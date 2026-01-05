@@ -1423,6 +1423,40 @@ static esp_err_t processing_settings_handler(httpd_req_t *req)
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, "{\"success\":true}");
         return ESP_OK;
+
+    } else if (req->method == HTTP_DELETE) {
+        // Reset to firmware defaults
+        processing_settings_t settings;
+        processing_settings_get_defaults(&settings);
+
+        // Save defaults to NVS
+        esp_err_t err = processing_settings_save(&settings);
+        if (err != ESP_OK) {
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+
+        // Return the default values
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddNumberToObject(response, "exposure", settings.exposure);
+        cJSON_AddNumberToObject(response, "saturation", settings.saturation);
+        cJSON_AddStringToObject(response, "toneMode", settings.tone_mode);
+        cJSON_AddNumberToObject(response, "contrast", settings.contrast);
+        cJSON_AddNumberToObject(response, "strength", settings.strength);
+        cJSON_AddNumberToObject(response, "shadowBoost", settings.shadow_boost);
+        cJSON_AddNumberToObject(response, "highlightCompress", settings.highlight_compress);
+        cJSON_AddNumberToObject(response, "midpoint", settings.midpoint);
+        cJSON_AddStringToObject(response, "colorMethod", settings.color_method);
+        cJSON_AddBoolToObject(response, "renderMeasured", settings.render_measured);
+        cJSON_AddStringToObject(response, "processingMode", settings.processing_mode);
+
+        char *json_str = cJSON_Print(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, json_str);
+
+        free(json_str);
+        cJSON_Delete(response);
+        return ESP_OK;
     }
 
     httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
@@ -1733,6 +1767,12 @@ esp_err_t http_server_init(void)
                                                     .handler = processing_settings_handler,
                                                     .user_ctx = NULL};
         httpd_register_uri_handler(server, &processing_settings_post_uri);
+
+        httpd_uri_t processing_settings_delete_uri = {.uri = "/api/settings/processing",
+                                                      .method = HTTP_DELETE,
+                                                      .handler = processing_settings_handler,
+                                                      .user_ctx = NULL};
+        httpd_register_uri_handler(server, &processing_settings_delete_uri);
 
         httpd_uri_t color_palette_get_uri = {.uri = "/api/settings/palette",
                                              .method = HTTP_GET,

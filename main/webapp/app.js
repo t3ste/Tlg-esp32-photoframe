@@ -940,8 +940,10 @@ document.getElementById("discardImage").addEventListener("click", () => {
 // Reset to defaults - fetch from firmware backend
 document.getElementById("resetParams").addEventListener("click", async () => {
   try {
-    // Fetch firmware defaults
-    const response = await fetch(`${API_BASE}/api/settings/processing`);
+    // Reset to firmware defaults using DELETE method
+    const response = await fetch(`${API_BASE}/api/settings/processing`, {
+      method: "DELETE",
+    });
     if (response.ok) {
       const defaults = await response.json();
 
