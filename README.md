@@ -154,6 +154,8 @@ The device will remain in download mode and be detectable for flashing.
 **For developers:** See **[DEV.md](docs/DEV.md)** for build-from-source instructions and configuration options.
 
 ## Initial Setup
+> [!IMPORTANT]
+> Insert the MicroSD card before installing the firmware. If the card is not detected, the device will halt.
 
 ### 1. WiFi Provisioning
 
