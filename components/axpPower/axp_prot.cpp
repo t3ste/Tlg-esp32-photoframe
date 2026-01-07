@@ -77,6 +77,18 @@ void axp_cmd_init(void) {
         axp2101.setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V2);
         ESP_LOGW("axp2101_init_log","Set the full charge voltage of the battery to 4.2V.");
     }
+    // Set VBUS input current limit to 500mA to prevent overload when USB connected
+    // This limits total current draw from USB port (system + charging)
+    if(axp2101.getVbusCurrentLimit() != XPOWERS_AXP2101_VBUS_CUR_LIM_500MA) {
+        axp2101.setVbusCurrentLimit(XPOWERS_AXP2101_VBUS_CUR_LIM_500MA);
+        ESP_LOGW("axp2101_init_log","Set VBUS input current limit to 500mA");
+    }
+    // Set charging current to 500mA for 1500mAh battery (0.33C rate - safe and prevents crashes)
+    // Lower charging current reduces stress on power rails during e-paper refresh
+    if(axp2101.getChargerConstantCurr() != XPOWERS_AXP2101_CHG_CUR_500MA) {
+        axp2101.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_500MA);
+        ESP_LOGW("axp2101_init_log","Set charging current to 500mA (0.33C for 1500mAh battery)");
+    }
     if(axp2101.getButtonBatteryVoltage() != 3300) {
         axp2101.setButtonBatteryChargeVoltage(3300);
         ESP_LOGW("axp2101_init_log","Set Button Battery charge voltage");
@@ -96,6 +108,12 @@ void axp_cmd_init(void) {
     if(axp2101.getALDO4Voltage() != 3300) {
         axp2101.setALDO4Voltage(3300);
         ESP_LOGW("axp2101_init_log","Set ALDO4 to output 3V3");
+    }
+    // Set system power-down voltage (VOFF) to 2.9V to prevent battery over-discharge
+    // Li-ion/LiPo batteries should not be discharged below ~2.8V to prevent damage
+    if(axp2101.getSysPowerDownVoltage() != 2900) {
+        axp2101.setSysPowerDownVoltage(2900);
+        ESP_LOGW("axp2101_init_log","Set VOFF to 2.9V for battery protection (UVLO)");
     }
 }
 
