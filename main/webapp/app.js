@@ -929,9 +929,7 @@ document.getElementById("discardImage").addEventListener("click", () => {
   currentImageCanvas = null;
   originalImageData = null;
   document.getElementById("fileInput").value = "";
-  document.getElementById("fileName").textContent = "";
-  // Section is already visible, just showing upload area
-  document.getElementById("uploadArea").style.display = "block";
+  document.getElementById("imageProcessingSection").style.display = "none";
   document.getElementById("previewArea").style.display = "none";
   document.getElementById("uploadStatus").textContent = "";
   document.getElementById("uploadStatus").className = "";
