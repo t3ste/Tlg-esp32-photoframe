@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "canvas": "^2.11.2",
-    "commander": "^11.1.0"
+    "commander": "^11.1.0",
+    "exif-parser": "^0.1.12"
   },
   "keywords": ["esp32", "photoframe", "image-processing"],
   "author": "",

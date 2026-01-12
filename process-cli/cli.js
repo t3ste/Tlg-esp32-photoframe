@@ -2,6 +2,7 @@
 
 import { createCanvas, loadImage } from "canvas";
 import { Command } from "commander";
+import ExifParser from "exif-parser";
 import fs from "fs";
 import http from "http";
 import path from "path";
@@ -342,6 +343,62 @@ async function processFolderStructure(
   console.log(`Output directory: ${outputDir}`);
 }
 
+function getExifOrientation(filePath) {
+  try {
+    const buffer = fs.readFileSync(filePath);
+    const parser = ExifParser.create(buffer);
+    const result = parser.parse();
+    return result.tags.Orientation || 1;
+  } catch (error) {
+    return 1; // Default orientation if EXIF parsing fails
+  }
+}
+
+function applyExifOrientation(canvas, orientation) {
+  if (orientation === 1) return canvas;
+
+  const { width, height } = canvas;
+  let newCanvas, ctx;
+
+  // Set canvas dimensions based on orientation
+  if (orientation >= 5 && orientation <= 8) {
+    // Rotations that swap width/height
+    newCanvas = createCanvas(height, width);
+  } else {
+    newCanvas = createCanvas(width, height);
+  }
+
+  ctx = newCanvas.getContext("2d");
+
+  // Apply transformations based on EXIF orientation
+  switch (orientation) {
+    case 2:
+      ctx.transform(-1, 0, 0, 1, width, 0);
+      break;
+    case 3:
+      ctx.transform(-1, 0, 0, -1, width, height);
+      break;
+    case 4:
+      ctx.transform(1, 0, 0, -1, 0, height);
+      break;
+    case 5:
+      ctx.transform(0, 1, 1, 0, 0, 0);
+      break;
+    case 6:
+      ctx.transform(0, 1, -1, 0, height, 0);
+      break;
+    case 7:
+      ctx.transform(0, -1, -1, 0, height, width);
+      break;
+    case 8:
+      ctx.transform(0, -1, 1, 0, 0, width);
+      break;
+  }
+
+  ctx.drawImage(canvas, 0, 0);
+  return newCanvas;
+}
+
 async function processImageFile(
   inputPath,
   outputBmp,
@@ -359,8 +416,18 @@ async function processImageFile(
 
   console.log(`  Original size: ${canvas.width}x${canvas.height}`);
 
-  // Save original image for thumbnail generation (before any processing)
-  const originalImg = img;
+  // 1.5. Apply EXIF orientation
+  const orientation = getExifOrientation(inputPath);
+  if (orientation > 1) {
+    console.log(`  Applying EXIF orientation: ${orientation}`);
+    canvas = applyExifOrientation(canvas, orientation);
+    console.log(`  After EXIF correction: ${canvas.width}x${canvas.height}`);
+  }
+
+  // Save EXIF-corrected canvas for thumbnail generation (before rotation/processing)
+  const originalCanvas = createCanvas(canvas.width, canvas.height);
+  const originalCanvasCtx = originalCanvas.getContext("2d");
+  originalCanvasCtx.drawImage(canvas, 0, 0);
 
   // 2. Check if portrait and rotate (skip rotation if rendering measured for debugging)
   const isPortrait = canvas.height > canvas.width;
@@ -457,21 +524,22 @@ async function processImageFile(
   console.log(`  Writing BMP: ${outputBmp}`);
   writeBMP(imageData, outputBmp);
 
-  // 6. Generate thumbnail if requested (from original source, not processed image)
+  // 6. Generate thumbnail if requested (from EXIF-corrected source, not processed image)
   if (options.generateThumbnail && outputThumb) {
     console.log(`  Generating thumbnail: ${outputThumb}`);
 
-    // Create thumbnail from original image (unprocessed)
-    // Determine thumbnail orientation based on original image
-    const thumbWidth = isPortrait ? 96 : 160;
-    const thumbHeight = isPortrait ? 160 : 96;
+    // Create thumbnail from EXIF-corrected canvas (before rotation/processing)
+    // Determine thumbnail orientation based on EXIF-corrected dimensions
+    const srcWidth = originalCanvas.width;
+    const srcHeight = originalCanvas.height;
+    const thumbIsPortrait = srcHeight > srcWidth;
+    const thumbWidth = thumbIsPortrait ? 96 : 160;
+    const thumbHeight = thumbIsPortrait ? 160 : 96;
 
     const thumbCanvas = createCanvas(thumbWidth, thumbHeight);
     const thumbCtx = thumbCanvas.getContext("2d");
 
-    // Scale original image to thumbnail size (cover mode)
-    const srcWidth = originalImg.width;
-    const srcHeight = originalImg.height;
+    // Scale EXIF-corrected canvas to thumbnail size (cover mode)
     const scaleX = thumbWidth / srcWidth;
     const scaleY = thumbHeight / srcHeight;
     const scale = Math.max(scaleX, scaleY);
@@ -481,9 +549,9 @@ async function processImageFile(
     const cropX = Math.round((scaledWidth - thumbWidth) / 2);
     const cropY = Math.round((scaledHeight - thumbHeight) / 2);
 
-    // Draw scaled and cropped original image
+    // Draw scaled and cropped EXIF-corrected canvas
     thumbCtx.drawImage(
-      originalImg,
+      originalCanvas,
       cropX / scale,
       cropY / scale,
       thumbWidth / scale,
