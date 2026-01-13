@@ -196,7 +196,7 @@ jobs:
         else
           # For main branch builds: create both manifests
           # Get latest release tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.8.3")
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "unknown")
           
           # Create manifest.json for stable release (points to latest tag)
           cat > docs/manifest.json << EOF

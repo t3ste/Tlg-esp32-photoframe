@@ -1251,14 +1251,33 @@
         
         // Version switching for firmware flasher
         function switchVersion(version) {
-            const installButton = document.getElementById('install-button');
             const versionWarning = document.getElementById('version-warning');
+            const buttonContainer = document.querySelector('.flash-container');
             
+            // Remove old button
+            const oldButton = document.getElementById('install-button');
+            if (oldButton) {
+                oldButton.remove();
+            }
+            
+            // Create new button with correct manifest
+            const manifestPath = version === 'dev' ? './manifest-dev.json' : './manifest.json';
+            const newButton = document.createElement('esp-web-install-button');
+            newButton.id = 'install-button';
+            newButton.setAttribute('manifest', manifestPath);
+            
+            const button = document.createElement('button');
+            button.setAttribute('slot', 'activate');
+            button.textContent = 'Connect & Flash';
+            newButton.appendChild(button);
+            
+            // Insert before warning message
+            buttonContainer.insertBefore(newButton, versionWarning);
+            
+            // Show/hide warning
             if (version === 'dev') {
-                installButton.setAttribute('manifest', './manifest-dev.json');
                 versionWarning.style.display = 'block';
             } else {
-                installButton.setAttribute('manifest', './manifest.json');
                 versionWarning.style.display = 'none';
             }
         }
