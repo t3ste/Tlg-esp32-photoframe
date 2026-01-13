@@ -18,7 +18,6 @@
 #include "http_server.h"
 #include "i2c_bsp.h"
 #include "image_processor.h"
-#include "improv_serial.h"
 #include "mdns_service.h"
 #include "nvs_flash.h"
 #include "power_manager.h"
@@ -240,10 +239,6 @@ void app_main(void)
 
     ESP_ERROR_CHECK(wifi_manager_init());
     ESP_ERROR_CHECK(wifi_provisioning_init());
-
-    // Start Improv Serial for web-based provisioning
-    ESP_ERROR_CHECK(improv_serial_init());
-    ESP_ERROR_CHECK(improv_serial_start());
 
     if (!wifi_provisioning_is_provisioned()) {
         ESP_LOGI(TAG, "===========================================");
