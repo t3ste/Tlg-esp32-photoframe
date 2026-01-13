@@ -714,11 +714,26 @@
 
             <div class="flash-container">
                 <h3>Flash Firmware</h3>
-                <div id="version-info" class="loading">Loading latest version...</div>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 1rem;">
+                        <input type="radio" name="version" value="stable" checked onchange="switchVersion(this.value)">
+                        <span>Stable Release <span id="stable-version" style="color: #666; font-size: 0.9rem;">(loading...)</span></span>
+                    </label>
+                    <label style="display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 1rem; margin-top: 10px;">
+                        <input type="radio" name="version" value="dev" onchange="switchVersion(this.value)">
+                        <span>Development (Latest Main Branch) <span id="dev-version" style="color: #666; font-size: 0.9rem;">(loading...)</span></span>
+                    </label>
+                </div>
+                
                 <br>
-                <esp-web-install-button manifest="./manifest.json">
+                <esp-web-install-button id="install-button" manifest="./manifest.json">
                     <button slot="activate">Connect & Flash</button>
                 </esp-web-install-button>
+                
+                <p id="version-warning" style="display: none; color: #856404; margin-top: 15px; font-size: 0.9rem;">
+                    ⚠️ <strong>Development builds</strong> are bleeding-edge and may contain bugs. Use stable releases for production.
+                </p>
             </div>
 
             <div class="section">
@@ -1233,6 +1248,49 @@
         }
 
         loadSampleImage();
+        
+        // Version switching for firmware flasher
+        function switchVersion(version) {
+            const installButton = document.getElementById('install-button');
+            const versionWarning = document.getElementById('version-warning');
+            
+            if (version === 'dev') {
+                installButton.setAttribute('manifest', './manifest-dev.json');
+                versionWarning.style.display = 'block';
+            } else {
+                installButton.setAttribute('manifest', './manifest.json');
+                versionWarning.style.display = 'none';
+            }
+        }
+        
+        // Load version info for both manifests
+        function loadVersionInfo() {
+            const stableVersion = document.getElementById('stable-version');
+            const devVersion = document.getElementById('dev-version');
+            
+            // Fetch stable version
+            fetch('./manifest.json')
+                .then(r => r.json())
+                .then(data => {
+                    stableVersion.textContent = `(${data.version})`;
+                })
+                .catch(() => {
+                    stableVersion.textContent = '(unavailable)';
+                });
+            
+            // Fetch dev version
+            fetch('./manifest-dev.json')
+                .then(r => r.json())
+                .then(data => {
+                    devVersion.textContent = `(${data.version})`;
+                })
+                .catch(() => {
+                    devVersion.textContent = '(unavailable)';
+                });
+        }
+        
+        // Load version info on page load
+        loadVersionInfo();
     </script>
 </body>
 </html>
