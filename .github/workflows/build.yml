@@ -21,12 +21,23 @@ jobs:
       with:
         submodules: 'recursive'
     
+    - name: Extract version
+      id: version
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          VERSION="${GITHUB_REF#refs/tags/}"
+        else
+          VERSION="dev-$(git rev-parse --short HEAD)"
+        fi
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "Building version: ${VERSION}"
+    
     - name: Setup ESP-IDF
       uses: espressif/esp-idf-ci-action@v1
       with:
         esp_idf_version: release-v6.0
         target: esp32s3
-        command: idf.py build
+        command: idf.py -DFIRMWARE_VERSION=\"${{ steps.version.outputs.version }}\" build
     
     - name: Prepare firmware artifacts
       run: |
@@ -138,13 +149,14 @@ jobs:
           VERSION="latest"
         fi
         
-        # Generate manifest.json dynamically
+        # Generate manifest.json dynamically with Improv Wi-Fi support
         cat > docs/manifest.json << EOF
         {
           "name": "ESP32 PhotoFrame",
           "version": "${VERSION}",
           "home_assistant_domain": "esphome",
           "new_install_prompt_erase": true,
+          "new_install_improv_wait_time": 15,
           "builds": [
             {
               "chipFamily": "ESP32-S3",

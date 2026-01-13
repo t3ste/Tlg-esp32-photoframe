@@ -728,7 +728,7 @@
                     <li><strong>Step 2:</strong> Click the "Connect & Flash" button above</li>
                     <li><strong>Step 3:</strong> Select the correct serial port from the popup</li>
                     <li><strong>Step 4:</strong> Wait for the flashing process to complete (~2 minutes)</li>
-                    <li><strong>Step 5:</strong> Follow the on-screen WiFi setup instructions</li>
+                    <li><strong>Step 5:</strong> Configure WiFi using Improv (automatic prompt) or AP mode</li>
                 </ul>
             </div>
 
@@ -748,11 +748,23 @@
                 </p>
             </div>
 
-            <div class="section">
-                <h2>After Flashing</h2>
+            <div class="info-banner">
+                <h3>📡 WiFi Setup with Improv Wi-Fi</h3>
                 <p>
-                    Once flashed, the device will create a WiFi access point named <strong>PhotoFrame-Setup</strong>. 
-                    Connect to it and navigate to <strong>http://192.168.4.1</strong> to configure your WiFi credentials.
+                    After flashing completes, your browser will automatically prompt you to configure WiFi credentials 
+                    using <strong>Improv Wi-Fi</strong> - no need to switch networks or open a separate page!
+                </p>
+                <p style="margin-top: 10px;">
+                    Simply enter your WiFi name and password when prompted, and the device will connect automatically.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>Alternative: AP Mode Setup</h2>
+                <p>
+                    If Improv provisioning doesn't work or you prefer the traditional method, the device will also create 
+                    a WiFi access point named <strong>PhotoFrame-Setup</strong>. Connect to it and navigate to 
+                    <strong>http://192.168.4.1</strong> to configure your WiFi credentials manually.
                 </p>
             </div>
         </div>

@@ -21,7 +21,15 @@ set(PROJECT_VER "${GIT_VERSION}")
 
 message(STATUS "Project version from git: ${PROJECT_VER}")
 
+# Allow FIRMWARE_VERSION to be overridden from command line, otherwise use PROJECT_VER
+if(NOT DEFINED FIRMWARE_VERSION)
+    set(FIRMWARE_VERSION "${PROJECT_VER}")
+endif()
+
+message(STATUS "Firmware version: ${FIRMWARE_VERSION}")
+
 add_compile_options(-Wno-missing-field-initializers)
+add_compile_definitions(FIRMWARE_VERSION="${FIRMWARE_VERSION}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(photoframe-api)
