@@ -139,21 +139,13 @@ jobs:
         # Copy sample image for demo page
         cp .img/sample.jpg docs/
         
-        # Get version from tag or use dev version
+        # Copy firmware files
         if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-          VERSION="${GITHUB_REF#refs/tags/}"
-          IS_RELEASE=true
-        else
-          VERSION="dev-$(git rev-parse --short HEAD)"
-          IS_RELEASE=false
-        fi
-        
-        # Handle firmware files based on build type
-        if [[ "${IS_RELEASE}" == "true" ]]; then
-          # For releases: copy as main firmware
+          # For releases: copy as both stable and dev firmware
           cp firmware/photoframe-firmware-merged.bin docs/photoframe-firmware-merged.bin
+          cp firmware/photoframe-firmware-merged.bin docs/photoframe-firmware-dev.bin
         else
-          # For main branch: copy dev firmware with different name
+          # For main branch: copy dev firmware
           cp firmware/photoframe-firmware-merged.bin docs/photoframe-firmware-dev.bin
           
           # Download latest stable release firmware from GitHub
@@ -170,78 +162,8 @@ jobs:
           fi
         fi
         
-        # Generate manifests based on build type
-        if [[ "${IS_RELEASE}" == "true" ]]; then
-          # For tagged releases: update manifest.json with release version
-          cat > docs/manifest.json << EOF
-        {
-          "name": "ESP32 PhotoFrame",
-          "version": "${VERSION}",
-          "home_assistant_domain": "esphome",
-          "new_install_prompt_erase": true,
-          "new_install_improv_wait_time": 15,
-          "builds": [
-            {
-              "chipFamily": "ESP32-S3",
-              "parts": [
-                {
-                  "path": "photoframe-firmware-merged.bin",
-                  "offset": 0
-                }
-              ]
-            }
-          ]
-        }
-        EOF
-        else
-          # For main branch builds: create both manifests
-          # Get latest release tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "unknown")
-          
-          # Create manifest.json for stable release (points to latest tag)
-          cat > docs/manifest.json << EOF
-        {
-          "name": "ESP32 PhotoFrame",
-          "version": "${LATEST_TAG}",
-          "home_assistant_domain": "esphome",
-          "new_install_prompt_erase": true,
-          "new_install_improv_wait_time": 15,
-          "builds": [
-            {
-              "chipFamily": "ESP32-S3",
-              "parts": [
-                {
-                  "path": "photoframe-firmware-merged.bin",
-                  "offset": 0
-                }
-              ]
-            }
-          ]
-        }
-        EOF
-          
-          # Create manifest-dev.json for development build
-          cat > docs/manifest-dev.json << EOF
-        {
-          "name": "ESP32 PhotoFrame (Development)",
-          "version": "${VERSION}",
-          "home_assistant_domain": "esphome",
-          "new_install_prompt_erase": true,
-          "new_install_improv_wait_time": 15,
-          "builds": [
-            {
-              "chipFamily": "ESP32-S3",
-              "parts": [
-                {
-                  "path": "photoframe-firmware-dev.bin",
-                  "offset": 0
-                }
-              ]
-            }
-          ]
-        }
-        EOF
-        fi
+        # Always generate both stable and dev manifests
+        python3 generate_manifests.py --no-copy --dev
     
     - name: Setup Pages
       uses: actions/configure-pages@v4

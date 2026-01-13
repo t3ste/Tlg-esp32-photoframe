@@ -715,15 +715,12 @@
             <div class="flash-container">
                 <h3>Flash Firmware</h3>
                 
-                <div style="margin-bottom: 20px;">
-                    <label style="display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 1rem;">
-                        <input type="radio" name="version" value="stable" checked onchange="switchVersion(this.value)">
-                        <span>Stable Release <span id="stable-version" style="color: #666; font-size: 0.9rem;">(loading...)</span></span>
-                    </label>
-                    <label style="display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 1rem; margin-top: 10px;">
-                        <input type="radio" name="version" value="dev" onchange="switchVersion(this.value)">
-                        <span>Development (Latest Main Branch) <span id="dev-version" style="color: #666; font-size: 0.9rem;">(loading...)</span></span>
-                    </label>
+                <div style="margin-bottom: 20px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 12px;">
+                    <label for="version-select" style="font-weight: 500;">Version:</label>
+                    <select id="version-select" style="padding: 8px 12px; font-size: 1rem; border: 2px solid #667eea; border-radius: 4px; background: white; cursor: pointer; min-width: 250px;">
+                        <option value="stable">Stable Release (loading...)</option>
+                        <option value="dev">Development (Latest Main Branch) (loading...)</option>
+                    </select>
                 </div>
                 
                 <br>
@@ -836,13 +833,17 @@
                 const data = await response.json();
                 
                 const versionInfo = document.getElementById('version-info');
-                versionInfo.textContent = `Latest Version: ${data.tag_name} (${new Date(data.published_at).toLocaleDateString()})`;
-                versionInfo.classList.remove('loading');
+                if (versionInfo) {
+                    versionInfo.textContent = `Latest Version: ${data.tag_name} (${new Date(data.published_at).toLocaleDateString()})`;
+                    versionInfo.classList.remove('loading');
+                }
             } catch (error) {
                 console.error('Error fetching release:', error);
                 const versionInfo = document.getElementById('version-info');
-                versionInfo.textContent = 'Version: 1.0.0';
-                versionInfo.classList.remove('loading');
+                if (versionInfo) {
+                    versionInfo.textContent = 'Version: 1.0.0';
+                    versionInfo.classList.remove('loading');
+                }
             }
         }
         
@@ -1283,33 +1284,43 @@
         }
         
         // Load version info for both manifests
-        function loadVersionInfo() {
-            const stableVersion = document.getElementById('stable-version');
-            const devVersion = document.getElementById('dev-version');
+        async function loadVersionInfo() {
+            const select = document.getElementById('version-select');
             
-            // Fetch stable version
-            fetch('./manifest.json')
-                .then(r => r.json())
-                .then(data => {
-                    stableVersion.textContent = `(${data.version})`;
-                })
-                .catch(() => {
-                    stableVersion.textContent = '(unavailable)';
-                });
+            try {
+                // Fetch stable version
+                const stableResponse = await fetch('./manifest.json');
+                const stableData = await stableResponse.json();
+                select.options[0].text = `Stable Release (${stableData.version})`;
+            } catch (e) {
+                select.options[0].text = 'Stable Release (unavailable)';
+            }
             
-            // Fetch dev version
-            fetch('./manifest-dev.json')
-                .then(r => r.json())
-                .then(data => {
-                    devVersion.textContent = `(${data.version})`;
-                })
-                .catch(() => {
-                    devVersion.textContent = '(unavailable)';
-                });
+            try {
+                // Fetch dev version
+                const devResponse = await fetch('./manifest-dev.json');
+                const devData = await devResponse.json();
+                select.options[1].text = `Development (${devData.version})`;
+            } catch (e) {
+                select.options[1].text = 'Development (unavailable)';
+            }
         }
         
         // Load version info on page load
         loadVersionInfo();
+        
+        // Initialize the button with the correct manifest on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            const select = document.getElementById('version-select');
+            
+            // Attach change event listener
+            select.addEventListener('change', (e) => {
+                switchVersion(e.target.value);
+            });
+            
+            // Trigger switchVersion with the current selection to ensure correct manifest
+            switchVersion(select.value);
+        });
     </script>
 </body>
 </html>
