@@ -37,7 +37,7 @@ jobs:
       with:
         esp_idf_version: release-v6.0
         target: esp32s3
-        command: idf.py -DFIRMWARE_VERSION=\"${{ steps.version.outputs.version }}\" build
+        command: idf.py -DFIRMWARE_VERSION='${{ steps.version.outputs.version }}' build
     
     - name: Prepare firmware artifacts
       run: |
