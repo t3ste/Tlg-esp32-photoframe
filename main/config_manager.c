@@ -12,6 +12,7 @@ static int rotate_interval = IMAGE_ROTATE_INTERVAL_SEC;
 static bool auto_rotate_enabled = false;
 static char image_url[IMAGE_URL_MAX_LEN] = {0};
 static rotation_mode_t rotation_mode = ROTATION_MODE_SDCARD;
+static bool save_downloaded_images = true;
 
 esp_err_t config_manager_init(void)
 {
@@ -47,6 +48,13 @@ esp_err_t config_manager_init(void)
             rotation_mode = (rotation_mode_t) stored_mode;
             ESP_LOGI(TAG, "Loaded rotation mode from NVS: %s",
                      rotation_mode == ROTATION_MODE_URL ? "url" : "sdcard");
+        }
+
+        uint8_t stored_save_dl = 1;
+        if (nvs_get_u8(nvs_handle, NVS_SAVE_DOWNLOADED_KEY, &stored_save_dl) == ESP_OK) {
+            save_downloaded_images = (stored_save_dl != 0);
+            ESP_LOGI(TAG, "Loaded save_downloaded_images from NVS: %s",
+                     save_downloaded_images ? "yes" : "no");
         }
 
         nvs_close(nvs_handle);
@@ -139,4 +147,23 @@ void config_manager_set_rotation_mode(rotation_mode_t mode)
 rotation_mode_t config_manager_get_rotation_mode(void)
 {
     return rotation_mode;
+}
+
+void config_manager_set_save_downloaded_images(bool enabled)
+{
+    save_downloaded_images = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_SAVE_DOWNLOADED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Save downloaded images %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_save_downloaded_images(void)
+{
+    return save_downloaded_images;
 }

@@ -43,10 +43,13 @@ typedef enum { ROTATION_MODE_SDCARD = 0, ROTATION_MODE_URL = 1 } rotation_mode_t
 #define NVS_WIFI_SSID_KEY "wifi_ssid"
 #define NVS_WIFI_PASS_KEY "wifi_pass"
 #define NVS_ROTATE_INTERVAL_KEY "rotate_int"
-#define NVS_AUTO_ROTATE_KEY "auto_rot"
+#define NVS_AUTO_ROTATE_KEY "auto_rotate"
+#define NVS_BRIGHTNESS_KEY "brightness"
+#define NVS_CONTRAST_KEY "contrast"
 #define NVS_DEEP_SLEEP_KEY "deep_sleep"
 #define NVS_ENABLED_ALBUMS_KEY "enabled_albums"
 #define NVS_IMAGE_URL_KEY "image_url"
-#define NVS_ROTATION_MODE_KEY "rot_mode"
+#define NVS_ROTATION_MODE_KEY "rotation_mode"
+#define NVS_SAVE_DOWNLOADED_KEY "save_dl"
 
 #endif

@@ -935,6 +935,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         bool deep_sleep_enabled = power_manager_get_deep_sleep_enabled();
         const char *image_url = config_manager_get_image_url();
         rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
+        bool save_downloaded_images = config_manager_get_save_downloaded_images();
 
         cJSON *root = cJSON_CreateObject();
         cJSON_AddNumberToObject(root, "rotate_interval", rotate_interval);
@@ -943,6 +944,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddStringToObject(root, "image_url", image_url ? image_url : "");
         cJSON_AddStringToObject(root, "rotation_mode",
                                 rotation_mode == ROTATION_MODE_URL ? "url" : "sdcard");
+        cJSON_AddBoolToObject(root, "save_downloaded_images", save_downloaded_images);
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -995,6 +997,12 @@ static esp_err_t config_handler(httpd_req_t *req)
             rotation_mode_t mode =
                 (strcmp(mode_str, "url") == 0) ? ROTATION_MODE_URL : ROTATION_MODE_SDCARD;
             config_manager_set_rotation_mode(mode);
+        }
+
+        cJSON *save_dl_obj = cJSON_GetObjectItem(root, "save_downloaded_images");
+        if (save_dl_obj && cJSON_IsBool(save_dl_obj)) {
+            bool save_dl = cJSON_IsTrue(save_dl_obj);
+            config_manager_set_save_downloaded_images(save_dl);
         }
 
         cJSON_Delete(root);

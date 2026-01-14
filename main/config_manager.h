@@ -20,4 +20,7 @@ const char *config_manager_get_image_url(void);
 void config_manager_set_rotation_mode(rotation_mode_t mode);
 rotation_mode_t config_manager_get_rotation_mode(void);
 
+void config_manager_set_save_downloaded_images(bool enabled);
+bool config_manager_get_save_downloaded_images(void);
+
 #endif

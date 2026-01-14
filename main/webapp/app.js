@@ -1297,6 +1297,8 @@ async function loadConfig() {
       data.image_url || "https://picsum.photos/800/480";
     document.getElementById("deepSleepEnabled").checked =
       data.deep_sleep_enabled !== false;
+    document.getElementById("saveDownloadedImages").checked =
+      data.save_downloaded_images !== false;
 
     // Set rotation mode based on backend config
     const rotationMode = data.rotation_mode || "sdcard";
@@ -1354,6 +1356,9 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
   ).value;
   const imageUrl = document.getElementById("imageUrl").value;
   const deepSleepEnabled = document.getElementById("deepSleepEnabled").checked;
+  const saveDownloadedImages = document.getElementById(
+    "saveDownloadedImages",
+  ).checked;
 
   try {
     const response = await fetch(`${API_BASE}/api/config`, {
@@ -1367,6 +1372,7 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
         rotation_mode: rotationMode,
         image_url: imageUrl,
         deep_sleep_enabled: deepSleepEnabled,
+        save_downloaded_images: saveDownloadedImages,
       }),
     });
 

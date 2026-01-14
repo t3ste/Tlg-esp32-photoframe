@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "config.h"
+#include "config_manager.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "image_processor.h"
@@ -147,53 +148,67 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
 
     ESP_LOGI(TAG, "Successfully converted image to BMP");
 
-    // Save to Downloads album
-    char downloads_path[256];
-    snprintf(downloads_path, sizeof(downloads_path), "%s/Downloads", IMAGE_DIRECTORY);
+    // Check if we should save downloaded images
+    bool save_images = config_manager_get_save_downloaded_images();
 
-    // Create Downloads directory if it doesn't exist
-    struct stat st;
-    if (stat(downloads_path, &st) != 0) {
-        ESP_LOGI(TAG, "Creating Downloads album directory");
-        if (mkdir(downloads_path, 0755) != 0) {
-            ESP_LOGE(TAG, "Failed to create Downloads directory");
+    if (save_images) {
+        // Save to Downloads album
+        char downloads_path[256];
+        snprintf(downloads_path, sizeof(downloads_path), "%s/Downloads", IMAGE_DIRECTORY);
+
+        // Create Downloads directory if it doesn't exist
+        struct stat st;
+        if (stat(downloads_path, &st) != 0) {
+            ESP_LOGI(TAG, "Creating Downloads album directory");
+            if (mkdir(downloads_path, 0755) != 0) {
+                ESP_LOGE(TAG, "Failed to create Downloads directory");
+                unlink(temp_jpg_path);
+                unlink(temp_bmp_path);
+                return ESP_FAIL;
+            }
+        }
+
+        // Generate unique filename based on timestamp
+        time_t now = time(NULL);
+        char filename_base[64];
+        snprintf(filename_base, sizeof(filename_base), "download_%lld", (long long) now);
+
+        // Save BMP to Downloads album
+        char final_bmp_path[512];
+        snprintf(final_bmp_path, sizeof(final_bmp_path), "%s/%s.bmp", downloads_path,
+                 filename_base);
+
+        if (rename(temp_bmp_path, final_bmp_path) != 0) {
+            ESP_LOGE(TAG, "Failed to move BMP to Downloads album");
             unlink(temp_jpg_path);
             unlink(temp_bmp_path);
             return ESP_FAIL;
         }
-    }
 
-    // Generate unique filename based on timestamp
-    time_t now = time(NULL);
-    char filename_base[64];
-    snprintf(filename_base, sizeof(filename_base), "download_%lld", (long long) now);
+        // Save JPG thumbnail to Downloads album (using original downloaded JPG as thumbnail)
+        char final_jpg_path[512];
+        snprintf(final_jpg_path, sizeof(final_jpg_path), "%s/%s.jpg", downloads_path,
+                 filename_base);
 
-    // Save BMP to Downloads album
-    char final_bmp_path[512];
-    snprintf(final_bmp_path, sizeof(final_bmp_path), "%s/%s.bmp", downloads_path, filename_base);
+        if (rename(temp_jpg_path, final_jpg_path) != 0) {
+            ESP_LOGE(TAG, "Failed to move JPG thumbnail to Downloads album");
+            unlink(temp_jpg_path);
+            // BMP is already moved, keep it
+            return ESP_FAIL;
+        }
 
-    if (rename(temp_bmp_path, final_bmp_path) != 0) {
-        ESP_LOGE(TAG, "Failed to move BMP to Downloads album");
+        ESP_LOGI(TAG, "Saved to Downloads album: %s.bmp (with thumbnail)", filename_base);
+
+        // Return the saved BMP path via output parameter
+        snprintf(saved_bmp_path, path_size, "%s", final_bmp_path);
+    } else {
+        // Just use temp BMP path without saving to album
+        ESP_LOGI(TAG, "Displaying image without saving (save_downloaded_images disabled)");
+        snprintf(saved_bmp_path, path_size, "%s", temp_bmp_path);
+
+        // Clean up the JPG file since we don't need it
         unlink(temp_jpg_path);
-        unlink(temp_bmp_path);
-        return ESP_FAIL;
     }
-
-    // Save JPG thumbnail to Downloads album (using original downloaded JPG as thumbnail)
-    char final_jpg_path[512];
-    snprintf(final_jpg_path, sizeof(final_jpg_path), "%s/%s.jpg", downloads_path, filename_base);
-
-    if (rename(temp_jpg_path, final_jpg_path) != 0) {
-        ESP_LOGE(TAG, "Failed to move JPG thumbnail to Downloads album");
-        unlink(temp_jpg_path);
-        // BMP is already moved, keep it
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "Saved to Downloads album: %s.bmp (with thumbnail)", filename_base);
-
-    // Return the saved BMP path via output parameter
-    snprintf(saved_bmp_path, path_size, "%s", final_bmp_path);
 
     return ESP_OK;
 }
