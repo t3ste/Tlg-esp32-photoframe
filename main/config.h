@@ -3,6 +3,9 @@
 
 #include <driver/gpio.h>
 
+// Uncomment to debug deep sleep wake
+// #define DEBUG_DEEP_SLEEP_WAKE
+
 typedef enum { ROTATION_MODE_SDCARD = 0, ROTATION_MODE_URL = 1 } rotation_mode_t;
 
 #define BOOT_BUTTON_GPIO GPIO_NUM_0
@@ -28,7 +31,12 @@ typedef enum { ROTATION_MODE_SDCARD = 0, ROTATION_MODE_URL = 1 } rotation_mode_t
 #define DISPLAY_WIDTH 800
 #define DISPLAY_HEIGHT 480
 
+#ifdef DEBUG_DEEP_SLEEP_WAKE
+#define AUTO_SLEEP_TIMEOUT_SEC 20
+#else
 #define AUTO_SLEEP_TIMEOUT_SEC 120
+#endif
+
 #define IMAGE_ROTATE_INTERVAL_SEC 3600
 
 #define NVS_NAMESPACE "photoframe"

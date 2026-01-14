@@ -100,12 +100,14 @@ static void sleep_timer_task(void *arg)
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
 
+#ifndef DEBUG_DEEP_SLEEP_WAKE
         // Skip auto-sleep when USB is connected
         if (axp_is_usb_connected()) {
             // Reset timer so it doesn't trigger immediately when USB is unplugged
             next_sleep_time = 0;
             continue;
         }
+#endif
 
         // Handle auto-sleep timer when on battery (only if deep sleep is enabled)
         if (deep_sleep_enabled) {
