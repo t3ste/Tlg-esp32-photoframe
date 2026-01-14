@@ -181,7 +181,7 @@ def main():
 
     print("\nManifests generated successfully!")
     print("\nTo test locally, run:")
-    print("  cd docs && python3 launch_demo.py")
+    print("  python3 scripts/launch_demo.py")
 
 
 if __name__ == "__main__":

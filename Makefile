@@ -9,7 +9,6 @@ JS_FILES := $(shell find main/webapp process-cli -type f -name "*.js" 2>/dev/nul
 
 # Find all Python files in the project root and docs/
 PY_FILES := $(shell find . -maxdepth 1 -type f -name "*.py" 2>/dev/null) \
-	    $(shell find docs -type f -name "*.py" 3>/dev/null) \
 	    $(shell find scripts -type f -name "*.py" 3>/dev/null)
 
 help:

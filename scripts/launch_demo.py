@@ -256,9 +256,10 @@ def main():
 
     args = parser.parse_args()
 
-    # Get paths
-    docs_dir = Path(__file__).parent
-    project_root = docs_dir.parent
+    # Get paths - script is now in scripts/, not docs/
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
+    docs_dir = project_root / "docs"
 
     print("=" * 60)
     print("ESP32 PhotoFrame Demo Launcher")
