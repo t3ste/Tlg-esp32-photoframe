@@ -12,6 +12,7 @@
 #include "cJSON.h"
 #include "color_palette.h"
 #include "config.h"
+#include "config_manager.h"
 #include "display_manager.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -929,14 +930,19 @@ static esp_err_t config_handler(httpd_req_t *req)
     power_manager_reset_sleep_timer();
 
     if (req->method == HTTP_GET) {
-        int rotate_interval = display_manager_get_rotate_interval();
-        bool auto_rotate = display_manager_get_auto_rotate();
+        int rotate_interval = config_manager_get_rotate_interval();
+        bool auto_rotate = config_manager_get_auto_rotate();
         bool deep_sleep_enabled = power_manager_get_deep_sleep_enabled();
+        const char *image_url = config_manager_get_image_url();
+        rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
 
         cJSON *root = cJSON_CreateObject();
         cJSON_AddNumberToObject(root, "rotate_interval", rotate_interval);
         cJSON_AddBoolToObject(root, "auto_rotate", auto_rotate);
         cJSON_AddBoolToObject(root, "deep_sleep_enabled", deep_sleep_enabled);
+        cJSON_AddStringToObject(root, "image_url", image_url ? image_url : "");
+        cJSON_AddStringToObject(root, "rotation_mode",
+                                rotation_mode == ROTATION_MODE_URL ? "url" : "sdcard");
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -963,18 +969,32 @@ static esp_err_t config_handler(httpd_req_t *req)
 
         cJSON *interval_obj = cJSON_GetObjectItem(root, "rotate_interval");
         if (interval_obj && cJSON_IsNumber(interval_obj)) {
-            display_manager_set_rotate_interval(interval_obj->valueint);
+            config_manager_set_rotate_interval(interval_obj->valueint);
             power_manager_reset_rotate_timer();
         }
 
         cJSON *auto_rotate_obj = cJSON_GetObjectItem(root, "auto_rotate");
         if (auto_rotate_obj && cJSON_IsBool(auto_rotate_obj)) {
-            display_manager_set_auto_rotate(cJSON_IsTrue(auto_rotate_obj));
+            config_manager_set_auto_rotate(cJSON_IsTrue(auto_rotate_obj));
         }
 
         cJSON *deep_sleep_obj = cJSON_GetObjectItem(root, "deep_sleep_enabled");
         if (deep_sleep_obj && cJSON_IsBool(deep_sleep_obj)) {
             power_manager_set_deep_sleep_enabled(cJSON_IsTrue(deep_sleep_obj));
+        }
+
+        cJSON *image_url_obj = cJSON_GetObjectItem(root, "image_url");
+        if (image_url_obj && cJSON_IsString(image_url_obj)) {
+            const char *url = cJSON_GetStringValue(image_url_obj);
+            config_manager_set_image_url(url);
+        }
+
+        cJSON *rotation_mode_obj = cJSON_GetObjectItem(root, "rotation_mode");
+        if (rotation_mode_obj && cJSON_IsString(rotation_mode_obj)) {
+            const char *mode_str = cJSON_GetStringValue(rotation_mode_obj);
+            rotation_mode_t mode =
+                (strcmp(mode_str, "url") == 0) ? ROTATION_MODE_URL : ROTATION_MODE_SDCARD;
+            config_manager_set_rotation_mode(mode);
         }
 
         cJSON_Delete(root);

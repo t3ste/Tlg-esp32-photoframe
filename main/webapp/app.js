@@ -1293,8 +1293,20 @@ async function loadConfig() {
     document.getElementById("autoRotate").checked = data.auto_rotate || false;
     document.getElementById("rotateInterval").value =
       data.rotate_interval || 3600;
+    document.getElementById("imageUrl").value =
+      data.image_url || "https://picsum.photos/800/480";
     document.getElementById("deepSleepEnabled").checked =
       data.deep_sleep_enabled !== false;
+
+    // Set rotation mode based on backend config
+    const rotationMode = data.rotation_mode || "sdcard";
+    if (rotationMode === "url") {
+      document.getElementById("rotationModeURL").checked = true;
+      document.getElementById("imageUrlGroup").style.display = "block";
+    } else {
+      document.getElementById("rotationModeSDCard").checked = true;
+      document.getElementById("imageUrlGroup").style.display = "none";
+    }
 
     // Update warning visibility based on loaded state
     updateDeepSleepWarning();
@@ -1316,6 +1328,19 @@ document
   .getElementById("deepSleepEnabled")
   .addEventListener("change", updateDeepSleepWarning);
 
+// Add event listeners for rotation mode radio buttons
+document
+  .getElementById("rotationModeSDCard")
+  .addEventListener("change", function () {
+    document.getElementById("imageUrlGroup").style.display = "none";
+  });
+
+document
+  .getElementById("rotationModeURL")
+  .addEventListener("change", function () {
+    document.getElementById("imageUrlGroup").style.display = "block";
+  });
+
 document.getElementById("configForm").addEventListener("submit", async (e) => {
   e.preventDefault();
 
@@ -1324,6 +1349,10 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
   const rotateInterval = parseInt(
     document.getElementById("rotateInterval").value,
   );
+  const rotationMode = document.querySelector(
+    'input[name="rotationMode"]:checked',
+  ).value;
+  const imageUrl = document.getElementById("imageUrl").value;
   const deepSleepEnabled = document.getElementById("deepSleepEnabled").checked;
 
   try {
@@ -1335,6 +1364,8 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
       body: JSON.stringify({
         auto_rotate: autoRotate,
         rotate_interval: rotateInterval,
+        rotation_mode: rotationMode,
+        image_url: imageUrl,
         deep_sleep_enabled: deepSleepEnabled,
       }),
     });

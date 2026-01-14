@@ -1,11 +1,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "album_manager.h"
 #include "axp_prot.h"
 #include "color_palette.h"
 #include "config.h"
+#include "config_manager.h"
 #include "display_manager.h"
 #include "driver/gpio.h"
 #include "driver/sdmmc_host.h"
@@ -23,6 +26,7 @@
 #include "power_manager.h"
 #include "processing_settings.h"
 #include "sdmmc_cmd.h"
+#include "utils.h"
 #include "wifi_manager.h"
 #include "wifi_provisioning.h"
 
@@ -202,6 +206,8 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    ESP_ERROR_CHECK(config_manager_init());
+
     ESP_ERROR_CHECK(image_processor_init());
 
     ESP_ERROR_CHECK(display_manager_init());
@@ -226,9 +232,47 @@ void app_main(void)
 
     // Check wake-up source with priority: Timer > KEY > BOOT
     if (power_manager_is_timer_wakeup() || power_manager_is_key_button_wakeup()) {
-        display_manager_handle_wakeup();
+        // Check rotation mode
+        rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
+        if (rotation_mode == ROTATION_MODE_URL) {
+            // URL mode - need WiFi to fetch image from URL
+            ESP_LOGI(TAG, "URL rotation mode - initializing WiFi");
+            ESP_ERROR_CHECK(wifi_manager_init());
+            ESP_ERROR_CHECK(wifi_provisioning_init());
 
-        // Go directly back to sleep without starting WiFi or HTTP server
+            // Wait for WiFi connection (with timeout)
+            int retry_count = 0;
+            while (!wifi_manager_is_connected() && retry_count < 30) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                retry_count++;
+            }
+
+            if (wifi_manager_is_connected()) {
+                const char *image_url = config_manager_get_image_url();
+                ESP_LOGI(TAG, "WiFi connected, downloading from: %s", image_url);
+
+                char saved_bmp_path[512];
+                if (fetch_and_save_image_from_url(image_url, saved_bmp_path,
+                                                  sizeof(saved_bmp_path)) == ESP_OK) {
+                    ESP_LOGI(TAG, "Successfully downloaded and saved image, displaying...");
+                    display_manager_show_image(saved_bmp_path);
+                    ESP_LOGI(TAG, "URL image display complete");
+                } else {
+                    ESP_LOGE(TAG,
+                             "Failed to download image from URL, falling back to SD card rotation");
+                    display_manager_handle_wakeup();
+                }
+            } else {
+                ESP_LOGE(TAG, "WiFi connection timeout, falling back to SD card rotation");
+                display_manager_handle_wakeup();
+            }
+        } else {
+            // SD card mode - no WiFi needed, use normal SD card rotation
+            ESP_LOGI(TAG, "SD card rotation mode - skipping WiFi initialization");
+            display_manager_handle_wakeup();
+        }
+
+        // Go directly back to sleep without starting HTTP server
         ESP_LOGI(TAG, "Auto-rotate complete, going back to sleep");
         power_manager_enter_sleep();
         // Won't reach here after sleep

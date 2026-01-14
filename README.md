@@ -88,6 +88,23 @@ The device supports two power modes, configurable via the web interface:
 - Behavior depends on deep sleep setting (see modes above)
 - Sleep timer reset by any HTTP interaction or button press
 
+### Auto-Rotation Modes
+
+Configure via web interface **Power & Auto-Rotate Settings**:
+
+#### SD Card Rotation (Default)
+- Rotates through images in `/sdcard/images/` albums
+- Supports BMP (direct) and JPG (converted on-the-fly)
+- No WiFi required during rotation
+
+#### URL-Based Rotation
+- Fetches fresh images from a configured URL at each interval
+- Perfect for dynamic content (weather, news, random images)
+- Default: `https://loremflickr.com/800/480` (random images)
+- Auto-retries 3 times, falls back to SD card on failure
+- Downloaded images saved to "Downloads" album
+- **Requires**: WiFi connection and **baseline JPEG** format (progressive JPEGs not supported)
+
 ### Configuring Deep Sleep
 
 Access the web interface and navigate to **Power & Auto-Rotate Settings**:

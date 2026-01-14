@@ -8,23 +8,18 @@
 #include "GUI_Paint.h"
 #include "album_manager.h"
 #include "config.h"
+#include "config_manager.h"
 #include "epaper_port.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_system.h"
-#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "nvs.h"
-#include "nvs_flash.h"
-#include "power_manager.h"
 
 static const char *TAG = "display_manager";
 
 static SemaphoreHandle_t display_mutex = NULL;
-static int rotate_interval = IMAGE_ROTATE_INTERVAL_SEC;
-static bool auto_rotate_enabled = false;
 static char current_image[64] = {0};
 
 static uint8_t *epd_image_buffer = NULL;
@@ -52,26 +47,6 @@ esp_err_t display_manager_init(void)
     Paint_SetScale(6);
     Paint_SelectImage(epd_image_buffer);
     Paint_SetRotate(180);
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        int32_t stored_interval = IMAGE_ROTATE_INTERVAL_SEC;
-        if (nvs_get_i32(nvs_handle, NVS_ROTATE_INTERVAL_KEY, &stored_interval) == ESP_OK) {
-            rotate_interval = stored_interval;
-            ESP_LOGI(TAG, "Loaded rotate interval from NVS: %d seconds", rotate_interval);
-        }
-
-        uint8_t stored_enabled = 0;
-        if (nvs_get_u8(nvs_handle, NVS_AUTO_ROTATE_KEY, &stored_enabled) == ESP_OK) {
-            auto_rotate_enabled = (stored_enabled != 0);
-            ESP_LOGI(TAG, "Loaded auto-rotate enabled from NVS: %s",
-                     auto_rotate_enabled ? "yes" : "no");
-        }
-
-        // Random rotation - no need to load index from NVS
-
-        nvs_close(nvs_handle);
-    }
 
     ESP_LOGI(TAG, "Display manager initialized");
     ESP_LOGI(TAG, "Auto-rotate uses timer-based wake-up (only works during sleep cycles)");
@@ -149,47 +124,9 @@ bool display_manager_is_busy(void)
     return true;
 }
 
-void display_manager_set_rotate_interval(int seconds)
-{
-    rotate_interval = seconds;
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_i32(nvs_handle, NVS_ROTATE_INTERVAL_KEY, seconds);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
-
-    ESP_LOGI(TAG, "Rotate interval set to %d seconds", seconds);
-}
-
-int display_manager_get_rotate_interval(void)
-{
-    return rotate_interval;
-}
-
-void display_manager_set_auto_rotate(bool enabled)
-{
-    auto_rotate_enabled = enabled;
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_AUTO_ROTATE_KEY, enabled ? 1 : 0);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
-
-    ESP_LOGI(TAG, "Auto-rotate %s", enabled ? "enabled" : "disabled");
-}
-
-bool display_manager_get_auto_rotate(void)
-{
-    return auto_rotate_enabled;
-}
-
 void display_manager_handle_wakeup(void)
 {
-    if (!auto_rotate_enabled) {
+    if (!config_manager_get_auto_rotate()) {
         ESP_LOGI(TAG, "Manual rotation triggered (auto-rotate is disabled)");
     } else {
         ESP_LOGI(TAG, "Handling wakeup for auto-rotate");

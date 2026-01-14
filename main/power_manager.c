@@ -2,6 +2,7 @@
 
 #include "axp_prot.h"
 #include "config.h"
+#include "config_manager.h"
 #include "display_manager.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
@@ -13,6 +14,7 @@
 #include "freertos/task.h"
 #include "http_server.h"
 #include "nvs.h"
+#include "utils.h"
 
 static const char *TAG = "power_manager";
 
@@ -41,12 +43,12 @@ static void rotation_timer_task(void *arg)
         }
 
         // Handle active rotation when device stays awake and auto-rotate enabled
-        if (display_manager_get_auto_rotate()) {
+        if (config_manager_get_auto_rotate()) {
             int64_t now = esp_timer_get_time();  // Get absolute time in microseconds
 
             if (next_rotation_time == 0) {
                 // Initialize next rotation time
-                int rotate_interval = display_manager_get_rotate_interval();
+                int rotate_interval = config_manager_get_rotate_interval();
                 next_rotation_time = now + (rotate_interval * 1000000LL);
                 const char *reason = axp_is_usb_connected() ? "USB powered" : "deep sleep disabled";
                 ESP_LOGI(TAG, "Active rotation scheduled in %d seconds (%s)", rotate_interval,
@@ -55,10 +57,32 @@ static void rotation_timer_task(void *arg)
                 // Time to rotate
                 const char *reason = axp_is_usb_connected() ? "USB powered" : "deep sleep disabled";
                 ESP_LOGI(TAG, "Active rotation triggered (%s)", reason);
-                display_manager_handle_wakeup();
+
+                // Check rotation mode
+                rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
+                if (rotation_mode == ROTATION_MODE_URL) {
+                    // URL mode - fetch image from URL
+                    const char *image_url = config_manager_get_image_url();
+                    ESP_LOGI(TAG, "URL rotation mode, downloading from: %s", image_url);
+
+                    char saved_bmp_path[512];
+                    if (fetch_and_save_image_from_url(image_url, saved_bmp_path,
+                                                      sizeof(saved_bmp_path)) == ESP_OK) {
+                        ESP_LOGI(TAG, "Successfully downloaded and saved image, displaying...");
+                        display_manager_show_image(saved_bmp_path);
+                    } else {
+                        ESP_LOGE(
+                            TAG,
+                            "Failed to download image from URL, falling back to SD card rotation");
+                        display_manager_handle_wakeup();
+                    }
+                } else {
+                    // SD card mode - use normal SD card rotation
+                    display_manager_handle_wakeup();
+                }
 
                 // Schedule next rotation
-                int rotate_interval = display_manager_get_rotate_interval();
+                int rotate_interval = config_manager_get_rotate_interval();
                 next_rotation_time = now + (rotate_interval * 1000000LL);
                 ESP_LOGI(TAG, "Next rotation scheduled in %d seconds", rotate_interval);
             }
@@ -228,7 +252,7 @@ esp_err_t power_manager_init(void)
     gpio_set_level(LED_GREEN_GPIO, 1);                         // Turn off green LED (active-low)
 
     xTaskCreate(sleep_timer_task, "sleep_timer", 4096, NULL, 5, &sleep_timer_task_handle);
-    xTaskCreate(rotation_timer_task, "rotation_timer", 4096, NULL, 5, &rotation_timer_task_handle);
+    xTaskCreate(rotation_timer_task, "rotation_timer", 16384, NULL, 5, &rotation_timer_task_handle);
 
     power_manager_enable_auto_light_sleep();
 
@@ -247,9 +271,9 @@ void power_manager_enter_sleep(void)
     gpio_set_level(LED_GREEN_GPIO, 1);
 
     // Check if auto-rotate is enabled
-    if (display_manager_get_auto_rotate()) {
+    if (config_manager_get_auto_rotate()) {
         // Use timer-based sleep for auto-rotate
-        int rotate_interval = display_manager_get_rotate_interval();
+        int rotate_interval = config_manager_get_rotate_interval();
         ESP_LOGI(TAG, "Auto-rotate enabled, setting timer wake-up for %d seconds", rotate_interval);
         esp_sleep_enable_timer_wakeup(rotate_interval * 1000000ULL);
     }
@@ -274,7 +298,7 @@ void power_manager_reset_sleep_timer(void)
 
 void power_manager_reset_rotate_timer(void)
 {
-    int rotate_interval = display_manager_get_rotate_interval();
+    int rotate_interval = config_manager_get_rotate_interval();
     next_rotation_time = esp_timer_get_time() + (rotate_interval * 1000000LL);
     ESP_LOGI(TAG, "Rotation timer reset, next rotation in %d seconds", rotate_interval);
 }
