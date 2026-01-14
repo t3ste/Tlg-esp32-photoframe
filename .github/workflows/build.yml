@@ -25,9 +25,11 @@ jobs:
       id: version
       run: |
         if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          # For tag builds, extract tag name directly
           VERSION="${GITHUB_REF#refs/tags/}"
         else
-          VERSION="dev-$(git rev-parse --short HEAD)"
+          # For non-tag builds, use centralized version script
+          VERSION=$(python3 scripts/get_version.py --type dev)
         fi
         echo "version=${VERSION}" >> $GITHUB_OUTPUT
         echo "Building version: ${VERSION}"
@@ -165,7 +167,7 @@ jobs:
         fi
         
         # Always generate both stable and dev manifests
-        python3 generate_manifests.py --no-copy --dev
+        python3 scripts/generate_manifests.py --no-copy --dev
     
     - name: Setup Pages
       uses: actions/configure-pages@v4

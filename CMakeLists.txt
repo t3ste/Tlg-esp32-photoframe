@@ -1,25 +1,20 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Get version from git tag
+# Get version from centralized script
 execute_process(
-    COMMAND git describe --tags --always --dirty
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/get_version.py --type auto
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE GIT_VERSION
+    OUTPUT_VARIABLE PROJECT_VER
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
 )
 
-# Strip leading 'v' if present (e.g., v1.6 -> 1.6)
-string(REGEX REPLACE "^v" "" GIT_VERSION "${GIT_VERSION}")
-
-# Fallback if git command fails
-if(NOT GIT_VERSION)
-    set(GIT_VERSION "1.6-unknown")
+# Fallback if script fails
+if(NOT PROJECT_VER)
+    set(PROJECT_VER "dev-unknown")
 endif()
 
-set(PROJECT_VER "${GIT_VERSION}")
-
-message(STATUS "Project version from git: ${PROJECT_VER}")
+message(STATUS "Project version: ${PROJECT_VER}")
 
 # Allow FIRMWARE_VERSION to be overridden from command line, otherwise use PROJECT_VER
 if(NOT DEFINED FIRMWARE_VERSION)

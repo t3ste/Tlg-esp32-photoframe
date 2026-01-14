@@ -13,92 +13,10 @@ import json
 import os
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 
-
-def get_latest_github_release():
-    """Get the latest release version from GitHub API."""
-    try:
-        # Try to get repository from git remote
-        result = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        
-        if result.returncode == 0:
-            # Parse GitHub repo from URL (e.g., git@github.com:user/repo.git or https://github.com/user/repo.git)
-            remote_url = result.stdout.strip()
-            if "github.com" in remote_url:
-                # Extract owner/repo
-                if remote_url.startswith("git@"):
-                    repo_path = remote_url.split("github.com:")[1].replace(".git", "")
-                else:
-                    repo_path = remote_url.split("github.com/")[1].replace(".git", "")
-                
-                # Fetch latest release from GitHub API
-                api_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
-                with urllib.request.urlopen(api_url) as response:
-                    data = json.loads(response.read())
-                    return data["tag_name"]
-    except Exception as e:
-        print(f"Warning: Could not fetch latest release from GitHub API: {e}")
-    
-    return None
-
-
-def get_git_version(dev=False):
-    """Get version from git tags or commit hash.
-
-    Args:
-        dev: If True, returns dev version with commit hash. If False, returns latest tag.
-    """
-    try:
-        if dev:
-            # For dev builds, use commit hash
-            result = subprocess.run(
-                ["git", "rev-parse", "--short", "HEAD"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            return f"dev-{result.stdout.strip()}"
-        else:
-            # For stable builds, try multiple methods to get latest tag
-            
-            # Method 1: Try git describe
-            result = subprocess.run(
-                ["git", "describe", "--tags", "--abbrev=0"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                version = result.stdout.strip()
-                print(f"Got version from git describe: {version}")
-                return version
-
-            # Method 2: Try fetching from GitHub API
-            print("Git tags not available, trying GitHub API...")
-            github_version = get_latest_github_release()
-            if github_version:
-                print(f"Got version from GitHub API: {github_version}")
-                return github_version
-
-            # Method 3: Fallback to commit hash
-            print("Warning: Could not get stable version, falling back to commit hash")
-            result = subprocess.run(
-                ["git", "rev-parse", "--short", "HEAD"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            return f"dev-{result.stdout.strip()}"
-    except Exception as e:
-        print(f"Warning: Could not get git version: {e}")
-        return "unknown"
+# Import version detection functions from get_version module
+import get_version as version_module
 
 
 def check_firmware_exists(firmware_path):
@@ -190,7 +108,7 @@ def generate_manifests(docs_dir, build_dir=None, dev_mode=False):
     docs_path.mkdir(exist_ok=True)
 
     # Get stable version (latest tag)
-    stable_version = get_git_version(dev=False)
+    stable_version = version_module.get_stable_version()
 
     # Copy firmware if build_dir provided
     if build_dir:
@@ -211,7 +129,7 @@ def generate_manifests(docs_dir, build_dir=None, dev_mode=False):
     # Generate dev manifest if in dev mode
     if dev_mode:
         # Get dev version (commit hash)
-        dev_version = get_git_version(dev=True)
+        dev_version = version_module.get_dev_version()
         dev_manifest_path = docs_path / "manifest-dev.json"
         # Dev manifest points to dev firmware file
         dev_firmware_file = "photoframe-firmware-dev.bin"
@@ -250,10 +168,11 @@ def main():
 
     args = parser.parse_args()
 
-    # Get absolute paths
+    # Get absolute paths - resolve relative to project root (parent of scripts dir)
     script_dir = Path(__file__).parent
-    docs_dir = script_dir / args.docs_dir
-    build_dir = script_dir / args.build_dir if not args.no_copy else None
+    project_root = script_dir.parent
+    docs_dir = project_root / args.docs_dir
+    build_dir = project_root / args.build_dir if not args.no_copy else None
 
     # Generate manifests
     print("Generating manifests...")

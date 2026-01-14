@@ -171,12 +171,12 @@ def generate_manifests(project_root):
         print(f"  ⚠ Warning: Firmware file not found: {firmware_file}")
         print(f"  To generate firmware:")
         print(f"    1. Build: idf.py build")
-        print(f"    2. Generate: python3 generate_manifests.py --dev")
+        print(f"    2. Generate: python3 scripts/generate_manifests.py --dev")
         print(f"  Or create dummy file for UI testing:")
         print(f"    touch docs/photoframe-firmware-merged.bin")
         return False
 
-    manifest_script = project_root / "generate_manifests.py"
+    manifest_script = project_root / "scripts" / "generate_manifests.py"
 
     if not manifest_script.exists():
         print(f"  ✗ Error: {manifest_script} not found")
@@ -280,7 +280,7 @@ def main():
         # Use generate_manifests.py to copy and merge firmware
         try:
             subprocess.run(
-                ["python3", str(project_root / "generate_manifests.py")],
+                ["python3", str(project_root / "scripts" / "generate_manifests.py")],
                 cwd=project_root,
                 check=True,
             )
