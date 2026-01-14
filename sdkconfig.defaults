@@ -32,6 +32,9 @@ CONFIG_FATFS_MAX_LFN=255
 # FreeRTOS
 CONFIG_FREERTOS_HZ=1000
 
+# Main task stack size - Increase for WiFi and HTTP client operations
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+
 # Component config
 CONFIG_LWIP_MAX_SOCKETS=16
 
