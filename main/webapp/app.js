@@ -1295,6 +1295,7 @@ async function loadConfig() {
       data.rotate_interval || 3600;
     document.getElementById("imageUrl").value =
       data.image_url || "https://picsum.photos/800/480";
+    document.getElementById("haUrl").value = data.ha_url || "";
     document.getElementById("deepSleepEnabled").checked =
       data.deep_sleep_enabled !== false;
     document.getElementById("saveDownloadedImages").checked =
@@ -1355,6 +1356,7 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
     'input[name="rotationMode"]:checked',
   ).value;
   const imageUrl = document.getElementById("imageUrl").value;
+  const haUrl = document.getElementById("haUrl").value;
   const deepSleepEnabled = document.getElementById("deepSleepEnabled").checked;
   const saveDownloadedImages = document.getElementById(
     "saveDownloadedImages",
@@ -1371,6 +1373,7 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
         rotate_interval: rotateInterval,
         rotation_mode: rotationMode,
         image_url: imageUrl,
+        ha_url: haUrl,
         deep_sleep_enabled: deepSleepEnabled,
         save_downloaded_images: saveDownloadedImages,
       }),
@@ -1434,7 +1437,7 @@ async function loadVersion() {
     // Update footer with version
     const footer = document.querySelector("footer p");
     if (footer && data.version) {
-      footer.textContent = `ESP32-S3 PhotoFrame v${data.version}`;
+      footer.textContent = `ESP32-S3 PhotoFrame ${data.version}`;
     }
   } catch (error) {
     // Silently fail if API not available (standalone mode)
@@ -2321,3 +2324,42 @@ document
 
 // Load palette on page load
 loadColorPalette();
+
+// Rotate image button handler
+document.getElementById("rotateBtn").addEventListener("click", async () => {
+  const statusDiv = document.getElementById("rotateStatus");
+  const btn = document.getElementById("rotateBtn");
+
+  btn.disabled = true;
+  statusDiv.textContent = "Rotating image...";
+  statusDiv.className = "";
+
+  try {
+    const response = await fetch(`${API_BASE}/api/rotate`, {
+      method: "POST",
+    });
+
+    if (response.ok) {
+      statusDiv.className = "status-success";
+      statusDiv.textContent = "✓ Image rotated successfully";
+
+      // Reload images after a short delay to show the new image
+      setTimeout(() => {
+        loadImages();
+      }, 1000);
+    } else {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  } catch (error) {
+    statusDiv.className = "status-error";
+    statusDiv.textContent = "✗ Failed to rotate image: " + error.message;
+  } finally {
+    btn.disabled = false;
+
+    // Clear status message after 3 seconds
+    setTimeout(() => {
+      statusDiv.textContent = "";
+      statusDiv.className = "";
+    }, 3000);
+  }
+});

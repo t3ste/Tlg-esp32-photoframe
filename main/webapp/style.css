@@ -67,6 +67,8 @@ header h1 {
     padding: 25px;
     margin-bottom: 20px;
     box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    max-width: 100%;
+    width: 100%;
 }
 
 .card h2 {
@@ -234,7 +236,8 @@ header h1 {
     font-weight: 500;
 }
 
-.form-group input[type="number"] {
+.form-group input[type="number"],
+.form-group input[type="url"] {
     width: 100%;
     padding: 10px;
     border: 2px solid #e0e0e0;
@@ -243,7 +246,8 @@ header h1 {
     transition: border-color 0.3s ease;
 }
 
-.form-group input[type="number"]:focus {
+.form-group input[type="number"]:focus,
+.form-group input[type="url"]:focus {
     outline: none;
     border-color: #667eea;
 }
@@ -422,6 +426,13 @@ footer {
 .btn-secondary {
     background: #6c757d;
     color: white;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
 }
 
 .btn-secondary:hover {
@@ -699,4 +710,375 @@ footer {
 
 .calibration-step:last-child {
     margin-bottom: 0;
+}
+
+/* Settings Sections */
+.settings-section {
+    margin-bottom: 24px;
+}
+
+.settings-section-divider {
+    padding-top: 24px;
+    border-top: 1px solid #e0e0e0;
+    margin-bottom: 24px;
+}
+
+/* Checkbox and Radio Labels */
+.checkbox-label,
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.radio-label {
+    margin-bottom: 8px;
+}
+
+/* Helper Text */
+.helper-text {
+    color: #666;
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+}
+
+/* Warning Box */
+.warning-box {
+    margin-top: 10px;
+    padding: 12px;
+    background: #fff3cd;
+    border-left: 4px solid #ffc107;
+    border-radius: 4px;
+}
+
+.warning-box-title {
+    font-weight: 600;
+    color: #856404;
+    margin-bottom: 5px;
+}
+
+.warning-box-text {
+    color: #856404;
+    line-height: 1.5;
+}
+
+/* URL Group (nested settings) */
+.url-group {
+    margin-left: 24px;
+    margin-top: 12px;
+    padding: 16px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+}
+
+.url-group-field {
+    margin-bottom: 12px;
+}
+
+.url-group-divider {
+    padding-top: 12px;
+    border-top: 1px solid #e0e0e0;
+}
+
+/* Input with Button */
+.input-with-button {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.input-with-button input {
+    flex: 1;
+    padding: 8px 12px;
+    box-sizing: border-box;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.input-with-button button {
+    padding: 8px 16px;
+    white-space: nowrap;
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: #555;
+}
+
+/* Checkbox with Description */
+.checkbox-with-desc {
+    display: flex;
+    align-items: flex-start;
+    cursor: pointer;
+}
+
+.checkbox-with-desc input[type="checkbox"] {
+    margin-top: 2px;
+    margin-right: 8px;
+}
+
+.checkbox-desc-title {
+    font-weight: 500;
+    color: #333;
+}
+
+.checkbox-desc-text {
+    color: #666;
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+}
+
+/* Field Label */
+.field-label {
+    font-weight: 500;
+    display: block;
+    margin-bottom: 6px;
+    color: #333;
+}
+
+/* Calibration Section */
+.section-description {
+    color: #666;
+    margin-bottom: 20px;
+}
+
+.section-subtitle {
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+}
+
+.calibration-flow {
+    margin-top: 20px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.step-description {
+    color: #666;
+    margin-bottom: 15px;
+}
+
+.step-description-small {
+    color: #666;
+    margin-bottom: 10px;
+}
+
+.step-tip {
+    color: #666;
+    margin-bottom: 15px;
+    font-size: 0.9rem;
+}
+
+.button-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.info-box {
+    margin-bottom: 15px;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.info-box-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #495057;
+}
+
+.info-box-image {
+    max-width: 100%;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.info-box-caption {
+    font-size: 0.9rem;
+    color: #6c757d;
+    margin-top: 8px;
+}
+
+.warning-box-important {
+    margin-bottom: 15px;
+    padding: 10px;
+    background: #fff3cd;
+    border-left: 4px solid #ffc107;
+    border-radius: 4px;
+}
+
+.warning-box-important-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #856404;
+}
+
+.warning-box-important-text {
+    font-size: 0.95rem;
+    color: #856404;
+    margin: 0;
+}
+
+.palette-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.status-message {
+    margin-top: 10px;
+}
+
+.calibration-canvas {
+    max-width: 100%;
+    margin-top: 15px;
+    border: 1px solid #ddd;
+}
+
+.btn-with-margin {
+    margin-top: 15px;
+}
+
+.btn-secondary-margin {
+    margin-left: 10px;
+}
+
+/* Header */
+.header-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Album Section */
+.album-section {
+    margin-bottom: 25px;
+}
+
+.album-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.album-hint {
+    color: #666;
+    font-size: 14px;
+    margin: 0;
+}
+
+/* Gallery Section */
+.gallery-divider {
+    border-top: 2px solid #e0e0e0;
+    padding-top: 20px;
+}
+
+.gallery-title {
+    color: #667eea;
+    margin-bottom: 15px;
+    font-size: 1.2rem;
+}
+
+/* Hidden Elements */
+.hidden {
+    display: none;
+}
+
+/* Processing Section */
+.processing-controls {
+    margin-bottom: 20px;
+}
+
+.radio-group {
+    margin-top: 8px;
+}
+
+.radio-option {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.radio-option input[type="radio"] {
+    margin-right: 5px;
+}
+
+/* Comparison Container */
+.comparison-custom {
+    flex: 0 0 auto;
+    padding: 0;
+    background: transparent;
+}
+
+.comparison-title {
+    text-align: center;
+    margin-bottom: 15px;
+    color: #333;
+}
+
+/* Curve Canvas Wrapper */
+.curve-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.scurve-panel {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+}
+
+.scurve-title {
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #667eea;
+}
+
+.scurve-controls-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+/* Upload Progress */
+.upload-progress {
+    margin-top: 15px;
+    text-align: center;
+}
+
+.upload-progress-title {
+    font-size: 1.1rem;
+    color: #667eea;
+    margin-bottom: 10px;
+}
+
+.upload-progress-text {
+    font-size: 0.9rem;
+    color: #666;
+}
+
+/* Rotation Mode Spacing */
+.rotation-mode-group {
+    margin-top: 8px;
+}
+
+/* Status Spacing */
+.status-spacing {
+    margin-top: 8px;
+}
+
+.status-spacing-large {
+    margin-top: 15px;
 }
