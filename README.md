@@ -6,11 +6,18 @@ A modern, feature-rich firmware for the **Waveshare ESP32-S3-PhotoPainter** that
 
 **Product Page**: [Waveshare ESP32-S3-PhotoPainter](https://www.waveshare.com/wiki/ESP32-S3-PhotoPainter)
 
+**🏠 Home Assistant Integration**: [ha-esp32-photoframe](https://github.com/aitjcize/ha-esp32-photoframe) - Companion integration for comprehensive control and monitoring through Home Assistant
+
+## Key Features
+
+- 🎨 **Superior Image Quality**: Measured color palette with automatic calibration produces significantly better results than stock firmware
+- 🔋 **Smart Power Management**: Deep sleep mode for weeks of battery life, or always-on for Home Assistant
+- 📁 **Flexible Image Sources**: SD card rotation or URL-based fetching (weather, news, random images)
+- 🌐 **Modern Web Interface**: Drag-and-drop uploads, gallery view, real-time battery status
+- 🔌 **RESTful API**: Full programmatic control ([API docs](docs/API.md))
+- 🏠 **Home Assistant Ready**: [Companion integration](https://github.com/aitjcize/ha-esp32-photoframe) available
+
 ## Image Quality Comparison
-
-Our firmware uses a **measured color palette** for superior image rendering compared to the stock firmware. The images below show simulated results of what you'll see on the actual e-paper display:
-
-> **⚠️ Note**: The stock algorithm may look acceptable on computer displays, but when flashed onto the actual e-paper device, the colors appear washed out and the image quality is significantly degraded. This is because the stock algorithm uses theoretical RGB values that don't match the physical characteristics of the e-paper display. Our enhanced algorithm with measured palette produces images that look much better on the actual device.
 
 **🎨 [Try the Interactive Demo](https://aitjcize.github.io/esp32-photoframe/)** - Drag the slider to compare algorithms in real-time with your own images!
 
@@ -38,249 +45,95 @@ Our firmware uses a **measured color palette** for superior image rendering comp
 **Why Our Algorithm is Better:**
 
 - ✅ **Accurate Color Matching**: Uses actual measured e-paper colors
+- ✅ **Automatic Calibration**: Built-in palette calibration tool adapts to your specific display
 - ✅ **Better Dithering**: Floyd-Steinberg algorithm with measured palette produces more natural color transitions
 - ✅ **No Over-Saturation**: Avoids the washed-out appearance of theoretical palette matching
 
-The measured palette accounts for the fact that e-paper displays show darker, more muted colors than pure RGB values. By dithering with these actual colors, the firmware makes better decisions about which palette color to use for each pixel, resulting in images that look significantly better on the physical display.
+The measured palette accounts for the fact that e-paper displays show darker, more muted colors than pure RGB values. By dithering with these actual colors, the firmware makes better decisions about which palette color to use for each pixel, resulting in images that look significantly better on the physical display. The automatic calibration feature allows you to measure and optimize the palette for your specific device.
 
 📖 **[Read the technical deep-dive on measured color palettes →](docs/MEASURED_PALETTE.md)**
 
 ## Power Management
 
-The firmware implements intelligent power management with configurable deep sleep behavior:
+**Deep Sleep Enabled (Default)**:
+- Battery life: months
+- Wake via BOOT/KEY button or auto-rotate timer
+- Web interface accessible only when awake
+- Power: ~10μA in sleep
 
-### Deep Sleep Modes
-
-The device supports two power modes, configurable via the web interface:
-
-#### 1. Deep Sleep Enabled (Default - Battery Efficient)
-**Best for**: Battery-powered operation, portable use
-
-- **LED Indicator**: RED LED on when awake
-- **Auto-Sleep**: Device enters deep sleep after 2 minutes of inactivity (on battery only)
-- **Auto-Rotate**: Uses timer-based wake-up from deep sleep
-- **Web Interface**: Accessible only when awake
-- **Wake-Up Methods**:
-  - Boot button (GPIO 0) - wakes device and starts HTTP server
-  - Key button (GPIO 4) - wakes device and triggers image rotation
-  - Auto-rotate timer - wakes device at configured interval
-- **Power Consumption**: Minimal (~10μA in deep sleep)
-- **Battery Life**: Maximum (weeks to months depending on rotation interval)
-
-#### 2. Deep Sleep Disabled (Always-On Mode)
-**Best for**: Home Assistant integration
-
-- **LED Indicator**: RED LED off (to save power)
-- **Auto-Sleep**: Disabled when on battery (device stays awake with auto light sleep)
-- **Auto-Rotate**: Uses active countdown timer
-- **Web Interface**: Always accessible via HTTP
-- **Power Consumption**: Higher (~40-80mA with auto light sleep)
-- **Battery Life**: Significantly reduced (hours instead of weeks)
-
-### USB vs Battery Behavior
-
-**When USB Connected** (regardless of deep sleep setting):
-- Auto-sleep is disabled (device stays awake)
-- Auto-rotate uses active countdown timer
+**Deep Sleep Disabled (Always-On)**:
+- Best for Home Assistant integration
 - Web interface always accessible
+- Power: ~40-80mA with auto light sleep
+- Battery life: days to weeks depending on usage
 
-**When Running on Battery**:
-- Behavior depends on deep sleep setting (see modes above)
-- Sleep timer reset by any HTTP interaction or button press
+**Auto-Rotation**: SD card (default) or URL-based (fetch from web)
 
-### Auto-Rotation Modes
+Configure via web interface **Settings** section.
 
-Configure via web interface **Power & Auto-Rotate Settings**:
+## Hardware Requirements
 
-#### SD Card Rotation (Default)
-- Rotates through images in `/sdcard/images/` albums
-- Supports BMP (direct) and JPG (converted on-the-fly)
-- No WiFi required during rotation
-
-#### URL-Based Rotation
-- Fetches fresh images from a configured URL at each interval
-- Perfect for dynamic content (weather, news, random images)
-- Default: `https://loremflickr.com/800/480` (random images)
-- Auto-retries 3 times, falls back to SD card on failure
-- Downloaded images saved to "Downloads" album
-- **Requires**: WiFi connection and **baseline JPEG** format (progressive JPEGs not supported)
-
-### Configuring Deep Sleep
-
-Access the web interface and navigate to **Power & Auto-Rotate Settings**:
-
-1. Check/uncheck **"Enable Deep Sleep"**
-2. Click **"Save Settings"**
-3. Setting is saved to non-volatile storage and persists across reboots
-
-**Power Consumption Warning**: When deep sleep is disabled, a warning appears explaining the increased power consumption.
-
-## Hardware
-
-This firmware is designed for the **[Waveshare ESP32-S3-PhotoPainter](https://www.waveshare.com/wiki/ESP32-S3-PhotoPainter)**.
-
-**Requirements**:
-- MicroSD card (formatted as FAT32)
-- WiFi network (2.4GHz)
-- USB-C cable for programming
+- **[Waveshare ESP32-S3-PhotoPainter](https://www.waveshare.com/wiki/ESP32-S3-PhotoPainter)**
+- MicroSD card (FAT32)
+- 2.4GHz WiFi network
+- USB-C cable
 
 ## Installation
 
-### Option 1: Web Flasher (Easiest) ⚡
+### Web Flasher (Easiest) ⚡
 
-**Flash directly from your browser - no software installation required!**
+**[🌐 Flash from Browser](https://aitjcize.github.io/esp32-photoframe/)** - Chrome/Edge/Opera required
 
-**[🌐 Open Web Flasher](https://aitjcize.github.io/esp32-photoframe/)**
+### Manual Flash
 
-Requirements:
-- Chrome, Edge, or Opera browser (Web Serial API support)
-- USB-C cable to connect your ESP32-S3-PhotoPainter
-- Just click "Connect & Flash" and follow the prompts!
+Download from [Releases](https://github.com/aitjcize/esp32-photoframe/releases):
 
-### Option 2: Download Prebuilt Firmware
+```bash
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 photoframe-firmware-merged.bin
+```
 
-Download the latest prebuilt firmware from the [GitHub Releases](https://github.com/aitjcize/esp32-photoframe/releases) page:
+**Device not detected?** Hold BOOT button + press PWR to enter download mode.
 
-1. **Quick Flash (Single File):**
-   ```bash
-   esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 photoframe-firmware-merged.bin
-   ```
+**Build from source:** See [DEV.md](docs/DEV.md)
 
-2. **Individual Files:**
-   ```bash
-   esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
-     write_flash 0x0 bootloader.bin \
-     0x8000 partition-table.bin \
-     0x10000 photoframe-api.bin
-   ```
+## Setup
 
-Replace `/dev/ttyUSB0` with your serial port (e.g., `/dev/cu.usbserial-*` on macOS, `COM3` on Windows).
+> **⚠️ Insert MicroSD card before first boot**
 
-#### ⚠️ Important: Device Not Detected?
+### WiFi Provisioning
 
-This firmware has **automatic light sleep** enabled. If the device is not detected for flashing:
+1. Device creates `PhotoFrame-Setup` AP on first boot
+2. Connect and open `http://192.168.4.1` (or use captive portal)
+3. Enter WiFi credentials (2.4GHz only)
+4. Device tests connection and saves if successful
 
-1. **Press and hold the PWR button for 5 seconds** (until device powers off)
-2. **Hold down the BOOT button and click the PWR button** to enter download mode
-3. **Run the flash command** while in download mode
-
-The device will remain in download mode and be detectable for flashing.
-
----
-
-**For developers:** See **[DEV.md](docs/DEV.md)** for build-from-source instructions and configuration options.
-
-## Initial Setup
-> [!IMPORTANT]
-> Insert the MicroSD card before installing the firmware. If the card is not detected, the device will halt.
-
-### 1. WiFi Provisioning
-
-On first boot, the device automatically starts in **WiFi provisioning mode** if no credentials are saved:
-
-1. **Connect to AP**: The device creates a WiFi access point named `PhotoFrame-Setup`
-2. **Open Browser**: Connect to the AP and navigate to `http://192.168.4.1`
-   - Most devices will automatically open a captive portal
-3. **Enter Credentials**: Submit your WiFi SSID and password
-4. **Live Connection Test**: The device tests the connection in real-time
-   - Uses APSTA mode - you stay connected to the setup page during the test
-   - ✅ **Success**: Credentials are saved and device restarts
-   - ❌ **Failure**: Error message appears immediately - retry with correct credentials
-5. **Auto-Connect**: On subsequent boots, device connects automatically
-
-**Important Notes:**
-- Only 2.4GHz WiFi networks are supported (ESP32 limitation)
-- WPA3-SAE security is supported
-- Connection is tested before saving - invalid credentials are never saved
-- You remain connected to the setup page during testing (no need to reconnect)
-- To re-provision, erase flash with: `idf.py erase-flash`
-
-### 2. Prepare SD Card
-
-1. Format SD card as FAT32
-2. Insert into device before powering on
-3. The device will automatically create `/sdcard/images/` directory on first boot
-4. You can pre-load BMP images (800x480, 7-color palette) into this directory
+**Re-provision:** `idf.py erase-flash`
 
 ## Usage
 
-### Web Interface
+**Web Interface:** `http://photoframe.local` or device IP address
+- Gallery view with drag-and-drop uploads
+- Settings, battery status, display control
 
-1. After connecting to WiFi, access the device at:
-   - **mDNS**: `http://photoframe.local` (recommended - works on most devices)
-   - **IP Address**: Check serial monitor for the device's IP address
-2. The web interface provides:
-   - Image gallery with thumbnails
-   - Drag-and-drop upload for JPG images
-   - Display control and image management
-   - Configuration for auto-rotate, brightness, and contrast
-   - Real-time battery status
-
-**Note**: If `photoframe.local` doesn't work, use the IP address shown in the serial monitor.
-
-### RESTful API
-
-Complete API documentation is available in **[API.md](docs/API.md)**.
+**API:** Full documentation in [API.md](docs/API.md)
 
 ## Troubleshooting
 
-### WiFi Provisioning Issues
-- **AP not visible**: Check serial monitor for errors, ensure device is powered on
-- **Captive portal doesn't open**: Manually navigate to `http://192.168.4.1`
-- **Connection test fails**: Verify SSID and password are correct, then retry
-  - You stay connected to the setup page - no need to reconnect
-  - Error message appears within 15 seconds if credentials are wrong
-- **Wrong network saved**: Erase flash with `idf.py erase-flash` and re-provision
-- **2.4GHz only**: ESP32 doesn't support 5GHz WiFi networks
-
-### WiFi Connection Issues
-- Ensure 2.4GHz WiFi network (ESP32 doesn't support 5GHz)
-- Check serial monitor for connection status and IP address
-- Try accessing via `http://photoframe.local` or the IP address shown in logs
-
-### SD Card Not Detected
-- Ensure SD card is formatted as FAT32
-- Check SD card is properly inserted
-- Try a different SD card (some cards are incompatible)
-
-### Image Upload Fails
-- Ensure the uploaded file is a valid JPG/JPEG image
-- Check available SPIRAM (large images require significant memory)
-- Monitor serial output for specific error messages
-- If upload succeeds but conversion fails, check SD card space
+- **WiFi issues**: Ensure 2.4GHz network, check serial monitor for IP
+- **SD card not detected**: Format as FAT32, try different card
+- **Upload fails**: Check file is valid JPEG, monitor serial output
+- **Device not detected for flash**: Hold BOOT + press PWR for download mode
 
 ## Offline Image Processing
 
-Use the Node.js CLI tool to process images offline with the same pipeline as the webapp:
+Node.js CLI tool for batch processing:
 
 ```bash
-cd process-cli
-npm install
-
-# Process single image with device settings (recommended)
+cd process-cli && npm install
 node cli.js input.jpg --device-parameters -o /path/to/sdcard/images/
-
-# Process entire album directory structure
-node cli.js ~/Photos/Albums --device-parameters -o /path/to/sdcard/images/
-
-# Custom S-curve and saturation
-node cli.js input.jpg --scurve-strength 0.8 --saturation 1.5 -o output/
-
-# Preview mode (render with measured palette)
-node cli.js input.jpg --render-measured -o preview/
 ```
 
-**Features:**
-- **Automatic detection**: Processes single files or entire folder structures
-- **Device parameters**: Fetch settings and calibrated palette from your device
-- **Batch processing**: Automatically processes album subdirectories
-- **Dual output**: BMP for display + JPEG thumbnail for web interface
-
-**Output:**
-- `photo.bmp` - Processed image for e-paper display (theoretical palette)
-- `photo.jpg` - Thumbnail for web interface
-
-See **[process-cli/README.md](process-cli/README.md)** for detailed usage.
+See [process-cli/README.md](process-cli/README.md) for details.
 
 ## License
 

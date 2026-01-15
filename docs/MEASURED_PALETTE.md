@@ -321,9 +321,24 @@ static const rgb_t palette_measured[7] = {
 
 ## Measuring Your Own Palette
 
-If you want to measure your own e-paper's colors for even better accuracy:
+The firmware includes **automatic palette calibration** to measure your specific e-paper display's colors for optimal accuracy.
 
-### Method 1: Photographic (Recommended)
+### Method 1: Automatic Calibration (Recommended)
+
+The firmware includes a built-in calibration tool accessible via the web interface:
+
+1. **Access calibration**: Navigate to the web interface settings
+2. **Start calibration**: The device displays each of the 7 colors sequentially
+3. **Photograph colors**: Take a photo of each color patch with consistent lighting
+4. **Upload photos**: Upload the photos through the web interface
+5. **Automatic extraction**: The firmware automatically extracts RGB values from the center of each patch
+6. **Apply calibration**: The measured palette is saved and immediately applied
+
+This method adapts the color processing to your specific display panel, accounting for manufacturing variations.
+
+### Method 2: Manual Photographic Calibration
+
+If you prefer manual control or want to use external tools:
 
 1. **Display pure colors**: Use the firmware to display solid blocks of each color
 2. **Take photos**: Photograph each color block with good, consistent lighting
@@ -334,7 +349,9 @@ If you want to measure your own e-paper's colors for even better accuracy:
    - `main/image_processor.c` (for firmware)
 6. **Rebuild firmware**: Flash the updated firmware to your device
 
-### Method 2: Colorimeter (Most Accurate)
+### Method 3: Colorimeter (Most Accurate)
+
+For the highest precision using professional equipment:
 
 1. **Display pure colors**: Use the firmware to display solid blocks of each color
 2. **Use a colorimeter**: Measure each color patch with a calibrated device (e.g., X-Rite ColorMunki, Datacolor SpyderX)
