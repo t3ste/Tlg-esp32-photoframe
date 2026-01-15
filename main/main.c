@@ -18,6 +18,7 @@
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "ha_integration.h"
 #include "http_server.h"
 #include "i2c_bsp.h"
 #include "image_processor.h"
@@ -264,12 +265,16 @@ void app_main(void)
     if (power_manager_is_timer_wakeup() || power_manager_is_key_button_wakeup()) {
         // Check rotation mode
         rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
+        bool ha_configured = ha_is_configured();
+        bool wifi_connected = false;
+
         if (rotation_mode == ROTATION_MODE_URL) {
             // URL mode - need WiFi to fetch image from URL
             ESP_LOGI(TAG, "URL rotation mode - initializing WiFi");
             ESP_ERROR_CHECK(wifi_manager_init());
 
             if (connect_to_wifi_with_timeout(60)) {
+                wifi_connected = true;
                 const char *image_url = config_manager_get_image_url();
                 ESP_LOGI(TAG, "Downloading from: %s", image_url);
 
@@ -289,9 +294,32 @@ void app_main(void)
                 display_manager_handle_wakeup();
             }
         } else {
-            // SD card mode - no WiFi needed, use normal SD card rotation
-            ESP_LOGI(TAG, "SD card rotation mode - skipping WiFi initialization");
+            // SD card mode
+            if (ha_configured) {
+                // HA URL is configured - need WiFi to post battery data
+                ESP_LOGI(TAG, "SD card rotation mode with HA configured - initializing WiFi");
+                ESP_ERROR_CHECK(wifi_manager_init());
+
+                if (connect_to_wifi_with_timeout(60)) {
+                    wifi_connected = true;
+                    ESP_LOGI(TAG, "WiFi connected, will post battery data to HA");
+                } else {
+                    ESP_LOGW(TAG, "WiFi connection timeout, skipping HA battery post");
+                }
+            } else {
+                ESP_LOGI(TAG, "SD card rotation mode - no HA configured, skipping WiFi");
+            }
+
             display_manager_handle_wakeup();
+        }
+
+        // Post battery data to HA if WiFi is connected and HA is configured
+        if (wifi_connected && ha_configured) {
+            ESP_LOGI(TAG, "Posting battery status to Home Assistant");
+            esp_err_t ha_err = ha_post_battery_status();
+            if (ha_err != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to post battery to HA, continuing anyway");
+            }
         }
 
         // Go directly back to sleep without starting HTTP server

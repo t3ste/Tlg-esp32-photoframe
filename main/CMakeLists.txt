@@ -4,6 +4,7 @@ set(SOURCES
     "config_manager.c"
     "display_manager.c"
     "dns_server.c"
+    "ha_integration.c"
     "http_server.c"
     "image_processor.c"
     "main.c"

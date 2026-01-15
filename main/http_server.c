@@ -963,6 +963,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         bool auto_rotate = config_manager_get_auto_rotate();
         bool deep_sleep_enabled = power_manager_get_deep_sleep_enabled();
         const char *image_url = config_manager_get_image_url();
+        const char *ha_url = config_manager_get_ha_url();
         rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
         bool save_downloaded_images = config_manager_get_save_downloaded_images();
 
@@ -971,6 +972,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddBoolToObject(root, "auto_rotate", auto_rotate);
         cJSON_AddBoolToObject(root, "deep_sleep_enabled", deep_sleep_enabled);
         cJSON_AddStringToObject(root, "image_url", image_url ? image_url : "");
+        cJSON_AddStringToObject(root, "ha_url", ha_url ? ha_url : "");
         cJSON_AddStringToObject(root, "rotation_mode",
                                 rotation_mode == ROTATION_MODE_URL ? "url" : "sdcard");
         cJSON_AddBoolToObject(root, "save_downloaded_images", save_downloaded_images);
@@ -1018,6 +1020,12 @@ static esp_err_t config_handler(httpd_req_t *req)
         if (image_url_obj && cJSON_IsString(image_url_obj)) {
             const char *url = cJSON_GetStringValue(image_url_obj);
             config_manager_set_image_url(url);
+        }
+
+        cJSON *ha_url_obj = cJSON_GetObjectItem(root, "ha_url");
+        if (ha_url_obj && cJSON_IsString(ha_url_obj)) {
+            const char *url = cJSON_GetStringValue(ha_url_obj);
+            config_manager_set_ha_url(url);
         }
 
         cJSON *rotation_mode_obj = cJSON_GetObjectItem(root, "rotation_mode");
