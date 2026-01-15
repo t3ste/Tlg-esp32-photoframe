@@ -731,6 +731,12 @@ footer {
     gap: 8px;
 }
 
+.checkbox-label input[type="checkbox"],
+.radio-label input[type="radio"] {
+    margin: 0;
+    flex-shrink: 0;
+}
+
 .radio-label {
     margin-bottom: 8px;
 }
