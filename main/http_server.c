@@ -21,6 +21,7 @@
 #include "image_processor.h"
 #include "power_manager.h"
 #include "processing_settings.h"
+#include "utils.h"
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -931,8 +932,8 @@ static esp_err_t rotate_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "Manual rotation triggered via API");
 
-    // Trigger rotation just like KEY button press
-    display_manager_handle_wakeup();
+    // Trigger rotation using helper function
+    trigger_image_rotation();
 
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "success");

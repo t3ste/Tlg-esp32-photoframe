@@ -164,7 +164,7 @@ static void button_task(void *arg)
             if (duration > 50 && duration < 3000) {
                 ESP_LOGI(TAG, "Key button pressed, triggering rotation");
                 power_manager_reset_sleep_timer();
-                display_manager_handle_wakeup();
+                display_manager_rotate_from_sdcard();
             }
         }
 
@@ -263,55 +263,27 @@ void app_main(void)
 
     // Check wake-up source with priority: Timer > KEY > BOOT
     if (power_manager_is_timer_wakeup() || power_manager_is_key_button_wakeup()) {
-        // Check rotation mode
+        // Check rotation mode and HA configuration
         rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
         bool ha_configured = ha_is_configured();
         bool wifi_connected = false;
 
-        if (rotation_mode == ROTATION_MODE_URL) {
-            // URL mode - need WiFi to fetch image from URL
-            ESP_LOGI(TAG, "URL rotation mode - initializing WiFi");
+        // Initialize WiFi if needed (URL mode always needs it, SD card mode only if HA configured)
+        if (rotation_mode == ROTATION_MODE_URL || ha_configured) {
+            ESP_LOGI(TAG, "Initializing WiFi for %s",
+                     rotation_mode == ROTATION_MODE_URL ? "URL rotation" : "HA battery post");
             ESP_ERROR_CHECK(wifi_manager_init());
 
             if (connect_to_wifi_with_timeout(60)) {
                 wifi_connected = true;
-                const char *image_url = config_manager_get_image_url();
-                ESP_LOGI(TAG, "Downloading from: %s", image_url);
-
-                char saved_bmp_path[512];
-                if (fetch_and_save_image_from_url(image_url, saved_bmp_path,
-                                                  sizeof(saved_bmp_path)) == ESP_OK) {
-                    ESP_LOGI(TAG, "Successfully downloaded and saved image, displaying...");
-                    display_manager_show_image(saved_bmp_path);
-                    ESP_LOGI(TAG, "URL image display complete");
-                } else {
-                    ESP_LOGE(TAG,
-                             "Failed to download image from URL, falling back to SD card rotation");
-                    display_manager_handle_wakeup();
-                }
+                ESP_LOGI(TAG, "WiFi connected");
             } else {
-                ESP_LOGE(TAG, "WiFi connection timeout, falling back to SD card rotation");
-                display_manager_handle_wakeup();
+                ESP_LOGW(TAG, "WiFi connection timeout");
             }
-        } else {
-            // SD card mode
-            if (ha_configured) {
-                // HA URL is configured - need WiFi to post battery data
-                ESP_LOGI(TAG, "SD card rotation mode with HA configured - initializing WiFi");
-                ESP_ERROR_CHECK(wifi_manager_init());
-
-                if (connect_to_wifi_with_timeout(60)) {
-                    wifi_connected = true;
-                    ESP_LOGI(TAG, "WiFi connected, will post battery data to HA");
-                } else {
-                    ESP_LOGW(TAG, "WiFi connection timeout, skipping HA battery post");
-                }
-            } else {
-                ESP_LOGI(TAG, "SD card rotation mode - no HA configured, skipping WiFi");
-            }
-
-            display_manager_handle_wakeup();
         }
+
+        // Trigger rotation
+        trigger_image_rotation();
 
         // Post battery data to HA if WiFi is connected and HA is configured
         if (wifi_connected && ha_configured) {

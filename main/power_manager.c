@@ -58,28 +58,8 @@ static void rotation_timer_task(void *arg)
                 const char *reason = axp_is_usb_connected() ? "USB powered" : "deep sleep disabled";
                 ESP_LOGI(TAG, "Active rotation triggered (%s)", reason);
 
-                // Check rotation mode
-                rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
-                if (rotation_mode == ROTATION_MODE_URL) {
-                    // URL mode - fetch image from URL
-                    const char *image_url = config_manager_get_image_url();
-                    ESP_LOGI(TAG, "URL rotation mode, downloading from: %s", image_url);
-
-                    char saved_bmp_path[512];
-                    if (fetch_and_save_image_from_url(image_url, saved_bmp_path,
-                                                      sizeof(saved_bmp_path)) == ESP_OK) {
-                        ESP_LOGI(TAG, "Successfully downloaded and saved image, displaying...");
-                        display_manager_show_image(saved_bmp_path);
-                    } else {
-                        ESP_LOGE(
-                            TAG,
-                            "Failed to download image from URL, falling back to SD card rotation");
-                        display_manager_handle_wakeup();
-                    }
-                } else {
-                    // SD card mode - use normal SD card rotation
-                    display_manager_handle_wakeup();
-                }
+                // Trigger rotation using helper function
+                trigger_image_rotation();
 
                 // Schedule next rotation
                 int rotate_interval = config_manager_get_rotate_interval();

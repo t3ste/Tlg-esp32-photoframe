@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "config_manager.h"
+#include "display_manager.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "image_processor.h"
@@ -211,4 +212,31 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
     }
 
     return ESP_OK;
+}
+
+esp_err_t trigger_image_rotation(void)
+{
+    rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
+
+    if (rotation_mode == ROTATION_MODE_URL) {
+        // URL mode - fetch image from URL
+        const char *image_url = config_manager_get_image_url();
+        ESP_LOGI(TAG, "URL rotation mode - downloading from: %s", image_url);
+
+        char saved_bmp_path[512];
+        if (fetch_and_save_image_from_url(image_url, saved_bmp_path, sizeof(saved_bmp_path)) ==
+            ESP_OK) {
+            ESP_LOGI(TAG, "Successfully downloaded and saved image, displaying...");
+            display_manager_show_image(saved_bmp_path);
+            return ESP_OK;
+        } else {
+            ESP_LOGE(TAG, "Failed to download image from URL, falling back to SD card rotation");
+            display_manager_rotate_from_sdcard();
+            return ESP_FAIL;
+        }
+    } else {
+        // SD card mode - rotate through albums
+        display_manager_rotate_from_sdcard();
+        return ESP_OK;
+    }
 }

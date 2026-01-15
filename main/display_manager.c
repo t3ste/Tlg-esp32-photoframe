@@ -124,12 +124,12 @@ bool display_manager_is_busy(void)
     return true;
 }
 
-void display_manager_handle_wakeup(void)
+void display_manager_rotate_from_sdcard(void)
 {
     if (!config_manager_get_auto_rotate()) {
         ESP_LOGI(TAG, "Manual rotation triggered (auto-rotate is disabled)");
     } else {
-        ESP_LOGI(TAG, "Handling wakeup for auto-rotate");
+        ESP_LOGI(TAG, "Rotating from SD card");
     }
 
     // Get enabled albums
