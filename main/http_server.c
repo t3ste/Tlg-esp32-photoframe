@@ -919,6 +919,35 @@ static esp_err_t sleep_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t rotate_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    power_manager_reset_sleep_timer();
+
+    ESP_LOGI(TAG, "Manual rotation triggered via API");
+
+    // Trigger rotation just like KEY button press
+    display_manager_handle_wakeup();
+
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "status", "success");
+    cJSON_AddStringToObject(response, "message", "Image rotation triggered");
+
+    char *json_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(response);
+
+    return ESP_OK;
+}
+
 static esp_err_t config_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -1734,6 +1763,10 @@ esp_err_t http_server_init(void)
                                        .handler = serve_image_handler,
                                        .user_ctx = NULL};
         httpd_register_uri_handler(server, &serve_image_uri);
+
+        httpd_uri_t rotate_uri = {
+            .uri = "/api/rotate", .method = HTTP_POST, .handler = rotate_handler, .user_ctx = NULL};
+        httpd_register_uri_handler(server, &rotate_uri);
 
         httpd_uri_t config_get_uri = {
             .uri = "/api/config", .method = HTTP_GET, .handler = config_handler, .user_ctx = NULL};
