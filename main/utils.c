@@ -123,15 +123,6 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
         return ESP_FAIL;
     }
 
-    // Validate that the downloaded file is actually a JPEG
-    FILE *validate_file = fopen(temp_jpg_path, "rb");
-    if (!validate_file) {
-        ESP_LOGE(TAG, "Failed to open downloaded file for validation");
-        unlink(temp_jpg_path);
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG, "JPEG file validated successfully (size: %d bytes)", total_downloaded);
-
     // Convert JPG to BMP using image processor
     err = image_processor_convert_jpg_to_bmp(temp_jpg_path, temp_bmp_path, false);
     if (err != ESP_OK) {
