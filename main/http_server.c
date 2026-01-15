@@ -867,8 +867,8 @@ static esp_err_t battery_handler(httpd_req_t *req)
     bool usb_connected = axp_is_usb_connected();
     bool battery_connected = axp_is_battery_connected();
 
-    cJSON_AddNumberToObject(response, "battery_voltage_mv", battery_voltage);
-    cJSON_AddNumberToObject(response, "battery_percent", battery_percent);
+    cJSON_AddNumberToObject(response, "battery_voltage", battery_voltage);
+    cJSON_AddNumberToObject(response, "battery_level", battery_percent);
     cJSON_AddBoolToObject(response, "charging", is_charging);
     cJSON_AddBoolToObject(response, "usb_connected", usb_connected);
     cJSON_AddBoolToObject(response, "battery_connected", battery_connected);

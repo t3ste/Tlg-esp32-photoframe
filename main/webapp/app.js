@@ -37,8 +37,8 @@ async function loadBatteryStatus() {
       return;
     }
 
-    const percent = data.battery_percent;
-    const voltage = data.battery_voltage_mv;
+    const percent = data.battery_level;
+    const voltage = data.battery_voltage;
     const charging = data.charging;
 
     let batteryIcon = "🔋";
