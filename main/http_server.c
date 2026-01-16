@@ -859,19 +859,12 @@ static esp_err_t battery_handler(httpd_req_t *req)
 
     power_manager_reset_sleep_timer();
 
-    cJSON *response = cJSON_CreateObject();
-
-    int battery_voltage = axp_get_battery_voltage();
-    int battery_percent = axp_get_battery_percent();
-    bool is_charging = axp_is_charging();
-    bool usb_connected = axp_is_usb_connected();
-    bool battery_connected = axp_is_battery_connected();
-
-    cJSON_AddNumberToObject(response, "battery_voltage", battery_voltage);
-    cJSON_AddNumberToObject(response, "battery_level", battery_percent);
-    cJSON_AddBoolToObject(response, "charging", is_charging);
-    cJSON_AddBoolToObject(response, "usb_connected", usb_connected);
-    cJSON_AddBoolToObject(response, "battery_connected", battery_connected);
+    cJSON *response = create_battery_json();
+    if (response == NULL) {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "Failed to create battery JSON");
+        return ESP_FAIL;
+    }
 
     char *json_str = cJSON_Print(response);
     httpd_resp_set_type(req, "application/json");

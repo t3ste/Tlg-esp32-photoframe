@@ -6,6 +6,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "axp_prot.h"
+#include "cJSON.h"
 #include "config.h"
 #include "config_manager.h"
 #include "display_manager.h"
@@ -230,4 +232,26 @@ esp_err_t trigger_image_rotation(void)
         display_manager_rotate_from_sdcard();
         return ESP_OK;
     }
+}
+
+cJSON *create_battery_json(void)
+{
+    cJSON *json = cJSON_CreateObject();
+    if (json == NULL) {
+        return NULL;
+    }
+
+    int battery_percent = axp_get_battery_percent();
+    int battery_voltage = axp_get_battery_voltage();
+    bool is_charging = axp_is_charging();
+    bool usb_connected = axp_is_usb_connected();
+    bool battery_connected = axp_is_battery_connected();
+
+    cJSON_AddNumberToObject(json, "battery_level", battery_percent);
+    cJSON_AddNumberToObject(json, "battery_voltage", battery_voltage);
+    cJSON_AddBoolToObject(json, "charging", is_charging);
+    cJSON_AddBoolToObject(json, "usb_connected", usb_connected);
+    cJSON_AddBoolToObject(json, "battery_connected", battery_connected);
+
+    return json;
 }

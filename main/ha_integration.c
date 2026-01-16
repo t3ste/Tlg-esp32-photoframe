@@ -3,13 +3,21 @@
 #include <string.h>
 
 #include "axp_prot.h"
+#include "cJSON.h"
 #include "config_manager.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "utils.h"
 
 static const char *TAG = "ha_integration";
 
-esp_err_t ha_post_battery_status(void)
+static TaskHandle_t battery_push_task_handle = NULL;
+static int64_t next_battery_push_time = 0;  // Use absolute time for battery push
+
+esp_err_t ha_post_battery_info(void)
 {
     const char *ha_url = config_manager_get_ha_url();
 
@@ -19,23 +27,23 @@ esp_err_t ha_post_battery_status(void)
         return ESP_OK;  // Not an error, just not configured
     }
 
-    // Get battery data
-    int battery_percent = axp_get_battery_percent();
-    int battery_voltage = axp_get_battery_voltage();
-
-    if (battery_percent < 0 || battery_voltage < 0) {
-        ESP_LOGW(TAG, "Failed to read battery data");
-        return ESP_FAIL;
-    }
-
     // Build the API endpoint URL
     char url[512];
     snprintf(url, sizeof(url), "%s/api/esp32_photoframe/battery", ha_url);
 
-    // Build JSON payload
-    char json_payload[256];
-    snprintf(json_payload, sizeof(json_payload), "{\"battery_level\":%d,\"battery_voltage\":%d}",
-             battery_percent, battery_voltage);
+    // Build JSON payload with all battery fields using shared function
+    cJSON *json = create_battery_json();
+    if (json == NULL) {
+        ESP_LOGE(TAG, "Failed to create battery JSON");
+        return ESP_FAIL;
+    }
+
+    char *json_payload = cJSON_PrintUnformatted(json);
+    if (json_payload == NULL) {
+        ESP_LOGE(TAG, "Failed to print JSON payload");
+        cJSON_Delete(json);
+        return ESP_FAIL;
+    }
 
     ESP_LOGI(TAG, "Posting battery status to HA: %s", json_payload);
 
@@ -62,6 +70,8 @@ esp_err_t ha_post_battery_status(void)
     int status_code = esp_http_client_get_status_code(client);
 
     esp_http_client_cleanup(client);
+    free(json_payload);
+    cJSON_Delete(json);
 
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "HTTP POST failed: %s", esp_err_to_name(err));
@@ -81,4 +91,50 @@ bool ha_is_configured(void)
 {
     const char *ha_url = config_manager_get_ha_url();
     return (ha_url != NULL && strlen(ha_url) > 0);
+}
+
+static void battery_push_task(void *arg)
+{
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // Push battery data to HA whenever device is awake and HA is configured
+        // Device is awake when HTTP server is running (not in deep sleep)
+        if (!ha_is_configured()) {
+            next_battery_push_time = 0;  // Reset when HA not configured
+            continue;
+        }
+
+        // Handle periodic battery push when device is awake
+        int64_t now = esp_timer_get_time();  // Get absolute time in microseconds
+
+        if (next_battery_push_time == 0) {
+            // Initialize next battery push time (60 seconds)
+            next_battery_push_time = now + (60 * 1000000LL);
+            ESP_LOGI(TAG, "Battery push scheduled in 60 seconds");
+        } else if (now >= next_battery_push_time) {
+            // Time to push battery data
+            ESP_LOGI(TAG, "Pushing battery data to HA");
+
+            esp_err_t err = ha_post_battery_info();
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to push battery data to HA");
+            }
+
+            // Schedule next push (60 seconds)
+            next_battery_push_time = now + (60 * 1000000LL);
+        }
+    }
+}
+
+esp_err_t ha_integration_init(void)
+{
+    if (battery_push_task_handle != NULL) {
+        ESP_LOGW(TAG, "HA integration already initialized");
+        return ESP_OK;
+    }
+
+    xTaskCreate(battery_push_task, "battery_push", 8192, NULL, 5, &battery_push_task_handle);
+    ESP_LOGI(TAG, "HA integration initialized");
+    return ESP_OK;
 }

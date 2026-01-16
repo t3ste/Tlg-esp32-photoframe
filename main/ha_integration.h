@@ -6,11 +6,18 @@
 #include "esp_err.h"
 
 /**
- * @brief Post battery status to Home Assistant
+ * @brief Initialize HA integration (starts battery push task)
  *
  * @return ESP_OK on success, ESP_FAIL on error
  */
-esp_err_t ha_post_battery_status(void);
+esp_err_t ha_integration_init(void);
+
+/**
+ * @brief Post battery info to Home Assistant
+ *
+ * @return ESP_OK on success, ESP_FAIL on error
+ */
+esp_err_t ha_post_battery_info(void);
 
 /**
  * @brief Check if Home Assistant URL is configured

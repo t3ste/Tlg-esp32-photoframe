@@ -288,7 +288,7 @@ void app_main(void)
         // Post battery data to HA if WiFi is connected and HA is configured
         if (wifi_connected && ha_configured) {
             ESP_LOGI(TAG, "Posting battery status to Home Assistant");
-            esp_err_t ha_err = ha_post_battery_status();
+            esp_err_t ha_err = ha_post_battery_info();
             if (ha_err != ESP_OK) {
                 ESP_LOGW(TAG, "Failed to post battery to HA, continuing anyway");
             }
@@ -344,6 +344,7 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(http_server_init());
+    ESP_ERROR_CHECK(ha_integration_init());
 
     if (wifi_manager_is_connected()) {
         char ip_str[16];

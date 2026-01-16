@@ -13,4 +13,10 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
 // Returns ESP_OK on success, error code on failure
 esp_err_t trigger_image_rotation(void);
 
+// Create battery status JSON object with all battery fields
+// Returns cJSON object (caller must delete with cJSON_Delete)
+// Returns NULL on failure
+struct cJSON;
+struct cJSON *create_battery_json(void);
+
 #endif
