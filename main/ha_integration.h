@@ -27,10 +27,10 @@ esp_err_t ha_post_battery_info(void);
 bool ha_is_configured(void);
 
 /**
- * @brief Trigger OTA firmware update (for HA integration)
+ * @brief Post OTA version info to Home Assistant
  *
  * @return ESP_OK on success, ESP_FAIL on error
  */
-esp_err_t ha_trigger_ota_update(void);
+esp_err_t ha_post_ota_version_info(void);
 
 #endif

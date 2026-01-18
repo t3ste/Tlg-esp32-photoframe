@@ -114,12 +114,17 @@ static void battery_push_task(void *arg)
             next_battery_push_time = now + (60 * 1000000LL);
             ESP_LOGI(TAG, "Battery push scheduled in 60 seconds");
         } else if (now >= next_battery_push_time) {
-            // Time to push battery data
-            ESP_LOGI(TAG, "Pushing battery data to HA");
+            // Time to push battery data and OTA version info
+            ESP_LOGI(TAG, "Pushing battery data and OTA version info to HA");
 
             esp_err_t err = ha_post_battery_info();
             if (err != ESP_OK) {
                 ESP_LOGW(TAG, "Failed to push battery data to HA");
+            }
+
+            err = ha_post_ota_version_info();
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to push OTA version info to HA");
             }
 
             // Schedule next push (60 seconds)
@@ -140,31 +145,89 @@ esp_err_t ha_integration_init(void)
     return ESP_OK;
 }
 
-esp_err_t ha_trigger_ota_update(void)
+esp_err_t ha_post_ota_version_info(void)
 {
-    ESP_LOGI(TAG, "Triggering OTA update via HA integration");
+    const char *ha_url = config_manager_get_ha_url();
 
-    // Check for update first
-    bool update_available = false;
-    esp_err_t err = ota_check_for_update(&update_available);
-
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to check for OTA update");
-        return err;
-    }
-
-    if (!update_available) {
-        ESP_LOGI(TAG, "No OTA update available");
+    // Check if HA URL is configured
+    if (ha_url == NULL || strlen(ha_url) == 0) {
+        ESP_LOGD(TAG, "HA URL not configured, skipping OTA version post");
         return ESP_OK;
     }
 
-    // Start the update
-    err = ota_start_update();
+    // Get OTA status
+    ota_status_t status;
+    ota_get_status(&status);
+
+    // Build the API endpoint URL
+    char url[512];
+    snprintf(url, sizeof(url), "%s/api/esp32_photoframe/ota", ha_url);
+
+    // Build JSON payload with version info and button entity
+    cJSON *json = cJSON_CreateObject();
+    if (json == NULL) {
+        ESP_LOGE(TAG, "Failed to create OTA JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON_AddStringToObject(json, "current_version", status.current_version);
+    cJSON_AddStringToObject(json, "latest_version", status.latest_version);
+    cJSON_AddStringToObject(json, "state",
+                            status.state == OTA_STATE_IDLE               ? "idle"
+                            : status.state == OTA_STATE_CHECKING         ? "checking"
+                            : status.state == OTA_STATE_UPDATE_AVAILABLE ? "update_available"
+                            : status.state == OTA_STATE_DOWNLOADING      ? "downloading"
+                            : status.state == OTA_STATE_INSTALLING       ? "installing"
+                            : status.state == OTA_STATE_SUCCESS          ? "success"
+                                                                         : "error");
+
+    char *json_payload = cJSON_PrintUnformatted(json);
+    if (json_payload == NULL) {
+        ESP_LOGE(TAG, "Failed to print OTA JSON payload");
+        cJSON_Delete(json);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Posting OTA version info to HA: %s", json_payload);
+
+    // Configure HTTP client
+    esp_http_client_config_t config = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = 10000,
+        .user_agent = "ESP32-PhotoFrame/1.0",
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(TAG, "Failed to initialize HTTP client");
+        free(json_payload);
+        cJSON_Delete(json);
+        return ESP_FAIL;
+    }
+
+    // Set headers and data
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_post_field(client, json_payload, strlen(json_payload));
+
+    // Perform request
+    esp_err_t err = esp_http_client_perform(client);
+    int status_code = esp_http_client_get_status_code(client);
+
+    esp_http_client_cleanup(client);
+    free(json_payload);
+    cJSON_Delete(json);
+
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start OTA update");
+        ESP_LOGE(TAG, "HTTP POST failed: %s", esp_err_to_name(err));
         return err;
     }
 
-    ESP_LOGI(TAG, "OTA update started successfully");
+    if (status_code != 200) {
+        ESP_LOGW(TAG, "HA returned HTTP %d", status_code);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "OTA version info posted to HA successfully");
     return ESP_OK;
 }
