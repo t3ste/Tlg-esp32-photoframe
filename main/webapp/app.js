@@ -76,12 +76,18 @@ async function loadAlbums() {
       response.headers.get("content-type")?.includes("text/html")
     ) {
       console.log("Albums API not available (standalone mode)");
+      // Create default album for local testing
+      currentAlbums = [{ name: "Default", enabled: true, image_count: 0 }];
+      displayAlbums();
       return;
     }
     currentAlbums = await response.json();
     displayAlbums();
   } catch (error) {
-    console.log("Failed to load albums:", error);
+    console.log("Failed to load albums (standalone mode):", error);
+    // Create default album for local testing
+    currentAlbums = [{ name: "Default", enabled: true, image_count: 0 }];
+    displayAlbums();
   }
 }
 
@@ -178,14 +184,21 @@ async function loadImagesForAlbum(albumName) {
     const response = await fetch(
       `${API_BASE}/api/images?album=${encodeURIComponent(albumName)}`,
     );
-    if (!response.ok) {
-      console.log("Failed to load images for album");
+    if (
+      !response.ok ||
+      response.headers.get("content-type")?.includes("text/html")
+    ) {
+      console.log("Images API not available (standalone mode)");
+      currentImages = [];
+      displayImages();
       return;
     }
     currentImages = await response.json();
     displayImages();
   } catch (error) {
-    console.log("Failed to load images:", error);
+    console.log("Failed to load images (standalone mode):", error);
+    currentImages = [];
+    displayImages();
   }
 }
 
