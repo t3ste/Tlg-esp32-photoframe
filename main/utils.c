@@ -45,9 +45,9 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
 {
     ESP_LOGI(TAG, "Fetching image from URL: %s", url);
 
-    // Use local temp paths
-    const char *temp_jpg_path = "/sdcard/temp_url_image.jpg";
-    const char *temp_bmp_path = "/sdcard/temp_url_image.bmp";
+    // Use fixed paths for current image and thumbnail
+    const char *temp_jpg_path = CURRENT_JPG_PATH;
+    const char *temp_bmp_path = CURRENT_BMP_PATH;
 
     esp_err_t err = ESP_FAIL;
     int status_code = 0;
@@ -200,8 +200,10 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
         ESP_LOGI(TAG, "Displaying image without saving (save_downloaded_images disabled)");
         snprintf(saved_bmp_path, path_size, "%s", temp_bmp_path);
 
-        // Clean up the JPG file since we don't need it
-        unlink(temp_jpg_path);
+        // Keep both .current.bmp and .current.jpg for HA integration
+        // .current.bmp is referenced by current_image
+        // .current.jpg is the thumbnail served by /api/current_image
+        ESP_LOGI(TAG, "Image and thumbnail saved: %s, %s", temp_bmp_path, temp_jpg_path);
     }
 
     return ESP_OK;

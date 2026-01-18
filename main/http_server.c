@@ -747,11 +747,11 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Receiving JPG image for direct display, size: %zu bytes (%.1f KB)", content_len,
              content_len / 1024.0);
 
-    // Create temporary file path in /sdcard root
-    const char *temp_jpg_path = "/sdcard/.temp_upload.jpg";
-    const char *temp_bmp_path = "/sdcard/.temp_upload.bmp";
+    // Use fixed paths for current image and thumbnail
+    const char *temp_jpg_path = "/sdcard/.current.jpg";
+    const char *temp_bmp_path = "/sdcard/.current.bmp";
 
-    // Delete old temp files to prevent caching issues
+    // Delete old files to prevent caching issues
     unlink(temp_jpg_path);
     unlink(temp_bmp_path);
 
@@ -820,15 +820,17 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
     // Display the converted BMP (use full path to bypass IMAGE_DIRECTORY prefix)
     err = display_manager_show_image(temp_bmp_path);
 
-    // Clean up temporary files
-    unlink(temp_jpg_path);
-    unlink(temp_bmp_path);
-
     if (err != ESP_OK) {
+        unlink(temp_jpg_path);
         unlink(temp_bmp_path);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
         return ESP_FAIL;
     }
+
+    // Keep both .current.bmp and .current.jpg for HA integration
+    // .current.bmp is referenced by current_image
+    // .current.jpg is the thumbnail served by /api/current_image
+    ESP_LOGI(TAG, "Image and thumbnail saved: %s, %s", temp_bmp_path, temp_jpg_path);
 
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "success");
@@ -938,6 +940,66 @@ static esp_err_t rotate_handler(httpd_req_t *req)
 
     free(json_str);
     cJSON_Delete(response);
+
+    return ESP_OK;
+}
+
+static esp_err_t current_image_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    power_manager_reset_sleep_timer();
+
+    const char *current_image = display_manager_get_current_image();
+
+    if (!current_image || strlen(current_image) == 0) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "No image currently displayed");
+        return ESP_FAIL;
+    }
+
+    // Try to serve JPG version first by replacing .bmp extension with .jpg
+    char thumbnail_path[512];
+    strncpy(thumbnail_path, current_image, sizeof(thumbnail_path) - 1);
+    thumbnail_path[sizeof(thumbnail_path) - 1] = '\0';
+
+    char *ext = strrchr(thumbnail_path, '.');
+    if (ext && strcasecmp(ext, ".bmp") == 0) {
+        strcpy(ext, ".jpg");
+    }
+
+    FILE *fp = fopen(thumbnail_path, "rb");
+    const char *content_type = "image/jpeg";
+
+    if (!fp) {
+        // Fall back to BMP if JPG doesn't exist
+        fp = fopen(current_image, "rb");
+        content_type = "image/bmp";
+
+        if (!fp) {
+            httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Image not found");
+            return ESP_FAIL;
+        }
+    }
+
+    httpd_resp_set_type(req, content_type);
+    // Cache for 30 seconds since current image changes infrequently
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=30");
+
+    char buffer[1024];
+    size_t read_bytes;
+    while ((read_bytes = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+        if (httpd_resp_send_chunk(req, buffer, read_bytes) != ESP_OK) {
+            fclose(fp);
+            return ESP_FAIL;
+        }
+    }
+
+    fclose(fp);
+    httpd_resp_send_chunk(req, NULL, 0);
 
     return ESP_OK;
 }
@@ -1699,9 +1761,8 @@ static esp_err_t color_palette_handler(httpd_req_t *req)
 esp_err_t http_server_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers =
-        30;                     // Increased to accommodate all endpoints including reset defaults
-    config.stack_size = 12288;  // Increased from 8192 to 12KB
+    config.max_uri_handlers = 32;
+    config.stack_size = 12288;       // Increased from 8192 to 12KB
     config.max_open_sockets = 10;    // Limit concurrent connections to prevent memory exhaustion
     config.lru_purge_enable = true;  // Enable LRU purging of connections
 
@@ -1769,6 +1830,12 @@ esp_err_t http_server_init(void)
         httpd_uri_t rotate_uri = {
             .uri = "/api/rotate", .method = HTTP_POST, .handler = rotate_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &rotate_uri);
+
+        httpd_uri_t current_image_uri = {.uri = "/api/current_image",
+                                         .method = HTTP_GET,
+                                         .handler = current_image_handler,
+                                         .user_ctx = NULL};
+        httpd_register_uri_handler(server, &current_image_uri);
 
         httpd_uri_t config_get_uri = {
             .uri = "/api/config", .method = HTTP_GET, .handler = config_handler, .user_ctx = NULL};

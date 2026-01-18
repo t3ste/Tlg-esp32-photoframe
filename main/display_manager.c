@@ -124,6 +124,11 @@ bool display_manager_is_busy(void)
     return true;
 }
 
+const char *display_manager_get_current_image(void)
+{
+    return current_image;
+}
+
 void display_manager_rotate_from_sdcard(void)
 {
     if (!config_manager_get_auto_rotate()) {
