@@ -14,6 +14,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "power_manager.h"
 
 static const char *TAG = "ota_manager";
 
@@ -296,6 +297,9 @@ static void ota_update_task(void *pvParameter)
 {
     ESP_LOGI(TAG, "Starting OTA update...");
 
+    // Reset sleep timer to prevent auto-sleep during OTA
+    power_manager_reset_sleep_timer();
+
     set_ota_state(OTA_STATE_DOWNLOADING, NULL);
     if (ota_status_mutex && xSemaphoreTake(ota_status_mutex, portMAX_DELAY) == pdTRUE) {
         ota_status.progress_percent = 0;
@@ -344,6 +348,9 @@ static void ota_update_task(void *pvParameter)
             }
             ESP_LOGI(TAG, "OTA progress: %d%%", progress);
         }
+
+        // Reset sleep timer periodically during OTA to prevent auto-sleep
+        power_manager_reset_sleep_timer();
 
         vTaskDelay(pdMS_TO_TICKS(100));
     }
