@@ -37,8 +37,7 @@ static void rotation_timer_task(void *arg)
         bool should_use_active_rotation = axp_is_usb_connected() || !deep_sleep_enabled;
 
         if (!should_use_active_rotation) {
-            next_rotation_time =
-                0;  // Reset when on battery with deep sleep enabled (uses sleep-based rotation)
+            // Device will auto-sleep after 120 seconds, no need to reset timer
             continue;
         }
 
