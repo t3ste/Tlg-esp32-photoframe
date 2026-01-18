@@ -547,8 +547,28 @@ async function loadImagePreview(file) {
     const isPortrait = img.height > img.width;
 
     // Set canvas to display dimensions (800x480 or 480x800)
-    const width = isPortrait ? 480 : 800;
-    const height = isPortrait ? 800 : 480;
+    const baseWidth = isPortrait ? 480 : 800;
+    const baseHeight = isPortrait ? 800 : 480;
+
+    // Get container width for responsive sizing on mobile
+    const container = previewCanvas.parentElement;
+    const containerWidth = container
+      ? container.clientWidth
+      : window.innerWidth;
+    const isMobile = window.innerWidth < 768;
+
+    // Calculate scaled dimensions maintaining aspect ratio
+    let width, height;
+    if (isMobile && baseWidth > containerWidth) {
+      // Scale down on mobile if canvas is wider than container
+      const scale = containerWidth / baseWidth;
+      width = Math.floor(baseWidth * scale);
+      height = Math.floor(baseHeight * scale);
+    } else {
+      // Keep full resolution on desktop
+      width = baseWidth;
+      height = baseHeight;
+    }
 
     previewCanvas.width = width;
     previewCanvas.height = height;

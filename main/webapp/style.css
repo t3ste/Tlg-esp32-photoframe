@@ -343,6 +343,7 @@ footer {
     border-radius: 8px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     background: white;
+    max-width: 300px;
 }
 
 #previewCanvas {
@@ -480,7 +481,6 @@ footer {
     }
 
     .preview-canvas-wrapper {
-        max-height: 400px;
         overflow: hidden;
         display: flex;
         align-items: center;
@@ -489,23 +489,21 @@ footer {
 
     #previewCanvas,
     #originalCanvas {
-        max-height: 400px;
-        width: auto !important;
+        width: 100% !important;
         height: auto !important;
         object-fit: contain;
     }
 
     .comparison-wrapper {
-        max-height: 400px;
+        width: 100%;
     }
 
     .canvas-container {
-        max-height: 400px;
+        width: 100%;
     }
 
     #curveCanvas {
         width: 100%;
-        max-width: 300px;
         margin: 0 auto;
         display: block;
     }
@@ -528,19 +526,24 @@ footer {
 .canvas-container {
     position: relative;
     width: 100%;
+    max-width: 100%;
     display: block;
+    overflow: hidden;
 }
 
 .canvas-container canvas {
     display: block;
     width: 100%;
     height: auto;
+    max-width: 100%;
 }
 
 #originalCanvas {
     position: relative;
     z-index: 1;
     display: block;
+    max-width: 100%;
+    height: auto;
 }
 
 #previewCanvas {
@@ -549,7 +552,9 @@ footer {
     left: 0;
     width: 100% !important;
     height: 100% !important;
+    max-width: 100%;
     z-index: 2;
+    object-fit: contain;
 }
 
 .slider-container {
