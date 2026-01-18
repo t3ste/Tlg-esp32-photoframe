@@ -307,9 +307,37 @@ void app_main(void)
     ESP_ERROR_CHECK(wifi_provisioning_init());
 
     if (!wifi_provisioning_is_provisioned()) {
+        // Try to load WiFi credentials from SD card first
+        char sd_ssid[WIFI_SSID_MAX_LEN] = {0};
+        char sd_password[WIFI_PASS_MAX_LEN] = {0};
+
+        if (wifi_manager_load_credentials_from_sdcard(sd_ssid, sd_password) == ESP_OK) {
+            ESP_LOGI(TAG, "===========================================");
+            ESP_LOGI(TAG, "WiFi credentials found on SD card!");
+            ESP_LOGI(TAG, "Saving to NVS and connecting...");
+            ESP_LOGI(TAG, "===========================================");
+
+            // Save credentials to NVS
+            if (wifi_manager_save_credentials(sd_ssid, sd_password) == ESP_OK) {
+                ESP_LOGI(TAG, "WiFi credentials saved to NVS");
+                ESP_LOGI(TAG, "Restarting to connect with new credentials...");
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                esp_restart();
+            } else {
+                ESP_LOGE(TAG, "Failed to save WiFi credentials to NVS");
+            }
+        }
+
+        // No SD card credentials found, start captive portal provisioning
         ESP_LOGI(TAG, "===========================================");
         ESP_LOGI(TAG, "No WiFi credentials found - Starting AP mode");
         ESP_LOGI(TAG, "===========================================");
+        ESP_LOGI(TAG, "Option 1: Place wifi.txt on SD card with:");
+        ESP_LOGI(TAG, "  Line 1: WiFi SSID");
+        ESP_LOGI(TAG, "  Line 2: WiFi Password");
+        ESP_LOGI(TAG, "  Then restart the device");
+        ESP_LOGI(TAG, "===========================================");
+        ESP_LOGI(TAG, "Option 2: Use captive portal:");
         ESP_LOGI(TAG, "1. Connect to WiFi: PhotoFrame-Setup");
         ESP_LOGI(TAG, "2. Open browser to: http://192.168.4.1");
         ESP_LOGI(TAG, "3. Enter your WiFi credentials");

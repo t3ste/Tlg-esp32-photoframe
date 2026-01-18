@@ -102,12 +102,33 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 phot
 
 ### WiFi Provisioning
 
-1. Device creates `PhotoFrame-Setup` AP on first boot
-2. Connect and open `http://192.168.4.1` (or use captive portal)
+The device supports two methods for WiFi provisioning:
+
+#### Option 1: SD Card Provisioning (Easiest)
+
+1. Create a file named `wifi.txt` on your SD card with:
+   ```
+   YourWiFiSSID
+   YourWiFiPassword
+   ```
+   - Line 1: WiFi SSID (network name)
+   - Line 2: WiFi password
+   - Use plain text, no quotes or extra formatting
+
+2. Insert SD card and power on the device
+3. Device automatically reads credentials, saves to memory, and connects
+4. The `wifi.txt` file is automatically deleted after reading (to prevent issues with invalid credentials)
+
+**Note**: If credentials are invalid, the device will clear them and fall back to captive portal mode.
+
+#### Option 2: Captive Portal
+
+1. Device creates `PhotoFrame-Setup` AP on first boot (if no credentials found)
+2. Connect to the AP and open `http://192.168.4.1` (or use captive portal)
 3. Enter WiFi credentials (2.4GHz only)
 4. Device tests connection and saves if successful
 
-**Re-provision:** `idf.py erase-flash`
+**Re-provision:** Delete credentials with `idf.py erase-flash` or place new `wifi.txt` on SD card after clearing stored credentials
 
 ## Usage
 
