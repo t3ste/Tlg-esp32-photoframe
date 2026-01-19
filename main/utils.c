@@ -267,6 +267,7 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
 esp_err_t trigger_image_rotation(void)
 {
     rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
+    esp_err_t result = ESP_OK;
 
     if (rotation_mode == ROTATION_MODE_URL) {
         // URL mode - fetch image from URL
@@ -278,17 +279,19 @@ esp_err_t trigger_image_rotation(void)
             ESP_OK) {
             ESP_LOGI(TAG, "Successfully downloaded and saved image, displaying...");
             display_manager_show_image(saved_bmp_path);
-            return ESP_OK;
+            result = ESP_OK;
         } else {
             ESP_LOGE(TAG, "Failed to download image from URL, falling back to SD card rotation");
             display_manager_rotate_from_sdcard();
-            return ESP_FAIL;
+            result = ESP_FAIL;
         }
     } else {
         // SD card mode - rotate through albums
         display_manager_rotate_from_sdcard();
-        return ESP_OK;
+        result = ESP_OK;
     }
+
+    return result;
 }
 
 cJSON *create_battery_json(void)

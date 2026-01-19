@@ -18,6 +18,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "ha_integration.h"
 #include "image_processor.h"
 #include "ota_manager.h"
 #include "power_manager.h"
@@ -460,8 +461,6 @@ static esp_err_t serve_image_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    power_manager_reset_sleep_timer();
-
     // Get filename from query parameter
     char filename[128];
     size_t buf_len = sizeof(filename);
@@ -543,8 +542,6 @@ static esp_err_t delete_image_handler(httpd_req_t *req)
         httpd_resp_sendstr(req, "System is still initializing");
         return ESP_FAIL;
     }
-
-    power_manager_reset_sleep_timer();
 
     char buf[256];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
@@ -893,8 +890,6 @@ static esp_err_t battery_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    power_manager_reset_sleep_timer();
-
     cJSON *response = create_battery_json();
     if (response == NULL) {
         httpd_resp_set_status(req, HTTPD_500);
@@ -957,12 +952,13 @@ static esp_err_t rotate_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    power_manager_reset_sleep_timer();
-
     ESP_LOGI(TAG, "Manual rotation triggered via API");
 
-    // Trigger rotation using helper function
+    power_manager_reset_sleep_timer();
     trigger_image_rotation();
+
+    // Notify HA that image has been updated
+    ha_notify_update();
 
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "success");
@@ -985,8 +981,6 @@ static esp_err_t current_image_handler(httpd_req_t *req)
         httpd_resp_sendstr(req, "System is still initializing");
         return ESP_FAIL;
     }
-
-    power_manager_reset_sleep_timer();
 
     char image_to_serve[512] = {0};
     const char *content_type = "image/jpeg";
@@ -1063,8 +1057,6 @@ static esp_err_t config_handler(httpd_req_t *req)
         httpd_resp_sendstr(req, "System is still initializing");
         return ESP_FAIL;
     }
-
-    power_manager_reset_sleep_timer();
 
     if (req->method == HTTP_GET) {
         int rotate_interval = config_manager_get_rotate_interval();
@@ -1544,6 +1536,23 @@ static esp_err_t ota_update_handler(httpd_req_t *req)
     return ESP_FAIL;
 }
 
+static esp_err_t keep_alive_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    // Reset sleep timer to keep device awake while webapp is actively being used
+    power_manager_reset_sleep_timer();
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+
+    return ESP_OK;
+}
+
 static esp_err_t display_calibration_handler(httpd_req_t *req)
 {
     const size_t calibration_bmp_size = (calibration_bmp_end - calibration_bmp_start);
@@ -1931,7 +1940,7 @@ static esp_err_t color_palette_handler(httpd_req_t *req)
 esp_err_t http_server_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 33;
+    config.max_uri_handlers = 36;
     config.stack_size = 12288;       // Increased from 8192 to 12KB
     config.max_open_sockets = 10;    // Limit concurrent connections to prevent memory exhaustion
     config.lru_purge_enable = true;  // Enable LRU purging of connections
@@ -2116,6 +2125,12 @@ esp_err_t http_server_init(void)
                                                .handler = display_calibration_handler,
                                                .user_ctx = NULL};
         httpd_register_uri_handler(server, &display_calibration_uri);
+
+        httpd_uri_t keep_alive_uri = {.uri = "/api/keep_alive",
+                                      .method = HTTP_POST,
+                                      .handler = keep_alive_handler,
+                                      .user_ctx = NULL};
+        httpd_register_uri_handler(server, &keep_alive_uri);
 
         ESP_LOGI(TAG, "HTTP server started");
         return ESP_OK;

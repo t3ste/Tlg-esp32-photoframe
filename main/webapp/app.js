@@ -15,10 +15,40 @@ const API_BASE = "";
 let settingsSaveTimer = null;
 const SETTINGS_SAVE_DELAY = 10000; // 10 seconds
 
+// Keep-alive mechanism to prevent auto-sleep when webapp is actively used
+let keepAliveInterval = null;
+const KEEP_ALIVE_INTERVAL = 30000; // 30 seconds
+
 let currentImages = [];
 let selectedImage = null;
 let currentAlbums = [];
 let selectedAlbum = "Default";
+
+// Send keep-alive ping to prevent device from sleeping
+async function sendKeepAlive() {
+  try {
+    await fetch(`${API_BASE}/api/keep_alive`, { method: "POST" });
+  } catch (error) {
+    // Silently fail if API not available
+    console.log("Keep-alive ping failed (standalone mode or device offline)");
+  }
+}
+
+// Start keep-alive interval
+function startKeepAlive() {
+  if (!keepAliveInterval) {
+    sendKeepAlive();
+    keepAliveInterval = setInterval(sendKeepAlive, KEEP_ALIVE_INTERVAL);
+  }
+}
+
+// Stop keep-alive interval
+function stopKeepAlive() {
+  if (keepAliveInterval) {
+    clearInterval(keepAliveInterval);
+    keepAliveInterval = null;
+  }
+}
 
 async function loadBatteryStatus() {
   try {
@@ -1488,15 +1518,17 @@ async function loadVersion() {
 // Listen for page visibility changes
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
-    console.log("Page hidden - stopping periodic updates");
+    console.log("Page hidden - stopping periodic updates and keep-alive");
     stopPeriodicUpdates();
+    stopKeepAlive();
   } else {
-    console.log("Page visible - starting periodic updates");
+    console.log("Page visible - starting periodic updates and keep-alive");
     // Refresh data immediately when page becomes visible
     loadAlbums();
     loadImages();
     loadBatteryStatus();
     startPeriodicUpdates();
+    startKeepAlive();
   }
 });
 
@@ -2580,6 +2612,9 @@ async function installUpdate() {
     }, 5000);
   }
 }
+
+// Initialize keep-alive mechanism to prevent auto-sleep
+startKeepAlive();
 
 // Load OTA status on page load and periodically
 loadOTAStatus();

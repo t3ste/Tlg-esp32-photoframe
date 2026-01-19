@@ -1,6 +1,8 @@
 #include "ota_manager.h"
 
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include "cJSON.h"
 #include "config.h"
@@ -21,6 +23,8 @@
 static const char *TAG = "ota_manager";
 #define OTA_NVS_NAMESPACE "ota"
 #define OTA_NVS_LAST_CHECK_KEY "last_check"
+#define OTA_NVS_LATEST_VERSION_KEY "latest_ver"
+#define OTA_NVS_STATE_KEY "state"
 #define OTA_CHECK_INTERVAL_SECONDS (24 * 60 * 60)  // 24 hours
 
 static ota_status_t ota_status = {.state = OTA_STATE_IDLE,
@@ -34,12 +38,17 @@ static esp_timer_handle_t ota_check_timer = NULL;
 static bool update_available = false;
 static char firmware_url[256] = "";
 
+// Forward declarations
+static void ota_save_status_to_nvs(void);
+static void ota_load_status_from_nvs(void);
+
 static void set_ota_state(ota_state_t state, const char *error_msg)
 {
     if (ota_status_mutex && xSemaphoreTake(ota_status_mutex, portMAX_DELAY) == pdTRUE) {
         ota_status.state = state;
         if (error_msg) {
             strncpy(ota_status.error_message, error_msg, sizeof(ota_status.error_message) - 1);
+            ota_status.error_message[sizeof(ota_status.error_message) - 1] = '\0';
         } else {
             ota_status.error_message[0] = '\0';
         }
@@ -258,6 +267,9 @@ cleanup:
 
 static void ota_check_task(void *pvParameter)
 {
+    // pvParameter is a boolean: true = notify HA, false/NULL = don't notify
+    bool notify_ha = (pvParameter != NULL);
+
     ESP_LOGI(TAG, "Checking for firmware updates...");
 
     set_ota_state(OTA_STATE_CHECKING, NULL);
@@ -278,9 +290,11 @@ static void ota_check_task(void *pvParameter)
     // Store latest version and URL
     if (ota_status_mutex && xSemaphoreTake(ota_status_mutex, portMAX_DELAY) == pdTRUE) {
         strncpy(ota_status.latest_version, latest_version, sizeof(ota_status.latest_version) - 1);
+        ota_status.latest_version[sizeof(ota_status.latest_version) - 1] = '\0';
         xSemaphoreGive(ota_status_mutex);
     }
     strncpy(firmware_url, download_url, sizeof(firmware_url) - 1);
+    firmware_url[sizeof(firmware_url) - 1] = '\0';
 
     // Compare versions
     int cmp = version_compare(ota_status.current_version, latest_version);
@@ -298,7 +312,14 @@ static void ota_check_task(void *pvParameter)
     // Update last check time after successful check
     ota_update_last_check_time();
 
-    ha_post_ota_version_info();
+    // Save OTA status to NVS for persistence across reboots
+    ota_save_status_to_nvs();
+
+    // Notify HA if requested
+    if (notify_ha) {
+        ESP_LOGI(TAG, "Notifying HA of OTA status update");
+        ha_notify_update();
+    }
 
     vTaskDelete(NULL);
 }
@@ -401,13 +422,24 @@ static void ota_update_task(void *pvParameter)
 
 static void ota_check_timer_callback(void *arg)
 {
-    ESP_LOGI(TAG, "Periodic OTA check triggered");
-    xTaskCreate(&ota_check_task, "ota_check_task", 12288, NULL, 5, NULL);
+    ESP_LOGI(TAG, "Periodic OTA check timer triggered");
+    // Only check if 24 hours have passed since last check
+    if (ota_should_check_daily()) {
+        ESP_LOGI(TAG, "24 hours elapsed, starting OTA check with HA notification");
+        // Pass non-NULL parameter to trigger HA notification
+        xTaskCreate(&ota_check_task, "ota_check_task", 12288, (void *) 1, 5, NULL);
+    } else {
+        ESP_LOGD(TAG, "Skipping OTA check, not yet 24 hours since last check");
+    }
 }
 
 esp_err_t ota_manager_init(void)
 {
     ESP_LOGI(TAG, "Initializing OTA manager");
+
+    // Zero out the entire ota_status struct to prevent garbage data
+    memset(&ota_status, 0, sizeof(ota_status_t));
+    ota_status.state = OTA_STATE_IDLE;
 
     // Create mutex for ota_status protection
     ota_status_mutex = xSemaphoreCreateMutex();
@@ -419,8 +451,12 @@ esp_err_t ota_manager_init(void)
     // Get current firmware version
     const esp_app_desc_t *app_desc = esp_app_get_description();
     strncpy(ota_status.current_version, app_desc->version, sizeof(ota_status.current_version) - 1);
+    ota_status.current_version[sizeof(ota_status.current_version) - 1] = '\0';
 
     ESP_LOGI(TAG, "Current firmware version: %s", ota_status.current_version);
+
+    // Load last known OTA status from NVS (latest_version, state)
+    ota_load_status_from_nvs();
 
     // Mark current partition as valid (for rollback support)
     const esp_partition_t *running = esp_ota_get_running_partition();
@@ -525,15 +561,21 @@ bool ota_should_check_daily(void)
         return true;  // No previous check, should check
     }
 
-    // Get current time
-    int64_t current_time = esp_timer_get_time() / 1000000;  // Convert to seconds
+    // Get current time (Unix epoch time, persists across deep sleep if set via SNTP)
+    time_t now;
+    time(&now);
+    int64_t current_time = (int64_t) now;
+
+    // If system time is not set (before year 2020), always check
+    // Unix timestamp for 2020-01-01 is 1577836800
+    if (current_time < 1577836800) {
+        ESP_LOGW(TAG, "System time not set, forcing OTA check");
+        return true;
+    }
 
     // Check if 24 hours have passed
     int64_t time_since_last_check = current_time - last_check_time;
     bool should_check = time_since_last_check >= OTA_CHECK_INTERVAL_SECONDS;
-
-    ESP_LOGI(TAG, "Last OTA check was %lld seconds ago, should check: %s", time_since_last_check,
-             should_check ? "yes" : "no");
 
     return should_check;
 }
@@ -547,15 +589,75 @@ void ota_update_last_check_time(void)
         return;
     }
 
-    int64_t current_time = esp_timer_get_time() / 1000000;  // Convert to seconds
+    time_t now;
+    time(&now);
+    int64_t current_time = (int64_t) now;
     err = nvs_set_i64(nvs_handle, OTA_NVS_LAST_CHECK_KEY, current_time);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save last check time: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to save last check time to NVS: %s", esp_err_to_name(err));
     } else {
-        err = nvs_commit(nvs_handle);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Updated last OTA check time");
+        nvs_commit(nvs_handle);
+    }
+
+    nvs_close(nvs_handle);
+}
+
+static void ota_save_status_to_nvs(void)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for saving OTA status: %s", esp_err_to_name(err));
+        return;
+    }
+
+    // Save latest_version and state
+    if (ota_status_mutex && xSemaphoreTake(ota_status_mutex, portMAX_DELAY) == pdTRUE) {
+        err = nvs_set_str(nvs_handle, OTA_NVS_LATEST_VERSION_KEY, ota_status.latest_version);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to save latest_version to NVS: %s", esp_err_to_name(err));
         }
+
+        err = nvs_set_u8(nvs_handle, OTA_NVS_STATE_KEY, (uint8_t) ota_status.state);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to save state to NVS: %s", esp_err_to_name(err));
+        }
+
+        xSemaphoreGive(ota_status_mutex);
+    }
+
+    nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+}
+
+static void ota_load_status_from_nvs(void)
+{
+    // Initialize to safe defaults first
+    ota_status.latest_version[0] = '\0';
+    ota_status.state = OTA_STATE_IDLE;
+
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGI(TAG, "No saved OTA status in NVS (first boot or cleared), using defaults");
+        return;
+    }
+
+    // Load latest_version
+    size_t required_size = sizeof(ota_status.latest_version);
+    err = nvs_get_str(nvs_handle, OTA_NVS_LATEST_VERSION_KEY, ota_status.latest_version,
+                      &required_size);
+    if (err != ESP_OK) {
+        ota_status.latest_version[0] = '\0';
+    }
+
+    // Load state
+    uint8_t saved_state = 0;
+    err = nvs_get_u8(nvs_handle, OTA_NVS_STATE_KEY, &saved_state);
+    if (err == ESP_OK) {
+        ota_status.state = (ota_state_t) saved_state;
+    } else {
+        ota_status.state = OTA_STATE_IDLE;
     }
 
     nvs_close(nvs_handle);

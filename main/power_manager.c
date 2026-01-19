@@ -1,19 +1,22 @@
 #include "power_manager.h"
 
+#include <driver/gpio.h>
+#include <driver/rtc_io.h>
+#include <esp_log.h>
+#include <esp_pm.h>
+#include <esp_sleep.h>
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <nvs.h>
+#include <nvs_flash.h>
+
 #include "axp_prot.h"
 #include "config.h"
 #include "config_manager.h"
 #include "display_manager.h"
-#include "driver/gpio.h"
-#include "driver/rtc_io.h"
-#include "esp_log.h"
-#include "esp_pm.h"
-#include "esp_sleep.h"
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "ha_integration.h"
 #include "http_server.h"
-#include "nvs.h"
 #include "utils.h"
 
 static const char *TAG = "power_manager";
@@ -57,8 +60,8 @@ static void rotation_timer_task(void *arg)
                 const char *reason = axp_is_usb_connected() ? "USB powered" : "deep sleep disabled";
                 ESP_LOGI(TAG, "Active rotation triggered (%s)", reason);
 
-                // Trigger rotation using helper function
                 trigger_image_rotation();
+                ha_notify_update();
 
                 // Schedule next rotation
                 int rotate_interval = config_manager_get_rotate_interval();
@@ -246,6 +249,8 @@ void power_manager_enter_sleep(void)
     power_manager_disable_auto_light_sleep();
 
     ESP_LOGI(TAG, "Preparing to enter deep sleep mode");
+
+    ha_notify_offline();
 
     // Turn off LEDs before sleep to save power (active-low)
     gpio_set_level(LED_RED_GPIO, 1);

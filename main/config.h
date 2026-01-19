@@ -39,7 +39,7 @@ typedef enum { ROTATION_MODE_SDCARD = 0, ROTATION_MODE_URL = 1 } rotation_mode_t
 #define DISPLAY_HEIGHT 480
 
 #ifdef DEBUG_DEEP_SLEEP_WAKE
-#define AUTO_SLEEP_TIMEOUT_SEC 20
+#define AUTO_SLEEP_TIMEOUT_SEC 60
 #else
 #define AUTO_SLEEP_TIMEOUT_SEC 120
 #endif

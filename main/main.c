@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -14,6 +15,7 @@
 #include "driver/sdmmc_host.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_sntp.h"
 #include "esp_system.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
@@ -33,6 +35,44 @@
 #include "wifi_provisioning.h"
 
 static const char *TAG = "main";
+
+// Helper function to initialize and synchronize time via SNTP
+static void initialize_sntp(void)
+{
+    ESP_LOGI(TAG, "Initializing SNTP");
+
+    // Set timezone to UTC (you can change this to your local timezone)
+    // Format: "TZ=<timezone>" e.g., "PST8PDT,M3.2.0/2,M11.1.0" for Pacific Time
+    setenv("TZ", "UTC0", 1);
+    tzset();
+
+    // Initialize SNTP
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_setservername(1, "time.google.com");
+    esp_sntp_init();
+
+    // Wait for time to be set
+    time_t now = 0;
+    struct tm timeinfo = {0};
+    int retry = 0;
+    const int retry_count = 10;
+
+    while (timeinfo.tm_year < (2020 - 1900) && ++retry < retry_count) {
+        ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        time(&now);
+        localtime_r(&now, &timeinfo);
+    }
+
+    if (timeinfo.tm_year < (2020 - 1900)) {
+        ESP_LOGW(TAG, "Failed to synchronize time via SNTP");
+    } else {
+        char strftime_buf[64];
+        strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+        ESP_LOGI(TAG, "System time synchronized: %s", strftime_buf);
+    }
+}
 
 // Helper function to connect to WiFi with timeout
 static bool connect_to_wifi_with_timeout(int timeout_seconds)
@@ -175,6 +215,71 @@ static void button_task(void *arg)
     }
 }
 
+void deep_sleep_wake_main(void)
+{
+    // Check rotation mode and HA configuration
+    rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
+    bool ha_configured = ha_is_configured();
+    bool wifi_connected = false;
+
+    // Initialize WiFi if needed (URL mode always needs it, SD card mode only if HA configured)
+    if (rotation_mode == ROTATION_MODE_URL || ha_configured) {
+        ESP_LOGI(TAG, "Initializing WiFi for %s",
+                 rotation_mode == ROTATION_MODE_URL ? "URL rotation" : "HA battery post");
+        ESP_ERROR_CHECK(wifi_manager_init());
+
+        if (connect_to_wifi_with_timeout(60)) {
+            wifi_connected = true;
+            ESP_LOGI(TAG, "WiFi connected");
+            // Synchronize system time via SNTP
+            initialize_sntp();
+        } else {
+            ESP_LOGW(TAG, "WiFi connection timeout");
+        }
+    }
+
+    // Start HTTP server for 10 seconds to allow config modifications
+    if (wifi_connected && ha_configured) {
+        ESP_LOGI(TAG, "Starting HTTP server for 10 seconds before sleep");
+        // Reset auto-sleep timer to prevent device goes into deep sleep
+        power_manager_reset_sleep_timer();
+
+        // Check for OTA updates once a day if WiFi is connected
+        if (ota_should_check_daily()) {
+            ESP_LOGI(TAG, "Performing daily OTA check");
+            ota_check_for_update(NULL, 30);
+        }
+
+        // Start mDNS service so HA can resolve photoframe.local
+        ESP_ERROR_CHECK(mdns_service_init());
+
+        ESP_ERROR_CHECK(http_server_init());
+        http_server_set_ready();
+
+        ha_notify_online();
+    }
+
+    // Trigger rotation
+    power_manager_reset_sleep_timer();
+    trigger_image_rotation();
+
+    // Notify HA that data has been updated (after both OTA check and rotation)
+    if (wifi_connected && ha_configured) {
+        ha_notify_update();
+
+        // Keep server running for 10 seconds
+        ESP_LOGI(TAG, "HTTP server available for config changes");
+        vTaskDelay(pdMS_TO_TICKS(10000));
+
+        ESP_LOGI(TAG, "HTTP server window closed");
+    }
+
+    // Go back to sleep (offline notification sent inside power_manager_enter_sleep)
+    ESP_LOGI(TAG, "Auto-rotate complete, going back to sleep");
+    power_manager_enter_sleep();
+    // Won't reach here after sleep
+}
+
 void app_main(void)
 {
     // Check reset reason to detect crashes
@@ -248,8 +353,9 @@ void app_main(void)
 
     ESP_ERROR_CHECK(color_palette_init());
 
-    // Initialize power manager early to detect wakeup cause
     ESP_ERROR_CHECK(power_manager_init());
+
+    ESP_ERROR_CHECK(ota_manager_init());
 
     ret = init_sdcard();
     if (ret != ESP_OK) {
@@ -259,58 +365,11 @@ void app_main(void)
         // Won't reach here
     }
 
-    // Initialize album manager
     ESP_ERROR_CHECK(album_manager_init());
 
     // Check wake-up source with priority: Timer > KEY > BOOT
     if (power_manager_is_timer_wakeup() || power_manager_is_key_button_wakeup()) {
-        // Check rotation mode and HA configuration
-        rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
-        bool ha_configured = ha_is_configured();
-        bool wifi_connected = false;
-
-        // Initialize WiFi if needed (URL mode always needs it, SD card mode only if HA configured)
-        if (rotation_mode == ROTATION_MODE_URL || ha_configured) {
-            ESP_LOGI(TAG, "Initializing WiFi for %s",
-                     rotation_mode == ROTATION_MODE_URL ? "URL rotation" : "HA battery post");
-            ESP_ERROR_CHECK(wifi_manager_init());
-
-            if (connect_to_wifi_with_timeout(60)) {
-                wifi_connected = true;
-                ESP_LOGI(TAG, "WiFi connected");
-            } else {
-                ESP_LOGW(TAG, "WiFi connection timeout");
-            }
-        }
-
-        // Trigger rotation
-        trigger_image_rotation();
-
-        // Post battery data and notify about image update to HA if WiFi is connected and HA is
-        // configured
-        if (wifi_connected && ha_configured) {
-            ESP_LOGI(TAG, "Posting battery status to Home Assistant");
-            esp_err_t ha_err = ha_post_battery_info();
-            if (ha_err != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to post battery to HA, continuing anyway");
-            }
-
-            ESP_LOGI(TAG, "Notifying Home Assistant about image update");
-            ha_err = ha_notify_image_update();
-            if (ha_err != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to notify HA about image update, continuing anyway");
-            }
-        }
-
-        // Check for OTA updates once a day if WiFi is connected
-        if (wifi_connected && ota_should_check_daily()) {
-            ESP_LOGI(TAG, "Performing daily OTA check");
-            ota_check_for_update(NULL, 30);
-        }
-
-        // Go directly back to sleep without starting HTTP server
-        ESP_LOGI(TAG, "Auto-rotate complete, going back to sleep");
-        power_manager_enter_sleep();
+        deep_sleep_wake_main();
         // Won't reach here after sleep
     } else if (power_manager_is_boot_button_wakeup()) {
         ESP_LOGI(TAG, "BOOT button wakeup detected - starting WiFi and HTTP server");
@@ -369,6 +428,9 @@ void app_main(void)
     }
 
     if (connect_to_wifi_with_timeout(30)) {
+        // Synchronize system time via SNTP
+        initialize_sntp();
+
         // Start mDNS service
         ESP_ERROR_CHECK(mdns_service_init());
     } else {
@@ -386,10 +448,6 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(http_server_init());
-    ESP_ERROR_CHECK(ha_integration_init());
-
-    // Initialize OTA manager (checks for updates on startup and periodically)
-    ESP_ERROR_CHECK(ota_manager_init());
 
     if (wifi_manager_is_connected()) {
         char ip_str[16];
@@ -404,6 +462,10 @@ void app_main(void)
 
     // Mark system as ready for HTTP requests after all initialization is complete
     http_server_set_ready();
+
+    // Notify HA that device is online (HA will poll for all data via REST API)
+    ESP_LOGI(TAG, "Sending online notification to Home Assistant");
+    ha_notify_online();
 
     // Perform the initial check on boot
     ota_check_for_update(NULL, 0);
