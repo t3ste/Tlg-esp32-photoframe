@@ -22,7 +22,6 @@
 #include "http_server.h"
 #include "i2c_bsp.h"
 #include "image_processor.h"
-#include "ota_manager.h"
 #include "mdns_service.h"
 #include "nvs_flash.h"
 #include "ota_manager.h"
@@ -287,13 +286,26 @@ void app_main(void)
         // Trigger rotation
         trigger_image_rotation();
 
-        // Post battery data to HA if WiFi is connected and HA is configured
+        // Post battery data and notify about image update to HA if WiFi is connected and HA is
+        // configured
         if (wifi_connected && ha_configured) {
             ESP_LOGI(TAG, "Posting battery status to Home Assistant");
             esp_err_t ha_err = ha_post_battery_info();
             if (ha_err != ESP_OK) {
                 ESP_LOGW(TAG, "Failed to post battery to HA, continuing anyway");
             }
+
+            ESP_LOGI(TAG, "Notifying Home Assistant about image update");
+            ha_err = ha_notify_image_update();
+            if (ha_err != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to notify HA about image update, continuing anyway");
+            }
+        }
+
+        // Check for OTA updates once a day if WiFi is connected
+        if (wifi_connected && ota_should_check_daily()) {
+            ESP_LOGI(TAG, "Performing daily OTA check");
+            ota_check_for_update(NULL, 30);
         }
 
         // Go directly back to sleep without starting HTTP server

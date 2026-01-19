@@ -28,5 +28,7 @@ esp_err_t ota_check_for_update(bool *update_available, int timeout);
 esp_err_t ota_start_update(void);
 void ota_get_status(ota_status_t *status);
 const char *ota_get_current_version(void);
+bool ota_should_check_daily(void);
+void ota_update_last_check_time(void);
 
 #endif  // OTA_MANAGER_H

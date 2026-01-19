@@ -15,9 +15,13 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "ha_integration.h"
+#include "nvs.h"
 #include "power_manager.h"
 
 static const char *TAG = "ota_manager";
+#define OTA_NVS_NAMESPACE "ota"
+#define OTA_NVS_LAST_CHECK_KEY "last_check"
+#define OTA_CHECK_INTERVAL_SECONDS (24 * 60 * 60)  // 24 hours
 
 static ota_status_t ota_status = {.state = OTA_STATE_IDLE,
                                   .current_version = "",
@@ -291,6 +295,9 @@ static void ota_check_task(void *pvParameter)
         set_ota_state(OTA_STATE_IDLE, NULL);
     }
 
+    // Update last check time after successful check
+    ota_update_last_check_time();
+
     ha_post_ota_version_info();
 
     vTaskDelete(NULL);
@@ -498,4 +505,58 @@ void ota_get_status(ota_status_t *status)
 const char *ota_get_current_version(void)
 {
     return ota_status.current_version;
+}
+
+bool ota_should_check_daily(void)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGD(TAG, "NVS not initialized for OTA, should check");
+        return true;  // First time, should check
+    }
+
+    int64_t last_check_time = 0;
+    err = nvs_get_i64(nvs_handle, OTA_NVS_LAST_CHECK_KEY, &last_check_time);
+    nvs_close(nvs_handle);
+
+    if (err != ESP_OK) {
+        ESP_LOGD(TAG, "No last check time found, should check");
+        return true;  // No previous check, should check
+    }
+
+    // Get current time
+    int64_t current_time = esp_timer_get_time() / 1000000;  // Convert to seconds
+
+    // Check if 24 hours have passed
+    int64_t time_since_last_check = current_time - last_check_time;
+    bool should_check = time_since_last_check >= OTA_CHECK_INTERVAL_SECONDS;
+
+    ESP_LOGI(TAG, "Last OTA check was %lld seconds ago, should check: %s", time_since_last_check,
+             should_check ? "yes" : "no");
+
+    return should_check;
+}
+
+void ota_update_last_check_time(void)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for OTA: %s", esp_err_to_name(err));
+        return;
+    }
+
+    int64_t current_time = esp_timer_get_time() / 1000000;  // Convert to seconds
+    err = nvs_set_i64(nvs_handle, OTA_NVS_LAST_CHECK_KEY, current_time);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save last check time: %s", esp_err_to_name(err));
+    } else {
+        err = nvs_commit(nvs_handle);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Updated last OTA check time");
+        }
+    }
+
+    nvs_close(nvs_handle);
 }

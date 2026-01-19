@@ -33,4 +33,11 @@ bool ha_is_configured(void);
  */
 esp_err_t ha_post_ota_version_info(void);
 
+/**
+ * @brief Notify Home Assistant about image update (triggers coordinator refresh)
+ *
+ * @return ESP_OK on success, ESP_FAIL on error
+ */
+esp_err_t ha_notify_image_update(void);
+
 #endif

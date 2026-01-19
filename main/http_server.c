@@ -955,16 +955,35 @@ static esp_err_t current_image_handler(httpd_req_t *req)
 
     power_manager_reset_sleep_timer();
 
-    const char *current_image = display_manager_get_current_image();
+    char image_to_serve[512] = {0};
+    const char *content_type = "image/jpeg";
 
-    if (!current_image || strlen(current_image) == 0) {
+    // Read image path from .current.lnk
+    FILE *link_fp = fopen(CURRENT_IMAGE_LINK, "r");
+    if (!link_fp) {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "No image currently displayed");
         return ESP_FAIL;
     }
 
+    // Read the path from link file
+    if (!fgets(image_to_serve, sizeof(image_to_serve), link_fp)) {
+        fclose(link_fp);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read link file");
+        return ESP_FAIL;
+    }
+    fclose(link_fp);
+
+    // Remove trailing newline if present
+    size_t len = strlen(image_to_serve);
+    if (len > 0 && image_to_serve[len - 1] == '\n') {
+        image_to_serve[len - 1] = '\0';
+    }
+
+    ESP_LOGI(TAG, "Serving image from link: %s", image_to_serve);
+
     // Try to serve JPG version first by replacing .bmp extension with .jpg
     char thumbnail_path[512];
-    strncpy(thumbnail_path, current_image, sizeof(thumbnail_path) - 1);
+    strncpy(thumbnail_path, image_to_serve, sizeof(thumbnail_path) - 1);
     thumbnail_path[sizeof(thumbnail_path) - 1] = '\0';
 
     char *ext = strrchr(thumbnail_path, '.');
@@ -973,11 +992,10 @@ static esp_err_t current_image_handler(httpd_req_t *req)
     }
 
     FILE *fp = fopen(thumbnail_path, "rb");
-    const char *content_type = "image/jpeg";
 
     if (!fp) {
         // Fall back to BMP if JPG doesn't exist
-        fp = fopen(current_image, "rb");
+        fp = fopen(image_to_serve, "rb");
         content_type = "image/bmp";
 
         if (!fp) {

@@ -25,6 +25,19 @@ static char current_image[64] = {0};
 static uint8_t *epd_image_buffer = NULL;
 static uint32_t image_buffer_size;
 
+// Helper function to create link file pointing to current image
+static void create_image_link(const char *target_path)
+{
+    FILE *fp = fopen(CURRENT_IMAGE_LINK, "w");
+    if (fp) {
+        fprintf(fp, "%s", target_path);
+        fclose(fp);
+        ESP_LOGD(TAG, "Created link file pointing to: %s", target_path);
+    } else {
+        ESP_LOGE(TAG, "Failed to create link file");
+    }
+}
+
 esp_err_t display_manager_init(void)
 {
     display_mutex = xSemaphoreCreateMutex();
@@ -92,6 +105,9 @@ esp_err_t display_manager_show_image(const char *filename)
     ESP_LOGI(TAG, "Free heap after display: %lu bytes", esp_get_free_heap_size());
 
     strncpy(current_image, filename, sizeof(current_image) - 1);
+
+    create_image_link(filename);
+    ESP_LOGD(TAG, "Created link to: %s", filename);
 
     xSemaphoreGive(display_mutex);
 

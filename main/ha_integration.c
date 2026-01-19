@@ -5,6 +5,7 @@
 #include "axp_prot.h"
 #include "cJSON.h"
 #include "config_manager.h"
+#include "display_manager.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -240,5 +241,126 @@ esp_err_t ha_post_ota_version_info(void)
     }
 
     ESP_LOGI(TAG, "OTA version info posted to HA successfully");
+    return ESP_OK;
+}
+
+esp_err_t ha_notify_image_update(void)
+{
+    const char *ha_url = config_manager_get_ha_url();
+
+    // Check if HA URL is configured
+    if (!ha_is_configured()) {
+        ESP_LOGD(TAG, "HA URL not configured, skipping image upload");
+        return ESP_OK;
+    }
+
+    // Get current image filename
+    const char *current_image = display_manager_get_current_image();
+    if (!current_image || strlen(current_image) == 0) {
+        ESP_LOGW(TAG, "No current image to upload");
+        return ESP_OK;
+    }
+
+    // Try to open JPG version first (replacing .bmp with .jpg)
+    char image_path[512];
+    strncpy(image_path, current_image, sizeof(image_path) - 1);
+    image_path[sizeof(image_path) - 1] = '\0';
+
+    char *ext = strrchr(image_path, '.');
+    if (ext && strcasecmp(ext, ".bmp") == 0) {
+        strcpy(ext, ".jpg");
+    }
+
+    FILE *fp = fopen(image_path, "rb");
+    const char *content_type = "image/jpeg";
+
+    if (!fp) {
+        // Fall back to BMP if JPG doesn't exist
+        fp = fopen(current_image, "rb");
+        content_type = "image/bmp";
+
+        if (!fp) {
+            ESP_LOGE(TAG, "Failed to open image file: %s", current_image);
+            return ESP_FAIL;
+        }
+    }
+
+    // Get file size
+    fseek(fp, 0, SEEK_END);
+    long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    if (file_size <= 0 || file_size > 1024 * 1024) {  // Max 1MB
+        ESP_LOGE(TAG, "Invalid image file size: %ld", file_size);
+        fclose(fp);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Uploading image to HA: %s (%ld bytes)", image_path, file_size);
+
+    // Build the API endpoint URL
+    char url[512];
+    snprintf(url, sizeof(url), "%s/api/esp32_photoframe/image_update", ha_url);
+
+    // Configure HTTP client
+    esp_http_client_config_t config = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = 30000,  // Longer timeout for image upload
+        .user_agent = "ESP32-PhotoFrame/1.0",
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(TAG, "Failed to initialize HTTP client");
+        fclose(fp);
+        return ESP_FAIL;
+    }
+
+    // Set headers
+    esp_http_client_set_header(client, "Content-Type", content_type);
+    char content_length[32];
+    snprintf(content_length, sizeof(content_length), "%ld", file_size);
+    esp_http_client_set_header(client, "Content-Length", content_length);
+
+    // Open connection
+    esp_err_t err = esp_http_client_open(client, file_size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        fclose(fp);
+        return err;
+    }
+
+    // Upload image in chunks
+    char buffer[1024];
+    size_t total_written = 0;
+    size_t read_bytes;
+
+    while ((read_bytes = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+        int written = esp_http_client_write(client, buffer, read_bytes);
+        if (written < 0) {
+            ESP_LOGE(TAG, "Failed to write image data");
+            esp_http_client_cleanup(client);
+            fclose(fp);
+            return ESP_FAIL;
+        }
+        total_written += written;
+    }
+
+    fclose(fp);
+
+    // Fetch response
+    esp_http_client_fetch_headers(client);
+    int status_code = esp_http_client_get_status_code(client);
+
+    esp_http_client_cleanup(client);
+
+    if (status_code != 200) {
+        ESP_LOGW(TAG, "HA returned HTTP %d", status_code);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Image uploaded to HA successfully (%zu bytes)", total_written);
     return ESP_OK;
 }
