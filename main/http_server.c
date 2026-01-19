@@ -725,9 +725,17 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
+    // Get content type to determine if it's JPG or BMP
+    char content_type[64] = {0};
+    if (httpd_req_get_hdr_value_str(req, "Content-Type", content_type, sizeof(content_type)) !=
+        ESP_OK) {
+        strcpy(content_type, "image/jpeg");  // Default to JPEG
+    }
+    bool upload_is_bmp = (strcmp(content_type, "image/bmp") == 0);
+
     // Get content length
     size_t content_len = req->content_len;
-    const size_t MAX_UPLOAD_SIZE = 5 * 1024 * 1024;  // 5MB max for JPEG file
+    const size_t MAX_UPLOAD_SIZE = 5 * 1024 * 1024;  // 5MB max
 
     if (content_len == 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty request body");
@@ -745,19 +753,21 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Receiving JPG image for direct display, size: %zu bytes (%.1f KB)", content_len,
-             content_len / 1024.0);
+    ESP_LOGI(TAG, "Receiving %s image for direct display, size: %zu bytes (%.1f KB)",
+             upload_is_bmp ? "BMP" : "JPG", content_len, content_len / 1024.0);
 
     // Use fixed paths for current image and thumbnail
+    const char *temp_upload_path = CURRENT_UPLOAD_PATH;
     const char *temp_jpg_path = CURRENT_JPG_PATH;
     const char *temp_bmp_path = CURRENT_BMP_PATH;
 
     // Delete old files to prevent caching issues
+    unlink(temp_upload_path);
     unlink(temp_jpg_path);
     unlink(temp_bmp_path);
 
     // Open file for writing
-    FILE *fp = fopen(temp_jpg_path, "wb");
+    FILE *fp = fopen(temp_upload_path, "wb");
     if (!fp) {
         ESP_LOGE(TAG, "Failed to create temporary file");
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
@@ -784,7 +794,7 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             ESP_LOGE(TAG, "Failed to receive data");
             free(buf);
             fclose(fp);
-            unlink(temp_jpg_path);
+            unlink(temp_upload_path);
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to receive data");
             return ESP_FAIL;
         }
@@ -795,43 +805,66 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
     free(buf);
     fclose(fp);
 
-    ESP_LOGI(TAG, "JPG image received successfully, processing...");
+    ESP_LOGI(TAG, "Image received successfully, processing...");
 
-    // Convert JPG to BMP using image processor
-    esp_err_t err = image_processor_convert_jpg_to_bmp(temp_jpg_path, temp_bmp_path, false);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to convert JPG to BMP: %s", esp_err_to_name(err));
-        unlink(temp_jpg_path);
-
-        // Provide specific error messages based on error type
-        if (err == ESP_ERR_INVALID_SIZE) {
-            httpd_resp_send_err(
-                req, HTTPD_400_BAD_REQUEST,
-                "Image is too large (max: 6400x3840). Please resize your image and try again.");
-        } else if (err == ESP_ERR_NO_MEM) {
-            httpd_resp_send_err(
-                req, HTTPD_400_BAD_REQUEST,
-                "Image requires too much memory to process. Please use a smaller image.");
-        } else {
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process image");
+    esp_err_t err = ESP_OK;
+    if (upload_is_bmp) {
+        // Move uploaded BMP to temp location
+        if (rename(temp_upload_path, temp_bmp_path) != 0) {
+            ESP_LOGE(TAG, "Failed to move uploaded BMP to temp location");
+            unlink(temp_upload_path);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process BMP");
+            return ESP_FAIL;
         }
-        return ESP_FAIL;
+    } else {
+        // Convert JPG to BMP using image processor
+        err = image_processor_convert_jpg_to_bmp(temp_upload_path, temp_bmp_path, false);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to convert JPG to BMP: %s", esp_err_to_name(err));
+            unlink(temp_upload_path);
+
+            // Provide specific error messages based on error type
+            if (err == ESP_ERR_INVALID_SIZE) {
+                httpd_resp_send_err(
+                    req, HTTPD_400_BAD_REQUEST,
+                    "Image is too large (max: 6400x3840). Please resize your image and try again.");
+            } else if (err == ESP_ERR_NO_MEM) {
+                httpd_resp_send_err(
+                    req, HTTPD_400_BAD_REQUEST,
+                    "Image requires too much memory to process. Please use a smaller image.");
+            } else {
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                    "Failed to process image");
+            }
+            return ESP_FAIL;
+        }
     }
 
-    // Display the converted BMP (use full path to bypass IMAGE_DIRECTORY prefix)
+    // Display the BMP (use full path to bypass IMAGE_DIRECTORY prefix)
     err = display_manager_show_image(temp_bmp_path);
 
     if (err != ESP_OK) {
-        unlink(temp_jpg_path);
+        unlink(temp_upload_path);
         unlink(temp_bmp_path);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
         return ESP_FAIL;
     }
 
-    // Keep both .current.bmp and .current.jpg for HA integration
-    // .current.bmp is referenced by current_image
-    // .current.jpg is the thumbnail served by /api/current_image
-    ESP_LOGI(TAG, "Image and thumbnail saved: %s, %s", temp_bmp_path, temp_jpg_path);
+    if (upload_is_bmp) {
+        // BMP upload - no separate thumbnail
+        ESP_LOGI(TAG, "BMP image saved: %s", temp_bmp_path);
+    } else {
+        // JPG upload - move to thumbnail location for HA integration
+        unlink(temp_jpg_path);
+        if (rename(temp_upload_path, temp_jpg_path) != 0) {
+            ESP_LOGW(TAG, "Failed to save JPG thumbnail");
+        } else {
+            // Keep both .current.bmp and .current.jpg for HA integration
+            // .current.bmp is referenced by current_image
+            // .current.jpg is the thumbnail served by /api/current_image
+            ESP_LOGI(TAG, "Image and thumbnail saved: %s, %s", temp_bmp_path, temp_jpg_path);
+        }
+    }
 
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "success");
