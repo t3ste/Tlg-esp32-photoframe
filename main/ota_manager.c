@@ -22,6 +22,7 @@
 #include "power_manager.h"
 
 static const char *TAG = "ota_manager";
+#define OTA_CHECK_TASK_NAME "ota_check"
 #define OTA_NVS_NAMESPACE "ota"
 #define OTA_NVS_LATEST_VERSION_KEY "latest_ver"
 #define OTA_NVS_STATE_KEY "state"
@@ -456,7 +457,7 @@ esp_err_t ota_manager_init(void)
     }
 
     // Register OTA check as a periodic task (24 hours)
-    esp_err_t err = periodic_tasks_register("ota_check", ota_check_periodic_callback,
+    esp_err_t err = periodic_tasks_register(OTA_CHECK_TASK_NAME, ota_check_periodic_callback,
                                             OTA_CHECK_INTERVAL_SECONDS);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register OTA periodic task: %s", esp_err_to_name(err));
@@ -523,12 +524,12 @@ const char *ota_get_current_version(void)
 
 bool ota_should_check_daily(void)
 {
-    return periodic_tasks_should_run("ota_check");
+    return periodic_tasks_should_run(OTA_CHECK_TASK_NAME);
 }
 
 void ota_update_last_check_time(void)
 {
-    periodic_tasks_update_last_run("ota_check");
+    periodic_tasks_update_last_run(OTA_CHECK_TASK_NAME);
 }
 
 static esp_err_t ota_check_periodic_callback(void)

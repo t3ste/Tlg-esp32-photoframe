@@ -212,6 +212,40 @@ esp_err_t periodic_tasks_get_last_run(const char *task_name, int64_t *last_run_t
     return err;
 }
 
+esp_err_t periodic_tasks_force_run(const char *task_name)
+{
+    if (task_name == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Clear the last run time from NVS to force task to run on next check
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(PERIODIC_TASKS_NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_erase_key(nvs_handle, task_name);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "Failed to erase last run time for '%s': %s", task_name,
+                 esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return err;
+    }
+
+    err = nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit NVS: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Cleared last run time for task '%s' - will run on next check", task_name);
+    return ESP_OK;
+}
+
 esp_err_t periodic_tasks_check_and_run(void)
 {
     ESP_LOGI(TAG, "Checking %d registered tasks", task_count);

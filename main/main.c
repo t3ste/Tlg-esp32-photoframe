@@ -27,6 +27,7 @@
 #include "mdns_service.h"
 #include "nvs_flash.h"
 #include "ota_manager.h"
+#include "pcf85063_rtc.h"
 #include "periodic_tasks.h"
 #include "power_manager.h"
 #include "processing_settings.h"
@@ -37,6 +38,8 @@
 #include "wifi_provisioning.h"
 
 static const char *TAG = "main";
+
+#define SNTP_TASK_NAME "sntp_sync"
 
 // Periodic callback for SNTP sync
 static esp_err_t sntp_sync_periodic_callback(void)
@@ -66,6 +69,18 @@ static esp_err_t sntp_sync_periodic_callback(void)
         char strftime_buf[64];
         strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
         ESP_LOGI(TAG, "SNTP sync successful: %s", strftime_buf);
+
+        // Update external RTC with synced time
+        time(&now);
+        if (pcf85063_is_available()) {
+            esp_err_t ret = pcf85063_write_time(now);
+            if (ret == ESP_OK) {
+                ESP_LOGI(TAG, "Updated external RTC with SNTP time");
+            } else {
+                ESP_LOGW(TAG, "Failed to update external RTC: %s", esp_err_to_name(ret));
+            }
+        }
+
         return ESP_OK;
     } else {
         ESP_LOGW(TAG, "SNTP sync timeout, will retry next period");
@@ -350,13 +365,73 @@ void app_main(void)
 
     ESP_ERROR_CHECK(config_manager_init());
 
+    // Initialize external RTC
+    ESP_LOGI(TAG, "Initializing PCF85063 external RTC...");
+    esp_err_t rtc_ret = pcf85063_init();
+    if (rtc_ret == ESP_OK) {
+        ESP_LOGI(TAG, "PCF85063 RTC initialized successfully");
+    } else {
+        ESP_LOGW(TAG, "PCF85063 RTC initialization failed (RTC may not be present)");
+    }
+
+    // Validate and restore time from RTCs
+    ESP_LOGI(TAG, "Validating system time...");
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    bool internal_rtc_valid = (timeinfo.tm_year >= (2025 - 1900));
+
+    if (internal_rtc_valid) {
+        char strftime_buf[64];
+        strftime(strftime_buf, sizeof(strftime_buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+        ESP_LOGI(TAG, "Internal RTC time valid: %s", strftime_buf);
+    } else {
+        ESP_LOGW(TAG, "Internal RTC time invalid (year %d), checking external RTC...",
+                 timeinfo.tm_year + 1900);
+
+        // Try to restore from external RTC
+        if (pcf85063_is_available()) {
+            time_t external_time;
+            esp_err_t ret = pcf85063_read_time(&external_time);
+            if (ret == ESP_OK) {
+                struct tm external_timeinfo;
+                localtime_r(&external_time, &external_timeinfo);
+
+                if (external_timeinfo.tm_year >= (2025 - 1900)) {
+                    // External RTC has valid time, restore it
+                    struct timeval tv = {.tv_sec = external_time, .tv_usec = 0};
+                    settimeofday(&tv, NULL);
+                    ESP_LOGI(TAG, "Restored time from external RTC: %04d-%02d-%02d %02d:%02d:%02d",
+                             external_timeinfo.tm_year + 1900, external_timeinfo.tm_mon + 1,
+                             external_timeinfo.tm_mday, external_timeinfo.tm_hour,
+                             external_timeinfo.tm_min, external_timeinfo.tm_sec);
+                    internal_rtc_valid = true;
+                } else {
+                    ESP_LOGW(TAG, "External RTC time also invalid (year %d)",
+                             external_timeinfo.tm_year + 1900);
+                }
+            } else {
+                ESP_LOGW(TAG, "Failed to read external RTC: %s", esp_err_to_name(ret));
+            }
+        }
+
+        if (!internal_rtc_valid) {
+            ESP_LOGW(TAG,
+                     "No valid RTC time available, will force SNTP sync after WiFi connection");
+            // Force SNTP sync to run on next periodic_tasks_check_and_run()
+            periodic_tasks_force_run(SNTP_TASK_NAME);
+        }
+    }
+
     // Initialize periodic tasks system
     ESP_LOGI(TAG, "Initializing periodic tasks...");
     ESP_ERROR_CHECK(periodic_tasks_init());
 
     // Register SNTP sync as a daily task
     ESP_ERROR_CHECK(
-        periodic_tasks_register("sntp_sync", sntp_sync_periodic_callback, 24 * 60 * 60));
+        periodic_tasks_register(SNTP_TASK_NAME, sntp_sync_periodic_callback, 24 * 60 * 60));
     ESP_LOGI(TAG, "Registered SNTP sync as daily task");
 
     ESP_ERROR_CHECK(image_processor_init());
@@ -451,6 +526,8 @@ void app_main(void)
 
     if (connect_to_wifi_with_timeout(30)) {
         // Check and run periodic tasks (OTA check, SNTP sync if due)
+        // Note: If RTC was invalid at boot, sntp_sync was already forced via
+        // periodic_tasks_force_run()
         ESP_LOGI(TAG, "Checking periodic tasks...");
         periodic_tasks_check_and_run();
 

@@ -69,6 +69,14 @@ esp_err_t periodic_tasks_update_last_run(const char *task_name);
  */
 esp_err_t periodic_tasks_get_last_run(const char *task_name, int64_t *last_run_time);
 
+/**
+ * @brief Force a task to run on next check by clearing its last run time
+ *
+ * @param task_name Name of the task
+ * @return ESP_OK on success, error code on failure
+ */
+esp_err_t periodic_tasks_force_run(const char *task_name);
+
 #ifdef __cplusplus
 }
 #endif
