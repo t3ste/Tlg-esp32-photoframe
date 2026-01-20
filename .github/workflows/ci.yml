@@ -34,6 +34,29 @@ jobs:
       - name: Check code formatting
         run: make format-check
 
+  build-firmware:
+    name: Build Firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(python3 scripts/get_version.py --type dev)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      - name: Setup ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: release-v6.0
+          target: esp32s3
+          command: idf.py -DFIRMWARE_VERSION='${{ steps.version.outputs.version }}' build
+
   host-tests:
     name: Host-Based Unit Tests
     runs-on: ubuntu-latest
