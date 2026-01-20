@@ -24,6 +24,7 @@
 #include "ota_manager.h"
 #include "power_manager.h"
 #include "processing_settings.h"
+#include "shtc3_sensor.h"
 #include "utils.h"
 
 #ifndef MIN
@@ -896,6 +897,51 @@ static esp_err_t battery_handler(httpd_req_t *req)
         httpd_resp_set_status(req, HTTPD_500);
         httpd_resp_sendstr(req, "Failed to create battery JSON");
         return ESP_FAIL;
+    }
+
+    char *json_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(response);
+
+    return ESP_OK;
+}
+
+static esp_err_t sensor_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    cJSON *response = cJSON_CreateObject();
+    if (response == NULL) {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "Failed to create JSON response");
+        return ESP_FAIL;
+    }
+
+    // Check if sensor is available
+    if (shtc3_is_available()) {
+        float temperature, humidity;
+        esp_err_t ret = shtc3_read(&temperature, &humidity);
+
+        if (ret == ESP_OK) {
+            cJSON_AddNumberToObject(response, "temperature", temperature);
+            cJSON_AddNumberToObject(response, "humidity", humidity);
+            cJSON_AddStringToObject(response, "status", "ok");
+        } else {
+            cJSON_AddNullToObject(response, "temperature");
+            cJSON_AddNullToObject(response, "humidity");
+            cJSON_AddStringToObject(response, "status", "read_error");
+        }
+    } else {
+        cJSON_AddNullToObject(response, "temperature");
+        cJSON_AddNullToObject(response, "humidity");
+        cJSON_AddStringToObject(response, "status", "not_available");
     }
 
     char *json_str = cJSON_Print(response);
@@ -2082,6 +2128,10 @@ esp_err_t http_server_init(void)
                                    .handler = battery_handler,
                                    .user_ctx = NULL};
         httpd_register_uri_handler(server, &battery_uri);
+
+        httpd_uri_t sensor_uri = {
+            .uri = "/api/sensor", .method = HTTP_GET, .handler = sensor_handler, .user_ctx = NULL};
+        httpd_register_uri_handler(server, &sensor_uri);
 
         httpd_uri_t sleep_uri = {
             .uri = "/api/sleep", .method = HTTP_POST, .handler = sleep_handler, .user_ctx = NULL};

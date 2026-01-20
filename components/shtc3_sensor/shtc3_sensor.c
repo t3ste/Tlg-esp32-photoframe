@@ -1,0 +1,171 @@
+#include "shtc3_sensor.h"
+
+#include <string.h>
+
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "i2c_bsp.h"
+
+static const char *TAG = "shtc3_sensor";
+
+// SHTC3 Commands
+#define SHTC3_CMD_WAKEUP 0x3517
+#define SHTC3_CMD_SLEEP 0xB098
+#define SHTC3_CMD_SOFT_RESET 0x805D
+#define SHTC3_CMD_READ_ID 0xEFC8
+#define SHTC3_CMD_MEASURE_NORMAL 0x7866  // Normal mode, T first, clock stretching disabled
+
+static bool sensor_initialized = false;
+static bool sensor_available = false;
+
+// CRC-8 calculation for SHTC3 (polynomial: 0x31, init: 0xFF)
+static uint8_t calculate_crc(const uint8_t *data, size_t length)
+{
+    uint8_t crc = 0xFF;
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (uint8_t bit = 8; bit > 0; --bit) {
+            if (crc & 0x80) {
+                crc = (crc << 1) ^ 0x31;
+            } else {
+                crc = (crc << 1);
+            }
+        }
+    }
+    return crc;
+}
+
+esp_err_t shtc3_init(void)
+{
+    esp_err_t ret;
+    uint8_t cmd[2];
+    uint8_t id_data[3];
+
+    ESP_LOGI(TAG, "Initializing SHTC3 sensor");
+
+    // Wake up sensor
+    cmd[0] = (SHTC3_CMD_WAKEUP >> 8) & 0xFF;
+    cmd[1] = SHTC3_CMD_WAKEUP & 0xFF;
+    ret = i2c_write_buff(shtc3_handle, -1, cmd, 2);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to wake up SHTC3: %s", esp_err_to_name(ret));
+        sensor_available = false;
+        sensor_initialized = true;
+        return ret;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(1));  // Wait for wake-up
+
+    // Read ID to verify sensor presence
+    cmd[0] = (SHTC3_CMD_READ_ID >> 8) & 0xFF;
+    cmd[1] = SHTC3_CMD_READ_ID & 0xFF;
+    ret = i2c_master_write_read_dev(shtc3_handle, cmd, 2, id_data, 3);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read SHTC3 ID: %s", esp_err_to_name(ret));
+        sensor_available = false;
+        sensor_initialized = true;
+        return ret;
+    }
+
+    // Verify CRC
+    uint8_t crc = calculate_crc(id_data, 2);
+    if (crc != id_data[2]) {
+        ESP_LOGE(TAG, "SHTC3 ID CRC mismatch: expected 0x%02X, got 0x%02X", crc, id_data[2]);
+        sensor_available = false;
+        sensor_initialized = true;
+        return ESP_ERR_INVALID_CRC;
+    }
+
+    uint16_t id = (id_data[0] << 8) | id_data[1];
+    ESP_LOGI(TAG, "SHTC3 sensor detected, ID: 0x%04X", id);
+
+    sensor_available = true;
+    sensor_initialized = true;
+    return ESP_OK;
+}
+
+esp_err_t shtc3_read(float *temperature, float *humidity)
+{
+    if (!sensor_initialized) {
+        ESP_LOGE(TAG, "SHTC3 not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!sensor_available) {
+        ESP_LOGD(TAG, "SHTC3 sensor not available");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    esp_err_t ret;
+    uint8_t cmd[2];
+    uint8_t data[6];  // T_MSB, T_LSB, T_CRC, RH_MSB, RH_LSB, RH_CRC
+
+    // Wake up sensor
+    cmd[0] = (SHTC3_CMD_WAKEUP >> 8) & 0xFF;
+    cmd[1] = SHTC3_CMD_WAKEUP & 0xFF;
+    ret = i2c_write_buff(shtc3_handle, -1, cmd, 2);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to wake up SHTC3: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(1));  // Wait for wake-up
+
+    // Trigger measurement
+    cmd[0] = (SHTC3_CMD_MEASURE_NORMAL >> 8) & 0xFF;
+    cmd[1] = SHTC3_CMD_MEASURE_NORMAL & 0xFF;
+    ret = i2c_write_buff(shtc3_handle, -1, cmd, 2);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to trigger SHTC3 measurement: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Wait for measurement to complete (typical: 12.1ms for normal mode)
+    vTaskDelay(pdMS_TO_TICKS(15));
+
+    // Read measurement data
+    ret = i2c_read_buff(shtc3_handle, -1, data, 6);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read SHTC3 data: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Put sensor back to sleep to save power
+    cmd[0] = (SHTC3_CMD_SLEEP >> 8) & 0xFF;
+    cmd[1] = SHTC3_CMD_SLEEP & 0xFF;
+    i2c_write_buff(shtc3_handle, -1, cmd, 2);
+
+    // Verify temperature CRC
+    uint8_t temp_crc = calculate_crc(data, 2);
+    if (temp_crc != data[2]) {
+        ESP_LOGE(TAG, "Temperature CRC mismatch: expected 0x%02X, got 0x%02X", temp_crc, data[2]);
+        return ESP_ERR_INVALID_CRC;
+    }
+
+    // Verify humidity CRC
+    uint8_t hum_crc = calculate_crc(&data[3], 2);
+    if (hum_crc != data[5]) {
+        ESP_LOGE(TAG, "Humidity CRC mismatch: expected 0x%02X, got 0x%02X", hum_crc, data[5]);
+        return ESP_ERR_INVALID_CRC;
+    }
+
+    // Convert raw values to physical units
+    uint16_t temp_raw = (data[0] << 8) | data[1];
+    uint16_t hum_raw = (data[3] << 8) | data[4];
+
+    // Temperature conversion: T = -45 + 175 * (raw / 65535)
+    *temperature = -45.0f + 175.0f * ((float) temp_raw / 65535.0f);
+
+    // Humidity conversion: RH = 100 * (raw / 65535)
+    *humidity = 100.0f * ((float) hum_raw / 65535.0f);
+
+    ESP_LOGD(TAG, "Temperature: %.2f°C, Humidity: %.2f%%", *temperature, *humidity);
+
+    return ESP_OK;
+}
+
+bool shtc3_is_available(void)
+{
+    return sensor_available;
+}

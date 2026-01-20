@@ -30,6 +30,7 @@
 #include "power_manager.h"
 #include "processing_settings.h"
 #include "sdmmc_cmd.h"
+#include "shtc3_sensor.h"
 #include "utils.h"
 #include "wifi_manager.h"
 #include "wifi_provisioning.h"
@@ -329,6 +330,15 @@ void app_main(void)
     axp_i2c_prot_init();
     axp_cmd_init();
     ESP_LOGI(TAG, "AXP2101 initialized");
+
+    // Initialize SHTC3 temperature/humidity sensor
+    ESP_LOGI(TAG, "Initializing SHTC3 sensor...");
+    esp_err_t shtc3_ret = shtc3_init();
+    if (shtc3_ret == ESP_OK) {
+        ESP_LOGI(TAG, "SHTC3 sensor initialized successfully");
+    } else {
+        ESP_LOGW(TAG, "SHTC3 sensor initialization failed (sensor may not be present)");
+    }
 
     // Wait for power rails to stabilize after AXP2101 initialization
     // The AXP2101 enables DC1, ALDO3, ALDO4 at 3.3V which power the SD card
