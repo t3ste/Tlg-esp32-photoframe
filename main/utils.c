@@ -401,3 +401,43 @@ int calculate_next_aligned_wakeup(int rotate_interval)
 
     return adjusted_seconds;
 }
+
+void sanitize_hostname(const char *device_name, char *hostname, size_t max_len)
+{
+    size_t i = 0, j = 0;
+    bool last_was_hyphen = false;
+
+    while (device_name[i] != '\0' && j < max_len - 1) {
+        char c = device_name[i];
+
+        if ((c >= 'A' && c <= 'Z')) {
+            // Uppercase: convert to lowercase
+            hostname[j++] = c + 32;
+            last_was_hyphen = false;
+        } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+            // Lowercase letters and digits: keep as-is
+            hostname[j++] = c;
+            last_was_hyphen = false;
+        } else if (!last_was_hyphen && j > 0) {
+            // Replace spaces and special characters with hyphen
+            // But avoid leading hyphens or consecutive hyphens
+            hostname[j++] = '-';
+            last_was_hyphen = true;
+        }
+
+        i++;
+    }
+
+    // Remove trailing hyphen if present
+    if (j > 0 && hostname[j - 1] == '-') {
+        j--;
+    }
+
+    hostname[j] = '\0';
+
+    // If result is empty, use default
+    if (j == 0) {
+        strncpy(hostname, "photoframe", max_len - 1);
+        hostname[max_len - 1] = '\0';
+    }
+}

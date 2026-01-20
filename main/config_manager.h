@@ -8,6 +8,9 @@
 
 esp_err_t config_manager_init(void);
 
+void config_manager_set_device_name(const char *name);
+const char *config_manager_get_device_name(void);
+
 void config_manager_set_rotate_interval(int seconds);
 int config_manager_get_rotate_interval(void);
 

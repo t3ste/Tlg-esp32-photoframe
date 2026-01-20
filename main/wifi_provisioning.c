@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "config_manager.h"
 #include "dns_server.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
@@ -89,9 +90,11 @@ static esp_err_t provision_save_handler(httpd_req_t *req)
 
     char ssid[WIFI_SSID_MAX_LEN] = {0};
     char password[WIFI_PASS_MAX_LEN] = {0};
+    char device_name[DEVICE_NAME_MAX_LEN] = {0};
 
     char *ssid_start = strstr(buf, "ssid=");
     char *pass_start = strstr(buf, "&password=");
+    char *name_start = strstr(buf, "&deviceName=");
 
     if (!ssid_start) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing SSID");
@@ -119,7 +122,8 @@ static esp_err_t provision_save_handler(httpd_req_t *req)
 
     if (pass_start) {
         pass_start += 10;
-        int pass_len = (buf + ret) - pass_start;
+        char *pass_end = name_start ? name_start : (buf + ret);
+        int pass_len = pass_end - pass_start;
         if (pass_len > 0 && pass_len < WIFI_PASS_MAX_LEN) {
             strncpy(password, pass_start, pass_len);
             password[pass_len] = '\0';
@@ -137,7 +141,36 @@ static esp_err_t provision_save_handler(httpd_req_t *req)
         }
     }
 
+    // Parse device name (optional)
+    if (name_start) {
+        name_start += 12;  // Skip "&deviceName="
+        int name_len = (buf + ret) - name_start;
+        if (name_len > 0 && name_len < DEVICE_NAME_MAX_LEN) {
+            strncpy(device_name, name_start, name_len);
+            device_name[name_len] = '\0';
+
+            // URL decode device name
+            for (int i = 0; i < name_len; i++) {
+                if (device_name[i] == '+')
+                    device_name[i] = ' ';
+                if (device_name[i] == '%' && i + 2 < name_len) {
+                    char hex[3] = {device_name[i + 1], device_name[i + 2], 0};
+                    device_name[i] = (char) strtol(hex, NULL, 16);
+                    memmove(&device_name[i + 1], &device_name[i + 3], name_len - i - 2);
+                    name_len -= 2;
+                }
+            }
+        }
+    }
+
+    // Use default if device name is empty
+    if (strlen(device_name) == 0) {
+        strncpy(device_name, DEFAULT_DEVICE_NAME, DEVICE_NAME_MAX_LEN - 1);
+        device_name[DEVICE_NAME_MAX_LEN - 1] = '\0';
+    }
+
     ESP_LOGI(TAG, "Received WiFi credentials - SSID: %s", ssid);
+    ESP_LOGI(TAG, "Device name: %s", device_name);
     ESP_LOGI(TAG, "Testing WiFi connection in APSTA mode...");
 
     // Switch to APSTA mode to test connection while keeping AP running
@@ -202,6 +235,10 @@ static esp_err_t provision_save_handler(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save credentials");
         return ESP_FAIL;
     }
+
+    // Save device name
+    config_manager_set_device_name(device_name);
+    ESP_LOGI(TAG, "Device name saved: %s", device_name);
 
     const char *response =
         "<html><body><h1>WiFi Configured!</h1>"

@@ -290,6 +290,7 @@ header h1 {
 }
 
 .form-group input[type="number"],
+.form-group input[type="text"],
 .form-group input[type="url"] {
     width: 100%;
     padding: 10px;
@@ -300,6 +301,7 @@ header h1 {
 }
 
 .form-group input[type="number"]:focus,
+.form-group input[type="text"]:focus,
 .form-group input[type="url"]:focus {
     outline: none;
     border-color: #667eea;

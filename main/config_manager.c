@@ -9,6 +9,7 @@
 
 static const char *TAG = "config_manager";
 
+static char device_name[DEVICE_NAME_MAX_LEN] = {0};
 static int rotate_interval = IMAGE_ROTATE_INTERVAL_SEC;
 static int image_orientation = IMAGE_ORIENTATION_DEG;
 static bool auto_rotate_enabled = false;
@@ -111,11 +112,45 @@ esp_err_t config_manager_init(void)
                      sleep_schedule_end, sleep_schedule_end / 60, sleep_schedule_end % 60);
         }
 
+        size_t device_name_len = DEVICE_NAME_MAX_LEN;
+        if (nvs_get_str(nvs_handle, NVS_DEVICE_NAME_KEY, device_name, &device_name_len) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded device name from NVS: %s", device_name);
+        } else {
+            // Set default device name if not configured
+            strncpy(device_name, DEFAULT_DEVICE_NAME, DEVICE_NAME_MAX_LEN - 1);
+            device_name[DEVICE_NAME_MAX_LEN - 1] = '\0';
+            ESP_LOGI(TAG, "No device name in NVS, using default: %s", device_name);
+        }
+
         nvs_close(nvs_handle);
     }
 
     ESP_LOGI(TAG, "Config manager initialized");
     return ESP_OK;
+}
+
+void config_manager_set_device_name(const char *name)
+{
+    if (name == NULL) {
+        return;
+    }
+
+    strncpy(device_name, name, DEVICE_NAME_MAX_LEN - 1);
+    device_name[DEVICE_NAME_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_DEVICE_NAME_KEY, device_name);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Device name set to: %s", device_name);
+}
+
+const char *config_manager_get_device_name(void)
+{
+    return device_name;
 }
 
 void config_manager_set_rotate_interval(int seconds)

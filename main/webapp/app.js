@@ -1398,6 +1398,10 @@ async function loadConfig() {
     document.getElementById("sleepScheduleEnd").value =
       `${String(endHours).padStart(2, "0")}:${String(endMins).padStart(2, "0")}`;
 
+    // Load device name
+    document.getElementById("deviceName").value =
+      data.device_name || "PhotoFrame";
+
     // Set rotation mode based on backend config
     const rotationMode = data.rotation_mode || "sdcard";
     if (rotationMode === "url") {
@@ -1486,6 +1490,8 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
   const [endHours, endMins] = sleepScheduleEndTime.split(":").map(Number);
   const sleepScheduleEnd = endHours * 60 + endMins;
 
+  const deviceName = document.getElementById("deviceName").value;
+
   try {
     const response = await fetch(`${API_BASE}/api/config`, {
       method: "POST",
@@ -1505,6 +1511,7 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
         sleep_schedule_enabled: sleepScheduleEnabled,
         sleep_schedule_start: sleepScheduleStart,
         sleep_schedule_end: sleepScheduleEnd,
+        device_name: deviceName,
       }),
     });
 

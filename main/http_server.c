@@ -20,6 +20,7 @@
 #include "esp_log.h"
 #include "ha_integration.h"
 #include "image_processor.h"
+#include "mdns_service.h"
 #include "ota_manager.h"
 #include "power_manager.h"
 #include "processing_settings.h"
@@ -1071,6 +1072,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         bool sleep_schedule_enabled = config_manager_get_sleep_schedule_enabled();
         int sleep_schedule_start = config_manager_get_sleep_schedule_start();
         int sleep_schedule_end = config_manager_get_sleep_schedule_end();
+        const char *device_name = config_manager_get_device_name();
 
         cJSON *root = cJSON_CreateObject();
         cJSON_AddNumberToObject(root, "rotate_interval", rotate_interval);
@@ -1088,6 +1090,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddBoolToObject(root, "sleep_schedule_enabled", sleep_schedule_enabled);
         cJSON_AddNumberToObject(root, "sleep_schedule_start", sleep_schedule_start);
         cJSON_AddNumberToObject(root, "sleep_schedule_end", sleep_schedule_end);
+        cJSON_AddStringToObject(root, "device_name", device_name ? device_name : "PhotoFrame");
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -1186,6 +1189,18 @@ static esp_err_t config_handler(httpd_req_t *req)
         if (sleep_sched_end_obj && cJSON_IsNumber(sleep_sched_end_obj)) {
             int end_minutes = sleep_sched_end_obj->valueint;
             config_manager_set_sleep_schedule_end(end_minutes);
+        }
+
+        cJSON *device_name_obj = cJSON_GetObjectItem(root, "device_name");
+        if (device_name_obj && cJSON_IsString(device_name_obj)) {
+            const char *new_name = cJSON_GetStringValue(device_name_obj);
+            const char *current_name = config_manager_get_device_name();
+
+            // Only update mDNS if the device name actually changed
+            if (strcmp(new_name, current_name) != 0) {
+                config_manager_set_device_name(new_name);
+                mdns_service_update_hostname();
+            }
         }
 
         cJSON_Delete(root);

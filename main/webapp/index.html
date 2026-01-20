@@ -211,6 +211,19 @@
         <section class="card">
             <h2>Settings</h2>
             <form id="configForm">
+                <!-- Device Name Section -->
+                <div class="settings-section-divider">
+                    <div class="form-group">
+                        <label for="deviceName">Device Name:</label>
+                    </div>
+                    <div class="form-group indented">
+                        <input type="text" id="deviceName" placeholder="PhotoFrame" maxlength="64">
+                        <small class="helper-text">
+                            📛 Set a custom name for your device. This will be used for the mDNS hostname (e.g., "Living Room PhotoFrame" → http://living-room-photoframe.local)
+                        </small>
+                    </div>
+                </div>
+                
                 <!-- Display Orientation Section -->
                 <div class="settings-section">
                     <div class="form-group">
@@ -364,6 +377,8 @@
                         </small>
                     </div>
                 </div>
+
+                <!-- Advanced Settings Section -->
                 <div class="settings-section-divider">
                     <div class="form-group">
                         <details>

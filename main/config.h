@@ -20,12 +20,14 @@ typedef enum {
 #define LED_RED_GPIO GPIO_NUM_45
 #define LED_GREEN_GPIO GPIO_NUM_42
 
+#define DEVICE_NAME_MAX_LEN 64
 #define WIFI_SSID_MAX_LEN 32
 #define WIFI_PASS_MAX_LEN 64
 #define IMAGE_URL_MAX_LEN 256
 #define HA_URL_MAX_LEN 256
 #define ROTATION_MODE_MAX_LEN 16
 
+#define DEFAULT_DEVICE_NAME "PhotoFrame"
 #define DEFAULT_WIFI_SSID "PhotoFrame"
 #define DEFAULT_WIFI_PASSWORD "photoframe123"
 #define DEFAULT_IMAGE_URL "https://loremflickr.com/800/480"
@@ -53,6 +55,7 @@ typedef enum {
 #define IMAGE_ORIENTATION_DEG 180
 
 #define NVS_NAMESPACE "photoframe"
+#define NVS_DEVICE_NAME_KEY "device_name"
 #define NVS_WIFI_SSID_KEY "wifi_ssid"
 #define NVS_WIFI_PASS_KEY "wifi_pass"
 #define NVS_ROTATE_INTERVAL_KEY "rotate_int"

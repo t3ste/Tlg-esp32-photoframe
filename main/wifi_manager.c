@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "config_manager.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -254,6 +255,23 @@ esp_err_t wifi_manager_load_credentials_from_sdcard(char *ssid, char *password)
     while (len > 0 && (password[len - 1] == '\n' || password[len - 1] == '\r')) {
         password[len - 1] = '\0';
         len--;
+    }
+
+    // Read device name (third line, optional)
+    char device_name[DEVICE_NAME_MAX_LEN] = {0};
+    if (fgets(device_name, DEVICE_NAME_MAX_LEN, fp)) {
+        // Remove trailing newline/carriage return
+        len = strlen(device_name);
+        while (len > 0 && (device_name[len - 1] == '\n' || device_name[len - 1] == '\r')) {
+            device_name[len - 1] = '\0';
+            len--;
+        }
+
+        // Only set if not empty
+        if (len > 0) {
+            config_manager_set_device_name(device_name);
+            ESP_LOGI(TAG, "Device name loaded from SD card: %s", device_name);
+        }
     }
 
     fclose(fp);

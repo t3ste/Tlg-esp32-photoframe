@@ -27,4 +27,10 @@ struct cJSON *create_battery_json(void);
 // - Overnight schedules (handles schedules that cross midnight)
 int calculate_next_aligned_wakeup(int rotate_interval);
 
+// Sanitize device name to create a valid mDNS hostname
+// Converts to lowercase, replaces spaces and special chars with hyphens
+// Example: "Living Room PhotoFrame" -> "living-room-photoframe"
+// hostname buffer must be at least max_len bytes
+void sanitize_hostname(const char *device_name, char *hostname, size_t max_len);
+
 #endif

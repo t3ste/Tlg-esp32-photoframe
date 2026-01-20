@@ -415,6 +415,7 @@ void app_main(void)
         ESP_LOGI(TAG, "Option 1: Place wifi.txt on SD card with:");
         ESP_LOGI(TAG, "  Line 1: WiFi SSID");
         ESP_LOGI(TAG, "  Line 2: WiFi Password");
+        ESP_LOGI(TAG, "  Line 3: Device Name (optional, default: PhotoFrame)");
         ESP_LOGI(TAG, "  Then restart the device");
         ESP_LOGI(TAG, "===========================================");
         ESP_LOGI(TAG, "Option 2: Use captive portal:");
@@ -465,9 +466,15 @@ void app_main(void)
     if (wifi_manager_is_connected()) {
         char ip_str[16];
         wifi_manager_get_ip(ip_str, sizeof(ip_str));
+
+        // Get sanitized hostname for mDNS
+        const char *device_name = config_manager_get_device_name();
+        char hostname[64];
+        sanitize_hostname(device_name, hostname, sizeof(hostname));
+
         ESP_LOGI(TAG, "===========================================");
         ESP_LOGI(TAG, "Web interface available at: http://%s", ip_str);
-        ESP_LOGI(TAG, "Or use: http://photoframe.local");
+        ESP_LOGI(TAG, "Or use: http://%s.local", hostname);
         ESP_LOGI(TAG, "===========================================");
     }
 
