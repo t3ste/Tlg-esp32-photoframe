@@ -454,7 +454,13 @@ void app_main(void)
         esp_restart();
     }
 
+    xTaskCreate(button_task, "button_task", 8192, NULL, 5, NULL);
+
+    // Perform the initial check on boot
+    ota_check_for_update(NULL, 0);
+
     ESP_ERROR_CHECK(http_server_init());
+    http_server_set_ready();
 
     if (wifi_manager_is_connected()) {
         char ip_str[16];
@@ -465,17 +471,10 @@ void app_main(void)
         ESP_LOGI(TAG, "===========================================");
     }
 
-    xTaskCreate(button_task, "button_task", 8192, NULL, 5, NULL);
-
-    // Mark system as ready for HTTP requests after all initialization is complete
-    http_server_set_ready();
 
     // Notify HA that device is online (HA will poll for all data via REST API)
     ESP_LOGI(TAG, "Sending online notification to Home Assistant");
     ha_notify_online();
-
-    // Perform the initial check on boot
-    ota_check_for_update(NULL, 0);
 
     ESP_LOGI(TAG, "PhotoFrame started successfully");
 }
