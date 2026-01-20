@@ -10,6 +10,7 @@ set(SOURCES
     "main.c"
     "mdns_service.c"
     "ota_manager.c"
+    "periodic_tasks.c"
     "power_manager.c"
     "processing_settings.c"
     "utils.c"

@@ -18,11 +18,11 @@
 #include "freertos/task.h"
 #include "ha_integration.h"
 #include "nvs.h"
+#include "periodic_tasks.h"
 #include "power_manager.h"
 
 static const char *TAG = "ota_manager";
 #define OTA_NVS_NAMESPACE "ota"
-#define OTA_NVS_LAST_CHECK_KEY "last_check"
 #define OTA_NVS_LATEST_VERSION_KEY "latest_ver"
 #define OTA_NVS_STATE_KEY "state"
 #define OTA_CHECK_INTERVAL_SECONDS (24 * 60 * 60)  // 24 hours
@@ -34,13 +34,13 @@ static ota_status_t ota_status = {.state = OTA_STATE_IDLE,
                                   .progress_percent = 0};
 
 static SemaphoreHandle_t ota_status_mutex = NULL;
-static esp_timer_handle_t ota_check_timer = NULL;
 static bool update_available = false;
 static char firmware_url[256] = "";
 
 // Forward declarations
 static void ota_save_status_to_nvs(void);
 static void ota_load_status_from_nvs(void);
+static esp_err_t ota_check_periodic_callback(void);
 
 static void set_ota_state(ota_state_t state, const char *error_msg)
 {
@@ -420,19 +420,6 @@ static void ota_update_task(void *pvParameter)
     vTaskDelete(NULL);
 }
 
-static void ota_check_timer_callback(void *arg)
-{
-    ESP_LOGI(TAG, "Periodic OTA check timer triggered");
-    // Only check if 24 hours have passed since last check
-    if (ota_should_check_daily()) {
-        ESP_LOGI(TAG, "24 hours elapsed, starting OTA check with HA notification");
-        // Pass non-NULL parameter to trigger HA notification
-        xTaskCreate(&ota_check_task, "ota_check_task", 12288, (void *) 1, 5, NULL);
-    } else {
-        ESP_LOGD(TAG, "Skipping OTA check, not yet 24 hours since last check");
-    }
-}
-
 esp_err_t ota_manager_init(void)
 {
     ESP_LOGI(TAG, "Initializing OTA manager");
@@ -468,20 +455,11 @@ esp_err_t ota_manager_init(void)
         }
     }
 
-    // Create periodic timer for update checks (24 hours)
-    const esp_timer_create_args_t timer_args = {.callback = &ota_check_timer_callback,
-                                                .name = "ota_check_timer"};
-
-    esp_err_t err = esp_timer_create(&timer_args, &ota_check_timer);
+    // Register OTA check as a periodic task (24 hours)
+    esp_err_t err = periodic_tasks_register("ota_check", ota_check_periodic_callback,
+                                            OTA_CHECK_INTERVAL_SECONDS);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create OTA check timer: %s", esp_err_to_name(err));
-        return err;
-    }
-
-    // Start periodic timer (convert milliseconds to microseconds)
-    err = esp_timer_start_periodic(ota_check_timer, (uint64_t) OTA_CHECK_INTERVAL_MS * 1000ULL);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start OTA check timer: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to register OTA periodic task: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -545,61 +523,22 @@ const char *ota_get_current_version(void)
 
 bool ota_should_check_daily(void)
 {
-    nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
-    if (err != ESP_OK) {
-        ESP_LOGD(TAG, "NVS not initialized for OTA, should check");
-        return true;  // First time, should check
-    }
-
-    int64_t last_check_time = 0;
-    err = nvs_get_i64(nvs_handle, OTA_NVS_LAST_CHECK_KEY, &last_check_time);
-    nvs_close(nvs_handle);
-
-    if (err != ESP_OK) {
-        ESP_LOGD(TAG, "No last check time found, should check");
-        return true;  // No previous check, should check
-    }
-
-    // Get current time (Unix epoch time, persists across deep sleep if set via SNTP)
-    time_t now;
-    time(&now);
-    int64_t current_time = (int64_t) now;
-
-    // If system time is not set (before year 2020), always check
-    // Unix timestamp for 2020-01-01 is 1577836800
-    if (current_time < 1577836800) {
-        ESP_LOGW(TAG, "System time not set, forcing OTA check");
-        return true;
-    }
-
-    // Check if 24 hours have passed
-    int64_t time_since_last_check = current_time - last_check_time;
-    bool should_check = time_since_last_check >= OTA_CHECK_INTERVAL_SECONDS;
-
-    return should_check;
+    return periodic_tasks_should_run("ota_check");
 }
 
 void ota_update_last_check_time(void)
 {
-    nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS for OTA: %s", esp_err_to_name(err));
-        return;
-    }
+    periodic_tasks_update_last_run("ota_check");
+}
 
-    time_t now;
-    time(&now);
-    int64_t current_time = (int64_t) now;
-    err = nvs_set_i64(nvs_handle, OTA_NVS_LAST_CHECK_KEY, current_time);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save last check time to NVS: %s", esp_err_to_name(err));
-    } else {
-        nvs_commit(nvs_handle);
-    }
+static esp_err_t ota_check_periodic_callback(void)
+{
+    ESP_LOGI(TAG, "Periodic OTA check triggered");
 
-    nvs_close(nvs_handle);
+    // Check for updates without notifying HA (HA will poll for status)
+    xTaskCreate(&ota_check_task, "ota_check_task", 12288, NULL, 5, NULL);
+
+    return ESP_OK;
 }
 
 static void ota_save_status_to_nvs(void)

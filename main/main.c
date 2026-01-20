@@ -27,6 +27,7 @@
 #include "mdns_service.h"
 #include "nvs_flash.h"
 #include "ota_manager.h"
+#include "periodic_tasks.h"
 #include "power_manager.h"
 #include "processing_settings.h"
 #include "sdmmc_cmd.h"
@@ -37,41 +38,35 @@
 
 static const char *TAG = "main";
 
-// Helper function to initialize and synchronize time via SNTP
-static void initialize_sntp(void)
+// Periodic callback for SNTP sync
+static esp_err_t sntp_sync_periodic_callback(void)
 {
-    ESP_LOGI(TAG, "Initializing SNTP");
+    ESP_LOGI(TAG, "Periodic SNTP sync triggered");
 
-    // Set timezone to UTC (you can change this to your local timezone)
-    // Format: "TZ=<timezone>" e.g., "PST8PDT,M3.2.0/2,M11.1.0" for Pacific Time
-    setenv("TZ", "UTC0", 1);
-    tzset();
-
-    // Initialize SNTP
-    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "pool.ntp.org");
-    esp_sntp_setservername(1, "time.google.com");
+    // Force SNTP to sync again
+    esp_sntp_stop();
     esp_sntp_init();
 
-    // Wait for time to be set
+    // Wait briefly for sync (non-blocking approach)
     time_t now = 0;
     struct tm timeinfo = {0};
     int retry = 0;
-    const int retry_count = 10;
+    const int retry_count = 5;  // Shorter timeout for periodic sync
 
-    while (timeinfo.tm_year < (2020 - 1900) && ++retry < retry_count) {
-        ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
-        vTaskDelay(pdMS_TO_TICKS(2000));
+    while (timeinfo.tm_year < (2025 - 1900) && ++retry < retry_count) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
         time(&now);
         localtime_r(&now, &timeinfo);
     }
 
-    if (timeinfo.tm_year < (2020 - 1900)) {
-        ESP_LOGW(TAG, "Failed to synchronize time via SNTP");
-    } else {
+    if (timeinfo.tm_year >= (2025 - 1900)) {
         char strftime_buf[64];
         strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-        ESP_LOGI(TAG, "System time synchronized: %s", strftime_buf);
+        ESP_LOGI(TAG, "SNTP sync successful: %s", strftime_buf);
+        return ESP_OK;
+    } else {
+        ESP_LOGW(TAG, "SNTP sync timeout, will retry next period");
+        return ESP_ERR_TIMEOUT;
     }
 }
 
@@ -232,8 +227,6 @@ void deep_sleep_wake_main(void)
         if (connect_to_wifi_with_timeout(60)) {
             wifi_connected = true;
             ESP_LOGI(TAG, "WiFi connected");
-            // Synchronize system time via SNTP
-            initialize_sntp();
         } else {
             ESP_LOGW(TAG, "WiFi connection timeout");
         }
@@ -241,15 +234,14 @@ void deep_sleep_wake_main(void)
 
     // Start HTTP server for 10 seconds to allow config modifications
     if (wifi_connected && ha_configured) {
-        ESP_LOGI(TAG, "Starting HTTP server for 10 seconds before sleep");
-        // Reset auto-sleep timer to prevent device goes into deep sleep
         power_manager_reset_sleep_timer();
 
-        // Check for OTA updates once a day if WiFi is connected
-        if (ota_should_check_daily()) {
-            ESP_LOGI(TAG, "Performing daily OTA check");
-            ota_check_for_update(NULL, 30);
-        }
+        // Check and run periodic tasks (OTA check, SNTP sync if due)
+        ESP_LOGI(TAG, "Checking periodic tasks...");
+        periodic_tasks_check_and_run();
+
+        ESP_LOGI(TAG, "Starting HTTP server for 10 seconds before sleep");
+        power_manager_reset_sleep_timer();
 
         // Start mDNS service so HA can resolve photoframe.local
         ESP_ERROR_CHECK(mdns_service_init());
@@ -355,6 +347,15 @@ void app_main(void)
 
     ESP_ERROR_CHECK(config_manager_init());
 
+    // Initialize periodic tasks system
+    ESP_LOGI(TAG, "Initializing periodic tasks...");
+    ESP_ERROR_CHECK(periodic_tasks_init());
+
+    // Register SNTP sync as a daily task
+    ESP_ERROR_CHECK(
+        periodic_tasks_register("sntp_sync", sntp_sync_periodic_callback, 24 * 60 * 60));
+    ESP_LOGI(TAG, "Registered SNTP sync as daily task");
+
     ESP_ERROR_CHECK(image_processor_init());
 
     ESP_ERROR_CHECK(display_manager_init());
@@ -446,8 +447,9 @@ void app_main(void)
     }
 
     if (connect_to_wifi_with_timeout(30)) {
-        // Synchronize system time via SNTP
-        initialize_sntp();
+        // Check and run periodic tasks (OTA check, SNTP sync if due)
+        ESP_LOGI(TAG, "Checking periodic tasks...");
+        periodic_tasks_check_and_run();
 
         // Start mDNS service
         ESP_ERROR_CHECK(mdns_service_init());
