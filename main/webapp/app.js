@@ -1402,6 +1402,18 @@ async function loadConfig() {
     document.getElementById("deviceName").value =
       data.device_name || "PhotoFrame";
 
+    // Load timezone - parse from POSIX format (e.g., "UTC-8" -> 8, "UTC+5:30" -> -5.5)
+    const timezone = data.timezone || "UTC0";
+    let offset = 0;
+    const match = timezone.match(/UTC([+-]?)(\d+)(?::(\d+))?/);
+    if (match) {
+      const sign = match[1] === "-" ? 1 : -1; // POSIX format is inverted
+      const hours = parseInt(match[2]) || 0;
+      const minutes = parseInt(match[3]) || 0;
+      offset = sign * (hours + minutes / 60);
+    }
+    document.getElementById("timezoneOffset").value = offset;
+
     // Set rotation mode based on backend config
     const rotationMode = data.rotation_mode || "sdcard";
     if (rotationMode === "url") {
@@ -1492,9 +1504,27 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
 
   const deviceName = document.getElementById("deviceName").value;
 
+  // Convert UTC offset to POSIX timezone format
+  // POSIX format is inverted: UTC-8 means 8 hours ahead (e.g., Asia)
+  const offsetValue =
+    parseFloat(document.getElementById("timezoneOffset").value) || 0;
+  let timezone = "UTC0";
+  if (offsetValue !== 0) {
+    const absOffset = Math.abs(offsetValue);
+    const hours = Math.floor(absOffset);
+    const minutes = Math.round((absOffset - hours) * 60);
+    const sign = offsetValue > 0 ? "-" : "+"; // Inverted for POSIX
+
+    if (minutes === 0) {
+      timezone = `UTC${sign}${hours}`;
+    } else {
+      timezone = `UTC${sign}${hours}:${String(minutes).padStart(2, "0")}`;
+    }
+  }
+
   try {
     const response = await fetch(`${API_BASE}/api/config`, {
-      method: "POST",
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
@@ -1512,6 +1542,7 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
         sleep_schedule_start: sleepScheduleStart,
         sleep_schedule_end: sleepScheduleEnd,
         device_name: deviceName,
+        timezone: timezone,
       }),
     });
 

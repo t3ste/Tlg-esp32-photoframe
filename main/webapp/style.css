@@ -291,20 +291,42 @@ header h1 {
 
 .form-group input[type="number"],
 .form-group input[type="text"],
-.form-group input[type="url"] {
+.form-group input[type="url"],
+.form-group input[type="time"] {
     width: 100%;
     padding: 10px;
     border: 2px solid #e0e0e0;
     border-radius: 6px;
     font-size: 1rem;
     transition: border-color 0.3s ease;
+    line-height: 1.5;
 }
 
 .form-group input[type="number"]:focus,
 .form-group input[type="text"]:focus,
-.form-group input[type="url"]:focus {
+.form-group input[type="url"]:focus,
+.form-group input[type="time"]:focus {
     outline: none;
     border-color: #667eea;
+}
+
+.time-input-group {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.time-input-field {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.time-input-label {
+    font-weight: 500;
+    color: #666;
+    white-space: nowrap;
 }
 
 .form-group input[type="checkbox"] {

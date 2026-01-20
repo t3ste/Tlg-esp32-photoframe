@@ -21,6 +21,7 @@ static display_orientation_t display_orientation = DISPLAY_ORIENTATION_LANDSCAPE
 static bool sleep_schedule_enabled = false;
 static int sleep_schedule_start = 1380;  // Minutes since midnight (23:00 = 23*60)
 static int sleep_schedule_end = 420;     // Minutes since midnight (07:00 = 7*60)
+static char tz_string[TIMEZONE_MAX_LEN] = {0};
 
 esp_err_t config_manager_init(void)
 {
@@ -122,8 +123,45 @@ esp_err_t config_manager_init(void)
             ESP_LOGI(TAG, "No device name in NVS, using default: %s", device_name);
         }
 
+        size_t tz_len = TIMEZONE_MAX_LEN;
+        if (nvs_get_str(nvs_handle, NVS_TIMEZONE_KEY, tz_string, &tz_len) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded timezone from NVS: %s", tz_string);
+        } else {
+            // Set default timezone if not configured
+            strncpy(tz_string, DEFAULT_TIMEZONE, TIMEZONE_MAX_LEN - 1);
+            tz_string[TIMEZONE_MAX_LEN - 1] = '\0';
+            ESP_LOGI(TAG, "No timezone in NVS, using default: %s", tz_string);
+        }
+
         nvs_close(nvs_handle);
     }
+
+    // Apply timezone setting
+    setenv("TZ", tz_string, 1);
+    tzset();
+    ESP_LOGI(TAG, "Timezone set to: %s", tz_string);
+
+    // Log current system time in local timezone
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    char strftime_buf[64];
+    strftime(strftime_buf, sizeof(strftime_buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+
+    // Calculate UTC offset for display
+    struct tm utc_timeinfo;
+    gmtime_r(&now, &utc_timeinfo);
+    int offset_hours = timeinfo.tm_hour - utc_timeinfo.tm_hour;
+    int offset_mins = timeinfo.tm_min - utc_timeinfo.tm_min;
+
+    // Handle day boundary crossing
+    if (offset_hours > 12)
+        offset_hours -= 24;
+    if (offset_hours < -12)
+        offset_hours += 24;
+
+    ESP_LOGI(TAG, "System time: %s (UTC%+d:%02d)", strftime_buf, offset_hours, abs(offset_mins));
 
     ESP_LOGI(TAG, "Config manager initialized");
     return ESP_OK;
@@ -399,4 +437,32 @@ bool config_manager_is_in_sleep_schedule(void)
         // Schedule within same day
         return current_minutes >= sleep_schedule_start && current_minutes < sleep_schedule_end;
     }
+}
+
+void config_manager_set_timezone(const char *tz)
+{
+    if (tz == NULL) {
+        return;
+    }
+
+    strncpy(tz_string, tz, TIMEZONE_MAX_LEN - 1);
+    tz_string[TIMEZONE_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_TIMEZONE_KEY, tz_string);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    // Apply timezone immediately
+    setenv("TZ", tz_string, 1);
+    tzset();
+
+    ESP_LOGI(TAG, "Timezone set to: %s", tz_string);
+}
+
+const char *config_manager_get_timezone(void)
+{
+    return tz_string;
 }

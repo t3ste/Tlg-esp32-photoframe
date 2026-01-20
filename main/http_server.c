@@ -1119,6 +1119,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         int sleep_schedule_start = config_manager_get_sleep_schedule_start();
         int sleep_schedule_end = config_manager_get_sleep_schedule_end();
         const char *device_name = config_manager_get_device_name();
+        const char *timezone = config_manager_get_timezone();
 
         cJSON *root = cJSON_CreateObject();
         cJSON_AddNumberToObject(root, "rotate_interval", rotate_interval);
@@ -1137,6 +1138,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddNumberToObject(root, "sleep_schedule_start", sleep_schedule_start);
         cJSON_AddNumberToObject(root, "sleep_schedule_end", sleep_schedule_end);
         cJSON_AddStringToObject(root, "device_name", device_name ? device_name : "PhotoFrame");
+        cJSON_AddStringToObject(root, "timezone", timezone ? timezone : "UTC0");
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -1146,7 +1148,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_Delete(root);
 
         return ESP_OK;
-    } else if (req->method == HTTP_POST) {
+    } else if (req->method == HTTP_POST || req->method == HTTP_PATCH) {
         char buf[512];
         int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
         if (ret <= 0) {
@@ -1247,6 +1249,12 @@ static esp_err_t config_handler(httpd_req_t *req)
                 config_manager_set_device_name(new_name);
                 mdns_service_update_hostname();
             }
+        }
+
+        cJSON *timezone_obj = cJSON_GetObjectItem(root, "timezone");
+        if (timezone_obj && cJSON_IsString(timezone_obj)) {
+            const char *tz = cJSON_GetStringValue(timezone_obj);
+            config_manager_set_timezone(tz);
         }
 
         cJSON_Delete(root);
@@ -2122,6 +2130,12 @@ esp_err_t http_server_init(void)
         httpd_uri_t config_post_uri = {
             .uri = "/api/config", .method = HTTP_POST, .handler = config_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &config_post_uri);
+
+        httpd_uri_t config_patch_uri = {.uri = "/api/config",
+                                        .method = HTTP_PATCH,
+                                        .handler = config_handler,
+                                        .user_ctx = NULL};
+        httpd_register_uri_handler(server, &config_patch_uri);
 
         httpd_uri_t battery_uri = {.uri = "/api/battery",
                                    .method = HTTP_GET,

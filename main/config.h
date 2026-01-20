@@ -26,12 +26,14 @@ typedef enum {
 #define IMAGE_URL_MAX_LEN 256
 #define HA_URL_MAX_LEN 256
 #define ROTATION_MODE_MAX_LEN 16
+#define TIMEZONE_MAX_LEN 64
 
 #define DEFAULT_DEVICE_NAME "PhotoFrame"
 #define DEFAULT_WIFI_SSID "PhotoFrame"
 #define DEFAULT_WIFI_PASSWORD "photoframe123"
 #define DEFAULT_IMAGE_URL "https://loremflickr.com/800/480"
 #define DEFAULT_HA_URL ""
+#define DEFAULT_TIMEZONE "UTC0"
 
 #define SDCARD_MOUNT_POINT "/sdcard"
 #define IMAGE_DIRECTORY "/sdcard/images"
@@ -73,6 +75,7 @@ typedef enum {
 #define NVS_SLEEP_SCHEDULE_ENABLED_KEY "sleep_sched_en"
 #define NVS_SLEEP_SCHEDULE_START_KEY "sleep_start"
 #define NVS_SLEEP_SCHEDULE_END_KEY "sleep_end"
+#define NVS_TIMEZONE_KEY "timezone"
 
 // OTA Configuration
 #define GITHUB_API_URL "https://api.github.com/repos/aitjcize/esp32-photoframe/releases/latest"

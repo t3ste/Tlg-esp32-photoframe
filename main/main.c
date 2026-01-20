@@ -43,8 +43,11 @@ static esp_err_t sntp_sync_periodic_callback(void)
 {
     ESP_LOGI(TAG, "Periodic SNTP sync triggered");
 
-    // Force SNTP to sync again
+    // Force SNTP to sync again (timezone is already set by config_manager)
     esp_sntp_stop();
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_setservername(1, "time.google.com");
     esp_sntp_init();
 
     // Wait briefly for sync (non-blocking approach)

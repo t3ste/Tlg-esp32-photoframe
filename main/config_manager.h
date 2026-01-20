@@ -46,4 +46,7 @@ int config_manager_get_sleep_schedule_end(void);
 
 bool config_manager_is_in_sleep_schedule(void);
 
+void config_manager_set_timezone(const char *tz);
+const char *config_manager_get_timezone(void);
+
 #endif
