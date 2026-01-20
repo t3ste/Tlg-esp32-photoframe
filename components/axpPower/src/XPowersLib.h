@@ -46,12 +46,11 @@ typedef PowersSY6970 XPowersPPM;
 #include "PowersBQ25896.tpp"
 typedef PowersBQ25896 XPowersPPM;
 #else
+#include "PowersSY6970.tpp"
 #include "XPowersAXP192.tpp"
 #include "XPowersAXP202.tpp"
 #include "XPowersAXP2101.tpp"
-#include "PowersSY6970.tpp"
 #endif
 
 #include "PowerDeliveryHUSB238.hpp"
-
 #include "XPowersLib_Version.h"

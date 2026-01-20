@@ -5,9 +5,11 @@
 # On Ubuntu: sudo apt-get install clang-format-18
 CLANG_FORMAT := $(shell which clang-format-18 2>/dev/null || which /opt/homebrew/opt/llvm@18/bin/clang-format 2>/dev/null || echo clang-format)
 
-# Find all C and H files in main/ directory only
-# Exclude components/ (vendor library code), build/, managed_components/, etc.
-C_FILES := $(shell find main -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null)
+# Find all C and H files in main/ and components/ directories
+# Exclude vendor libraries: epaper_src, epaper_port, axpPower, ListLib, sdcard_bsp
+# Exclude build/, managed_components/, etc.
+C_FILES := $(shell find main -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null) \
+	   $(shell find components -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null)
 
 # Find all JS files in main/webapp/ and process-cli/ directories
 JS_FILES := $(shell find main/webapp process-cli -type f -name "*.js" 2>/dev/null | grep -v node_modules)
