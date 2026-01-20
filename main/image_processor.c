@@ -47,15 +47,15 @@ static void load_calibrated_palette(void)
     color_palette_t cal_palette;
     if (color_palette_load(&cal_palette) == ESP_OK) {
         palette_measured[0] =
-            (rgb_t) {cal_palette.black.r, cal_palette.black.g, cal_palette.black.b};
+            (rgb_t){cal_palette.black.r, cal_palette.black.g, cal_palette.black.b};
         palette_measured[1] =
-            (rgb_t) {cal_palette.white.r, cal_palette.white.g, cal_palette.white.b};
+            (rgb_t){cal_palette.white.r, cal_palette.white.g, cal_palette.white.b};
         palette_measured[2] =
-            (rgb_t) {cal_palette.yellow.r, cal_palette.yellow.g, cal_palette.yellow.b};
-        palette_measured[3] = (rgb_t) {cal_palette.red.r, cal_palette.red.g, cal_palette.red.b};
-        palette_measured[5] = (rgb_t) {cal_palette.blue.r, cal_palette.blue.g, cal_palette.blue.b};
+            (rgb_t){cal_palette.yellow.r, cal_palette.yellow.g, cal_palette.yellow.b};
+        palette_measured[3] = (rgb_t){cal_palette.red.r, cal_palette.red.g, cal_palette.red.b};
+        palette_measured[5] = (rgb_t){cal_palette.blue.r, cal_palette.blue.g, cal_palette.blue.b};
         palette_measured[6] =
-            (rgb_t) {cal_palette.green.r, cal_palette.green.g, cal_palette.green.b};
+            (rgb_t){cal_palette.green.r, cal_palette.green.g, cal_palette.green.b};
         ESP_LOGI(TAG, "Loaded calibrated color palette from NVS");
     } else {
         ESP_LOGI(TAG, "Using default color palette");

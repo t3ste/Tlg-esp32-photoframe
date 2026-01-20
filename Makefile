@@ -1,5 +1,10 @@
 .PHONY: format format-check format-diff test help
 
+# Use clang-format-18 for consistency with CI
+# On macOS: brew install llvm@18 && brew link llvm@18
+# On Ubuntu: sudo apt-get install clang-format-18
+CLANG_FORMAT := $(shell which clang-format-18 2>/dev/null || which /opt/homebrew/opt/llvm@18/bin/clang-format 2>/dev/null || echo clang-format)
+
 # Find all C and H files in main/ directory only
 # Exclude components/ (vendor library code), build/, managed_components/, etc.
 C_FILES := $(shell find main -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null)
@@ -20,7 +25,7 @@ help:
 
 format:
 	@echo "Formatting C/H files..."
-	@clang-format -i $(C_FILES)
+	@$(CLANG_FORMAT) -i $(C_FILES)
 	@echo "Done! Formatted $(words $(C_FILES)) C/H files."
 	@echo "Formatting JS files..."
 	@npx prettier --write $(JS_FILES)
@@ -35,7 +40,7 @@ format:
 
 format-check:
 	@echo "Checking C/H files formatting..."
-	@clang-format --dry-run --Werror $(C_FILES)
+	@$(CLANG_FORMAT) --dry-run --Werror $(C_FILES)
 	@echo "Checking JS files formatting..."
 	@npx prettier --check $(JS_FILES)
 	@if [ -n "$(PY_FILES)" ]; then \
@@ -49,7 +54,7 @@ format-diff:
 	@echo "Showing formatting differences for C/H files..."
 	@for file in $(C_FILES); do \
 		echo "=== $$file ==="; \
-		clang-format "$$file" | diff -u "$$file" - || true; \
+		$(CLANG_FORMAT) "$$file" | diff -u "$$file" - || true; \
 	done
 	@echo "Showing formatting differences for JS files..."
 	@for file in $(JS_FILES); do \
