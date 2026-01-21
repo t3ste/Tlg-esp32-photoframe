@@ -374,55 +374,43 @@ void app_main(void)
         ESP_LOGW(TAG, "PCF85063 RTC initialization failed (RTC may not be present)");
     }
 
-    // Validate and restore time from RTCs
-    ESP_LOGI(TAG, "Validating system time...");
-    time_t now;
-    struct tm timeinfo;
-    time(&now);
-    localtime_r(&now, &timeinfo);
+    // Always restore time from external RTC (internal RTC is inaccurate)
+    ESP_LOGI(TAG, "Checking external RTC for time restoration...");
+    bool time_restored = false;
 
-    bool internal_rtc_valid = (timeinfo.tm_year >= (2025 - 1900));
+    if (pcf85063_is_available()) {
+        time_t external_time;
+        esp_err_t ret = pcf85063_read_time(&external_time);
+        if (ret == ESP_OK) {
+            struct tm external_timeinfo;
+            localtime_r(&external_time, &external_timeinfo);
 
-    if (internal_rtc_valid) {
-        char strftime_buf[64];
-        strftime(strftime_buf, sizeof(strftime_buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
-        ESP_LOGI(TAG, "Internal RTC time valid: %s", strftime_buf);
-    } else {
-        ESP_LOGW(TAG, "Internal RTC time invalid (year %d), checking external RTC...",
-                 timeinfo.tm_year + 1900);
-
-        // Try to restore from external RTC
-        if (pcf85063_is_available()) {
-            time_t external_time;
-            esp_err_t ret = pcf85063_read_time(&external_time);
-            if (ret == ESP_OK) {
-                struct tm external_timeinfo;
-                localtime_r(&external_time, &external_timeinfo);
-
-                if (external_timeinfo.tm_year >= (2025 - 1900)) {
-                    // External RTC has valid time, restore it
-                    struct timeval tv = {.tv_sec = external_time, .tv_usec = 0};
-                    settimeofday(&tv, NULL);
-                    ESP_LOGI(TAG, "Restored time from external RTC: %04d-%02d-%02d %02d:%02d:%02d",
-                             external_timeinfo.tm_year + 1900, external_timeinfo.tm_mon + 1,
-                             external_timeinfo.tm_mday, external_timeinfo.tm_hour,
-                             external_timeinfo.tm_min, external_timeinfo.tm_sec);
-                    internal_rtc_valid = true;
-                } else {
-                    ESP_LOGW(TAG, "External RTC time also invalid (year %d)",
-                             external_timeinfo.tm_year + 1900);
-                }
+            if (external_timeinfo.tm_year >= (2025 - 1900)) {
+                // External RTC has valid time, restore it
+                struct timeval tv = {.tv_sec = external_time, .tv_usec = 0};
+                settimeofday(&tv, NULL);
+                ESP_LOGI(TAG, "Restored time from external RTC: %04d-%02d-%02d %02d:%02d:%02d",
+                         external_timeinfo.tm_year + 1900, external_timeinfo.tm_mon + 1,
+                         external_timeinfo.tm_mday, external_timeinfo.tm_hour,
+                         external_timeinfo.tm_min, external_timeinfo.tm_sec);
+                time_restored = true;
             } else {
-                ESP_LOGW(TAG, "Failed to read external RTC: %s", esp_err_to_name(ret));
+                ESP_LOGW(TAG, "External RTC time invalid (year %d)",
+                         external_timeinfo.tm_year + 1900);
             }
+        } else {
+            ESP_LOGW(TAG, "Failed to read external RTC: %s", esp_err_to_name(ret));
         }
+    } else {
+        ESP_LOGW(TAG, "External RTC not available");
+    }
 
-        if (!internal_rtc_valid) {
-            ESP_LOGW(TAG,
-                     "No valid RTC time available, will force SNTP sync after WiFi connection");
-            // Force SNTP sync to run on next periodic_tasks_check_and_run()
-            periodic_tasks_force_run(SNTP_TASK_NAME);
-        }
+    // If external RTC failed or invalid, force SNTP sync (don't trust internal RTC)
+    if (!time_restored) {
+        ESP_LOGW(TAG,
+                 "External RTC unavailable/invalid, will force SNTP sync after WiFi connection");
+        // Force SNTP sync to run on next periodic_tasks_check_and_run()
+        periodic_tasks_force_run(SNTP_TASK_NAME);
     }
 
     // Initialize periodic tasks system
