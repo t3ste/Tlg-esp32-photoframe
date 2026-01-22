@@ -154,8 +154,8 @@ UBYTE GUI_ReadPng_RGB_6Color(const char *path, UWORD Xstart, UWORD Ystart)
                 color = 1;  // Default to white for unknown colors
             }
 
-            // Paint pixel directly
-            Paint_SetPixel(Xstart + x, Ystart + (height - y - 1), color);
+            // Paint pixel directly (Paint rotation system handles coordinate transformations)
+            Paint_SetPixel(Xstart + x, Ystart + y, color);
         }
     }
 
