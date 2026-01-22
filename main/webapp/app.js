@@ -1,12 +1,12 @@
 import {
+  PALETTE_MEASURED,
+  PALETTE_THEORETICAL,
   processImage,
-  applyExposure,
-  applyContrast,
-  applySaturation,
-  applyScurveTonemap,
+  rotate90Clockwise,
   applyExifOrientation,
   resizeImageCover,
   generateThumbnail,
+  createPNG,
 } from "./image-processor.js";
 
 const API_BASE = "";
@@ -340,8 +340,17 @@ function displayImages() {
 
     const thumbnail = document.createElement("img");
     thumbnail.className = "image-thumbnail";
-    // Convert .bmp to .jpg for thumbnail
-    const thumbnailName = image.name.replace(/\.bmp$/i, ".jpg");
+
+    // Use thumbnail field if provided by API (when JPG thumbnail exists), otherwise use the image itself
+    let thumbnailName;
+    if (image.thumbnail) {
+      // API provided thumbnail filename (JPG exists for this image)
+      thumbnailName = image.thumbnail;
+    } else {
+      // Fallback: use the image name itself (for legacy images without thumbnails)
+      thumbnailName = image.name;
+    }
+
     // Use album/filename format
     const thumbnailPath = `${selectedAlbum}/${thumbnailName}`;
     thumbnail.src = `${API_BASE}/api/image?name=${encodeURIComponent(thumbnailPath)}`;
@@ -539,62 +548,9 @@ async function resizeImage(file, maxWidth, maxHeight, quality) {
   });
 }
 
-// Convert canvas to 24-bit BMP blob (required by ESP32 GUI_ReadBmp_RGB_6Color)
-async function canvasToBMP(canvas) {
-  const width = canvas.width;
-  const height = canvas.height;
-  const ctx = canvas.getContext("2d");
-  const imageData = ctx.getImageData(0, 0, width, height);
-
-  // BMP file structure for 24-bit RGB
-  const rowSize = width * 3; // 3 bytes per pixel (RGB)
-  const rowPadding = (4 - (rowSize % 4)) % 4; // Rows must be padded to 4-byte boundary
-  const paddedRowSize = rowSize + rowPadding;
-  const pixelDataSize = paddedRowSize * height;
-  const fileSize = 54 + pixelDataSize; // Header (54) + Pixel data (no color table for 24-bit)
-
-  const buffer = new ArrayBuffer(fileSize);
-  const view = new DataView(buffer);
-  const bytes = new Uint8Array(buffer);
-
-  // BMP Header (14 bytes)
-  view.setUint16(0, 0x4d42, true); // "BM"
-  view.setUint32(2, fileSize, true); // File size
-  view.setUint32(6, 0, true); // Reserved
-  view.setUint32(10, 54, true); // Pixel data offset (54 bytes, no color table)
-
-  // DIB Header (40 bytes)
-  view.setUint32(14, 40, true); // DIB header size
-  view.setInt32(18, width, true); // Width
-  view.setInt32(22, height, true); // Height (positive = bottom-up)
-  view.setUint16(26, 1, true); // Planes
-  view.setUint16(28, 24, true); // Bits per pixel (24-bit RGB)
-  view.setUint32(30, 0, true); // Compression (none)
-  view.setUint32(34, pixelDataSize, true); // Image size
-  view.setInt32(38, 2835, true); // X pixels per meter (72 DPI)
-  view.setInt32(42, 2835, true); // Y pixels per meter (72 DPI)
-  view.setUint32(46, 0, true); // Colors in palette (0 for 24-bit)
-  view.setUint32(50, 0, true); // Important colors (0 = all)
-
-  // Pixel data (24-bit RGB, stored bottom-up, BGR order)
-  let offset = 54;
-  for (let y = height - 1; y >= 0; y--) {
-    // Bottom-up: start from last row
-    for (let x = 0; x < width; x++) {
-      const pixelIndex = (y * width + x) * 4;
-      // BMP uses BGR order, not RGB
-      bytes[offset++] = imageData.data[pixelIndex + 2]; // B
-      bytes[offset++] = imageData.data[pixelIndex + 1]; // G
-      bytes[offset++] = imageData.data[pixelIndex + 0]; // R
-    }
-
-    // Add row padding
-    for (let p = 0; p < rowPadding; p++) {
-      bytes[offset++] = 0;
-    }
-  }
-
-  return new Blob([buffer], { type: "image/bmp" });
+// Convert canvas to PNG blob - wrapper for createPNG from image-processor.js
+async function canvasToPNG(canvas) {
+  return createPNG(canvas);
 }
 
 async function loadImagePreview(file) {
@@ -1296,6 +1252,9 @@ document
       deviceCanvas.height = 480;
       const deviceCtx = deviceCanvas.getContext("2d");
 
+      // Disable image smoothing to preserve exact pixel colors
+      deviceCtx.imageSmoothingEnabled = false;
+
       // Check if image is portrait (needs rotation)
       const isPortrait = tempCanvas.width < tempCanvas.height;
 
@@ -1309,12 +1268,12 @@ document
         deviceCtx.drawImage(tempCanvas, 0, 0);
       }
 
-      // Convert the 800x480 canvas to 24-bit BMP
-      const bmpBlob = await canvasToBMP(deviceCanvas);
+      // Convert the 800x480 canvas to PNG
+      const pngBlob = await canvasToPNG(deviceCanvas);
 
-      // Generate filename with .bmp extension
+      // Generate filename with .png extension
       const originalName = currentImageFile.name.replace(/\.[^/.]+$/, "");
-      const bmpFilename = `${originalName}.bmp`;
+      const pngFilename = `${originalName}.png`;
 
       // Create thumbnail (320x192 or 192x320) from original using shared function
       const thumbnailBlob = await new Promise((resolve, reject) => {
@@ -1343,16 +1302,17 @@ document
       });
 
       const formData = new FormData();
-      // Send album name and files (BMP is already dithered, no processing needed on device)
-      formData.append("album", selectedAlbum);
-      formData.append("image", bmpBlob, bmpFilename);
+      // Send files (PNG is already dithered, will be saved directly on device)
+      formData.append("image", pngBlob, pngFilename);
       formData.append(
         "thumbnail",
         thumbnailBlob,
         "thumb_" + currentImageFile.name,
       );
 
-      const response = await fetch(`${API_BASE}/api/upload`, {
+      // Send album as URL query parameter
+      const uploadUrl = `${API_BASE}/api/upload?album=${encodeURIComponent(selectedAlbum)}`;
+      const response = await fetch(uploadUrl, {
         method: "POST",
         body: formData,
       });

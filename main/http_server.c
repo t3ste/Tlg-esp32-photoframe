@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "album_manager.h"
@@ -101,31 +102,33 @@ static esp_err_t measurement_sample_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static esp_err_t upload_image_handler(httpd_req_t *req)
+// Shared multipart parsing helper
+typedef struct {
+    char image_path[512];
+    char thumbnail_path[512];
+    char original_filename[256];  // Original filename from upload
+    bool has_image;
+    bool has_thumbnail;
+} multipart_result_t;
+
+static esp_err_t parse_multipart_upload(httpd_req_t *req, const char *base_dir,
+                                        const char *image_filename, const char *thumb_filename,
+                                        multipart_result_t *result, bool require_png)
 {
-    if (!system_ready) {
-        httpd_resp_set_status(req, HTTPD_503);
-        httpd_resp_sendstr(req, "System is still initializing");
-        return ESP_FAIL;
-    }
+    result->has_image = false;
+    result->has_thumbnail = false;
 
-    power_manager_reset_sleep_timer();
-
-    char *buf = malloc(4096);  // 4KB buffer - balance between performance and memory usage
+    char *buf = malloc(4096);
     if (!buf) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
         return ESP_FAIL;
     }
 
-    int buf_len = 0;  // Current data in buffer
+    int buf_len = 0;
     int remaining = req->content_len;
 
-    ESP_LOGI(TAG, "Upload started, content length: %d", remaining);
-
     char boundary[128] = {0};
-    size_t hdr_buf_len = sizeof(boundary);
-
-    if (httpd_req_get_hdr_value_str(req, "Content-Type", boundary, hdr_buf_len) != ESP_OK) {
+    if (httpd_req_get_hdr_value_str(req, "Content-Type", boundary, sizeof(boundary)) != ESP_OK) {
         free(buf);
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No Content-Type header");
         return ESP_FAIL;
@@ -148,34 +151,21 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
         boundary_end = boundary_start + strlen(boundary_start);
 
     int boundary_value_len = boundary_end - boundary_start;
-
-    // HTTP spec: actual boundary in data = "--" + boundary from header
     snprintf(boundary, sizeof(boundary), "--%.*s", boundary_value_len, boundary_start);
     int full_boundary_len = strlen(boundary);
 
-    char filename[64] = {0};
     char current_field[64] = {0};
-    char album_name[128] = DEFAULT_ALBUM_NAME;
     bool header_parsed = false;
-    int file_count = 0;
-
     FILE *fp = NULL;
-    char temp_fullsize_path[512];
-    char temp_thumb_path[512];
-    char final_bmp_path[512];
-    char final_thumb_path[512];
-    char album_path[256];
 
     while (remaining > 0 || buf_len > 0) {
-        // Read more data if buffer has space and there's data remaining
         if (remaining > 0 && buf_len < 2048) {
             int to_read = MIN(remaining, 4096 - buf_len);
             int received = httpd_req_recv(req, buf + buf_len, to_read);
 
             if (received <= 0) {
-                if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+                if (received == HTTPD_SOCK_ERR_TIMEOUT)
                     continue;
-                }
                 if (fp)
                     fclose(fp);
                 free(buf);
@@ -188,7 +178,6 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
         }
 
         if (!header_parsed) {
-            // Parse headers
             char *name_start = strstr(buf, "name=\"");
             if (name_start && name_start < buf + buf_len) {
                 name_start += 6;
@@ -207,93 +196,62 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
                 if (filename_end && filename_end < buf + buf_len) {
                     int name_len = filename_end - filename_start;
 
-                    if (file_count == 0) {
-                        strncpy(filename, filename_start, MIN(name_len, sizeof(filename) - 1));
-                        filename[MIN(name_len, sizeof(filename) - 1)] = '\0';
-
-                        char *ext = strrchr(filename, '.');
-                        if (!ext || strcasecmp(ext, ".bmp") != 0) {
-                            if (fp)
-                                fclose(fp);
-                            free(buf);
-                            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                                                "Only BMP files are allowed");
-                            return ESP_FAIL;
-                        }
-                    }
-
                     if (strcmp(current_field, "image") == 0) {
-                        album_manager_get_album_path(album_name, album_path, sizeof(album_path));
+                        // Capture original filename
+                        strncpy(result->original_filename, filename_start,
+                                MIN(name_len, sizeof(result->original_filename) - 1));
+                        result->original_filename[MIN(
+                            name_len, sizeof(result->original_filename) - 1)] = '\0';
 
-                        // Ensure album directory exists
-                        struct stat st;
-                        if (stat(album_path, &st) != 0) {
-                            ESP_LOGI(TAG, "Creating album directory: %s", album_path);
-                            if (mkdir(album_path, 0755) != 0) {
-                                ESP_LOGE(TAG, "Failed to create directory: %s, errno: %d",
-                                         album_path, errno);
+                        if (require_png) {
+                            // Check PNG extension for image field
+                            char *ext = strrchr(result->original_filename, '.');
+                            if (!ext || strcasecmp(ext, ".png") != 0) {
+                                if (fp)
+                                    fclose(fp);
                                 free(buf);
-                                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                                                    "Failed to create album directory");
+                                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                                    "Only PNG files are allowed");
                                 return ESP_FAIL;
                             }
                         }
 
-                        snprintf(temp_fullsize_path, sizeof(temp_fullsize_path), "%s/temp_full.bmp",
-                                 album_path);
-                        fp = fopen(temp_fullsize_path, "wb");
+                        snprintf(result->image_path, sizeof(result->image_path), "%s/%s", base_dir,
+                                 image_filename);
+                        fp = fopen(result->image_path, "wb");
                         if (!fp) {
                             free(buf);
                             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                                 "Failed to create file");
                             return ESP_FAIL;
                         }
-                        file_count++;
+                        result->has_image = true;
                     } else if (strcmp(current_field, "thumbnail") == 0) {
-                        album_manager_get_album_path(album_name, album_path, sizeof(album_path));
-                        snprintf(temp_thumb_path, sizeof(temp_thumb_path), "%s/temp_thumb.jpg",
-                                 album_path);
-                        fp = fopen(temp_thumb_path, "wb");
+                        snprintf(result->thumbnail_path, sizeof(result->thumbnail_path), "%s/%s",
+                                 base_dir, thumb_filename);
+                        fp = fopen(result->thumbnail_path, "wb");
                         if (!fp) {
                             free(buf);
                             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                                 "Failed to create file");
                             return ESP_FAIL;
                         }
-                        file_count++;
+                        result->has_thumbnail = true;
                     }
                 }
             }
 
-            // Find end of headers
             char *data_start = strstr(buf, "\r\n\r\n");
             if (data_start && data_start < buf + buf_len) {
                 data_start += 4;
                 int header_len = data_start - buf;
                 header_parsed = true;
-
-                // If this is the album field, capture its value
-                if (strcmp(current_field, "album") == 0) {
-                    char *value_end = strstr(data_start, "\r\n");
-                    if (value_end && value_end < buf + buf_len) {
-                        int value_len = value_end - data_start;
-                        if (value_len > 0 && value_len < sizeof(album_name)) {
-                            strncpy(album_name, data_start, value_len);
-                            album_name[value_len] = '\0';
-                            ESP_LOGI(TAG, "Album: %s", album_name);
-                        }
-                    }
-                }
-
-                // Move remaining data to start of buffer
                 buf_len -= header_len;
                 memmove(buf, data_start, buf_len);
             } else if (remaining == 0) {
-                // No more data coming and headers not complete
                 break;
             }
         } else {
-            // Look for boundary in current buffer
             char *boundary_pos = NULL;
             for (int i = 0; i <= buf_len - full_boundary_len; i++) {
                 if (memcmp(buf + i, boundary, full_boundary_len) == 0) {
@@ -303,7 +261,6 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
             }
 
             if (boundary_pos) {
-                // Found boundary
                 int data_len = boundary_pos - buf;
                 if (fp && data_len > 0) {
                     fwrite(buf, 1, data_len, fp);
@@ -314,17 +271,12 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
                     fp = NULL;
                 }
 
-                // Move past boundary
                 int consumed = (boundary_pos - buf) + full_boundary_len;
                 buf_len -= consumed;
                 memmove(buf, buf + consumed, buf_len);
-
-                // Reset for next part
                 header_parsed = false;
                 current_field[0] = '\0';
             } else {
-                // No boundary found yet
-                // Write data but keep last (boundary_len - 1) bytes in buffer
                 int safe_write = buf_len - (full_boundary_len - 1);
                 if (safe_write > 0 && remaining > 0) {
                     if (fp) {
@@ -333,7 +285,6 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
                     buf_len -= safe_write;
                     memmove(buf, buf + safe_write, buf_len);
                 } else if (remaining == 0 && buf_len > 0) {
-                    // No more data coming, write everything
                     if (fp) {
                         fwrite(buf, 1, buf_len, fp);
                     }
@@ -345,68 +296,150 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
 
     if (fp) {
         fclose(fp);
-        fp = NULL;
+    }
+    free(buf);
+
+    return ESP_OK;
+}
+
+static esp_err_t upload_image_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
     }
 
-    // Process uploaded files
-    if (file_count >= 2) {
-        ESP_LOGI(TAG, "Upload complete, saving BMP and thumbnail");
+    power_manager_reset_sleep_timer();
 
-        char bmp_filename[128];
-        char jpg_filename[128];
-        char filename_base[120];  // Leave room for extension
+    ESP_LOGI(TAG, "Upload started, content length: %d", req->content_len);
 
-        // Extract base filename without extension
-        strncpy(filename_base, filename, sizeof(filename_base) - 1);
-        filename_base[sizeof(filename_base) - 1] = '\0';  // Ensure null termination
-        char *ext = strrchr(filename_base, '.');
-        if (ext)
-            *ext = '\0';
+    // Get album name from query parameter, default to "Default"
+    char album_name[128] = DEFAULT_ALBUM_NAME;
+    char query[256];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char album_param[128];
+        if (httpd_query_key_value(query, "album", album_param, sizeof(album_param)) == ESP_OK) {
+            strncpy(album_name, album_param, sizeof(album_name) - 1);
+            album_name[sizeof(album_name) - 1] = '\0';
+        }
+    }
 
-        snprintf(bmp_filename, sizeof(bmp_filename), "%s.bmp", filename_base);
-        snprintf(jpg_filename, sizeof(jpg_filename), "%s.jpg", filename_base);
-        album_manager_get_album_path(album_name, album_path, sizeof(album_path));
-        snprintf(final_bmp_path, sizeof(final_bmp_path), "%s/%s", album_path, bmp_filename);
-        snprintf(final_thumb_path, sizeof(final_thumb_path), "%s/%s", album_path, jpg_filename);
+    ESP_LOGI(TAG, "Uploading to album: %s", album_name);
+    char album_path[256];
 
-        // Delete existing files if they exist (to allow overwriting)
-        unlink(final_bmp_path);
-        unlink(final_thumb_path);
-
-        // Rename temp BMP to final path (no conversion needed - already dithered)
-        if (rename(temp_fullsize_path, final_bmp_path) != 0) {
-            remove(temp_fullsize_path);
-            remove(temp_thumb_path);
-            free(buf);
-            ESP_LOGE(TAG, "Failed to rename BMP file");
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save image");
+    // Get album path and ensure directory exists
+    album_manager_get_album_path(album_name, album_path, sizeof(album_path));
+    struct stat st;
+    if (stat(album_path, &st) != 0) {
+        ESP_LOGI(TAG, "Creating album directory: %s", album_path);
+        if (mkdir(album_path, 0755) != 0) {
+            ESP_LOGE(TAG, "Failed to create directory: %s, errno: %d", album_path, errno);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                "Failed to create album directory");
             return ESP_FAIL;
         }
-
-        // Rename thumbnail JPEG
-        rename(temp_thumb_path, final_thumb_path);
-
-        ESP_LOGI(TAG, "Image saved successfully: %s (thumbnail: %s)", bmp_filename, jpg_filename);
-
-        cJSON *response = cJSON_CreateObject();
-        cJSON_AddStringToObject(response, "status", "success");
-        cJSON_AddStringToObject(response, "filename", bmp_filename);
-
-        char *json_str = cJSON_Print(response);
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_sendstr(req, json_str);
-
-        free(json_str);
-        cJSON_Delete(response);
-        free(buf);
-
-        return ESP_OK;
     }
 
-    free(buf);
-    ESP_LOGE(TAG, "Upload incomplete - expected 2 files, got %d", file_count);
-    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Incomplete upload");
-    return ESP_FAIL;
+    // Use shared multipart parser
+    multipart_result_t result;
+    esp_err_t err = parse_multipart_upload(req, album_path, "temp_full.png", "temp_thumb.jpg",
+                                           &result, true);  // require_png = true
+    if (err != ESP_OK) {
+        return ESP_FAIL;
+    }
+
+    if (!result.has_image || !result.has_thumbnail) {
+        if (result.has_image)
+            unlink(result.image_path);
+        if (result.has_thumbnail)
+            unlink(result.thumbnail_path);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                            "Upload incomplete - expected image and thumbnail");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Upload complete, saving PNG directly");
+
+    // Use original filename from upload
+    char filename_base[120];
+    char *ext = strrchr(result.original_filename, '.');
+    if (ext) {
+        int base_len = ext - result.original_filename;
+        int safe_len = MIN(base_len, (int) sizeof(filename_base) - 1);
+        snprintf(filename_base, sizeof(filename_base), "%.*s", safe_len, result.original_filename);
+    } else {
+        // Copy up to buffer size - 1 to ensure null termination
+        strncpy(filename_base, result.original_filename, sizeof(filename_base) - 1);
+        filename_base[sizeof(filename_base) - 1] = '\0';
+    }
+
+    char png_filename[128];
+    char jpg_filename[128];
+    char final_png_path[512];
+    char final_thumb_path[512];
+
+    // Handle duplicates by adding numeric suffix
+    int suffix = 0;
+    while (1) {
+        if (suffix == 0) {
+            snprintf(png_filename, sizeof(png_filename), "%s.png", filename_base);
+            snprintf(jpg_filename, sizeof(jpg_filename), "%s.jpg", filename_base);
+        } else {
+            snprintf(png_filename, sizeof(png_filename), "%s_%d.png", filename_base, suffix);
+            snprintf(jpg_filename, sizeof(jpg_filename), "%s_%d.jpg", filename_base, suffix);
+        }
+
+        snprintf(final_png_path, sizeof(final_png_path), "%s/%s", album_path, png_filename);
+        snprintf(final_thumb_path, sizeof(final_thumb_path), "%s/%s", album_path, jpg_filename);
+
+        // Check if either file exists
+        if (stat(final_png_path, &st) != 0 && stat(final_thumb_path, &st) != 0) {
+            // Neither file exists, we can use this name
+            break;
+        }
+
+        suffix++;
+        if (suffix > 999) {
+            // Safety limit to prevent infinite loop
+            ESP_LOGE(TAG, "Too many duplicate files");
+            unlink(result.image_path);
+            unlink(result.thumbnail_path);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Too many duplicate files");
+            return ESP_FAIL;
+        }
+    }
+
+    // Move PNG to final location
+    ESP_LOGI(TAG, "Saving PNG: %s -> %s", result.image_path, final_png_path);
+    if (rename(result.image_path, final_png_path) != 0) {
+        ESP_LOGE(TAG, "Failed to move PNG to album");
+        unlink(result.image_path);
+        unlink(result.thumbnail_path);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save image");
+        return ESP_FAIL;
+    }
+
+    // Move thumbnail to final location
+    if (rename(result.thumbnail_path, final_thumb_path) != 0) {
+        ESP_LOGW(TAG, "Failed to move thumbnail");
+        unlink(result.thumbnail_path);
+    }
+
+    ESP_LOGI(TAG, "Image saved successfully: %s (thumbnail: %s)", png_filename, jpg_filename);
+
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "status", "success");
+    cJSON_AddStringToObject(response, "filename", png_filename);
+
+    char *json_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(response);
+
+    return ESP_OK;
 }
 
 // URL decode helper function to handle encoded characters like %20 for space
@@ -465,25 +498,49 @@ static esp_err_t serve_image_handler(httpd_req_t *req)
     // Build full path: /sdcard/images/ + decoded_filename
     snprintf(filepath, sizeof(filepath), "%s/%s", IMAGE_DIRECTORY, decoded_filename);
 
+    // Detect content type from extension
+    char *ext = strrchr(decoded_filename, '.');
+    if (ext) {
+        if (strcasecmp(ext, ".png") == 0) {
+            content_type = "image/png";
+        } else if (strcasecmp(ext, ".bmp") == 0) {
+            content_type = "image/bmp";
+        }
+    }
+
     FILE *fp = fopen(filepath, "rb");
 
-    // If JPG doesn't exist and request was for .jpg, try .bmp fallback
+    // If JPG doesn't exist and request was for .jpg, try .png then .bmp fallback
     if (!fp) {
-        char *ext = strrchr(decoded_filename, '.');
         if (ext && strcasecmp(ext, ".jpg") == 0) {
-            // Convert .jpg to .bmp for fallback
-            char bmp_filename[256];
-            strncpy(bmp_filename, decoded_filename, sizeof(bmp_filename) - 1);
-            char *bmp_ext = strrchr(bmp_filename, '.');
-            if (bmp_ext) {
-                strcpy(bmp_ext, ".bmp");
+            // Try .png fallback first
+            char png_filename[256];
+            strncpy(png_filename, decoded_filename, sizeof(png_filename) - 1);
+            char *png_ext = strrchr(png_filename, '.');
+            if (png_ext) {
+                strcpy(png_ext, ".png");
             }
 
-            snprintf(filepath, sizeof(filepath), "%s/%s", IMAGE_DIRECTORY, bmp_filename);
+            snprintf(filepath, sizeof(filepath), "%s/%s", IMAGE_DIRECTORY, png_filename);
             fp = fopen(filepath, "rb");
             if (fp) {
-                content_type = "image/bmp";
-                ESP_LOGW(TAG, "JPG thumbnail not found, serving BMP: %s", bmp_filename);
+                content_type = "image/png";
+                ESP_LOGW(TAG, "JPG thumbnail not found, serving PNG: %s", png_filename);
+            } else {
+                // Try .bmp fallback
+                char bmp_filename[256];
+                strncpy(bmp_filename, decoded_filename, sizeof(bmp_filename) - 1);
+                char *bmp_ext = strrchr(bmp_filename, '.');
+                if (bmp_ext) {
+                    strcpy(bmp_ext, ".bmp");
+                }
+
+                snprintf(filepath, sizeof(filepath), "%s/%s", IMAGE_DIRECTORY, bmp_filename);
+                fp = fopen(filepath, "rb");
+                if (fp) {
+                    content_type = "image/bmp";
+                    ESP_LOGW(TAG, "JPG thumbnail not found, serving BMP: %s", bmp_filename);
+                }
             }
         }
     }
@@ -557,7 +614,7 @@ static esp_err_t delete_image_handler(httpd_req_t *req)
     strncpy(jpg_filename, filename_copy, sizeof(jpg_filename) - 1);
     jpg_filename[sizeof(jpg_filename) - 1] = '\0';
     char *ext = strrchr(jpg_filename, '.');
-    if (ext && strcasecmp(ext, ".bmp") == 0) {
+    if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0)) {
         strcpy(ext, ".jpg");
     }
 
@@ -699,13 +756,128 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    // Get content type to determine if it's JPG or BMP
-    char content_type[64] = {0};
+    // Get content type to determine if it's JPG, BMP, PNG, or multipart
+    char content_type[128] = {0};
     if (httpd_req_get_hdr_value_str(req, "Content-Type", content_type, sizeof(content_type)) !=
         ESP_OK) {
         strcpy(content_type, "image/jpeg");  // Default to JPEG
     }
+
+    // Check if this is a multipart upload (with optional thumbnail)
+    bool is_multipart = (strstr(content_type, "multipart/form-data") != NULL);
+
+    if (is_multipart) {
+        // Handle multipart upload with optional thumbnail using shared helper
+        multipart_result_t result;
+        const char *temp_dir = "/sdcard";
+
+        esp_err_t err = parse_multipart_upload(req, temp_dir, ".current_upload.tmp",
+                                               ".current_thumb.tmp", &result, false);
+        if (err != ESP_OK) {
+            return ESP_FAIL;
+        }
+
+        if (!result.has_image) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No image file in multipart upload");
+            return ESP_FAIL;
+        }
+
+        // Detect image type from uploaded file
+        bool upload_is_png = false;
+        bool upload_is_bmp = false;
+        FILE *test_fp = fopen(result.image_path, "rb");
+        if (test_fp) {
+            unsigned char header[8];
+            if (fread(header, 1, 8, test_fp) == 8) {
+                // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+                if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E &&
+                    header[3] == 0x47) {
+                    upload_is_png = true;
+                }
+                // BMP signature: 42 4D
+                else if (header[0] == 0x42 && header[1] == 0x4D) {
+                    upload_is_bmp = true;
+                }
+            }
+            fclose(test_fp);
+        }
+
+        const char *temp_bmp_path = CURRENT_BMP_PATH;
+        const char *temp_png_path = "/sdcard/.current.png";
+        const char *temp_jpg_path = CURRENT_JPG_PATH;
+        const char *display_path = NULL;
+
+        // Process the uploaded image
+        if (upload_is_png) {
+            unlink(temp_png_path);
+            if (rename(result.image_path, temp_png_path) != 0) {
+                ESP_LOGE(TAG, "Failed to move PNG");
+                unlink(result.image_path);
+                if (result.has_thumbnail)
+                    unlink(result.thumbnail_path);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process PNG");
+                return ESP_FAIL;
+            }
+            display_path = temp_png_path;
+        } else if (upload_is_bmp) {
+            unlink(temp_bmp_path);
+            if (rename(result.image_path, temp_bmp_path) != 0) {
+                ESP_LOGE(TAG, "Failed to move BMP");
+                unlink(result.image_path);
+                if (result.has_thumbnail)
+                    unlink(result.thumbnail_path);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process BMP");
+                return ESP_FAIL;
+            }
+            display_path = temp_bmp_path;
+        } else {
+            // Assume JPEG, convert to BMP
+            err = image_processor_convert_jpg_to_bmp(result.image_path, temp_bmp_path, false);
+            unlink(result.image_path);
+            if (err != ESP_OK) {
+                if (result.has_thumbnail)
+                    unlink(result.thumbnail_path);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                    "Failed to convert image");
+                return ESP_FAIL;
+            }
+            display_path = temp_bmp_path;
+        }
+
+        // Handle thumbnail if provided
+        if (result.has_thumbnail) {
+            unlink(temp_jpg_path);
+            if (rename(result.thumbnail_path, temp_jpg_path) != 0) {
+                ESP_LOGW(TAG, "Failed to save thumbnail");
+                unlink(result.thumbnail_path);
+            } else {
+                ESP_LOGI(TAG, "Thumbnail saved: %s", temp_jpg_path);
+            }
+        }
+
+        // Display the image
+        err = display_manager_show_image(display_path);
+        if (err != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
+            return ESP_FAIL;
+        }
+
+        // Notify HA
+        ha_notify_update();
+
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "status", "success");
+        char *json_str = cJSON_Print(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, json_str);
+        free(json_str);
+        cJSON_Delete(response);
+
+        return ESP_OK;
+    }
+
     bool upload_is_bmp = (strcmp(content_type, "image/bmp") == 0);
+    bool upload_is_png = (strcmp(content_type, "image/png") == 0);
 
     // Get content length
     size_t content_len = req->content_len;
@@ -727,18 +899,21 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Receiving %s image for direct display, size: %zu bytes (%.1f KB)",
-             upload_is_bmp ? "BMP" : "JPG", content_len, content_len / 1024.0);
+    const char *format = upload_is_bmp ? "BMP" : (upload_is_png ? "PNG" : "JPG");
+    ESP_LOGI(TAG, "Receiving %s image for direct display, size: %zu bytes (%.1f KB)", format,
+             content_len, content_len / 1024.0);
 
     // Use fixed paths for current image and thumbnail
     const char *temp_upload_path = CURRENT_UPLOAD_PATH;
     const char *temp_jpg_path = CURRENT_JPG_PATH;
     const char *temp_bmp_path = CURRENT_BMP_PATH;
+    const char *temp_png_path = "/sdcard/.current.png";
 
     // Delete old files to prevent caching issues
     unlink(temp_upload_path);
     unlink(temp_jpg_path);
     unlink(temp_bmp_path);
+    unlink(temp_png_path);
 
     // Open file for writing
     FILE *fp = fopen(temp_upload_path, "wb");
@@ -782,6 +957,8 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Image received successfully, processing...");
 
     esp_err_t err = ESP_OK;
+    const char *display_path = NULL;
+
     if (upload_is_bmp) {
         // Move uploaded BMP to temp location
         if (rename(temp_upload_path, temp_bmp_path) != 0) {
@@ -790,6 +967,17 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process BMP");
             return ESP_FAIL;
         }
+        display_path = temp_bmp_path;
+    } else if (upload_is_png) {
+        // Save PNG directly - display_manager can handle PNG now
+        if (rename(temp_upload_path, temp_png_path) != 0) {
+            ESP_LOGE(TAG, "Failed to move uploaded PNG to temp location");
+            unlink(temp_upload_path);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process PNG");
+            return ESP_FAIL;
+        }
+        display_path = temp_png_path;
+        ESP_LOGI(TAG, "PNG saved: %s", temp_png_path);
     } else {
         // Convert JPG to BMP using image processor
         err = image_processor_convert_jpg_to_bmp(temp_upload_path, temp_bmp_path, false);
@@ -812,21 +1000,23 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             }
             return ESP_FAIL;
         }
+        display_path = temp_bmp_path;
     }
 
-    // Display the BMP (use full path to bypass IMAGE_DIRECTORY prefix)
-    err = display_manager_show_image(temp_bmp_path);
+    // Display the image (PNG or BMP) - display_manager handles both
+    err = display_manager_show_image(display_path);
 
     if (err != ESP_OK) {
         unlink(temp_upload_path);
         unlink(temp_bmp_path);
+        unlink(temp_png_path);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
         return ESP_FAIL;
     }
 
-    if (upload_is_bmp) {
-        // BMP upload - no separate thumbnail
-        ESP_LOGI(TAG, "BMP image saved: %s", temp_bmp_path);
+    if (upload_is_bmp || upload_is_png) {
+        // BMP/PNG upload - no separate thumbnail
+        ESP_LOGI(TAG, "%s image displayed: %s", upload_is_bmp ? "BMP" : "PNG", display_path);
     } else {
         // JPG upload - move to thumbnail location for HA integration
         unlink(temp_jpg_path);
@@ -1030,22 +1220,26 @@ static esp_err_t current_image_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "Serving image from link: %s", image_to_serve);
 
-    // Try to serve JPG version first by replacing .bmp extension with .jpg
+    // Try to serve JPG version first by replacing .bmp/.png extension with .jpg
     char thumbnail_path[512];
     strncpy(thumbnail_path, image_to_serve, sizeof(thumbnail_path) - 1);
     thumbnail_path[sizeof(thumbnail_path) - 1] = '\0';
 
     char *ext = strrchr(thumbnail_path, '.');
-    if (ext && strcasecmp(ext, ".bmp") == 0) {
+    if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0)) {
         strcpy(ext, ".jpg");
     }
 
     FILE *fp = fopen(thumbnail_path, "rb");
 
     if (!fp) {
-        // Fall back to BMP if JPG doesn't exist
+        // Fall back to original file (BMP or PNG) if JPG doesn't exist
         fp = fopen(image_to_serve, "rb");
-        content_type = "image/bmp";
+        if (ext && strcasecmp(ext, ".png") == 0) {
+            content_type = "image/png";
+        } else {
+            content_type = "image/bmp";
+        }
 
         if (!fp) {
             httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Image not found");
@@ -1470,10 +1664,29 @@ static esp_err_t album_images_handler(httpd_req_t *req)
                 continue;
             }
             const char *ext = strrchr(entry->d_name, '.');
-            if (ext && (strcmp(ext, ".bmp") == 0 || strcmp(ext, ".BMP") == 0)) {
+            if (ext && (strcmp(ext, ".bmp") == 0 || strcmp(ext, ".BMP") == 0 ||
+                        strcmp(ext, ".png") == 0 || strcmp(ext, ".PNG") == 0)) {
                 cJSON *image_obj = cJSON_CreateObject();
                 cJSON_AddStringToObject(image_obj, "name", entry->d_name);
                 cJSON_AddStringToObject(image_obj, "album", album_name);
+
+                // Check if a corresponding JPG thumbnail exists for any image type
+                char thumbnail_name[256];
+                char thumbnail_path[512];
+
+                // Extract base name without extension
+                int base_len = ext - entry->d_name;
+                snprintf(thumbnail_name, sizeof(thumbnail_name), "%.*s.jpg", base_len,
+                         entry->d_name);
+                snprintf(thumbnail_path, sizeof(thumbnail_path), "%s/%s", album_path,
+                         thumbnail_name);
+
+                // Check if thumbnail file exists
+                struct stat st;
+                if (stat(thumbnail_path, &st) == 0) {
+                    cJSON_AddStringToObject(image_obj, "thumbnail", thumbnail_name);
+                }
+
                 cJSON_AddItemToArray(response, image_obj);
             }
         }

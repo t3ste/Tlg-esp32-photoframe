@@ -8,7 +8,7 @@ set(include_dirs
 idf_component_register(
   SRC_DIRS 
   ${src_dirs}
-  PRIV_REQUIRES driver fatfs sdmmc sdcard_bsp
+  PRIV_REQUIRES driver fatfs sdmmc sdcard_bsp espressif__libpng
   INCLUDE_DIRS 
   ${include_dirs})
 

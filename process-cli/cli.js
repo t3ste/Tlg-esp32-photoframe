@@ -4,8 +4,10 @@ import { createCanvas, loadImage } from "canvas";
 import { Command } from "commander";
 import ExifParser from "exif-parser";
 import fs from "fs";
+import FormData from "form-data";
 import heicConvert from "heic-convert";
 import http from "http";
+import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import {
@@ -15,6 +17,7 @@ import {
   applyExifOrientation,
   resizeImageCover,
   generateThumbnail,
+  createPNG,
 } from "./image-processor.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -132,6 +135,192 @@ async function fetchDevicePalette(host) {
   });
 }
 
+// Display image directly on device without saving (via /api/display-image)
+async function displayDirectly(host, pngPath, thumbPath, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      if (attempt > 1) {
+        console.log(
+          `  Retry attempt ${attempt}/${retries} after 5 second delay...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
+
+      await displayDirectlyOnce(host, pngPath, thumbPath);
+      return; // Success, exit retry loop
+    } catch (error) {
+      if (attempt === retries) {
+        throw error; // Last attempt failed, throw error
+      }
+      console.log(`  Display failed: ${error.message}`);
+    }
+  }
+}
+
+// Single direct display attempt
+function displayDirectlyOnce(host, pngPath, thumbPath) {
+  return new Promise((resolve, reject) => {
+    console.log(`Displaying image directly on device: ${host}`);
+    console.log(`  Image: ${pngPath}`);
+    console.log(`  Thumbnail: ${thumbPath}`);
+
+    const form = new FormData();
+    form.append("image", fs.createReadStream(pngPath), {
+      filename: path.basename(pngPath),
+      contentType: "image/png",
+    });
+    form.append("thumbnail", fs.createReadStream(thumbPath), {
+      filename: path.basename(thumbPath),
+      contentType: "image/jpeg",
+    });
+
+    // Use form.submit() which properly handles Content-Length
+    form
+      .submit(
+        {
+          protocol: "http:",
+          host: host,
+          port: 80,
+          path: "/api/display-image",
+          method: "POST",
+        },
+        (err, res) => {
+          if (err) {
+            reject(new Error(`Failed to submit form: ${err.message}`));
+            return;
+          }
+
+          let data = "";
+
+          res.on("data", (chunk) => {
+            data += chunk;
+          });
+
+          res.on("end", () => {
+            if (res.statusCode === 200) {
+              console.log(`✓ Image displayed successfully`);
+              resolve();
+            } else {
+              reject(
+                new Error(`Server returned status ${res.statusCode}: ${data}`),
+              );
+            }
+          });
+
+          res.on("error", (error) => {
+            reject(new Error(`Failed to read response: ${error.message}`));
+          });
+        },
+      )
+      .on("error", (error) => {
+        reject(
+          new Error(`Failed to connect to device at ${host}: ${error.message}`),
+        );
+      });
+  });
+}
+
+// Upload PNG and thumbnail to device with retry logic
+async function uploadToDevice(
+  host,
+  pngPath,
+  thumbPath,
+  album = null,
+  retries = 3,
+) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      if (attempt > 1) {
+        console.log(
+          `  Retry attempt ${attempt}/${retries} after 5 second delay...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
+
+      await uploadToDeviceOnce(host, pngPath, thumbPath, album);
+      return; // Success, exit retry loop
+    } catch (error) {
+      if (attempt === retries) {
+        throw error; // Last attempt failed, throw error
+      }
+      console.log(`  Upload failed: ${error.message}`);
+    }
+  }
+}
+
+// Single upload attempt
+function uploadToDeviceOnce(host, pngPath, thumbPath, album = null) {
+  return new Promise((resolve, reject) => {
+    console.log(`Uploading to device: ${host}`);
+    console.log(`  Image: ${pngPath}`);
+    console.log(`  Thumbnail: ${thumbPath}`);
+    if (album) {
+      console.log(`  Album: ${album}`);
+    }
+
+    const form = new FormData();
+    form.append("image", fs.createReadStream(pngPath), {
+      filename: path.basename(pngPath),
+      contentType: "image/png",
+    });
+    form.append("thumbnail", fs.createReadStream(thumbPath), {
+      filename: path.basename(thumbPath),
+      contentType: "image/jpeg",
+    });
+
+    // Build path with album query parameter if provided
+    let uploadPath = "/api/upload";
+    if (album) {
+      uploadPath += `?album=${encodeURIComponent(album)}`;
+    }
+
+    // Use form.submit() which properly handles Content-Length
+    form.submit(
+      {
+        protocol: "http:",
+        host: host,
+        port: 80,
+        path: uploadPath,
+        method: "POST",
+      },
+      (err, res) => {
+        if (err) {
+          reject(new Error(`Failed to submit form: ${err.message}`));
+          return;
+        }
+
+        let data = "";
+
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+
+        res.on("end", () => {
+          if (res.statusCode === 200) {
+            try {
+              const response = JSON.parse(data);
+              console.log(`✓ Upload successful: ${response.filename}`);
+              resolve(response);
+            } catch (error) {
+              reject(new Error(`Failed to parse response: ${error.message}`));
+            }
+          } else {
+            reject(
+              new Error(
+                `HTTP ${res.statusCode}: Upload failed - ${data || "Unknown error"}`,
+              ),
+            );
+          }
+        });
+
+        res.on("error", (error) => {
+          reject(new Error(`Response error: ${error.message}`));
+        });
+      },
+    );
+  });
+}
+
 // BMP file writing (24-bit RGB format)
 function writeBMP(imageData, outputPath) {
   const width = imageData.width;
@@ -229,6 +418,7 @@ async function processFolderStructure(
   options,
   deviceSettings,
   devicePalette,
+  uploadHost = null,
 ) {
   console.log(`\nProcessing folder structure: ${inputDir}`);
   console.log(`Output directory: ${outputDir}\n`);
@@ -247,6 +437,7 @@ async function processFolderStructure(
   );
 
   let totalProcessed = 0;
+  let totalUploaded = 0;
   let totalErrors = 0;
 
   for (const album of albums) {
@@ -256,10 +447,8 @@ async function processFolderStructure(
 
     console.log(`\n=== Processing album: ${albumName} ===`);
 
-    // Create output directory for this album
-    if (!fs.existsSync(albumOutputPath)) {
-      fs.mkdirSync(albumOutputPath, { recursive: true });
-    }
+    // Create output directory for this album (always create, even if tmpdir)
+    fs.mkdirSync(albumOutputPath, { recursive: true });
 
     // Get all image files in this album
     const files = fs.readdirSync(albumInputPath);
@@ -277,10 +466,8 @@ async function processFolderStructure(
       const imageFile = imageFiles[i];
       const inputPath = path.join(albumInputPath, imageFile);
       const baseName = path.basename(imageFile, path.extname(imageFile));
-      const outputBmp = path.join(albumOutputPath, `${baseName}.bmp`);
-      const outputThumb = options.generateThumbnail
-        ? path.join(albumOutputPath, `${baseName}.jpg`)
-        : null;
+      const outputPng = path.join(albumOutputPath, `${baseName}.png`);
+      const outputThumb = path.join(albumOutputPath, `${baseName}.jpg`);
 
       try {
         console.log(
@@ -288,12 +475,23 @@ async function processFolderStructure(
         );
         await processImageFile(
           inputPath,
-          outputBmp,
+          outputPng,
           outputThumb,
           options,
           devicePalette,
         );
         totalProcessed++;
+
+        // Upload if requested
+        if (uploadHost) {
+          try {
+            await uploadToDevice(uploadHost, outputPng, outputThumb, albumName);
+            totalUploaded++;
+          } catch (error) {
+            console.error(`  ERROR uploading ${imageFile}: ${error.message}`);
+            totalErrors++;
+          }
+        }
       } catch (error) {
         console.error(`  ERROR processing ${imageFile}: ${error.message}`);
         totalErrors++;
@@ -303,6 +501,9 @@ async function processFolderStructure(
 
   console.log(`\n=== Summary ===`);
   console.log(`Total images processed: ${totalProcessed}`);
+  if (uploadHost) {
+    console.log(`Total images uploaded: ${totalUploaded}`);
+  }
   if (totalErrors > 0) {
     console.log(`Total errors: ${totalErrors}`);
   }
@@ -461,9 +662,16 @@ async function processImageFile(
   processImage(imageData, params);
   ctx.putImageData(imageData, 0, 0);
 
-  // 5. Write BMP
-  console.log(`  Writing BMP: ${outputBmp}`);
-  writeBMP(imageData, outputBmp);
+  // 5. Write output file (BMP or PNG)
+  if (options.outputPng) {
+    const outputPng = outputBmp.replace(/\.bmp$/, ".png");
+    console.log(`  Writing PNG: ${outputPng}`);
+    const pngBuffer = await createPNG(canvas);
+    fs.writeFileSync(outputPng, pngBuffer);
+  } else {
+    console.log(`  Writing BMP: ${outputBmp}`);
+    writeBMP(imageData, outputBmp);
+  }
 
   // 6. Generate thumbnail if requested (from EXIF-corrected source, not processed image)
   if (options.generateThumbnail && outputThumb) {
@@ -501,13 +709,20 @@ program
     "Suffix to add to output filename (single file mode only)",
     "",
   )
-  .option("--no-thumbnail", "Skip thumbnail generation")
-  .option("--device-parameters", "Fetch processing parameters from device")
   .option(
-    "--device-host <host>",
+    "--upload",
+    "Upload converted PNG and thumbnail to device (requires --host)",
+  )
+  .option(
+    "--direct",
+    "Display image directly on device without saving (requires --host, single file only)",
+  )
+  .option(
+    "--host <host>",
     "Device hostname or IP address (default: photoframe.local)",
     "photoframe.local",
   )
+  .option("--device-parameters", "Fetch processing parameters from device")
   .option(
     "--exposure <value>",
     "Exposure multiplier (0.5-2.0, 1.0=normal)",
@@ -577,9 +792,36 @@ program
         process.exit(1);
       }
 
-      const outputDir = path.resolve(options.outputDir);
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
+      // Validate --direct and --upload are mutually exclusive
+      if (options.direct && options.upload) {
+        console.error("Error: --direct and --upload cannot be used together");
+        process.exit(1);
+      }
+
+      // Check input type and validate --direct option
+      const inputStats = fs.statSync(inputPath);
+      const isDirectory = inputStats.isDirectory();
+
+      // Validate --direct and --upload are mutually exclusive
+      if (options.direct && isDirectory) {
+        console.error(
+          "Error: --direct option requires a single file input, not a directory",
+        );
+        process.exit(1);
+      }
+
+      // Use tmpdir when uploading or displaying directly, otherwise use specified output directory
+      let outputDir;
+      let useTmpDir = false;
+      if (options.upload || options.direct) {
+        outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "photoframe-"));
+        useTmpDir = true;
+        console.log(`Using temporary directory: ${outputDir}`);
+      } else {
+        outputDir = path.resolve(options.outputDir);
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true });
+        }
       }
 
       // Fetch device settings if --device-parameters is specified
@@ -587,8 +829,8 @@ program
       let devicePalette = null;
       if (options.deviceParameters) {
         try {
-          deviceSettings = await fetchDeviceSettings(options.deviceHost);
-          devicePalette = await fetchDevicePalette(options.deviceHost);
+          deviceSettings = await fetchDeviceSettings(options.host);
+          devicePalette = await fetchDevicePalette(options.host);
         } catch (error) {
           console.error(`Error: ${error.message}`);
           process.exit(1);
@@ -597,9 +839,11 @@ program
 
       // Use device settings if available, otherwise use CLI options
       // Note: renderMeasured is CLI-only and always comes from options
+      // Always output PNG and generate thumbnails (matching webapp behavior)
       const processOptions = deviceSettings
         ? {
-            generateThumbnail: options.thumbnail,
+            generateThumbnail: true,
+            outputPng: true,
             exposure: deviceSettings.exposure,
             saturation: deviceSettings.saturation,
             toneMode: deviceSettings.toneMode,
@@ -613,7 +857,8 @@ program
             processingMode: deviceSettings.processingMode,
           }
         : {
-            generateThumbnail: options.thumbnail,
+            generateThumbnail: true,
+            outputPng: true,
             exposure: options.exposure,
             saturation: options.saturation,
             toneMode: options.toneMode,
@@ -627,9 +872,8 @@ program
             processingMode: options.processingMode,
           };
 
-      // Automatically detect if input is file or directory
-      const stats = fs.statSync(inputPath);
-      if (stats.isDirectory()) {
+      // Process based on input type
+      if (isDirectory) {
         // Process folder structure (albums)
         await processFolderStructure(
           inputPath,
@@ -637,27 +881,73 @@ program
           processOptions,
           deviceSettings,
           devicePalette,
+          options.upload ? options.host : null,
         );
       } else {
         // Process single file
         const baseName = path.basename(input, path.extname(input));
         const suffix = options.suffix || "";
-        const outputBmp = path.join(outputDir, `${baseName}${suffix}.bmp`);
-        const outputThumb = options.thumbnail
-          ? path.join(outputDir, `${baseName}${suffix}.jpg`)
-          : null;
+        const outputPng = path.join(outputDir, `${baseName}${suffix}.png`);
+        const outputThumb = path.join(outputDir, `${baseName}${suffix}.jpg`);
 
         await processImageFile(
           inputPath,
-          outputBmp,
+          outputPng,
           outputThumb,
           processOptions,
           devicePalette,
         );
+
+        // Upload or display directly on device
+        if (options.upload || options.direct) {
+          if (!fs.existsSync(outputPng)) {
+            console.error(`Error: PNG file not found: ${outputPng}`);
+            process.exit(1);
+          }
+          if (!fs.existsSync(outputThumb)) {
+            console.error(`Error: Thumbnail file not found: ${outputThumb}`);
+            process.exit(1);
+          }
+
+          try {
+            if (options.direct) {
+              await displayDirectly(options.host, outputPng, outputThumb);
+            } else {
+              await uploadToDevice(options.host, outputPng, outputThumb, null);
+            }
+          } catch (error) {
+            const action = options.direct ? "Display" : "Upload";
+            console.error(`${action} failed: ${error.message}`);
+            process.exit(1);
+          }
+        }
+      }
+
+      // Cleanup temporary directory if used
+      if (useTmpDir) {
+        console.log(`\nCleaning up temporary directory: ${outputDir}`);
+        try {
+          fs.rmSync(outputDir, { recursive: true, force: true });
+          console.log(`✓ Temporary files cleaned up`);
+        } catch (error) {
+          console.warn(
+            `Warning: Failed to cleanup temporary directory: ${error.message}`,
+          );
+        }
       }
     } catch (error) {
       console.error(`Error processing: ${error.message}`);
       console.error(error.stack);
+
+      // Cleanup temporary directory on error if used
+      if (useTmpDir && outputDir) {
+        try {
+          fs.rmSync(outputDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+          // Ignore cleanup errors on error path
+        }
+      }
+
       process.exit(1);
     }
   });

@@ -614,6 +614,37 @@ function generateThumbnail(
   return thumbCanvas;
 }
 
+/**
+ * Convert canvas to PNG (24-bit RGB)
+ * Note: Indexed PNG encoding is not reliably supported in JavaScript libraries
+ * @param {HTMLCanvasElement} canvas - Canvas with dithered image data
+ * @returns {Promise<Blob>|Buffer} PNG blob (browser) or Buffer (Node.js)
+ */
+async function createPNG(canvas) {
+  const width = canvas.width;
+  const height = canvas.height;
+
+  // Use native PNG encoding (24-bit RGB)
+  // Note: Indexed PNG encoding is not reliably supported in JavaScript
+  // 24-bit PNG is still 4-7x smaller than BMP and uploads much faster
+  if (typeof Buffer !== "undefined" && typeof window === "undefined") {
+    // Node.js environment
+    const buffer = canvas.toBuffer("image/png");
+    return buffer;
+  } else {
+    // Browser environment
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error("Failed to create PNG blob"));
+        }
+      }, "image/png");
+    });
+  }
+}
+
 // Export for Node.js ES modules
 export {
   PALETTE_MEASURED,
@@ -628,4 +659,5 @@ export {
   applyExifOrientation,
   resizeImageCover,
   generateThumbnail,
+  createPNG,
 };

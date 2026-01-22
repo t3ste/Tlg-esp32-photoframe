@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 
 #include "GUI_BMPfile.h"
+#include "GUI_PNGfile.h"
 #include "GUI_Paint.h"
 #include "album_manager.h"
 #include "config.h"
@@ -127,11 +128,24 @@ esp_err_t display_manager_show_image(const char *filename)
     ESP_LOGI(TAG, "Clearing display buffer");
     Paint_Clear(EPD_7IN3E_WHITE);
 
-    ESP_LOGI(TAG, "Reading BMP file into buffer");
-    if (GUI_ReadBmp_RGB_6Color(filename, 0, 0) != 0) {
-        ESP_LOGE(TAG, "Failed to read BMP file");
-        xSemaphoreGive(display_mutex);
-        return ESP_FAIL;
+    // Detect file type by extension
+    const char *ext = strrchr(filename, '.');
+    bool is_png = (ext != NULL && strcasecmp(ext, ".png") == 0);
+
+    if (is_png) {
+        ESP_LOGI(TAG, "Reading PNG file into buffer");
+        if (GUI_ReadPng_RGB_6Color(filename, 0, 0) != 0) {
+            ESP_LOGE(TAG, "Failed to read PNG file");
+            xSemaphoreGive(display_mutex);
+            return ESP_FAIL;
+        }
+    } else {
+        ESP_LOGI(TAG, "Reading BMP file into buffer");
+        if (GUI_ReadBmp_RGB_6Color(filename, 0, 0) != 0) {
+            ESP_LOGE(TAG, "Failed to read BMP file");
+            xSemaphoreGive(display_mutex);
+            return ESP_FAIL;
+        }
     }
 
     ESP_LOGI(TAG, "Starting e-paper display update (this takes ~30 seconds)");
