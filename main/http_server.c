@@ -155,7 +155,6 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
 
     char filename[64] = {0};
     char current_field[64] = {0};
-    char processing_mode[16] = "enhanced";  // Default to enhanced mode
     char album_name[128] = DEFAULT_ALBUM_NAME;
     bool header_parsed = false;
     int file_count = 0;
@@ -213,13 +212,12 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
                         filename[MIN(name_len, sizeof(filename) - 1)] = '\0';
 
                         char *ext = strrchr(filename, '.');
-                        if (!ext ||
-                            (strcasecmp(ext, ".jpg") != 0 && strcasecmp(ext, ".jpeg") != 0)) {
+                        if (!ext || strcasecmp(ext, ".bmp") != 0) {
                             if (fp)
                                 fclose(fp);
                             free(buf);
                             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                                                "Only JPG files are allowed");
+                                                "Only BMP files are allowed");
                             return ESP_FAIL;
                         }
                     }
@@ -241,7 +239,7 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
                             }
                         }
 
-                        snprintf(temp_fullsize_path, sizeof(temp_fullsize_path), "%s/temp_full.jpg",
+                        snprintf(temp_fullsize_path, sizeof(temp_fullsize_path), "%s/temp_full.bmp",
                                  album_path);
                         fp = fopen(temp_fullsize_path, "wb");
                         if (!fp) {
@@ -273,20 +271,6 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
                 data_start += 4;
                 int header_len = data_start - buf;
                 header_parsed = true;
-
-                // If this is the processingMode field, capture its value
-                if (strcmp(current_field, "processingMode") == 0) {
-                    // Find the end of the value (next boundary or CRLF)
-                    char *value_end = strstr(data_start, "\r\n");
-                    if (value_end && value_end < buf + buf_len) {
-                        int value_len = value_end - data_start;
-                        if (value_len > 0 && value_len < sizeof(processing_mode)) {
-                            strncpy(processing_mode, data_start, value_len);
-                            processing_mode[value_len] = '\0';
-                            ESP_LOGI(TAG, "Processing mode: %s", processing_mode);
-                        }
-                    }
-                }
 
                 // If this is the album field, capture its value
                 if (strcmp(current_field, "album") == 0) {
@@ -366,52 +350,43 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
 
     // Process uploaded files
     if (file_count >= 2) {
-        ESP_LOGI(TAG, "Upload complete, converting full-size JPG to BMP");
+        ESP_LOGI(TAG, "Upload complete, saving BMP and thumbnail");
 
         char bmp_filename[128];
         char jpg_filename[128];
-        char *ext = strrchr(filename, '.');
+        char filename_base[120];  // Leave room for extension
+
+        // Extract base filename without extension
+        strncpy(filename_base, filename, sizeof(filename_base) - 1);
+        filename_base[sizeof(filename_base) - 1] = '\0';  // Ensure null termination
+        char *ext = strrchr(filename_base, '.');
         if (ext)
             *ext = '\0';
 
-        snprintf(bmp_filename, sizeof(bmp_filename), "%s.bmp", filename);
-        snprintf(jpg_filename, sizeof(jpg_filename), "%s.jpg", filename);
+        snprintf(bmp_filename, sizeof(bmp_filename), "%s.bmp", filename_base);
+        snprintf(jpg_filename, sizeof(jpg_filename), "%s.jpg", filename_base);
         album_manager_get_album_path(album_name, album_path, sizeof(album_path));
         snprintf(final_bmp_path, sizeof(final_bmp_path), "%s/%s", album_path, bmp_filename);
         snprintf(final_thumb_path, sizeof(final_thumb_path), "%s/%s", album_path, jpg_filename);
 
-        // Log memory before conversion
-        ESP_LOGI(TAG, "Before conversion - Free heap: %lu bytes, Largest block: %lu bytes",
-                 esp_get_free_heap_size(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        // Delete existing files if they exist (to allow overwriting)
+        unlink(final_bmp_path);
+        unlink(final_thumb_path);
 
-        // Convert full-size to BMP for display
-        // Use stock mode if processing_mode is "stock", otherwise use enhanced mode
-        bool use_stock_mode = (strcmp(processing_mode, "stock") == 0);
-        ESP_LOGI(TAG, "Using %s mode for image processing", use_stock_mode ? "stock" : "enhanced");
-        esp_err_t ret =
-            image_processor_convert_jpg_to_bmp(temp_fullsize_path, final_bmp_path, use_stock_mode);
-
-        // Log memory after conversion
-        ESP_LOGI(TAG, "After conversion - Free heap: %lu bytes, Largest block: %lu bytes",
-                 esp_get_free_heap_size(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-
-        if (ret != ESP_OK) {
+        // Rename temp BMP to final path (no conversion needed - already dithered)
+        if (rename(temp_fullsize_path, final_bmp_path) != 0) {
             remove(temp_fullsize_path);
             remove(temp_thumb_path);
             free(buf);
-            ESP_LOGE(TAG, "Failed to convert image");
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to convert image");
+            ESP_LOGE(TAG, "Failed to rename BMP file");
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save image");
             return ESP_FAIL;
         }
 
-        // Delete full-size JPEG (no longer needed)
-        remove(temp_fullsize_path);
-
-        // Keep thumbnail JPEG
+        // Rename thumbnail JPEG
         rename(temp_thumb_path, final_thumb_path);
 
-        ESP_LOGI(TAG, "Image converted successfully: %s (thumbnail: %s)", bmp_filename,
-                 jpg_filename);
+        ESP_LOGI(TAG, "Image saved successfully: %s (thumbnail: %s)", bmp_filename, jpg_filename);
 
         cJSON *response = cJSON_CreateObject();
         cJSON_AddStringToObject(response, "status", "success");

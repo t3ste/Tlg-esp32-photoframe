@@ -539,6 +539,64 @@ async function resizeImage(file, maxWidth, maxHeight, quality) {
   });
 }
 
+// Convert canvas to 24-bit BMP blob (required by ESP32 GUI_ReadBmp_RGB_6Color)
+async function canvasToBMP(canvas) {
+  const width = canvas.width;
+  const height = canvas.height;
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, width, height);
+
+  // BMP file structure for 24-bit RGB
+  const rowSize = width * 3; // 3 bytes per pixel (RGB)
+  const rowPadding = (4 - (rowSize % 4)) % 4; // Rows must be padded to 4-byte boundary
+  const paddedRowSize = rowSize + rowPadding;
+  const pixelDataSize = paddedRowSize * height;
+  const fileSize = 54 + pixelDataSize; // Header (54) + Pixel data (no color table for 24-bit)
+
+  const buffer = new ArrayBuffer(fileSize);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+
+  // BMP Header (14 bytes)
+  view.setUint16(0, 0x4d42, true); // "BM"
+  view.setUint32(2, fileSize, true); // File size
+  view.setUint32(6, 0, true); // Reserved
+  view.setUint32(10, 54, true); // Pixel data offset (54 bytes, no color table)
+
+  // DIB Header (40 bytes)
+  view.setUint32(14, 40, true); // DIB header size
+  view.setInt32(18, width, true); // Width
+  view.setInt32(22, height, true); // Height (positive = bottom-up)
+  view.setUint16(26, 1, true); // Planes
+  view.setUint16(28, 24, true); // Bits per pixel (24-bit RGB)
+  view.setUint32(30, 0, true); // Compression (none)
+  view.setUint32(34, pixelDataSize, true); // Image size
+  view.setInt32(38, 2835, true); // X pixels per meter (72 DPI)
+  view.setInt32(42, 2835, true); // Y pixels per meter (72 DPI)
+  view.setUint32(46, 0, true); // Colors in palette (0 for 24-bit)
+  view.setUint32(50, 0, true); // Important colors (0 = all)
+
+  // Pixel data (24-bit RGB, stored bottom-up, BGR order)
+  let offset = 54;
+  for (let y = height - 1; y >= 0; y--) {
+    // Bottom-up: start from last row
+    for (let x = 0; x < width; x++) {
+      const pixelIndex = (y * width + x) * 4;
+      // BMP uses BGR order, not RGB
+      bytes[offset++] = imageData.data[pixelIndex + 2]; // B
+      bytes[offset++] = imageData.data[pixelIndex + 1]; // G
+      bytes[offset++] = imageData.data[pixelIndex + 0]; // R
+    }
+
+    // Add row padding
+    for (let p = 0; p < rowPadding; p++) {
+      bytes[offset++] = 0;
+    }
+  }
+
+  return new Blob([buffer], { type: "image/bmp" });
+}
+
 async function loadImagePreview(file) {
   const previewCanvas = document.getElementById("previewCanvas");
   const originalCanvas = document.getElementById("originalCanvas");
@@ -573,10 +631,10 @@ async function loadImagePreview(file) {
     // Load image and resize to display size
     const img = await loadImage(file);
 
-    // Determine if portrait or landscape
+    // Determine if portrait or landscape for preview display
     const isPortrait = img.height > img.width;
 
-    // Set canvas to display dimensions (800x480 or 480x800)
+    // Set canvas to display dimensions (800x480 or 480x800) for preview
     const baseWidth = isPortrait ? 480 : 800;
     const baseHeight = isPortrait ? 800 : 480;
 
@@ -1205,62 +1263,58 @@ document
     let uploadSucceeded = false;
 
     try {
-      let imageBlob;
+      // Re-process the image with theoretical palette for device upload
+      // (preview uses calibrated palette, but device needs theoretical palette)
+      const originalCanvas = document.getElementById("originalCanvas");
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = originalImageData.width;
+      tempCanvas.height = originalImageData.height;
+      const tempCtx = tempCanvas.getContext("2d", {
+        willReadFrequently: true,
+      });
 
-      if (currentParams.processingMode === "stock") {
-        // Stock mode: send raw scaled/cropped image (no processing)
-        imageBlob = await resizeImage(currentImageFile, 800, 480, 0.9);
+      // Copy original image data
+      const imageDataCopy = tempCtx.createImageData(
+        originalImageData.width,
+        originalImageData.height,
+      );
+      imageDataCopy.data.set(originalImageData.data);
+
+      // Process with theoretical palette for device upload
+      // renderMeasured=false means output uses PALETTE_THEORETICAL (for device consumption)
+      // but error diffusion still uses the calibrated palette for accurate dithering
+      const uploadParams = { ...currentParams };
+      uploadParams.renderMeasured = false; // Output with theoretical palette
+      processImage(imageDataCopy, uploadParams);
+
+      // Put processed data to temp canvas
+      tempCtx.putImageData(imageDataCopy, 0, 0);
+
+      // Create 800x480 canvas for device (always landscape)
+      const deviceCanvas = document.createElement("canvas");
+      deviceCanvas.width = 800;
+      deviceCanvas.height = 480;
+      const deviceCtx = deviceCanvas.getContext("2d");
+
+      // Check if image is portrait (needs rotation)
+      const isPortrait = tempCanvas.width < tempCanvas.height;
+
+      if (isPortrait) {
+        // Rotate portrait image 90 degrees clockwise to landscape
+        deviceCtx.translate(800, 0);
+        deviceCtx.rotate(Math.PI / 2);
+        deviceCtx.drawImage(tempCanvas, 0, 0);
       } else {
-        // Enhanced mode: apply exposure, saturation, and tone mapping, but NO dithering
-        // Create a temporary canvas for processing
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = originalImageData.width;
-        tempCanvas.height = originalImageData.height;
-        const tempCtx = tempCanvas.getContext("2d", {
-          willReadFrequently: true,
-        });
-
-        // Copy original image data
-        const imageDataCopy = tempCtx.createImageData(
-          originalImageData.width,
-          originalImageData.height,
-        );
-        imageDataCopy.data.set(originalImageData.data);
-
-        // Apply exposure
-        if (currentParams.exposure && currentParams.exposure !== 1.0) {
-          applyExposure(imageDataCopy, currentParams.exposure);
-        }
-
-        // Apply saturation
-        if (currentParams.saturation !== 1.0) {
-          applySaturation(imageDataCopy, currentParams.saturation);
-        }
-
-        // Apply tone mapping (contrast or S-curve)
-        if (currentParams.toneMode === "contrast") {
-          if (currentParams.contrast && currentParams.contrast !== 1.0) {
-            applyContrast(imageDataCopy, currentParams.contrast);
-          }
-        } else {
-          // S-curve tone mapping
-          applyScurveTonemap(
-            imageDataCopy,
-            currentParams.strength,
-            currentParams.shadowBoost,
-            currentParams.highlightCompress,
-            currentParams.midpoint,
-          );
-        }
-
-        // Put processed data to canvas (NO dithering)
-        tempCtx.putImageData(imageDataCopy, 0, 0);
-
-        // Convert to blob
-        imageBlob = await new Promise((resolve) => {
-          tempCanvas.toBlob(resolve, "image/jpeg", 0.9);
-        });
+        // Landscape image, just copy directly
+        deviceCtx.drawImage(tempCanvas, 0, 0);
       }
+
+      // Convert the 800x480 canvas to 24-bit BMP
+      const bmpBlob = await canvasToBMP(deviceCanvas);
+
+      // Generate filename with .bmp extension
+      const originalName = currentImageFile.name.replace(/\.[^/.]+$/, "");
+      const bmpFilename = `${originalName}.bmp`;
 
       // Create thumbnail (320x192 or 192x320) from original using shared function
       const thumbnailBlob = await new Promise((resolve, reject) => {
@@ -1289,10 +1343,9 @@ document
       });
 
       const formData = new FormData();
-      // Send text fields first so backend can parse them before processing files
+      // Send album name and files (BMP is already dithered, no processing needed on device)
       formData.append("album", selectedAlbum);
-      formData.append("processingMode", currentParams.processingMode);
-      formData.append("image", imageBlob, currentImageFile.name);
+      formData.append("image", bmpBlob, bmpFilename);
       formData.append(
         "thumbnail",
         thumbnailBlob,
