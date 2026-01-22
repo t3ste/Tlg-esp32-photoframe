@@ -147,12 +147,26 @@ The device supports two methods for WiFi provisioning:
 
 ## Offline Image Processing
 
-Node.js CLI tool for batch processing:
+Node.js CLI tool for batch processing and image serving:
 
+### Batch Processing
 ```bash
 cd process-cli && npm install
+# Process to disk
 node cli.js input.jpg --device-parameters -o /path/to/sdcard/images/
+
+# Or upload directly to device
+node cli.js ~/Photos/Albums --upload --device-parameters --host photoframe.local
 ```
+
+### Image Server Mode
+Serve pre-processed images directly to your ESP32 over HTTP:
+
+```bash
+node cli.js --serve ~/Photos --serve-port 9000 --serve-format png --device-parameters --host photoframe.local
+```
+
+The ESP32 can fetch images from your computer instead of storing them on SD card. Supports BMP, PNG, and JPG formats with automatic thumbnail generation.
 
 See [process-cli/README.md](process-cli/README.md) for details.
 
