@@ -10,6 +10,7 @@ import http from "http";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
+import url from "url";
 import {
   processImage,
   PALETTE_THEORETICAL,
@@ -550,74 +551,8 @@ async function processImageFile(
 ) {
   console.log(`Processing: ${inputPath}`);
 
-  // 1. Load image (with HEIC conversion if needed)
-  const img = await loadImageWithHeicSupport(inputPath);
-  let canvas = createCanvas(img.width, img.height);
-  let ctx = canvas.getContext("2d");
-  ctx.drawImage(img, 0, 0);
-
-  console.log(`  Original size: ${canvas.width}x${canvas.height}`);
-
-  // 1.5. Apply EXIF orientation
-  const orientation = getExifOrientation(inputPath);
-  if (orientation > 1) {
-    console.log(`  Applying EXIF orientation: ${orientation}`);
-    canvas = applyExifOrientation(canvas, orientation, createCanvas);
-    console.log(`  After EXIF correction: ${canvas.width}x${canvas.height}`);
-  }
-
-  // Save EXIF-corrected canvas for thumbnail generation (before rotation/processing)
-  const originalCanvas = createCanvas(canvas.width, canvas.height);
-  const originalCanvasCtx = originalCanvas.getContext("2d");
-  originalCanvasCtx.drawImage(canvas, 0, 0);
-
-  // 2. Check if portrait and rotate (skip rotation if rendering measured for debugging)
-  const isPortrait = canvas.height > canvas.width;
-  if (isPortrait && !options.renderMeasured) {
-    console.log(`  Portrait detected, rotating 90° clockwise`);
-    canvas = rotate90Clockwise(canvas, createCanvas);
-    console.log(`  After rotation: ${canvas.width}x${canvas.height}`);
-  } else if (isPortrait && options.renderMeasured) {
-    console.log(`  Portrait detected, skipping rotation (debug mode)`);
-  }
-
-  // 3. Resize with cover (fill and crop)
-  let targetWidth, targetHeight;
-  if (options.renderMeasured && isPortrait) {
-    targetWidth = DISPLAY_HEIGHT;
-    targetHeight = DISPLAY_WIDTH; // 480x800
-  } else {
-    targetWidth = DISPLAY_WIDTH;
-    targetHeight = DISPLAY_HEIGHT; // 800x480
-  }
-
-  if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-    console.log(
-      `  Resizing to ${targetWidth}x${targetHeight} (cover mode: scale and crop)`,
-    );
-    canvas = resizeImageCover(canvas, targetWidth, targetHeight, createCanvas);
-  }
-
-  // 4. Apply image processing
-  ctx = canvas.getContext("2d");
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-  // Convert device palette to array format if provided
-  let customPalette = null;
-  if (devicePalette) {
-    customPalette = [
-      [devicePalette.black.r, devicePalette.black.g, devicePalette.black.b],
-      [devicePalette.white.r, devicePalette.white.g, devicePalette.white.b],
-      [devicePalette.yellow.r, devicePalette.yellow.g, devicePalette.yellow.b],
-      [devicePalette.red.r, devicePalette.red.g, devicePalette.red.b],
-      [0, 0, 0], // Reserved
-      [devicePalette.blue.r, devicePalette.blue.g, devicePalette.blue.b],
-      [devicePalette.green.r, devicePalette.green.g, devicePalette.green.b],
-    ];
-    console.log(`  Using calibrated color palette from device`);
-  }
-
-  const params = {
+  // Build processing parameters from options
+  const processingParams = {
     exposure: options.exposure,
     saturation: options.saturation,
     toneMode: options.toneMode,
@@ -629,38 +564,18 @@ async function processImageFile(
     colorMethod: options.colorMethod,
     renderMeasured: options.renderMeasured,
     processingMode: options.processingMode,
-    customPalette: customPalette,
   };
 
-  if (params.processingMode === "stock") {
-    console.log(
-      `  Using stock Waveshare algorithm (no tone mapping, theoretical palette)`,
-    );
-  } else {
-    console.log(`  Using enhanced algorithm`);
-    console.log(
-      `  Exposure: ${params.exposure}, Saturation: ${params.saturation}`,
-    );
-    if (params.toneMode === "scurve") {
-      console.log(
-        `  Tone mapping: S-Curve (strength=${params.strength}, shadow=${params.shadowBoost}, highlight=${params.highlightCompress})`,
-      );
-    } else {
-      console.log(`  Tone mapping: Simple Contrast (${params.contrast})`);
-    }
-    console.log(`  Color method: ${params.colorMethod}`);
-  }
+  // Use shared processing pipeline with verbose logging
+  const { canvas, originalCanvas } = await processImagePipeline(
+    inputPath,
+    processingParams,
+    devicePalette,
+    { verbose: true },
+  );
 
-  if (options.renderMeasured) {
-    console.log(
-      `  Rendering BMP with measured colors (darker output for preview)`,
-    );
-  } else {
-    console.log(`  Rendering BMP with theoretical colors (standard output)`);
-  }
-
-  processImage(imageData, params);
-  ctx.putImageData(imageData, 0, 0);
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
   // 5. Write output file (BMP or PNG)
   if (options.outputPng) {
@@ -692,6 +607,514 @@ async function processImageFile(
   console.log(`Done!`);
 }
 
+// Shared image processing pipeline - matches processImageFile logic exactly
+async function processImagePipeline(
+  imagePath,
+  processingParams,
+  devicePalette,
+  options = {},
+) {
+  const { verbose = false } = options;
+
+  // 1. Load image (with HEIC conversion if needed)
+  const img = await loadImageWithHeicSupport(imagePath);
+  let canvas = createCanvas(img.width, img.height);
+  let ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  if (verbose) {
+    console.log(`  Original size: ${canvas.width}x${canvas.height}`);
+  }
+
+  // 2. Apply EXIF orientation
+  const orientation = getExifOrientation(imagePath);
+  if (orientation > 1) {
+    if (verbose) {
+      console.log(`  Applying EXIF orientation: ${orientation}`);
+    }
+    canvas = applyExifOrientation(canvas, orientation, createCanvas);
+    if (verbose) {
+      console.log(`  After EXIF correction: ${canvas.width}x${canvas.height}`);
+    }
+  }
+
+  // Save EXIF-corrected canvas for thumbnail generation (before rotation/processing)
+  const originalCanvas = createCanvas(canvas.width, canvas.height);
+  const originalCanvasCtx = originalCanvas.getContext("2d");
+  originalCanvasCtx.drawImage(canvas, 0, 0);
+
+  // 3. Check if portrait and rotate (skip rotation if rendering measured for debugging)
+  const isPortrait = canvas.height > canvas.width;
+  if (isPortrait && !processingParams.renderMeasured) {
+    if (verbose) {
+      console.log(`  Portrait detected, rotating 90° clockwise`);
+    }
+    canvas = rotate90Clockwise(canvas, createCanvas);
+    if (verbose) {
+      console.log(`  After rotation: ${canvas.width}x${canvas.height}`);
+    }
+  } else if (isPortrait && processingParams.renderMeasured && verbose) {
+    console.log(`  Portrait detected, skipping rotation (debug mode)`);
+  }
+
+  // 4. Resize to display dimensions
+  let targetWidth, targetHeight;
+  if (processingParams.renderMeasured && isPortrait) {
+    targetWidth = DISPLAY_HEIGHT;
+    targetHeight = DISPLAY_WIDTH; // 480x800
+  } else {
+    targetWidth = DISPLAY_WIDTH;
+    targetHeight = DISPLAY_HEIGHT; // 800x480
+  }
+
+  if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+    if (verbose) {
+      console.log(
+        `  Resizing to ${targetWidth}x${targetHeight} (cover mode: scale and crop)`,
+      );
+    }
+    canvas = resizeImageCover(canvas, targetWidth, targetHeight, createCanvas);
+  }
+
+  // 5. Apply image processing (tone mapping, dithering, palette conversion)
+  ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  // Convert device palette to array format if provided
+  let customPalette = null;
+  if (devicePalette) {
+    customPalette = [
+      [devicePalette.black.r, devicePalette.black.g, devicePalette.black.b],
+      [devicePalette.white.r, devicePalette.white.g, devicePalette.white.b],
+      [devicePalette.yellow.r, devicePalette.yellow.g, devicePalette.yellow.b],
+      [devicePalette.red.r, devicePalette.red.g, devicePalette.red.b],
+      [0, 0, 0], // Reserved
+      [devicePalette.blue.r, devicePalette.blue.g, devicePalette.blue.b],
+      [devicePalette.green.r, devicePalette.green.g, devicePalette.green.b],
+    ];
+    if (verbose) {
+      console.log(`  Using calibrated color palette from device`);
+    }
+  }
+
+  const params = {
+    ...processingParams,
+    customPalette: customPalette,
+  };
+
+  if (verbose) {
+    if (params.processingMode === "stock") {
+      console.log(
+        `  Using stock Waveshare algorithm (no tone mapping, theoretical palette)`,
+      );
+    } else {
+      console.log(`  Using enhanced algorithm`);
+      console.log(
+        `  Exposure: ${params.exposure}, Saturation: ${params.saturation}`,
+      );
+      if (params.toneMode === "scurve") {
+        console.log(
+          `  Tone mapping: S-Curve (strength=${params.strength}, shadow=${params.shadowBoost}, highlight=${params.highlightCompress})`,
+        );
+      } else {
+        console.log(`  Tone mapping: Simple Contrast (${params.contrast})`);
+      }
+      console.log(`  Color method: ${params.colorMethod}`);
+    }
+
+    if (params.renderMeasured) {
+      console.log(
+        `  Rendering BMP with measured colors (darker output for preview)`,
+      );
+    } else {
+      console.log(`  Rendering BMP with theoretical colors (standard output)`);
+    }
+  }
+
+  processImage(imageData, params);
+  ctx.putImageData(imageData, 0, 0);
+
+  return { canvas, originalCanvas };
+}
+
+// HTTP Server for --serve mode
+function startImageServer(
+  albumDir,
+  port,
+  serveFormat,
+  deviceSettings = null,
+  devicePalette = null,
+  options = {},
+) {
+  // Validate serve format
+  const validFormats = ["png", "jpg", "bmp"];
+  if (!validFormats.includes(serveFormat)) {
+    console.error(
+      `Error: Invalid --serve-format "${serveFormat}". Must be one of: ${validFormats.join(", ")}`,
+    );
+    process.exit(1);
+  }
+
+  // Build processing parameters from options or defaults
+  const processingParams = {
+    exposure: options.exposure ?? DEFAULT_PARAMS.exposure,
+    saturation: options.saturation ?? DEFAULT_PARAMS.saturation,
+    toneMode: options.toneMode ?? DEFAULT_PARAMS.toneMode,
+    contrast: options.contrast ?? DEFAULT_PARAMS.contrast,
+    strength: options.scurveStrength ?? DEFAULT_PARAMS.scurveStrength, // Note: param name is 'strength' not 'scurveStrength'
+    shadowBoost: options.scurveShadow ?? DEFAULT_PARAMS.shadowBoost,
+    highlightCompress:
+      options.scurveHighlight ?? DEFAULT_PARAMS.highlightCompress,
+    midpoint: options.scurveMidpoint ?? DEFAULT_PARAMS.midpoint,
+    colorMethod: options.colorMethod ?? DEFAULT_PARAMS.colorMethod,
+    renderMeasured: false, // Always use theoretical palette for rendering (standard output)
+    processingMode: options.processingMode ?? DEFAULT_PARAMS.processingMode,
+  };
+
+  // Override with device settings if provided
+  if (deviceSettings) {
+    processingParams.exposure = deviceSettings.exposure;
+    processingParams.saturation = deviceSettings.saturation;
+    processingParams.toneMode = deviceSettings.toneMode;
+    processingParams.contrast = deviceSettings.contrast;
+    processingParams.strength = deviceSettings.strength;
+    processingParams.shadowBoost = deviceSettings.shadowBoost;
+    processingParams.highlightCompress = deviceSettings.highlightCompress;
+    processingParams.midpoint = deviceSettings.midpoint;
+    processingParams.colorMethod = deviceSettings.colorMethod;
+    processingParams.processingMode = deviceSettings.processingMode;
+
+    console.log(`Using device parameters:`);
+    console.log(`  Exposure: ${processingParams.exposure}`);
+    console.log(`  Saturation: ${processingParams.saturation}`);
+    console.log(`  Tone mode: ${processingParams.toneMode}`);
+    console.log(`  Color method: ${processingParams.colorMethod}`);
+  }
+
+  // Scan albums and collect all images
+  const albums = {};
+  const allImages = [];
+
+  console.log(`Scanning album directory: ${albumDir}`);
+
+  const entries = fs.readdirSync(albumDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const albumName = entry.name;
+    const albumPath = path.join(albumDir, albumName);
+    const images = [];
+
+    const files = fs.readdirSync(albumPath);
+    for (const file of files) {
+      const ext = path.extname(file).toLowerCase();
+      if (
+        ext === ".png" ||
+        ext === ".jpg" ||
+        ext === ".jpeg" ||
+        ext === ".heic"
+      ) {
+        const imagePath = path.join(albumPath, file);
+
+        images.push({
+          name: file,
+          path: imagePath,
+          album: albumName,
+        });
+      }
+    }
+
+    if (images.length > 0) {
+      albums[albumName] = images;
+      allImages.push(...images);
+      console.log(`  Album "${albumName}": ${images.length} images`);
+    }
+  }
+
+  if (allImages.length === 0) {
+    console.error("Error: No images found in album directory");
+    process.exit(1);
+  }
+
+  console.log(
+    `Total images: ${allImages.length} across ${Object.keys(albums).length} albums`,
+  );
+
+  // Cache for generated thumbnails (in-memory)
+  const thumbnailCache = new Map();
+
+  const server = http.createServer(async (req, res) => {
+    const parsedUrl = url.parse(req.url, true);
+    const pathname = parsedUrl.pathname;
+
+    // CORS headers
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
+    // GET /image - serve random image from library
+    if (pathname === "/image" && req.method === "GET") {
+      const randomIndex = Math.floor(Math.random() * allImages.length);
+      const image = allImages[randomIndex];
+
+      try {
+        const imagePath = image.path;
+
+        // Process image through shared pipeline
+        const { canvas: processedCanvas, originalCanvas } =
+          await processImagePipeline(
+            imagePath,
+            processingParams,
+            devicePalette,
+          );
+
+        // Generate and cache thumbnail from original canvas (before processing)
+        if (!thumbnailCache.has(image.name)) {
+          const thumbCanvas = generateThumbnail(
+            originalCanvas,
+            400,
+            240,
+            createCanvas,
+          );
+          const thumbBuffer = thumbCanvas.toBuffer("image/jpeg", {
+            quality: 0.8,
+          });
+          thumbnailCache.set(image.name, thumbBuffer);
+        }
+
+        // Convert to requested format
+        let imageBuffer;
+        let contentType;
+        if (serveFormat === "png") {
+          imageBuffer = await createPNG(processedCanvas);
+          contentType = "image/png";
+        } else if (serveFormat === "jpg") {
+          imageBuffer = processedCanvas.toBuffer("image/jpeg", {
+            quality: 0.95,
+          });
+          contentType = "image/jpeg";
+        } else if (serveFormat === "bmp") {
+          const ctx = processedCanvas.getContext("2d");
+          const processedImageData = ctx.getImageData(
+            0,
+            0,
+            processedCanvas.width,
+            processedCanvas.height,
+          );
+          imageBuffer = writeBMPToBuffer(processedImageData);
+          contentType = "image/bmp";
+        }
+
+        // Set headers before writeHead
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Content-Length", imageBuffer.length);
+
+        // Add thumbnail URL header
+        const serverHost = req.headers.host || `localhost:${port}`;
+        const thumbUrl = `http://${serverHost}/thumbnail?file=${encodeURIComponent(image.name)}`;
+        res.setHeader("X-Thumbnail-URL", thumbUrl);
+
+        res.writeHead(200);
+        res.end(imageBuffer);
+
+        console.log(
+          `[${new Date().toISOString()}] Served: ${image.album}/${image.name} (${serveFormat.toUpperCase()}) [Thumbnail: ${thumbUrl}]`,
+        );
+      } catch (error) {
+        console.error(`Error serving image: ${error.message}`);
+        res.writeHead(500);
+        res.end("Internal Server Error");
+      }
+      return;
+    }
+
+    // GET /thumbnail?file=filename - serve cached thumbnail by filename
+    if (pathname === "/thumbnail" && req.method === "GET") {
+      const filename = parsedUrl.query.file;
+      if (!filename) {
+        res.writeHead(400);
+        res.end("Missing 'file' parameter");
+        return;
+      }
+
+      // Check if thumbnail is in cache
+      if (thumbnailCache.has(filename)) {
+        const thumbBuffer = thumbnailCache.get(filename);
+        res.setHeader("Content-Type", "image/jpeg");
+        res.setHeader("Content-Length", thumbBuffer.length);
+        res.writeHead(200);
+        res.end(thumbBuffer);
+
+        console.log(
+          `[${new Date().toISOString()}] Served cached thumbnail: ${filename}`,
+        );
+        return;
+      }
+
+      // If not in cache, generate it on-demand
+      const image = allImages.find((img) => img.name === filename);
+      if (!image) {
+        res.writeHead(404);
+        res.end("Image not found");
+        return;
+      }
+
+      try {
+        // Load and process image to get original canvas
+        const img = await loadImageWithHeicSupport(image.path);
+        let canvas = createCanvas(img.width, img.height);
+        let ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+
+        // Apply EXIF orientation
+        const orientation = getExifOrientation(image.path);
+        if (orientation > 1) {
+          canvas = applyExifOrientation(canvas, orientation, createCanvas);
+        }
+
+        // Generate thumbnail from EXIF-corrected canvas
+        const thumbCanvas = generateThumbnail(canvas, 400, 240, createCanvas);
+        const thumbBuffer = thumbCanvas.toBuffer("image/jpeg", {
+          quality: 0.8,
+        });
+
+        // Cache it
+        thumbnailCache.set(filename, thumbBuffer);
+
+        res.setHeader("Content-Type", "image/jpeg");
+        res.setHeader("Content-Length", thumbBuffer.length);
+        res.writeHead(200);
+        res.end(thumbBuffer);
+
+        console.log(
+          `[${new Date().toISOString()}] Generated and served thumbnail: ${image.album}/${filename}`,
+        );
+      } catch (error) {
+        console.error(`Error generating thumbnail: ${error.message}`);
+        res.writeHead(500);
+        res.end("Internal Server Error");
+      }
+      return;
+    }
+
+    // GET /status - server status
+    if (pathname === "/status" && req.method === "GET") {
+      const status = {
+        totalImages: allImages.length,
+        albums: Object.keys(albums).length,
+        currentIndex: currentIndex,
+        serveFormat: serveFormat,
+      };
+      res.setHeader("Content-Type", "application/json");
+      res.writeHead(200);
+      res.end(JSON.stringify(status, null, 2));
+      return;
+    }
+
+    // 404
+    res.writeHead(404);
+    res.end("Not Found");
+  });
+
+  server.listen(port, () => {
+    console.log(`\nImage server running on http://localhost:${port}`);
+    console.log(
+      `  Image endpoint: http://localhost:${port}/image (format: ${serveFormat.toUpperCase()})`,
+    );
+    console.log(
+      `  Thumbnail endpoint: http://localhost:${port}/thumbnail?file=<filename>`,
+    );
+    console.log(`  Status endpoint: http://localhost:${port}/status`);
+    console.log(`\nPress Ctrl+C to stop\n`);
+  });
+
+  // Handle server errors (e.g., port already in use)
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`\nError: Port ${port} is already in use.`);
+      console.error(`Please try a different port with --serve-port <port>\n`);
+      process.exit(1);
+    } else {
+      console.error(`\nServer error: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+}
+
+// Helper function to write BMP to buffer
+function writeBMPToBuffer(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  // BMP header sizes
+  const fileHeaderSize = 14;
+  const infoHeaderSize = 40;
+  const rowSize = Math.floor((24 * width + 31) / 32) * 4; // Row size must be multiple of 4
+  const pixelDataSize = rowSize * height;
+  const fileSize = fileHeaderSize + infoHeaderSize + pixelDataSize;
+
+  const buffer = Buffer.alloc(fileSize);
+  let offset = 0;
+
+  // File header (14 bytes)
+  buffer.write("BM", offset); // Signature
+  offset += 2;
+  buffer.writeUInt32LE(fileSize, offset); // File size
+  offset += 4;
+  buffer.writeUInt32LE(0, offset); // Reserved
+  offset += 4;
+  buffer.writeUInt32LE(fileHeaderSize + infoHeaderSize, offset); // Pixel data offset
+  offset += 4;
+
+  // Info header (40 bytes)
+  buffer.writeUInt32LE(infoHeaderSize, offset); // Info header size
+  offset += 4;
+  buffer.writeInt32LE(width, offset); // Width
+  offset += 4;
+  buffer.writeInt32LE(height, offset); // Height
+  offset += 4;
+  buffer.writeUInt16LE(1, offset); // Planes
+  offset += 2;
+  buffer.writeUInt16LE(24, offset); // Bits per pixel
+  offset += 2;
+  buffer.writeUInt32LE(0, offset); // Compression (none)
+  offset += 4;
+  buffer.writeUInt32LE(pixelDataSize, offset); // Image size
+  offset += 4;
+  buffer.writeInt32LE(2835, offset); // X pixels per meter
+  offset += 4;
+  buffer.writeInt32LE(2835, offset); // Y pixels per meter
+  offset += 4;
+  buffer.writeUInt32LE(0, offset); // Colors used
+  offset += 4;
+  buffer.writeUInt32LE(0, offset); // Important colors
+  offset += 4;
+
+  // Pixel data (bottom-up, BGR format)
+  for (let y = height - 1; y >= 0; y--) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      buffer[offset++] = data[i + 2]; // B
+      buffer[offset++] = data[i + 1]; // G
+      buffer[offset++] = data[i + 0]; // R
+    }
+    // Padding to make row size multiple of 4
+    const padding = rowSize - width * 3;
+    for (let p = 0; p < padding; p++) {
+      buffer[offset++] = 0;
+    }
+  }
+
+  return buffer;
+}
+
 // CLI setup
 const program = new Command();
 
@@ -716,6 +1139,16 @@ program
   .option(
     "--direct",
     "Display image directly on device without saving (requires --host, single file only)",
+  )
+  .option(
+    "--serve",
+    "Start HTTP server to serve images from album directory structure",
+  )
+  .option("--serve-port <port>", "Port for HTTP server in --serve mode", "8080")
+  .option(
+    "--serve-format <format>",
+    "Image format to serve: png, jpg, or bmp (default: png)",
+    "png",
   )
   .option(
     "--host <host>",
@@ -792,6 +1225,49 @@ program
         process.exit(1);
       }
 
+      // Check if --serve mode is enabled
+      if (options.serve) {
+        const inputStats = fs.statSync(inputPath);
+        if (!inputStats.isDirectory()) {
+          console.error(
+            "Error: --serve mode requires a directory with album structure",
+          );
+          process.exit(1);
+        }
+
+        const port = parseInt(options.servePort);
+        if (isNaN(port) || port < 1 || port > 65535) {
+          console.error(`Error: Invalid port number: ${options.servePort}`);
+          process.exit(1);
+        }
+
+        // Fetch device settings if --device-parameters is specified
+        let deviceSettings = null;
+        let devicePalette = null;
+        if (options.deviceParameters) {
+          try {
+            console.log(`Fetching device parameters from ${options.host}...`);
+            deviceSettings = await fetchDeviceSettings(options.host);
+            devicePalette = await fetchDevicePalette(options.host);
+            console.log(`Device parameters fetched successfully`);
+          } catch (error) {
+            console.error(`Error fetching device parameters: ${error.message}`);
+            console.error(`Falling back to default parameters`);
+          }
+        }
+
+        // Start HTTP server and keep running
+        startImageServer(
+          inputPath,
+          port,
+          options.serveFormat,
+          deviceSettings,
+          devicePalette,
+          options,
+        );
+        return; // Server runs indefinitely
+      }
+
       // Validate --direct and --upload are mutually exclusive
       if (options.direct && options.upload) {
         console.error("Error: --direct and --upload cannot be used together");
@@ -802,7 +1278,7 @@ program
       const inputStats = fs.statSync(inputPath);
       const isDirectory = inputStats.isDirectory();
 
-      // Validate --direct and --upload are mutually exclusive
+      // Validate --direct requires single file
       if (options.direct && isDirectory) {
         console.error(
           "Error: --direct option requires a single file input, not a directory",
