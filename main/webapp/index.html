@@ -210,6 +210,19 @@
 
         <section class="card">
             <h2>Settings</h2>
+            
+            <!-- Tab Navigation -->
+            <div class="tabs">
+                <button class="tab-button active" data-tab="general">General</button>
+                <button class="tab-button" data-tab="autoRotate">Auto Rotate</button>
+                <button class="tab-button" data-tab="power">Power</button>
+                <button class="tab-button" data-tab="homeAssistant">Home Assistant</button>
+                <button class="tab-button" data-tab="advanced">Advanced</button>
+                <button class="tab-button" data-tab="calibration">Palette Calibration</button>
+            </div>
+            
+            <!-- General Settings Tab -->
+            <div id="generalTab" class="tab-content active">
             <form id="configForm">
                 <!-- Device Name Section -->
                 <div class="settings-section-divider">
@@ -246,6 +259,27 @@
                     </div>
                 </div>
                 
+                <!-- Timezone Section -->
+                <div class="settings-section-divider">
+                    <div class="form-group">
+                        <label for="timezoneOffset">Timezone (UTC offset):</label>
+                    </div>
+                    <div class="form-group indented">
+                        <input type="number" id="timezoneOffset" min="-12" max="14" step="0.5" value="0" placeholder="0">
+                        <small class="helper-text">
+                            🌍 Set your UTC offset (e.g., -8 for PST, +1 for CET, +8 for CST). Supports half-hour offsets like +5.5 for IST.
+                        </small>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">Save Settings</button>
+                <div id="configStatus"></div>
+            </form>
+            </div>
+            <!-- End General Settings Tab -->
+            
+            <!-- Auto Rotate Tab -->
+            <div id="autoRotateTab" class="tab-content">
                 <!-- Auto-Rotate Section -->
                 <div class="settings-section-divider">
                     <div class="form-group">
@@ -341,20 +375,11 @@
                         </small>
                     </div>
                 </div>
-                
-                <!-- Timezone Section -->
-                <div class="settings-section-divider">
-                    <div class="form-group">
-                        <label for="timezoneOffset">Timezone (UTC offset):</label>
-                    </div>
-                    <div class="form-group indented">
-                        <input type="number" id="timezoneOffset" min="-12" max="14" step="0.5" value="0" placeholder="0">
-                        <small class="helper-text">
-                            🌍 Set your UTC offset (e.g., -8 for PST, +1 for CET, +8 for CST). Supports half-hour offsets like +5.5 for IST.
-                        </small>
-                    </div>
-                </div>
-                
+            </div>
+            <!-- End Auto Rotate Tab -->
+            
+            <!-- Power Tab -->
+            <div id="powerTab" class="tab-content">
                 <!-- Power Management Section -->
                 <div class="settings-section-divider">
                     <div class="form-group">
@@ -377,7 +402,11 @@
                         </div>
                     </div>
                 </div>
-                
+            </div>
+            <!-- End Power Tab -->
+            
+            <!-- Home Assistant Tab -->
+            <div id="homeAssistantTab" class="tab-content">
                 <!-- Home Assistant Integration Section -->
                 <div class="settings-section-divider">
                     <div class="form-group">
@@ -390,28 +419,116 @@
                         </small>
                     </div>
                 </div>
-
+            </div>
+            <!-- End Home Assistant Tab -->
+            
+            <!-- Advanced Tab -->
+            <div id="advancedTab" class="tab-content">
                 <!-- Advanced Settings Section -->
                 <div class="settings-section-divider">
                     <div class="form-group">
-                        <details>
-                            <summary>Advanced Settings</summary>
-                            <label for="imageOrientation">Image orientation (degrees):</label>
-                            <input type="number" id="imageOrientation" min="0" max="360" value="180">
-                            <small class="helper-text">
-                                💡 This is only needed for images that were converted through third-party tools. If you are only using the default firmware implementation, leave this setting as is (180).
-                            </small>
-                        </details>
+                        <label for="imageOrientation">Image orientation (degrees):</label>
+                        <input type="number" id="imageOrientation" min="0" max="360" value="180">
+                        <small class="helper-text">
+                            💡 This is only needed for images that were converted through third-party tools. If you are only using the default firmware implementation, leave this setting as is (180).
+                        </small>
+                    </div>
+                </div>
+            </div>
+            <!-- End Advanced Tab -->
+            
+            <!-- Palette Calibration Tab -->
+            <div id="calibrationTab" class="tab-content">
+                <p class="section-description">
+                    Calibrate the measured color palette for your specific E6 display batch. This improves color accuracy during image processing.
+                </p>
+                
+                <div id="currentPalette" class="settings-section">
+                    <h3 class="section-subtitle">Current Palette</h3>
+                    <p class="step-tip">
+                        You can manually adjust the RGB values (0-255) to fine-tune each color. Changes will be saved when you click the Save button.
+                    </p>
+                    <div id="currentPaletteColors" class="palette-grid">
+                        <!-- Colors will be populated by JavaScript -->
+                    </div>
+                    <div id="savePaletteButtonContainer" class="btn-with-margin" style="display: none;">
+                        <button id="savePaletteBtn" class="btn btn-primary">Save Palette Changes</button>
+                        <button id="cancelPaletteBtn" class="btn btn-secondary btn-secondary-margin">Cancel</button>
+                    </div>
+                    <div id="savePaletteStatus" class="status-message"></div>
+                </div>
+                
+                <div id="calibrationFlow" class="calibration-flow" style="display: none;">
+                    <div id="calibrationStep1" class="calibration-step">
+                        <h3 class="section-subtitle">Step 1: Display Calibration Image</h3>
+                        <p class="step-description">
+                            Click the button below to display the calibration pattern on your device. The pattern shows 6 color boxes.
+                        </p>
+                        <div class="button-row">
+                            <button id="displayCalibrationBtn" class="btn btn-primary">Display Calibration Pattern</button>
+                            <button id="skipDisplayBtn" class="btn btn-secondary">Skip (Already Displayed)</button>
+                        </div>
+                        <div id="displayCalibrationStatus" class="status-message"></div>
+                    </div>
+                    
+                    <div id="calibrationStep2" class="calibration-step" style="display: none;">
+                        <h3 class="section-subtitle">Step 2: Take Photo</h3>
+                        <p class="step-description">
+                            Place the device under a 5500K light source (daylight or daylight-balanced LED). Take a photo with your phone camera, ensuring the entire display is visible and well-lit. Avoid shadows and reflections.
+                        </p>
+                        <div class="warning-box-important">
+                            <p class="warning-box-important-title">📸 Important:</p>
+                            <p class="warning-box-important-text">
+                                <strong>Crop your photo to show ONLY the color boxes</strong> - no device edges, bezels, or background. This ensures accurate color detection.
+                            </p>
+                        </div>
+                        <div class="info-box">
+                            <p class="info-box-title">Example Photo:</p>
+                            <img src="measurement_sample.jpg" alt="Sample calibration photo" class="info-box-image">
+                            <p class="info-box-caption">Your photo should look similar to this - entire display visible, well-lit, no glare.</p>
+                        </div>
+                        <button id="proceedToUploadBtn" class="btn btn-primary">I've Taken the Photo</button>
+                    </div>
+                    
+                    <div id="calibrationStep3" class="calibration-step" style="display: none;">
+                        <h3 class="section-subtitle">Step 3: Crop & Upload Photo</h3>
+                        <p class="step-description-small">
+                            <strong>Before uploading:</strong> Crop your photo to show only the 6 color boxes - remove all device edges, bezels, and background. This improves color detection accuracy.
+                        </p>
+                        <p class="step-description">
+                            Upload the cropped photo. The system will automatically detect the color boxes and extract the RGB values.
+                        </p>
+                        <input type="file" id="calibrationPhotoInput" accept="image/*" class="btn-with-margin">
+                        <div id="calibrationAnalysisStatus" class="status-message"></div>
+                        <canvas id="calibrationCanvas" class="calibration-canvas" style="display: none;"></canvas>
+                    </div>
+                    
+                    <div id="calibrationStep4" class="calibration-step" style="display: none;">
+                        <h3 class="section-subtitle">Step 4: Review & Save</h3>
+                        <p class="step-description-small">
+                            Review the measured colors below. You can manually adjust the RGB values (0-255) to fine-tune each color.
+                        </p>
+                        <p class="step-tip">
+                            💡 <strong>Tip:</strong> The color swatch updates in real-time as you edit. When satisfied, click Save to store the calibration.
+                        </p>
+                        <div id="measuredPalette" class="palette-grid">
+                        </div>
+                        <div class="button-group">
+                            <button id="cancelCalibrationBtn" class="btn btn-secondary">Cancel</button>
+                            <button id="saveCalibrationBtn" class="btn btn-primary">Save Calibration</button>
+                        </div>
+                        <div id="saveCalibrationStatus" class="status-message"></div>
                     </div>
                 </div>
                 
-                <button type="submit" class="btn btn-primary">Save Settings</button>
-                <div id="configStatus"></div>
-            </form>
+                <button id="startCalibrationBtn" class="btn btn-primary btn-with-margin">Start Calibration</button>
+                <button id="resetPaletteBtn" class="btn btn-secondary btn-with-margin">Reset to Defaults</button>
+            </div>
+            <!-- End Palette Calibration Tab -->
         </section>
 
         <section class="card">
-            <h2>Firmware Update</h2>
+            <h2>Firmware Update (OTA)</h2>
             <p class="section-description">
                 Check for and install firmware updates from GitHub releases.
             </p>
@@ -448,94 +565,6 @@
                 
                 <div id="otaStatus" class="status-message"></div>
             </div>
-        </section>
-
-        <section class="card">
-            <h2>Color Palette Calibration</h2>
-            <p class="section-description">
-                Calibrate the measured color palette for your specific E6 display batch. This improves color accuracy during image processing.
-            </p>
-            
-            <div id="currentPalette" class="settings-section">
-                <h3 class="section-subtitle">Current Palette</h3>
-                <p class="step-tip">
-                    You can manually adjust the RGB values (0-255) to fine-tune each color. Changes will be saved when you click the Save button.
-                </p>
-                <div id="currentPaletteColors" class="palette-grid">
-                    <!-- Colors will be populated by JavaScript -->
-                </div>
-                <div id="savePaletteButtonContainer" class="btn-with-margin" style="display: none;">
-                    <button id="savePaletteBtn" class="btn btn-primary">Save Palette Changes</button>
-                    <button id="cancelPaletteBtn" class="btn btn-secondary btn-secondary-margin">Cancel</button>
-                </div>
-                <div id="savePaletteStatus" class="status-message"></div>
-            </div>
-            
-            <div id="calibrationFlow" class="calibration-flow" style="display: none;">
-                <div id="calibrationStep1" class="calibration-step">
-                    <h3 class="section-subtitle">Step 1: Display Calibration Image</h3>
-                    <p class="step-description">
-                        Click the button below to display the calibration pattern on your device. The pattern shows 6 color boxes.
-                    </p>
-                    <div class="button-row">
-                        <button id="displayCalibrationBtn" class="btn btn-primary">Display Calibration Pattern</button>
-                        <button id="skipDisplayBtn" class="btn btn-secondary">Skip (Already Displayed)</button>
-                    </div>
-                    <div id="displayCalibrationStatus" class="status-message"></div>
-                </div>
-                
-                <div id="calibrationStep2" class="calibration-step" style="display: none;">
-                    <h3 class="section-subtitle">Step 2: Take Photo</h3>
-                    <p class="step-description">
-                        Place the device under a 5500K light source (daylight or daylight-balanced LED). Take a photo with your phone camera, ensuring the entire display is visible and well-lit. Avoid shadows and reflections.
-                    </p>
-                    <div class="warning-box-important">
-                        <p class="warning-box-important-title">📸 Important:</p>
-                        <p class="warning-box-important-text">
-                            <strong>Crop your photo to show ONLY the color boxes</strong> - no device edges, bezels, or background. This ensures accurate color detection.
-                        </p>
-                    </div>
-                    <div class="info-box">
-                        <p class="info-box-title">Example Photo:</p>
-                        <img src="measurement_sample.jpg" alt="Sample calibration photo" class="info-box-image">
-                        <p class="info-box-caption">Your photo should look similar to this - entire display visible, well-lit, no glare.</p>
-                    </div>
-                    <button id="proceedToUploadBtn" class="btn btn-primary">I've Taken the Photo</button>
-                </div>
-                
-                <div id="calibrationStep3" class="calibration-step" style="display: none;">
-                    <h3 class="section-subtitle">Step 3: Crop & Upload Photo</h3>
-                    <p class="step-description-small">
-                        <strong>Before uploading:</strong> Crop your photo to show only the 6 color boxes - remove all device edges, bezels, and background. This improves color detection accuracy.
-                    </p>
-                    <p class="step-description">
-                        Upload the cropped photo. The system will automatically detect the color boxes and extract the RGB values.
-                    </p>
-                    <input type="file" id="calibrationPhotoInput" accept="image/*" class="btn-with-margin">
-                    <div id="calibrationAnalysisStatus" class="status-message"></div>
-                    <canvas id="calibrationCanvas" class="calibration-canvas" style="display: none;"></canvas>
-                </div>
-                
-                <div id="calibrationStep4" class="calibration-step" style="display: none;">
-                    <h3 class="section-subtitle">Step 4: Review & Save</h3>
-                    <p class="step-description-small">
-                        Review the measured colors below. You can manually adjust the RGB values (0-255) to fine-tune each color.
-                    </p>
-                    <p class="step-tip">
-                        💡 <strong>Tip:</strong> The color swatch updates in real-time as you edit. When satisfied, click Save to store the calibration.
-                    </p>
-                    <div id="measuredPalette" class="palette-grid">
-                    </div>
-                    <div class="button-group">
-                        <button id="cancelCalibrationBtn" class="btn btn-secondary">Cancel</button>
-                        <button id="saveCalibrationBtn" class="btn btn-primary">Save Calibration</button>
-                    </div>
-                    <div id="saveCalibrationStatus" class="status-message"></div>
-                </div>
-            </div>
-            
-            <button id="startCalibrationBtn" class="btn btn-primary btn-with-margin">Start Calibration</button>
-            <button id="resetPaletteBtn" class="btn btn-secondary btn-with-margin">Reset to Defaults</button>
         </section>
 
         <footer>
