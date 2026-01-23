@@ -1379,9 +1379,8 @@ document
     document.getElementById("imageUrlGroup").style.display = "block";
   });
 
-document.getElementById("configForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-
+// Function to save all settings
+async function saveAllSettings() {
   const statusDiv = document.getElementById("configStatus");
   const autoRotate = document.getElementById("autoRotate").checked;
 
@@ -1482,6 +1481,17 @@ document.getElementById("configForm").addEventListener("submit", async (e) => {
     statusDiv.className = "status-error";
     statusDiv.textContent = "Error saving settings";
   }
+}
+
+// Event listener for the new Save Settings button (outside tabs)
+document
+  .getElementById("saveSettingsBtn")
+  .addEventListener("click", saveAllSettings);
+
+// Keep the form submit handler for backwards compatibility (if form is submitted via Enter key)
+document.getElementById("configForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  await saveAllSettings();
 });
 
 // Periodic updates - only when page is visible/focused
