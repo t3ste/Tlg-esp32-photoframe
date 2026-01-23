@@ -68,10 +68,23 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
     esp_err_t err = ESP_FAIL;
     int status_code = 0;
     int content_length = 0;
-    char *content_type;
+    char *content_type = NULL;
     char *thumbnail_url_buffer = NULL;
     int total_downloaded = 0;
     const int max_retries = 3;
+
+    // Allocate buffers once before retry loop
+    thumbnail_url_buffer = calloc(512, 1);
+    content_type = calloc(128, 1);
+
+    if (!content_type || !thumbnail_url_buffer) {
+        ESP_LOGE(TAG, "Failed to allocate memory for download context");
+        if (content_type)
+            free(content_type);
+        if (thumbnail_url_buffer)
+            free(thumbnail_url_buffer);
+        return ESP_FAIL;
+    }
 
     // Retry loop
     for (int retry = 0; retry < max_retries; retry++) {
@@ -86,23 +99,13 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
             continue;  // Try again
         }
 
-        // Allocate thumbnail URL buffer if not already allocated
-        if (!thumbnail_url_buffer) {
-            thumbnail_url_buffer = calloc(512, 1);
-        }
+        // Clear buffers for this retry
+        memset(content_type, 0, 128);
 
-        download_context_t ctx = {
-            .file = file,
-            .total_read = 0,
-            .content_type =
-                calloc(128, 1),  // Zero-initialize to handle missing Content-Type header
-            .thumbnail_url = thumbnail_url_buffer};
-
-        if (!ctx.content_type) {
-            ESP_LOGE(TAG, "Failed to allocate memory for content_type");
-            fclose(file);
-            continue;
-        }
+        download_context_t ctx = {.file = file,
+                                  .total_read = 0,
+                                  .content_type = content_type,
+                                  .thumbnail_url = thumbnail_url_buffer};
 
         esp_http_client_config_t config = {
             .url = url,
@@ -146,22 +149,22 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
             ESP_LOGE(TAG, "No data downloaded from URL");
         }
 
-        // Clean up failed download
-        free(ctx.content_type);
+        // Clean up failed download (don't free content_type - it's reused across retries)
         unlink(temp_upload_path);
     }
 
     // Check final result after all retries
     if (err != ESP_OK || status_code != 200 || total_downloaded <= 0) {
         ESP_LOGE(TAG, "Failed to download image after %d attempts", max_retries);
-        if (content_type)
-            free(content_type);
+        free(content_type);
+        free(thumbnail_url_buffer);
         unlink(temp_upload_path);
         return ESP_FAIL;
     }
 
     bool upload_is_bmp = strcmp(content_type, "image/bmp") == 0;
     bool upload_is_png = strcmp(content_type, "image/png") == 0;
+    bool upload_is_jpeg = strcmp(content_type, "image/jpeg") == 0;
     const char *final_path = NULL;
 
     if (upload_is_bmp) {
@@ -187,15 +190,23 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
         final_path = temp_png_path;
         err = ESP_OK;  // PNG move succeeded
         ESP_LOGI(TAG, "PNG saved: %s", temp_png_path);
-    } else {
+    } else if (upload_is_jpeg) {
         // Convert the upload from JPG to BMP
         err = image_processor_convert_jpg_to_bmp(temp_upload_path, temp_bmp_path, false);
         final_path = temp_bmp_path;
+    } else {
+        // Unknown format
+        ESP_LOGE(TAG, "Unsupported image format: %s", content_type);
+        free(content_type);
+        free(thumbnail_url_buffer);
+        unlink(temp_upload_path);
+        return ESP_FAIL;
     }
 
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to process image: %s", esp_err_to_name(err));
         free(content_type);
+        free(thumbnail_url_buffer);
         unlink(temp_upload_path);
 
         // Provide specific error messages based on error type
@@ -211,6 +222,9 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
     free(content_type);
 
     ESP_LOGI(TAG, "Successfully processed image: %s", final_path);
+
+    // Track if thumbnail was successfully downloaded
+    bool thumbnail_downloaded = false;
 
     // Download thumbnail if URL was provided in X-Thumbnail-URL header
     if (thumbnail_url_buffer && strlen(thumbnail_url_buffer) > 0) {
@@ -244,6 +258,7 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
                 if (thumb_err == ESP_OK && thumb_status == 200 && thumb_ctx.total_read > 0) {
                     ESP_LOGI(TAG, "Thumbnail downloaded successfully: %d bytes",
                              thumb_ctx.total_read);
+                    thumbnail_downloaded = true;
                 } else {
                     ESP_LOGW(TAG, "Failed to download thumbnail (status: %d)", thumb_status);
                     unlink(temp_jpg_path);
@@ -379,13 +394,22 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
             // Keep both .current.bmp and .current.jpg for HA integration
             // .current.bmp is referenced by current_image
             // .current.jpg is the thumbnail served by /api/current_image
-            unlink(temp_jpg_path);
-            if (rename(temp_upload_path, temp_jpg_path) != 0) {
-                ESP_LOGE(TAG, "Failed to move upload to current JPG thumbnail");
+
+            // Check if thumbnail was downloaded from server (via X-Thumbnail-URL header)
+            if (!thumbnail_downloaded) {
+                // No downloaded thumbnail, use original upload as thumbnail
+                if (rename(temp_upload_path, temp_jpg_path) != 0) {
+                    ESP_LOGE(TAG, "Failed to move upload to current JPG thumbnail");
+                    unlink(temp_upload_path);
+                    return ESP_FAIL;
+                }
+                ESP_LOGI(TAG, "Image and thumbnail saved: %s, %s", temp_bmp_path, temp_jpg_path);
+            } else {
+                // Downloaded thumbnail exists, keep it and delete original upload
                 unlink(temp_upload_path);
-                return ESP_FAIL;
+                ESP_LOGI(TAG, "Image and downloaded thumbnail saved: %s, %s", temp_bmp_path,
+                         temp_jpg_path);
             }
-            ESP_LOGI(TAG, "Image and thumbnail saved: %s, %s", temp_bmp_path, temp_jpg_path);
         }
     }
 

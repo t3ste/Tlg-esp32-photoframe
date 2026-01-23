@@ -1197,8 +1197,6 @@ static esp_err_t current_image_handler(httpd_req_t *req)
         image_to_serve[len - 1] = '\0';
     }
 
-    ESP_LOGI(TAG, "Serving image from link: %s", image_to_serve);
-
     // Try to serve JPG version first by replacing .bmp/.png extension with .jpg
     char thumbnail_path[512];
     strncpy(thumbnail_path, image_to_serve, sizeof(thumbnail_path) - 1);
@@ -1220,10 +1218,14 @@ static esp_err_t current_image_handler(httpd_req_t *req)
             content_type = "image/bmp";
         }
 
+        ESP_LOGI(TAG, "Serving %s as fallback thumbnail image", image_to_serve);
+
         if (!fp) {
             httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Image not found");
             return ESP_FAIL;
         }
+    } else {
+        ESP_LOGI(TAG, "Serving thumbnail image %s for %s", thumbnail_path, image_to_serve);
     }
 
     httpd_resp_set_type(req, content_type);
