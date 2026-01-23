@@ -1,8 +1,5 @@
 import {
-  PALETTE_MEASURED,
-  PALETTE_THEORETICAL,
   processImage,
-  rotate90Clockwise,
   applyExifOrientation,
   resizeImageCover,
   generateThumbnail,
@@ -20,7 +17,6 @@ let keepAliveInterval = null;
 const KEEP_ALIVE_INTERVAL = 30000; // 30 seconds
 
 let currentImages = [];
-let selectedImage = null;
 let currentAlbums = [];
 let selectedAlbum = "Default";
 
@@ -442,7 +438,6 @@ async function selectImage(filename, element) {
     item.classList.remove("selected");
   });
   element.classList.add("selected");
-  selectedImage = filename;
 
   isDisplaying = true;
 
@@ -483,8 +478,20 @@ async function selectImage(filename, element) {
 // Global state for image processing
 let currentImageFile = null;
 let currentImageCanvas = null;
-let originalImageData = null; // Store original unprocessed image data
-let currentParams = {};
+let sourceCanvas = null; // Store raw EXIF-corrected source for processing
+let currentParams = {
+  exposure: 1.0,
+  saturation: 1.3,
+  toneMode: "scurve",
+  contrast: 1.0,
+  strength: 0.9,
+  shadowBoost: 0.0,
+  highlightCompress: 1.5,
+  midpoint: 0.5,
+  colorMethod: "rgb",
+  renderMeasured: true,
+  processingMode: "enhanced",
+};
 
 document.getElementById("fileInput").addEventListener("change", async (e) => {
   const file = e.target.files[0];
@@ -505,49 +512,6 @@ document.getElementById("fileInput").addEventListener("change", async (e) => {
   await loadImagePreview(file);
 });
 
-async function resizeImage(file, maxWidth, maxHeight, quality) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        // Load image into a temporary canvas
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = img.width;
-        tempCanvas.height = img.height;
-        const tempCtx = tempCanvas.getContext("2d");
-        tempCtx.drawImage(img, 0, 0);
-
-        // Determine if portrait or landscape
-        const isPortrait = img.height > img.width;
-
-        // Set target dimensions based on orientation
-        const targetWidth = isPortrait ? maxHeight : maxWidth;
-        const targetHeight = isPortrait ? maxWidth : maxHeight;
-
-        // Use shared resizeImageCover function
-        const resizedCanvas = resizeImageCover(
-          tempCanvas,
-          targetWidth,
-          targetHeight,
-        );
-
-        resizedCanvas.toBlob(
-          (blob) => {
-            resolve(blob);
-          },
-          "image/jpeg",
-          quality,
-        );
-      };
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 // Convert canvas to PNG blob - wrapper for createPNG from image-processor.js
 async function canvasToPNG(canvas) {
   return createPNG(canvas);
@@ -563,20 +527,12 @@ async function loadImagePreview(file) {
   statusDiv.className = "";
 
   // Fetch calibrated palette from device if not already loaded
-  if (!deviceCalibratedPalette) {
+  if (!devicePaletteObject) {
     try {
       const response = await fetch(`${API_BASE}/api/settings/palette`);
       if (response.ok) {
         const palette = await response.json();
-        deviceCalibratedPalette = [
-          [palette.black.r, palette.black.g, palette.black.b],
-          [palette.white.r, palette.white.g, palette.white.b],
-          [palette.yellow.r, palette.yellow.g, palette.yellow.b],
-          [palette.red.r, palette.red.g, palette.red.b],
-          [0, 0, 0], // Reserved
-          [palette.blue.r, palette.blue.g, palette.blue.b],
-          [palette.green.r, palette.green.g, palette.green.b],
-        ];
+        devicePaletteObject = palette;
       }
     } catch (error) {
       console.error("Error loading calibrated palette:", error);
@@ -584,68 +540,23 @@ async function loadImagePreview(file) {
   }
 
   try {
-    // Load image and resize to display size
+    // Load image with EXIF orientation applied
     const img = await loadImage(file);
 
-    // Determine if portrait or landscape for preview display
-    const isPortrait = img.height > img.width;
+    // Create canvas from loaded image (EXIF-corrected source)
+    sourceCanvas = document.createElement("canvas");
+    sourceCanvas.width = img.width;
+    sourceCanvas.height = img.height;
+    const sourceCtx = sourceCanvas.getContext("2d");
+    sourceCtx.drawImage(img, 0, 0);
 
-    // Set canvas to display dimensions (800x480 or 480x800) for preview
-    const baseWidth = isPortrait ? 480 : 800;
-    const baseHeight = isPortrait ? 800 : 480;
-
-    // Get container width for responsive sizing on mobile
-    const container = previewCanvas.parentElement;
-    const containerWidth = container
-      ? container.clientWidth
-      : window.innerWidth;
-    const isMobile = window.innerWidth < 768;
-
-    // Calculate scaled dimensions maintaining aspect ratio
-    let width, height;
-    if (isMobile && baseWidth > containerWidth) {
-      // Scale down on mobile if canvas is wider than container
-      const scale = containerWidth / baseWidth;
-      width = Math.floor(baseWidth * scale);
-      height = Math.floor(baseHeight * scale);
-    } else {
-      // Keep full resolution on desktop
-      width = baseWidth;
-      height = baseHeight;
-    }
-
-    previewCanvas.width = width;
-    previewCanvas.height = height;
-    originalCanvas.width = width;
-    originalCanvas.height = height;
-
-    // Draw image with cover mode (fill and crop)
-    const scaleX = width / img.width;
-    const scaleY = height / img.height;
-    const scale = Math.max(scaleX, scaleY);
-
-    const scaledWidth = img.width * scale;
-    const scaledHeight = img.height * scale;
-    const offsetX = (width - scaledWidth) / 2;
-    const offsetY = (height - scaledHeight) / 2;
-
-    // Draw to both canvases
-    const previewCtx = previewCanvas.getContext("2d", {
-      willReadFrequently: true,
-    });
-    const originalCtx = originalCanvas.getContext("2d");
-
-    previewCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
-    originalCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
-
-    // Store canvas and original image data
+    // Store canvas reference
     currentImageCanvas = previewCanvas;
-    originalImageData = previewCtx.getImageData(0, 0, width, height);
 
     // Initialize comparison slider
     initComparisonSlider();
 
-    // Apply initial processing
+    // Apply initial processing (will rotate, resize, and preprocess)
     updatePreview();
   } catch (error) {
     console.error("Error loading preview:", error);
@@ -957,38 +868,67 @@ function drawCurveVisualization() {
 }
 
 function updatePreview() {
-  if (!currentImageCanvas || !originalImageData) return;
+  if (!currentImageCanvas || !sourceCanvas) return;
 
   // Update curve visualization
   drawCurveVisualization();
 
-  // Create a copy of the original image data
-  const tempCanvas = document.createElement("canvas");
-  tempCanvas.width = originalImageData.width;
-  tempCanvas.height = originalImageData.height;
-  const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
+  // Determine natural dimensions (portrait stays portrait in browser)
+  const isPortrait = sourceCanvas.height > sourceCanvas.width;
+  const naturalWidth = isPortrait ? 480 : 800;
+  const naturalHeight = isPortrait ? 800 : 480;
 
-  // Copy original image data
-  const imageDataCopy = tempCtx.createImageData(
-    originalImageData.width,
-    originalImageData.height,
+  // Process with dithering for preview (skipRotation for browser display)
+  const previewParams = { ...currentParams, renderMeasured: true };
+  const { canvas: processedCanvas } = processImage(
+    sourceCanvas,
+    previewParams,
+    devicePaletteObject,
+    {
+      verbose: false,
+      skipRotation: true,
+      targetWidth: 800,
+      targetHeight: 480,
+    },
   );
-  imageDataCopy.data.set(originalImageData.data);
 
-  // Apply image processing with device calibrated palette for accurate preview
-  const previewParams = { ...currentParams };
-  if (deviceCalibratedPalette) {
-    previewParams.customPalette = deviceCalibratedPalette;
-  }
-  processImage(imageDataCopy, previewParams);
+  // Create original JPEG version (just resized, no processing)
+  const originalResized = resizeImageCover(
+    sourceCanvas,
+    naturalWidth,
+    naturalHeight,
+  );
 
-  // Put processed data back to temp canvas
-  tempCtx.putImageData(imageDataCopy, 0, 0);
-
-  // Draw processed image to preview canvas
+  // Get container width for responsive sizing on mobile
   const previewCanvas = document.getElementById("previewCanvas");
-  const ctx = previewCanvas.getContext("2d");
-  ctx.drawImage(tempCanvas, 0, 0);
+  const originalCanvas = document.getElementById("originalCanvas");
+  const container = previewCanvas.parentElement;
+  const containerWidth = container ? container.clientWidth : window.innerWidth;
+  const isMobile = window.innerWidth < 768;
+
+  // Calculate display dimensions
+  let displayWidth = processedCanvas.width;
+  let displayHeight = processedCanvas.height;
+
+  if (isMobile && displayWidth > containerWidth) {
+    const scale = containerWidth / displayWidth;
+    displayWidth = Math.floor(displayWidth * scale);
+    displayHeight = Math.floor(displayHeight * scale);
+  }
+
+  // Update canvas dimensions
+  previewCanvas.width = displayWidth;
+  previewCanvas.height = displayHeight;
+  originalCanvas.width = displayWidth;
+  originalCanvas.height = displayHeight;
+
+  // Draw original (no dithering) to original canvas (for comparison)
+  const originalCtx = originalCanvas.getContext("2d");
+  originalCtx.drawImage(originalResized, 0, 0, displayWidth, displayHeight);
+
+  // Draw processed (with dithering) to preview canvas
+  const previewCtx = previewCanvas.getContext("2d");
+  previewCtx.drawImage(processedCanvas, 0, 0, displayWidth, displayHeight);
 }
 
 // Parameter change handlers
@@ -1104,7 +1044,7 @@ document.querySelectorAll('input[name="processingMode"]').forEach((radio) => {
 document.getElementById("discardImage").addEventListener("click", () => {
   currentImageFile = null;
   currentImageCanvas = null;
-  originalImageData = null;
+  sourceCanvas = null;
   document.getElementById("fileInput").value = "";
   document.getElementById("imageProcessingSection").style.display = "none";
   document.getElementById("previewArea").style.display = "none";
@@ -1219,66 +1159,28 @@ document
     let uploadSucceeded = false;
 
     try {
-      // Re-process the image with theoretical palette for device upload
-      // (preview uses calibrated palette, but device needs theoretical palette)
-      const originalCanvas = document.getElementById("originalCanvas");
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = originalImageData.width;
-      tempCanvas.height = originalImageData.height;
-      const tempCtx = tempCanvas.getContext("2d", {
-        willReadFrequently: true,
-      });
+      // Process image with theoretical palette for device upload using shared pipeline
+      // Device expects 800x480 landscape, so rotate portrait images
+      const uploadParams = { ...currentParams, renderMeasured: false };
+      const { canvas: processedCanvas, originalCanvas: exifCorrectedCanvas } =
+        processImage(sourceCanvas, uploadParams, devicePaletteObject, {
+          verbose: false,
+          skipRotation: false, // Rotate for device
+          targetWidth: 800,
+          targetHeight: 480,
+        });
 
-      // Copy original image data
-      const imageDataCopy = tempCtx.createImageData(
-        originalImageData.width,
-        originalImageData.height,
-      );
-      imageDataCopy.data.set(originalImageData.data);
-
-      // Process with theoretical palette for device upload
-      // renderMeasured=false means output uses PALETTE_THEORETICAL (for device consumption)
-      // but error diffusion still uses the calibrated palette for accurate dithering
-      const uploadParams = { ...currentParams };
-      uploadParams.renderMeasured = false; // Output with theoretical palette
-      processImage(imageDataCopy, uploadParams);
-
-      // Put processed data to temp canvas
-      tempCtx.putImageData(imageDataCopy, 0, 0);
-
-      // Create 800x480 canvas for device (always landscape)
-      const deviceCanvas = document.createElement("canvas");
-      deviceCanvas.width = 800;
-      deviceCanvas.height = 480;
-      const deviceCtx = deviceCanvas.getContext("2d");
-
-      // Disable image smoothing to preserve exact pixel colors
-      deviceCtx.imageSmoothingEnabled = false;
-
-      // Check if image is portrait (needs rotation)
-      const isPortrait = tempCanvas.width < tempCanvas.height;
-
-      if (isPortrait) {
-        // Rotate portrait image 90 degrees clockwise to landscape
-        deviceCtx.translate(800, 0);
-        deviceCtx.rotate(Math.PI / 2);
-        deviceCtx.drawImage(tempCanvas, 0, 0);
-      } else {
-        // Landscape image, just copy directly
-        deviceCtx.drawImage(tempCanvas, 0, 0);
-      }
-
-      // Convert the 800x480 canvas to PNG
-      const pngBlob = await canvasToPNG(deviceCanvas);
+      // Convert the processed canvas to PNG
+      const pngBlob = await canvasToPNG(processedCanvas);
 
       // Generate filename with .png extension
       const originalName = currentImageFile.name.replace(/\.[^/.]+$/, "");
       const pngFilename = `${originalName}.png`;
 
-      // Create thumbnail (400x240 or 240x400) from EXIF-corrected original using shared function
+      // Create thumbnail (400x240 or 240x400) from EXIF-corrected source using shared function
       const thumbnailBlob = await new Promise((resolve, reject) => {
-        // Use originalCanvas which already has EXIF orientation applied
-        const thumbCanvas = generateThumbnail(originalCanvas, 400, 240);
+        // Use exifCorrectedCanvas (before rotation) for thumbnail
+        const thumbCanvas = generateThumbnail(exifCorrectedCanvas, 400, 240);
 
         // Convert to blob
         thumbCanvas.toBlob(resolve, "image/jpeg", 0.85);
@@ -1308,7 +1210,7 @@ document
         // Reset state
         currentImageFile = null;
         currentImageCanvas = null;
-        originalImageData = null;
+        sourceCanvas = null;
         document.getElementById("fileInput").value = "";
 
         // Hide processing section
@@ -1724,6 +1626,63 @@ function scheduleSaveSettings() {
 }
 
 // Load persisted settings from backend
+// Initialize UI controls with current parameter values
+function initializeUI() {
+  document.getElementById("exposure").value = currentParams.exposure;
+  document.getElementById("exposureValue").textContent =
+    currentParams.exposure.toFixed(1);
+  document.getElementById("saturation").value = currentParams.saturation;
+  document.getElementById("saturationValue").textContent =
+    currentParams.saturation.toFixed(1);
+  document.getElementById("contrast").value = currentParams.contrast;
+  document.getElementById("contrastValue").textContent =
+    currentParams.contrast.toFixed(1);
+  document.getElementById("scurveStrength").value = currentParams.strength;
+  document.getElementById("strengthValue").textContent =
+    currentParams.strength.toFixed(1);
+  document.getElementById("scurveShadow").value = currentParams.shadowBoost;
+  document.getElementById("shadowValue").textContent =
+    currentParams.shadowBoost.toFixed(1);
+  document.getElementById("scurveHighlight").value =
+    currentParams.highlightCompress;
+  document.getElementById("highlightValue").textContent =
+    currentParams.highlightCompress.toFixed(1);
+  document.getElementById("scurveMidpoint").value = currentParams.midpoint;
+  document.getElementById("midpointValue").textContent =
+    currentParams.midpoint.toFixed(1);
+  document.querySelector(
+    `input[name="colorMethod"][value="${currentParams.colorMethod}"]`,
+  ).checked = true;
+  document.querySelector(
+    `input[name="toneMode"][value="${currentParams.toneMode}"]`,
+  ).checked = true;
+  document.querySelector(
+    `input[name="processingMode"][value="${currentParams.processingMode}"]`,
+  ).checked = true;
+
+  // Update UI visibility based on settings
+  const enhancedControls = document.getElementById("enhancedControls");
+  const colorMethodControl = document.getElementById("colorMethodControl");
+  const contrastControl = document.getElementById("contrastControl");
+  const curveCanvasWrapper = document.querySelector(".curve-canvas-wrapper");
+
+  if (currentParams.processingMode === "stock") {
+    enhancedControls.style.display = "none";
+    colorMethodControl.style.display = "none";
+    curveCanvasWrapper.style.display = "none";
+  } else {
+    enhancedControls.style.display = "grid";
+    colorMethodControl.style.display = "block";
+    if (currentParams.toneMode === "scurve") {
+      contrastControl.style.display = "none";
+      curveCanvasWrapper.style.display = "flex";
+    } else {
+      contrastControl.style.display = "block";
+      curveCanvasWrapper.style.display = "none";
+    }
+  }
+}
+
 async function loadPersistedSettings() {
   try {
     const response = await fetch(`${API_BASE}/api/settings/processing`);
@@ -1732,75 +1691,26 @@ async function loadPersistedSettings() {
 
       // Update currentParams with persisted values
       currentParams = { ...settings };
-
-      // Update UI to reflect loaded settings
-      document.getElementById("exposure").value = settings.exposure;
-      document.getElementById("exposureValue").textContent =
-        settings.exposure.toFixed(1);
-      document.getElementById("saturation").value = settings.saturation;
-      document.getElementById("saturationValue").textContent =
-        settings.saturation.toFixed(1);
-      document.getElementById("contrast").value = settings.contrast;
-      document.getElementById("contrastValue").textContent =
-        settings.contrast.toFixed(1);
-      document.getElementById("scurveStrength").value = settings.strength;
-      document.getElementById("strengthValue").textContent =
-        settings.strength.toFixed(1);
-      document.getElementById("scurveShadow").value = settings.shadowBoost;
-      document.getElementById("shadowValue").textContent =
-        settings.shadowBoost.toFixed(1);
-      document.getElementById("scurveHighlight").value =
-        settings.highlightCompress;
-      document.getElementById("highlightValue").textContent =
-        settings.highlightCompress.toFixed(1);
-      document.getElementById("scurveMidpoint").value = settings.midpoint;
-      document.getElementById("midpointValue").textContent =
-        settings.midpoint.toFixed(1);
-      document.querySelector(
-        `input[name="colorMethod"][value="${settings.colorMethod}"]`,
-      ).checked = true;
-      document.querySelector(
-        `input[name="toneMode"][value="${settings.toneMode}"]`,
-      ).checked = true;
-      document.querySelector(
-        `input[name="processingMode"][value="${settings.processingMode}"]`,
-      ).checked = true;
-
-      // Update UI visibility based on loaded settings
-      const enhancedControls = document.getElementById("enhancedControls");
-      const colorMethodControl = document.getElementById("colorMethodControl");
-      const contrastControl = document.getElementById("contrastControl");
-      const curveCanvasWrapper = document.querySelector(
-        ".curve-canvas-wrapper",
-      );
-
-      if (settings.processingMode === "stock") {
-        enhancedControls.style.display = "none";
-        colorMethodControl.style.display = "none";
-        curveCanvasWrapper.style.display = "none";
-      } else {
-        enhancedControls.style.display = "grid";
-        colorMethodControl.style.display = "block";
-        if (settings.toneMode === "scurve") {
-          contrastControl.style.display = "none";
-          curveCanvasWrapper.style.display = "flex";
-        } else {
-          contrastControl.style.display = "block";
-          curveCanvasWrapper.style.display = "none";
-        }
-      }
-
       console.log("Loaded persisted settings from device");
     } else {
-      console.error("Failed to load settings from firmware");
+      console.log("API not available, using default settings");
     }
   } catch (error) {
-    console.error("Error loading settings:", error);
+    console.log("API not available, using default settings:", error.message);
   }
+
+  // Always initialize UI with current parameters (either loaded or defaults)
+  initializeUI();
 }
 
 setupDragAndDrop();
-loadPersistedSettings();
+
+// Load persisted settings and palette from device before allowing image processing
+(async () => {
+  await Promise.all([loadPersistedSettings(), loadColorPalette()]);
+  console.log("Device settings loaded:", currentParams);
+  console.log("Device palette loaded:", devicePaletteObject);
+})();
 
 // ===== Color Palette Calibration =====
 
@@ -1809,7 +1719,15 @@ let measuredPaletteData = null;
 // Load and display current palette
 let currentPaletteData = null;
 let originalPaletteData = null;
-let deviceCalibratedPalette = null; // Palette for preview dithering
+// Default palette object for processImage (fallback when API not available)
+let devicePaletteObject = {
+  black: { r: 2, g: 2, b: 2 },
+  white: { r: 190, g: 190, b: 190 },
+  yellow: { r: 205, g: 202, b: 0 },
+  red: { r: 135, g: 19, b: 0 },
+  blue: { r: 5, g: 64, b: 158 },
+  green: { r: 39, g: 102, b: 60 },
+};
 
 async function loadColorPalette() {
   try {
@@ -1819,26 +1737,25 @@ async function loadColorPalette() {
       currentPaletteData = JSON.parse(JSON.stringify(palette));
       originalPaletteData = JSON.parse(JSON.stringify(palette));
 
-      // Convert palette to array format for preview dithering
-      deviceCalibratedPalette = [
-        [palette.black.r, palette.black.g, palette.black.b],
-        [palette.white.r, palette.white.g, palette.white.b],
-        [palette.yellow.r, palette.yellow.g, palette.yellow.b],
-        [palette.red.r, palette.red.g, palette.red.b],
-        [0, 0, 0], // Reserved
-        [palette.blue.r, palette.blue.g, palette.blue.b],
-        [palette.green.r, palette.green.g, palette.green.b],
-      ];
+      // Store palette object for processImage
+      devicePaletteObject = palette;
 
       displayPalette(palette);
 
       // Update preview if image is loaded
-      if (currentImageCanvas && originalImageData) {
+      if (currentImageCanvas && sourceCanvas) {
         updatePreview();
       }
+
+      console.log("Loaded calibrated palette from device");
+    } else {
+      console.log("API not available, using default measured palette");
     }
   } catch (error) {
-    console.error("Error loading palette:", error);
+    console.log(
+      "API not available, using default measured palette:",
+      error.message,
+    );
   }
 }
 
@@ -2480,9 +2397,6 @@ document
       alert("Error resetting palette: " + error.message);
     }
   });
-
-// Load palette on page load
-loadColorPalette();
 
 // Rotate image button handler
 document.getElementById("rotateBtn").addEventListener("click", async () => {

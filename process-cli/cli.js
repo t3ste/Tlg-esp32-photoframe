@@ -13,10 +13,7 @@ import { fileURLToPath } from "url";
 import url from "url";
 import {
   processImage,
-  PALETTE_THEORETICAL,
-  rotate90Clockwise,
   applyExifOrientation,
-  resizeImageCover,
   generateThumbnail,
   createPNG,
 } from "./image-processor.js";
@@ -607,26 +604,26 @@ async function processImageFile(
   console.log(`Done!`);
 }
 
-// Shared image processing pipeline - matches processImageFile logic exactly
+// Wrapper for file-based image processing: loads image, applies EXIF, then calls shared processImage
 async function processImagePipeline(
   imagePath,
   processingParams,
   devicePalette,
   options = {},
 ) {
-  const { verbose = false } = options;
+  const { verbose = false, skipDithering = false } = options;
 
-  // 1. Load image (with HEIC conversion if needed)
+  // Load image (with HEIC conversion if needed)
   const img = await loadImageWithHeicSupport(imagePath);
   let canvas = createCanvas(img.width, img.height);
-  let ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d");
   ctx.drawImage(img, 0, 0);
 
   if (verbose) {
     console.log(`  Original size: ${canvas.width}x${canvas.height}`);
   }
 
-  // 2. Apply EXIF orientation
+  // Apply EXIF orientation
   const orientation = getExifOrientation(imagePath);
   if (orientation > 1) {
     if (verbose) {
@@ -638,103 +635,14 @@ async function processImagePipeline(
     }
   }
 
-  // Save EXIF-corrected canvas for thumbnail generation (before rotation/processing)
-  const originalCanvas = createCanvas(canvas.width, canvas.height);
-  const originalCanvasCtx = originalCanvas.getContext("2d");
-  originalCanvasCtx.drawImage(canvas, 0, 0);
-
-  // 3. Check if portrait and rotate (skip rotation if rendering measured for debugging)
-  const isPortrait = canvas.height > canvas.width;
-  if (isPortrait && !processingParams.renderMeasured) {
-    if (verbose) {
-      console.log(`  Portrait detected, rotating 90° clockwise`);
-    }
-    canvas = rotate90Clockwise(canvas, createCanvas);
-    if (verbose) {
-      console.log(`  After rotation: ${canvas.width}x${canvas.height}`);
-    }
-  } else if (isPortrait && processingParams.renderMeasured && verbose) {
-    console.log(`  Portrait detected, skipping rotation (debug mode)`);
-  }
-
-  // 4. Resize to display dimensions
-  let targetWidth, targetHeight;
-  if (processingParams.renderMeasured && isPortrait) {
-    targetWidth = DISPLAY_HEIGHT;
-    targetHeight = DISPLAY_WIDTH; // 480x800
-  } else {
-    targetWidth = DISPLAY_WIDTH;
-    targetHeight = DISPLAY_HEIGHT; // 800x480
-  }
-
-  if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-    if (verbose) {
-      console.log(
-        `  Resizing to ${targetWidth}x${targetHeight} (cover mode: scale and crop)`,
-      );
-    }
-    canvas = resizeImageCover(canvas, targetWidth, targetHeight, createCanvas);
-  }
-
-  // 5. Apply image processing (tone mapping, dithering, palette conversion)
-  ctx = canvas.getContext("2d");
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-  // Convert device palette to array format if provided
-  let customPalette = null;
-  if (devicePalette) {
-    customPalette = [
-      [devicePalette.black.r, devicePalette.black.g, devicePalette.black.b],
-      [devicePalette.white.r, devicePalette.white.g, devicePalette.white.b],
-      [devicePalette.yellow.r, devicePalette.yellow.g, devicePalette.yellow.b],
-      [devicePalette.red.r, devicePalette.red.g, devicePalette.red.b],
-      [0, 0, 0], // Reserved
-      [devicePalette.blue.r, devicePalette.blue.g, devicePalette.blue.b],
-      [devicePalette.green.r, devicePalette.green.g, devicePalette.green.b],
-    ];
-    if (verbose) {
-      console.log(`  Using calibrated color palette from device`);
-    }
-  }
-
-  const params = {
-    ...processingParams,
-    customPalette: customPalette,
-  };
-
-  if (verbose) {
-    if (params.processingMode === "stock") {
-      console.log(
-        `  Using stock Waveshare algorithm (no tone mapping, theoretical palette)`,
-      );
-    } else {
-      console.log(`  Using enhanced algorithm`);
-      console.log(
-        `  Exposure: ${params.exposure}, Saturation: ${params.saturation}`,
-      );
-      if (params.toneMode === "scurve") {
-        console.log(
-          `  Tone mapping: S-Curve (strength=${params.strength}, shadow=${params.shadowBoost}, highlight=${params.highlightCompress})`,
-        );
-      } else {
-        console.log(`  Tone mapping: Simple Contrast (${params.contrast})`);
-      }
-      console.log(`  Color method: ${params.colorMethod}`);
-    }
-
-    if (params.renderMeasured) {
-      console.log(
-        `  Rendering BMP with measured colors (darker output for preview)`,
-      );
-    } else {
-      console.log(`  Rendering BMP with theoretical colors (standard output)`);
-    }
-  }
-
-  processImage(imageData, params);
-  ctx.putImageData(imageData, 0, 0);
-
-  return { canvas, originalCanvas };
+  // Call shared processImage pipeline (handles rotation, resize, preprocessing)
+  return processImage(canvas, processingParams, devicePalette, {
+    verbose,
+    targetWidth: DISPLAY_WIDTH,
+    targetHeight: DISPLAY_HEIGHT,
+    createCanvas,
+    skipDithering,
+  });
 }
 
 // HTTP Server for --serve mode
@@ -867,11 +775,16 @@ function startImageServer(
         const imagePath = image.path;
 
         // Process image through shared pipeline
+        // All served images should be landscape (rotate portrait to landscape)
+        // JPG: skip dithering (full-color), PNG/BMP: apply dithering
         const { canvas: processedCanvas, originalCanvas } =
           await processImagePipeline(
             imagePath,
             processingParams,
             devicePalette,
+            {
+              skipDithering: serveFormat === "jpg",
+            },
           );
 
         // Generate and cache thumbnail from original canvas (before processing)

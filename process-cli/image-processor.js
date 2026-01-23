@@ -337,64 +337,42 @@ function applyFloydSteinbergDither(
   }
 }
 
-function processImage(imageData, params) {
+function preprocessImage(imageData, params) {
   // Processing mode: 'stock' (Waveshare original) or 'enhanced' (our algorithm)
   const mode = params.processingMode || "enhanced";
   const toneMode = params.toneMode || "scurve"; // 'contrast' or 'scurve'
 
-  // Use custom palette if provided, otherwise use default measured palette
-  const ditherPalette = params.customPalette || PALETTE_MEASURED;
-
   if (mode === "stock") {
-    // Stock Waveshare algorithm: no tone mapping, theoretical palette for dithering
-    // But render with measured palette for accurate preview
-    const outputPalette = params.renderMeasured
-      ? ditherPalette
-      : PALETTE_THEORETICAL;
-    applyFloydSteinbergDither(
-      imageData,
-      "rgb",
-      outputPalette,
-      PALETTE_THEORETICAL,
-    );
+    // Stock Waveshare algorithm: no tone mapping
+    // Dithering will be applied later in processImage if needed
+    return;
+  }
+
+  // Enhanced algorithm with tone mapping
+
+  // 1. Apply exposure
+  if (params.exposure && params.exposure !== 1.0) {
+    applyExposure(imageData, params.exposure);
+  }
+
+  // 2. Apply saturation
+  if (params.saturation !== 1.0) {
+    applySaturation(imageData, params.saturation);
+  }
+
+  // 3. Apply tone mapping (contrast or S-curve)
+  if (toneMode === "contrast") {
+    if (params.contrast && params.contrast !== 1.0) {
+      applyContrast(imageData, params.contrast);
+    }
   } else {
-    // Enhanced algorithm with tone mapping
-
-    // 1. Apply exposure
-    if (params.exposure && params.exposure !== 1.0) {
-      applyExposure(imageData, params.exposure);
-    }
-
-    // 2. Apply saturation
-    if (params.saturation !== 1.0) {
-      applySaturation(imageData, params.saturation);
-    }
-
-    // 3. Apply tone mapping (contrast or S-curve)
-    if (toneMode === "contrast") {
-      if (params.contrast && params.contrast !== 1.0) {
-        applyContrast(imageData, params.contrast);
-      }
-    } else {
-      // S-curve tone mapping
-      applyScurveTonemap(
-        imageData,
-        params.strength,
-        params.shadowBoost,
-        params.highlightCompress,
-        params.midpoint,
-      );
-    }
-
-    // 4. Apply Floyd-Steinberg dithering with measured palette for accurate error diffusion
-    const outputPalette = params.renderMeasured
-      ? ditherPalette
-      : PALETTE_THEORETICAL;
-    applyFloydSteinbergDither(
+    // S-curve tone mapping
+    applyScurveTonemap(
       imageData,
-      params.colorMethod,
-      outputPalette,
-      ditherPalette,
+      params.strength,
+      params.shadowBoost,
+      params.highlightCompress,
+      params.midpoint,
     );
   }
 }
@@ -569,7 +547,7 @@ function generateThumbnail(
   const srcWidth = sourceCanvas.width;
   const srcHeight = sourceCanvas.height;
 
-  // Determine orientation
+  // Maintain source orientation - swap dimensions for portrait images
   const isPortrait = srcHeight > srcWidth;
   const thumbWidth = isPortrait ? targetHeight : targetWidth;
   const thumbHeight = isPortrait ? targetWidth : targetHeight;
@@ -645,17 +623,202 @@ async function createPNG(canvas) {
   }
 }
 
+/**
+ * Complete image processing pipeline from source to device-ready output
+ * Handles: portrait rotation, resizing, tone mapping, dithering
+ *
+ * @param {Canvas|ImageData} source - Source canvas (should already have EXIF orientation applied)
+ * @param {Object} processingParams - Processing parameters
+ * @param {Object} devicePalette - Optional device-specific palette
+ * @param {Object} options - Additional options (verbose, targetWidth, targetHeight, createCanvas, skipRotation, skipDithering)
+ * @returns {Object} { canvas: processed canvas, originalCanvas: EXIF-corrected source }
+ */
+function processImage(
+  source,
+  processingParams,
+  devicePalette = null,
+  options = {},
+) {
+  const {
+    verbose = false,
+    targetWidth = 800,
+    targetHeight = 480,
+    createCanvas = null,
+    skipRotation = false,
+    skipDithering = false,
+  } = options;
+
+  // Handle both canvas and ImageData inputs
+  // Create a new canvas to avoid mutating the source
+  // Note: In Node.js, ImageData is not a global, so we use duck typing
+  const isImageData = source.data && source.width && source.height;
+  let canvas;
+  if (createCanvas) {
+    canvas = createCanvas(source.width, source.height);
+  } else {
+    canvas = document.createElement("canvas");
+    canvas.width = source.width;
+    canvas.height = source.height;
+  }
+  const ctx = canvas.getContext("2d");
+
+  // Copy source to canvas
+  if (isImageData) {
+    ctx.putImageData(source, 0, 0);
+  } else {
+    ctx.drawImage(source, 0, 0);
+  }
+
+  if (verbose) {
+    console.log(`  Original size: ${canvas.width}x${canvas.height}`);
+  }
+
+  // Save EXIF-corrected canvas for thumbnail generation (before rotation/processing)
+  let originalCanvas;
+  if (createCanvas) {
+    originalCanvas = createCanvas(canvas.width, canvas.height);
+  } else {
+    originalCanvas = document.createElement("canvas");
+    originalCanvas.width = canvas.width;
+    originalCanvas.height = canvas.height;
+  }
+  const originalCanvasCtx = originalCanvas.getContext("2d");
+  originalCanvasCtx.drawImage(canvas, 0, 0);
+
+  // Check if portrait and rotate to landscape (unless skipRotation is true)
+  const isPortrait = canvas.height > canvas.width;
+  if (isPortrait && !skipRotation) {
+    if (verbose) {
+      console.log(`  Portrait detected, rotating 90° clockwise`);
+    }
+    canvas = rotate90Clockwise(canvas, createCanvas);
+    if (verbose) {
+      console.log(`  After rotation: ${canvas.width}x${canvas.height}`);
+    }
+  } else if (isPortrait && skipRotation && verbose) {
+    console.log(
+      `  Portrait detected, skipping rotation (browser preview mode)`,
+    );
+  }
+
+  // Resize to display dimensions
+  // If portrait and skipRotation, use portrait dimensions; otherwise landscape
+  let finalWidth, finalHeight;
+  if (isPortrait && skipRotation) {
+    finalWidth = targetHeight; // 480 for portrait
+    finalHeight = targetWidth; // 800 for portrait
+  } else {
+    finalWidth = targetWidth; // 800 for landscape
+    finalHeight = targetHeight; // 480 for landscape
+  }
+
+  if (canvas.width !== finalWidth || canvas.height !== finalHeight) {
+    if (verbose) {
+      console.log(
+        `  Resizing to ${finalWidth}x${finalHeight} (cover mode: scale and crop)`,
+      );
+    }
+    canvas = resizeImageCover(canvas, finalWidth, finalHeight, createCanvas);
+  }
+
+  // Apply image processing (tone mapping, dithering, palette conversion)
+  const imageData = canvas
+    .getContext("2d")
+    .getImageData(0, 0, canvas.width, canvas.height);
+
+  // Convert device palette to array format if provided
+  let customPalette = null;
+  if (devicePalette) {
+    customPalette = [
+      [devicePalette.black.r, devicePalette.black.g, devicePalette.black.b],
+      [devicePalette.white.r, devicePalette.white.g, devicePalette.white.b],
+      [devicePalette.yellow.r, devicePalette.yellow.g, devicePalette.yellow.b],
+      [devicePalette.red.r, devicePalette.red.g, devicePalette.red.b],
+      [0, 0, 0], // Reserved
+      [devicePalette.blue.r, devicePalette.blue.g, devicePalette.blue.b],
+      [devicePalette.green.r, devicePalette.green.g, devicePalette.green.b],
+    ];
+    if (verbose) {
+      console.log(`  Using calibrated color palette from device`);
+    }
+  }
+
+  const params = {
+    ...processingParams,
+    customPalette: customPalette,
+    skipDithering: skipDithering,
+  };
+
+  if (verbose) {
+    if (params.processingMode === "stock") {
+      console.log(
+        `  Using stock Waveshare algorithm (no tone mapping, theoretical palette)`,
+      );
+    } else {
+      console.log(`  Using enhanced algorithm`);
+      console.log(
+        `  Exposure: ${params.exposure}, Saturation: ${params.saturation}`,
+      );
+      if (params.toneMode === "scurve") {
+        console.log(
+          `  Tone mapping: S-Curve (strength=${params.strength}, shadow=${params.shadowBoost}, highlight=${params.highlightCompress})`,
+        );
+      } else {
+        console.log(`  Tone mapping: Simple Contrast (${params.contrast})`);
+      }
+      console.log(`  Color method: ${params.colorMethod}`);
+    }
+
+    if (params.renderMeasured) {
+      console.log(
+        `  Rendering BMP with measured colors (darker output for preview)`,
+      );
+    } else {
+      console.log(`  Rendering BMP with theoretical colors (standard output)`);
+    }
+  }
+
+  // Apply tone mapping (exposure, saturation, contrast/S-curve)
+  preprocessImage(imageData, params);
+
+  // Apply dithering if not skipped
+  if (!skipDithering) {
+    const mode = params.processingMode || "enhanced";
+    const ditherPalette = customPalette || PALETTE_MEASURED;
+
+    if (mode === "stock") {
+      // Stock Waveshare algorithm: theoretical palette for dithering
+      const outputPalette = params.renderMeasured
+        ? ditherPalette
+        : PALETTE_THEORETICAL;
+      applyFloydSteinbergDither(
+        imageData,
+        "rgb",
+        outputPalette,
+        PALETTE_THEORETICAL,
+      );
+    } else {
+      // Enhanced algorithm: use color method and measured palette
+      const outputPalette = params.renderMeasured
+        ? ditherPalette
+        : PALETTE_THEORETICAL;
+      applyFloydSteinbergDither(
+        imageData,
+        params.colorMethod,
+        outputPalette,
+        ditherPalette,
+      );
+    }
+  }
+
+  canvas.getContext("2d").putImageData(imageData, 0, 0);
+
+  return { canvas, originalCanvas };
+}
+
 // Export for Node.js ES modules
 export {
-  PALETTE_MEASURED,
-  PALETTE_THEORETICAL,
-  applyExposure,
-  applyContrast,
-  applySaturation,
-  applyScurveTonemap,
-  applyFloydSteinbergDither,
   processImage,
-  rotate90Clockwise,
   applyExifOrientation,
   resizeImageCover,
   generateThumbnail,
