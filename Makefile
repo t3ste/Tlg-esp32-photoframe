@@ -76,7 +76,10 @@ test:
 	@mkdir -p host_tests/build
 	@cd host_tests/build && cmake .. && make
 	@echo ""
-	@echo "Running tests..."
+	@echo "Running C unit tests..."
 	@./host_tests/build/utils_test
+	@echo ""
+	@echo "Running image orientation tests..."
+	@cd process-cli && npm install --silent && npm run test:orientation
 	@echo ""
 	@echo "✓ All tests passed!"

@@ -8,14 +8,19 @@
     "photoframe-process": "./cli.js"
   },
   "scripts": {
-    "test": "node cli.js --help"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:orientation": "node --experimental-vm-modules node_modules/jest/bin/jest.js test/serve-orientation.test.js"
   },
   "dependencies": {
     "canvas": "^2.11.2",
     "commander": "^11.1.0",
     "exif-parser": "^0.1.12",
     "form-data": "^4.0.0",
-    "heic-convert": "^2.1.0"
+    "heic-convert": "^2.1.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
   },
   "keywords": [
     "esp32",

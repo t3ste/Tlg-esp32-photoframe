@@ -1,0 +1,432 @@
+/**
+ * HTTP Server for image serving mode
+ * Provides endpoints for serving processed images and thumbnails
+ */
+
+import http from "http";
+import url from "url";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { createCanvas } from "canvas";
+import { processImagePipeline } from "./utils.js";
+import { generateThumbnail, createPNG } from "./image-processor.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Default parameters for image processing
+const DEFAULT_PARAMS = {
+  exposure: 1.0,
+  saturation: 1.3,
+  toneMode: "scurve",
+  contrast: 1.0,
+  scurveStrength: 0.9,
+  shadowBoost: 0.0,
+  highlightCompress: 1.5,
+  midpoint: 0.5,
+  colorMethod: "rgb",
+  processingMode: "enhanced",
+};
+
+/**
+ * Helper function to write BMP to buffer
+ */
+function writeBMPToBuffer(imageData) {
+  const width = imageData.width;
+  const height = imageData.height;
+  const data = imageData.data;
+
+  // BMP header sizes
+  const fileHeaderSize = 14;
+  const infoHeaderSize = 40;
+  const rowSize = Math.floor((24 * width + 31) / 32) * 4;
+  const pixelDataSize = rowSize * height;
+  const fileSize = fileHeaderSize + infoHeaderSize + pixelDataSize;
+
+  const buffer = Buffer.alloc(fileSize);
+  let offset = 0;
+
+  // File header (14 bytes)
+  buffer.write("BM", offset);
+  offset += 2;
+  buffer.writeUInt32LE(fileSize, offset);
+  offset += 4;
+  buffer.writeUInt32LE(0, offset);
+  offset += 4;
+  buffer.writeUInt32LE(fileHeaderSize + infoHeaderSize, offset);
+  offset += 4;
+
+  // Info header (40 bytes)
+  buffer.writeUInt32LE(infoHeaderSize, offset);
+  offset += 4;
+  buffer.writeInt32LE(width, offset);
+  offset += 4;
+  buffer.writeInt32LE(height, offset);
+  offset += 4;
+  buffer.writeUInt16LE(1, offset);
+  offset += 2;
+  buffer.writeUInt16LE(24, offset);
+  offset += 2;
+  buffer.writeUInt32LE(0, offset);
+  offset += 4;
+  buffer.writeUInt32LE(pixelDataSize, offset);
+  offset += 4;
+  buffer.writeInt32LE(2835, offset);
+  offset += 4;
+  buffer.writeInt32LE(2835, offset);
+  offset += 4;
+  buffer.writeUInt32LE(0, offset);
+  offset += 4;
+  buffer.writeUInt32LE(0, offset);
+  offset += 4;
+
+  // Pixel data (bottom-up, BGR format)
+  const padding = rowSize - width * 3;
+  for (let y = height - 1; y >= 0; y--) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      buffer[offset++] = data[i + 2]; // B
+      buffer[offset++] = data[i + 1]; // G
+      buffer[offset++] = data[i]; // R
+    }
+    for (let p = 0; p < padding; p++) {
+      buffer[offset++] = 0;
+    }
+  }
+
+  return buffer;
+}
+
+/**
+ * Create and start an HTTP server for serving processed images
+ *
+ * @param {string} albumDir - Directory containing image albums
+ * @param {number} port - Port to listen on
+ * @param {string} serveFormat - Output format (jpg, png, bmp)
+ * @param {Object} devicePalette - Optional device color palette
+ * @param {Object} deviceSettings - Optional device processing settings
+ * @param {Object} options - Additional options (silent, etc.)
+ * @returns {Promise<http.Server>} The HTTP server instance
+ */
+export async function createImageServer(
+  albumDir,
+  port,
+  serveFormat,
+  devicePalette,
+  deviceSettings,
+  options = {},
+) {
+  // Validate serve format
+  const validFormats = ["png", "jpg", "bmp"];
+  if (!validFormats.includes(serveFormat)) {
+    throw new Error(
+      `Invalid serve format "${serveFormat}". Must be one of: ${validFormats.join(", ")}`,
+    );
+  }
+
+  // Build processing parameters
+  const processingParams = {
+    exposure: options.exposure ?? DEFAULT_PARAMS.exposure,
+    saturation: options.saturation ?? DEFAULT_PARAMS.saturation,
+    toneMode: options.toneMode ?? DEFAULT_PARAMS.toneMode,
+    contrast: options.contrast ?? DEFAULT_PARAMS.contrast,
+    strength: options.scurveStrength ?? DEFAULT_PARAMS.scurveStrength,
+    shadowBoost: options.scurveShadow ?? DEFAULT_PARAMS.shadowBoost,
+    highlightCompress:
+      options.scurveHighlight ?? DEFAULT_PARAMS.highlightCompress,
+    midpoint: options.scurveMidpoint ?? DEFAULT_PARAMS.midpoint,
+    colorMethod: options.colorMethod ?? DEFAULT_PARAMS.colorMethod,
+    processingMode: options.processingMode ?? DEFAULT_PARAMS.processingMode,
+  };
+
+  // Override with device settings if provided
+  if (deviceSettings) {
+    Object.assign(processingParams, {
+      exposure: deviceSettings.exposure,
+      saturation: deviceSettings.saturation,
+      toneMode: deviceSettings.toneMode,
+      contrast: deviceSettings.contrast,
+      strength: deviceSettings.strength,
+      shadowBoost: deviceSettings.shadowBoost,
+      highlightCompress: deviceSettings.highlightCompress,
+      midpoint: deviceSettings.midpoint,
+      colorMethod: deviceSettings.colorMethod,
+      processingMode: deviceSettings.processingMode,
+    });
+
+    if (!options.silent) {
+      console.log(`Using device parameters:`);
+      console.log(`  Exposure: ${processingParams.exposure}`);
+      console.log(`  Saturation: ${processingParams.saturation}`);
+      console.log(`  Tone mode: ${processingParams.toneMode}`);
+      console.log(`  Color method: ${processingParams.colorMethod}`);
+    }
+  }
+
+  // Scan albums and collect all images
+  const albums = {};
+  const allImages = [];
+
+  if (!options.silent) {
+    console.log(`Scanning album directory: ${albumDir}`);
+  }
+
+  const entries = fs.readdirSync(albumDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const albumName = entry.name;
+    const albumPath = path.join(albumDir, albumName);
+    const images = [];
+
+    const files = fs.readdirSync(albumPath);
+    for (const file of files) {
+      const ext = path.extname(file).toLowerCase();
+      if ([".png", ".jpg", ".jpeg", ".heic"].includes(ext)) {
+        images.push({
+          name: file,
+          path: path.join(albumPath, file),
+          album: albumName,
+        });
+      }
+    }
+
+    if (images.length > 0) {
+      albums[albumName] = images;
+      allImages.push(...images);
+      if (!options.silent) {
+        console.log(`  Album "${albumName}": ${images.length} images`);
+      }
+    }
+  }
+
+  if (allImages.length === 0) {
+    throw new Error("No images found in album directory");
+  }
+
+  if (!options.silent) {
+    console.log(
+      `Total images: ${allImages.length} across ${Object.keys(albums).length} albums`,
+    );
+  }
+
+  // Cache for generated thumbnails
+  const thumbnailCache = new Map();
+
+  const server = http.createServer(async (req, res) => {
+    const parsedUrl = url.parse(req.url, true);
+    const pathname = parsedUrl.pathname;
+
+    // CORS headers
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
+    // GET /image - serve random image
+    if (pathname === "/image" && req.method === "GET") {
+      const randomIndex = Math.floor(Math.random() * allImages.length);
+      const image = allImages[randomIndex];
+
+      try {
+        // Process image through pipeline
+        const { canvas: processedCanvas, originalCanvas } =
+          await processImagePipeline(
+            image.path,
+            processingParams,
+            devicePalette,
+            {
+              skipDithering: serveFormat === "jpg",
+            },
+          );
+
+        // Generate and cache thumbnail
+        if (!thumbnailCache.has(image.name)) {
+          const thumbCanvas = generateThumbnail(
+            originalCanvas,
+            400,
+            240,
+            createCanvas,
+          );
+          const thumbBuffer = thumbCanvas.toBuffer("image/jpeg", {
+            quality: 0.8,
+          });
+          thumbnailCache.set(image.name, thumbBuffer);
+        }
+
+        // Convert to requested format
+        let imageBuffer;
+        let contentType;
+
+        if (serveFormat === "jpg") {
+          contentType = "image/jpeg";
+          imageBuffer = processedCanvas.toBuffer("image/jpeg", {
+            quality: 0.95,
+          });
+        } else if (serveFormat === "png") {
+          contentType = "image/png";
+          imageBuffer = await createPNG(processedCanvas);
+        } else if (serveFormat === "bmp") {
+          contentType = "image/bmp";
+          const ctx = processedCanvas.getContext("2d");
+          const imageData = ctx.getImageData(
+            0,
+            0,
+            processedCanvas.width,
+            processedCanvas.height,
+          );
+          imageBuffer = writeBMPToBuffer(imageData);
+        }
+
+        // Set headers
+        const thumbnailUrl = `http://${req.headers.host}/thumbnail?file=${encodeURIComponent(image.name)}`;
+        res.setHeader("X-Thumbnail-URL", thumbnailUrl);
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Content-Length", imageBuffer.length);
+        res.writeHead(200);
+        res.end(imageBuffer);
+
+        if (!options.silent) {
+          console.log(
+            `[${new Date().toISOString()}] Served: ${image.album}/${image.name} (${serveFormat.toUpperCase()}) [Thumbnail: ${thumbnailUrl}]`,
+          );
+        }
+      } catch (error) {
+        console.error(`Error processing image: ${error.message}`);
+        res.writeHead(500);
+        res.end("Internal Server Error");
+      }
+      return;
+    }
+
+    // GET /thumbnail - serve thumbnail
+    if (pathname === "/thumbnail" && req.method === "GET") {
+      const fileName = parsedUrl.query.file;
+
+      if (!fileName) {
+        res.writeHead(400);
+        res.end("Missing file parameter");
+        return;
+      }
+
+      try {
+        // Check cache
+        if (thumbnailCache.has(fileName)) {
+          const thumbBuffer = thumbnailCache.get(fileName);
+          res.setHeader("Content-Type", "image/jpeg");
+          res.setHeader("Content-Length", thumbBuffer.length);
+          res.writeHead(200);
+          res.end(thumbBuffer);
+
+          if (!options.silent) {
+            console.log(
+              `[${new Date().toISOString()}] Served cached thumbnail: ${fileName}`,
+            );
+          }
+          return;
+        }
+
+        // Find and generate thumbnail
+        const image = allImages.find((img) => img.name === fileName);
+        if (!image) {
+          res.writeHead(404);
+          res.end("Image not found");
+          return;
+        }
+
+        const { originalCanvas } = await processImagePipeline(
+          image.path,
+          processingParams,
+          devicePalette,
+          { skipDithering: true },
+        );
+
+        const thumbCanvas = generateThumbnail(
+          originalCanvas,
+          400,
+          240,
+          createCanvas,
+        );
+        const thumbBuffer = thumbCanvas.toBuffer("image/jpeg", {
+          quality: 0.8,
+        });
+
+        thumbnailCache.set(fileName, thumbBuffer);
+
+        res.setHeader("Content-Type", "image/jpeg");
+        res.setHeader("Content-Length", thumbBuffer.length);
+        res.writeHead(200);
+        res.end(thumbBuffer);
+
+        if (!options.silent) {
+          console.log(
+            `[${new Date().toISOString()}] Generated and served thumbnail: ${image.album}/${image.name}`,
+          );
+        }
+      } catch (error) {
+        console.error(`Error generating thumbnail: ${error.message}`);
+        res.writeHead(500);
+        res.end("Internal Server Error");
+      }
+      return;
+    }
+
+    // GET /status - server status
+    if (pathname === "/status" && req.method === "GET") {
+      const status = {
+        totalImages: allImages.length,
+        albums: Object.keys(albums).length,
+        serveFormat: serveFormat,
+      };
+      res.setHeader("Content-Type", "application/json");
+      res.writeHead(200);
+      res.end(JSON.stringify(status, null, 2));
+      return;
+    }
+
+    // 404
+    res.writeHead(404);
+    res.end("Not Found");
+  });
+
+  // Return server instance
+  return new Promise((resolve, reject) => {
+    server.listen(port, () => {
+      if (!options.silent) {
+        console.log(`\nImage server running on http://localhost:${port}`);
+        console.log(
+          `  Image endpoint: http://localhost:${port}/image (format: ${serveFormat.toUpperCase()})`,
+        );
+        console.log(
+          `  Thumbnail endpoint: http://localhost:${port}/thumbnail?file=<filename>`,
+        );
+        console.log(`  Status endpoint: http://localhost:${port}/status`);
+        console.log(`\nPress Ctrl+C to stop\n`);
+      }
+      resolve(server);
+    });
+
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        if (!options.silent) {
+          console.error(`\nError: Port ${port} is already in use.`);
+          console.error(
+            `Please try a different port with --serve-port <port>\n`,
+          );
+        }
+        reject(err);
+      } else {
+        if (!options.silent) {
+          console.error(`\nServer error: ${err.message}\n`);
+        }
+        reject(err);
+      }
+    });
+  });
+}
