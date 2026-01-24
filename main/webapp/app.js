@@ -4,9 +4,20 @@ import {
   resizeImageCover,
   generateThumbnail,
   createPNG,
+  getCanvasContext,
 } from "./image-processor.js";
 
 const API_BASE = "";
+
+// Display dimensions constants
+const DISPLAY_WIDTH_LANDSCAPE = 800;
+const DISPLAY_HEIGHT_LANDSCAPE = 480;
+const DISPLAY_WIDTH_PORTRAIT = 480;
+const DISPLAY_HEIGHT_PORTRAIT = 800;
+
+// Thumbnail dimensions (half of display resolution)
+const THUMBNAIL_WIDTH = 400;
+const THUMBNAIL_HEIGHT = 240;
 
 // ===== Tab Navigation =====
 document.addEventListener("DOMContentLoaded", () => {
@@ -570,7 +581,7 @@ async function loadImagePreview(file) {
     sourceCanvas = document.createElement("canvas");
     sourceCanvas.width = img.width;
     sourceCanvas.height = img.height;
-    const sourceCtx = sourceCanvas.getContext("2d");
+    const sourceCtx = getCanvasContext(sourceCanvas);
     sourceCtx.drawImage(img, 0, 0);
 
     // Store canvas reference
@@ -687,7 +698,7 @@ async function loadImage(file) {
           const tempCanvas = document.createElement("canvas");
           tempCanvas.width = img.width;
           tempCanvas.height = img.height;
-          const tempCtx = tempCanvas.getContext("2d");
+          const tempCtx = getCanvasContext(tempCanvas);
           tempCtx.drawImage(img, 0, 0);
 
           // Apply EXIF orientation transformation
@@ -775,7 +786,7 @@ function initComparisonSlider() {
 
 function drawCurveVisualization() {
   const canvas = document.getElementById("curveCanvas");
-  const ctx = canvas.getContext("2d");
+  const ctx = getCanvasContext(canvas);
   const width = canvas.width;
   const height = canvas.height;
   const padding = 40;
@@ -898,8 +909,12 @@ function updatePreview() {
 
   // Determine natural dimensions (portrait stays portrait in browser)
   const isPortrait = sourceCanvas.height > sourceCanvas.width;
-  const naturalWidth = isPortrait ? 480 : 800;
-  const naturalHeight = isPortrait ? 800 : 480;
+  const naturalWidth = isPortrait
+    ? DISPLAY_WIDTH_PORTRAIT
+    : DISPLAY_WIDTH_LANDSCAPE;
+  const naturalHeight = isPortrait
+    ? DISPLAY_HEIGHT_PORTRAIT
+    : DISPLAY_HEIGHT_LANDSCAPE;
 
   // Process with dithering for preview (skipRotation for browser display)
   const previewParams = { ...currentParams, renderMeasured: true };
@@ -946,11 +961,11 @@ function updatePreview() {
   originalCanvas.height = displayHeight;
 
   // Draw original (no dithering) to original canvas (for comparison)
-  const originalCtx = originalCanvas.getContext("2d");
+  const originalCtx = getCanvasContext(originalCanvas);
   originalCtx.drawImage(originalResized, 0, 0, displayWidth, displayHeight);
 
   // Draw processed (with dithering) to preview canvas
-  const previewCtx = previewCanvas.getContext("2d");
+  const previewCtx = getCanvasContext(previewCanvas);
   previewCtx.drawImage(processedCanvas, 0, 0, displayWidth, displayHeight);
 }
 
@@ -1183,14 +1198,13 @@ document
 
     try {
       // Process image with theoretical palette for device upload using shared pipeline
-      // Device expects 800x480 landscape, so rotate portrait images
       const uploadParams = { ...currentParams, renderMeasured: false };
       const { canvas: processedCanvas, originalCanvas: exifCorrectedCanvas } =
         processImage(sourceCanvas, uploadParams, devicePaletteObject, {
           verbose: false,
           skipRotation: false, // Rotate for device
-          targetWidth: 800,
-          targetHeight: 480,
+          targetWidth: DISPLAY_WIDTH_LANDSCAPE,
+          targetHeight: DISPLAY_HEIGHT_LANDSCAPE,
         });
 
       // Convert the processed canvas to PNG
@@ -1200,10 +1214,14 @@ document
       const originalName = currentImageFile.name.replace(/\.[^/.]+$/, "");
       const pngFilename = `${originalName}.png`;
 
-      // Create thumbnail (400x240 or 240x400) from EXIF-corrected source using shared function
+      // Create thumbnail from EXIF-corrected source using shared function
       const thumbnailBlob = await new Promise((resolve, reject) => {
         // Use exifCorrectedCanvas (before rotation) for thumbnail
-        const thumbCanvas = generateThumbnail(exifCorrectedCanvas, 400, 240);
+        const thumbCanvas = generateThumbnail(
+          exifCorrectedCanvas,
+          THUMBNAIL_WIDTH,
+          THUMBNAIL_HEIGHT,
+        );
 
         // Convert to blob
         thumbCanvas.toBlob(resolve, "image/jpeg", 0.85);
@@ -1287,7 +1305,8 @@ async function loadConfig() {
     document.getElementById("imageOrientation").value =
       data.image_orientation || 180;
     document.getElementById("imageUrl").value =
-      data.image_url || "https://loremflickr.com/800/480";
+      data.image_url ||
+      `https://loremflickr.com/${DISPLAY_WIDTH_LANDSCAPE}/${DISPLAY_HEIGHT_LANDSCAPE}`;
     document.getElementById("deepSleepEnabled").checked =
       data.deep_sleep_enabled !== false;
     document.getElementById("haUrl").value = data.ha_url || "";
@@ -1866,7 +1885,7 @@ document.getElementById("startCalibrationBtn").addEventListener("click", () => {
   // Clear canvas and file input
   const canvas = document.getElementById("calibrationCanvas");
   canvas.style.display = "none";
-  const ctx = canvas.getContext("2d");
+  const ctx = getCanvasContext(canvas);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   document.getElementById("calibrationPhotoInput").value = "";
 
@@ -1946,7 +1965,7 @@ document
       const canvas = document.getElementById("calibrationCanvas");
       canvas.width = img.width;
       canvas.height = img.height;
-      const ctx = canvas.getContext("2d");
+      const ctx = getCanvasContext(canvas);
       ctx.drawImage(img, 0, 0);
       canvas.style.display = "block";
 

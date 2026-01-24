@@ -860,7 +860,7 @@
         getLatestRelease();
 
         // Demo functionality
-        import { processImage } from './image-processor.js';
+        import { processImage, getCanvasContext } from './image-processor.js';
 
         let currentImageFile = null;
         let originalImageData = null;
@@ -1008,7 +1008,7 @@
                 enhancedCanvas.width = width;
                 enhancedCanvas.height = height;
 
-                const ctx = stockCanvas.getContext('2d', { willReadFrequently: true });
+                const ctx = getCanvasContext(stockCanvas, '2d', { willReadFrequently: true });
                 const scaleX = width / img.width;
                 const scaleY = height / img.height;
                 const scale = Math.max(scaleX, scaleY);
@@ -1031,7 +1031,7 @@
 
         function drawCurveVisualization() {
             const canvas = document.getElementById('curveCanvas');
-            const ctx = canvas.getContext('2d');
+            const ctx = getCanvasContext(canvas);
             const width = canvas.width;
             const height = canvas.height;
             const padding = 40;
@@ -1107,7 +1107,7 @@
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = originalImageData.width;
             tempCanvas.height = originalImageData.height;
-            const tempCtx = tempCanvas.getContext('2d');
+            const tempCtx = getCanvasContext(tempCanvas);
             tempCtx.putImageData(originalImageData, 0, 0);
 
             // Determine target dimensions based on orientation
@@ -1132,7 +1132,7 @@
             const enhancedCanvas = document.getElementById('enhancedCanvas');
             enhancedCanvas.width = enhancedProcessed.width;
             enhancedCanvas.height = enhancedProcessed.height;
-            const enhancedCtx = enhancedCanvas.getContext('2d');
+            const enhancedCtx = getCanvasContext(enhancedCanvas);
             enhancedCtx.drawImage(enhancedProcessed, 0, 0);
 
             // Process stock version (no tone mapping, theoretical palette)
@@ -1152,7 +1152,7 @@
             const stockCanvas = document.getElementById('stockCanvas');
             stockCanvas.width = stockProcessed.width;
             stockCanvas.height = stockProcessed.height;
-            const stockCtx = stockCanvas.getContext('2d');
+            const stockCtx = getCanvasContext(stockCanvas);
             stockCtx.drawImage(stockProcessed, 0, 0);
 
             // Set initial slider position to 30%

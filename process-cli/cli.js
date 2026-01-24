@@ -23,8 +23,19 @@ import { createImageServer } from "./server.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DISPLAY_WIDTH = 800;
-const DISPLAY_HEIGHT = 480;
+// Display dimensions constants
+const DISPLAY_WIDTH_LANDSCAPE = 800;
+const DISPLAY_HEIGHT_LANDSCAPE = 480;
+const DISPLAY_WIDTH_PORTRAIT = 480;
+const DISPLAY_HEIGHT_PORTRAIT = 800;
+
+// Thumbnail dimensions (half of display resolution)
+const THUMBNAIL_WIDTH = 400;
+const THUMBNAIL_HEIGHT = 240;
+
+// Legacy constants for backwards compatibility
+const DISPLAY_WIDTH = DISPLAY_WIDTH_LANDSCAPE;
+const DISPLAY_HEIGHT = DISPLAY_HEIGHT_LANDSCAPE;
 
 // Centralized default configuration for image processing
 // Keep in sync with webapp/app.js DEFAULT_PARAMS and firmware processing_settings.c
@@ -594,8 +605,8 @@ async function processImageFile(
     // Use shared thumbnail generation function
     const thumbCanvas = generateThumbnail(
       originalCanvas,
-      400,
-      240,
+      THUMBNAIL_WIDTH,
+      THUMBNAIL_HEIGHT,
       createCanvas,
     );
 

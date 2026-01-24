@@ -1,6 +1,35 @@
 // Image processing functions for S-curve tone mapping and dithering
 // This file is shared between the webapp and CLI
 
+// Display dimensions constants
+const DISPLAY_WIDTH_LANDSCAPE = 800;
+const DISPLAY_HEIGHT_LANDSCAPE = 480;
+const DISPLAY_WIDTH_PORTRAIT = 480;
+const DISPLAY_HEIGHT_PORTRAIT = 800;
+
+// Thumbnail dimensions (half of display resolution)
+const THUMBNAIL_WIDTH = 400;
+const THUMBNAIL_HEIGHT = 240;
+
+// Helper function to get canvas context with image smoothing disabled
+function getCanvasContext(canvas, contextType = "2d") {
+  const ctx = canvas.getContext(contextType);
+  if (ctx && contextType === "2d") {
+    ctx.imageSmoothingEnabled = false;
+    // Vendor prefixes for older browsers/environments
+    if (ctx.mozImageSmoothingEnabled !== undefined) {
+      ctx.mozImageSmoothingEnabled = false;
+    }
+    if (ctx.webkitImageSmoothingEnabled !== undefined) {
+      ctx.webkitImageSmoothingEnabled = false;
+    }
+    if (ctx.msImageSmoothingEnabled !== undefined) {
+      ctx.msImageSmoothingEnabled = false;
+    }
+  }
+  return ctx;
+}
+
 // Measured palette - actual displayed colors from e-paper
 const PALETTE_MEASURED = [
   [2, 2, 2], // Black
@@ -393,7 +422,7 @@ function rotate90Clockwise(canvas, createCanvas = null) {
     rotatedCanvas.height = canvas.width;
   }
 
-  const ctx = rotatedCanvas.getContext("2d");
+  const ctx = getCanvasContext(rotatedCanvas);
   ctx.translate(canvas.height, 0);
   ctx.rotate(Math.PI / 2);
   ctx.drawImage(canvas, 0, 0);
@@ -434,7 +463,7 @@ function applyExifOrientation(canvas, orientation, createCanvas = null) {
     }
   }
 
-  ctx = newCanvas.getContext("2d");
+  ctx = getCanvasContext(newCanvas);
 
   // Apply transformations based on EXIF orientation
   switch (orientation) {
@@ -499,7 +528,7 @@ function resizeImageCover(
     tempCanvas.width = scaledWidth;
     tempCanvas.height = scaledHeight;
   }
-  const tempCtx = tempCanvas.getContext("2d");
+  const tempCtx = getCanvasContext(tempCanvas);
   tempCtx.drawImage(sourceCanvas, 0, 0, scaledWidth, scaledHeight);
 
   // Crop to target size (center crop)
@@ -514,7 +543,7 @@ function resizeImageCover(
     outputCanvas.width = targetWidth;
     outputCanvas.height = targetHeight;
   }
-  const outputCtx = outputCanvas.getContext("2d");
+  const outputCtx = getCanvasContext(outputCanvas);
   outputCtx.drawImage(
     tempCanvas,
     cropX,
@@ -533,15 +562,15 @@ function resizeImageCover(
 /**
  * Generate thumbnail from canvas with proper orientation handling
  * @param {Canvas} sourceCanvas - Source canvas (browser Canvas or node-canvas)
- * @param {number} targetWidth - Target width for landscape orientation (e.g., 400)
- * @param {number} targetHeight - Target height for landscape orientation (e.g., 240)
+ * @param {number} targetWidth - Target width for landscape orientation
+ * @param {number} targetHeight - Target height for landscape orientation
  * @param {Function} createCanvas - Canvas creation function (for Node.js compatibility)
  * @returns {Canvas} Thumbnail canvas
  */
 function generateThumbnail(
   sourceCanvas,
-  targetWidth = 400,
-  targetHeight = 240,
+  targetWidth = THUMBNAIL_WIDTH,
+  targetHeight = THUMBNAIL_HEIGHT,
   createCanvas = null,
 ) {
   const srcWidth = sourceCanvas.width;
@@ -564,7 +593,7 @@ function generateThumbnail(
     thumbCanvas.height = thumbHeight;
   }
 
-  const thumbCtx = thumbCanvas.getContext("2d");
+  const thumbCtx = getCanvasContext(thumbCanvas);
 
   // Scale to cover thumbnail size (crop to fill)
   const scaleX = thumbWidth / srcWidth;
@@ -641,8 +670,8 @@ function processImage(
 ) {
   const {
     verbose = false,
-    targetWidth = 800,
-    targetHeight = 480,
+    targetWidth = DISPLAY_WIDTH_LANDSCAPE,
+    targetHeight = DISPLAY_HEIGHT_LANDSCAPE,
     createCanvas = null,
     skipRotation = false,
     skipDithering = false,
@@ -660,7 +689,7 @@ function processImage(
     canvas.width = source.width;
     canvas.height = source.height;
   }
-  const ctx = canvas.getContext("2d");
+  const ctx = getCanvasContext(canvas);
 
   // Copy source to canvas
   if (isImageData) {
@@ -682,7 +711,7 @@ function processImage(
     originalCanvas.width = canvas.width;
     originalCanvas.height = canvas.height;
   }
-  const originalCanvasCtx = originalCanvas.getContext("2d");
+  const originalCanvasCtx = getCanvasContext(originalCanvas);
   originalCanvasCtx.drawImage(canvas, 0, 0);
 
   // Check if portrait and rotate to landscape (unless skipRotation is true)
@@ -705,11 +734,11 @@ function processImage(
   // If portrait and skipRotation, use portrait dimensions; otherwise landscape
   let finalWidth, finalHeight;
   if (isPortrait && skipRotation) {
-    finalWidth = targetWidth; // 480 for portrait
-    finalHeight = targetHeight; // 800 for portrait
+    finalWidth = targetWidth; // Portrait width
+    finalHeight = targetHeight; // Portrait height
   } else {
-    finalWidth = targetWidth; // 800 for landscape
-    finalHeight = targetHeight; // 480 for landscape
+    finalWidth = targetWidth; // Landscape width
+    finalHeight = targetHeight; // Landscape height
   }
 
   if (canvas.width !== finalWidth || canvas.height !== finalHeight) {
@@ -722,9 +751,12 @@ function processImage(
   }
 
   // Apply image processing (tone mapping, dithering, palette conversion)
-  const imageData = canvas
-    .getContext("2d")
-    .getImageData(0, 0, canvas.width, canvas.height);
+  const imageData = getCanvasContext(canvas).getImageData(
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
 
   // Convert device palette to array format if provided
   let customPalette = null;
@@ -811,7 +843,7 @@ function processImage(
     }
   }
 
-  canvas.getContext("2d").putImageData(imageData, 0, 0);
+  getCanvasContext(canvas).putImageData(imageData, 0, 0);
 
   return { canvas, originalCanvas };
 }
@@ -823,4 +855,5 @@ export {
   resizeImageCover,
   generateThumbnail,
   createPNG,
+  getCanvasContext,
 };
