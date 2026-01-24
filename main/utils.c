@@ -38,10 +38,10 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
         }
         break;
     case HTTP_EVENT_ON_HEADER:
-        if (strcmp(evt->header_key, "Content-Type") == 0) {
+        if (strcasecmp(evt->header_key, "Content-Type") == 0) {
             sprintf(ctx->content_type, "%s", evt->header_value);
-        } else if (strcmp(evt->header_key, "X-Thumbnail-URL") == 0) {
-            // Capture thumbnail URL if provided by server
+        } else if (strcasecmp(evt->header_key, "X-Thumbnail-URL") == 0) {
+            // Capture thumbnail URL if provided by server (case-insensitive)
             if (ctx->thumbnail_url && strlen(evt->header_value) > 0) {
                 strncpy(ctx->thumbnail_url, evt->header_value, 511);
                 ctx->thumbnail_url[511] = '\0';
