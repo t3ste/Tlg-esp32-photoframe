@@ -386,18 +386,24 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
         snprintf(saved_bmp_path, path_size, "%s", final_path);
 
         if (upload_is_bmp || upload_is_png) {
-            // If upload is BMP or PNG, we don't have a separate jpg as thumbnail.
-            // .current.bmp/.current.png is referenced by current_image, and also served as fallback
-            // via /api/current_image
-            ESP_LOGI(TAG, "Image without thumbnail saved: %s", final_path);
-        } else {  // if it is not bmp/png at this point, it has to be jpg as conversion succeeded
+            // BMP/PNG uploads may have a thumbnail if X-Thumbnail-URL was provided
+            // .current.bmp/.current.png is referenced by current_image
+            // If no thumbnail, it's also served as fallback via /api/current_image
+            if (thumbnail_downloaded) {
+                ESP_LOGI(TAG, "Image and downloaded thumbnail saved: %s, %s", final_path,
+                         temp_jpg_path);
+            } else {
+                ESP_LOGI(TAG, "Image saved (no thumbnail): %s", final_path);
+            }
+        } else {
+            // JPEG upload: temp_upload_path still exists after conversion to BMP
             // Keep both .current.bmp and .current.jpg for HA integration
             // .current.bmp is referenced by current_image
             // .current.jpg is the thumbnail served by /api/current_image
 
             // Check if thumbnail was downloaded from server (via X-Thumbnail-URL header)
             if (!thumbnail_downloaded) {
-                // No downloaded thumbnail, use original upload as thumbnail
+                // No downloaded thumbnail, use original JPEG upload as thumbnail
                 if (rename(temp_upload_path, temp_jpg_path) != 0) {
                     ESP_LOGE(TAG, "Failed to move upload to current JPG thumbnail");
                     unlink(temp_upload_path);
@@ -405,7 +411,7 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
                 }
                 ESP_LOGI(TAG, "Image and thumbnail saved: %s, %s", temp_bmp_path, temp_jpg_path);
             } else {
-                // Downloaded thumbnail exists, keep it and delete original upload
+                // Downloaded thumbnail exists, delete original JPEG upload
                 unlink(temp_upload_path);
                 ESP_LOGI(TAG, "Image and downloaded thumbnail saved: %s, %s", temp_bmp_path,
                          temp_jpg_path);
