@@ -220,6 +220,7 @@ static void button_task(void *arg)
                 ESP_LOGI(TAG, "Key button pressed, triggering rotation");
                 power_manager_reset_sleep_timer();
                 trigger_image_rotation();
+                ha_notify_update();
             }
         }
 
