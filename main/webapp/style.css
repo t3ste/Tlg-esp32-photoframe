@@ -1000,6 +1000,26 @@ details > *:not(summary) {
     border-top: 1px solid #e0e0e0;
 }
 
+/* HTTP Header Inputs */
+.http-header-inputs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.http-header-inputs input {
+    padding: 8px 12px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.http-header-inputs input:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
 /* Input with Button */
 .input-with-button {
     display: flex;

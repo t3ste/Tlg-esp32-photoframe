@@ -123,6 +123,32 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
             continue;  // Try again
         }
 
+        // Add Authorization Bearer header if access token is configured
+        const char *access_token = config_manager_get_access_token();
+        if (access_token && strlen(access_token) > 0) {
+            char auth_header[ACCESS_TOKEN_MAX_LEN + 20];  // "Bearer " + token + null terminator
+            snprintf(auth_header, sizeof(auth_header), "Bearer %s", access_token);
+            esp_http_client_set_header(client, "Authorization", auth_header);
+            ESP_LOGI(TAG, "Added Authorization Bearer header (token length: %zu)",
+                     strlen(access_token));
+        }
+
+        // Add custom HTTP header if configured (will not override Authorization if already set by
+        // access token)
+        const char *header_key = config_manager_get_http_header_key();
+        const char *header_value = config_manager_get_http_header_value();
+        if (header_key && strlen(header_key) > 0 && header_value && strlen(header_value) > 0) {
+            // Skip if trying to set Authorization header when access token is already set
+            if (strcasecmp(header_key, "Authorization") == 0 && access_token &&
+                strlen(access_token) > 0) {
+                ESP_LOGW(TAG,
+                         "Skipping custom Authorization header - access token takes precedence");
+            } else {
+                esp_http_client_set_header(client, header_key, header_value);
+                ESP_LOGI(TAG, "Added custom HTTP header: %s", header_key);
+            }
+        }
+
         err = esp_http_client_perform(client);
 
         status_code = esp_http_client_get_status_code(client);

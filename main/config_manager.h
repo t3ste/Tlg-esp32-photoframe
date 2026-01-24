@@ -49,4 +49,13 @@ bool config_manager_is_in_sleep_schedule(void);
 void config_manager_set_timezone(const char *tz);
 const char *config_manager_get_timezone(void);
 
+void config_manager_set_access_token(const char *token);
+const char *config_manager_get_access_token(void);
+
+void config_manager_set_http_header_key(const char *key);
+const char *config_manager_get_http_header_key(void);
+
+void config_manager_set_http_header_value(const char *value);
+const char *config_manager_get_http_header_value(void);
+
 #endif

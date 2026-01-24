@@ -27,6 +27,9 @@ typedef enum {
 #define HA_URL_MAX_LEN 256
 #define ROTATION_MODE_MAX_LEN 16
 #define TIMEZONE_MAX_LEN 64
+#define ACCESS_TOKEN_MAX_LEN 512
+#define HTTP_HEADER_KEY_MAX_LEN 64
+#define HTTP_HEADER_VALUE_MAX_LEN 512
 
 #define DEFAULT_DEVICE_NAME "PhotoFrame"
 #define DEFAULT_WIFI_SSID "PhotoFrame"
@@ -76,6 +79,9 @@ typedef enum {
 #define NVS_SLEEP_SCHEDULE_START_KEY "sleep_start"
 #define NVS_SLEEP_SCHEDULE_END_KEY "sleep_end"
 #define NVS_TIMEZONE_KEY "timezone"
+#define NVS_ACCESS_TOKEN_KEY "access_token"
+#define NVS_HTTP_HEADER_KEY_KEY "http_hdr_key"
+#define NVS_HTTP_HEADER_VALUE_KEY "http_hdr_val"
 
 // OTA Configuration
 #define GITHUB_API_URL "https://api.github.com/repos/aitjcize/esp32-photoframe/releases/latest"

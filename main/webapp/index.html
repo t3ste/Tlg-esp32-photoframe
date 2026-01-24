@@ -325,13 +325,30 @@
                                         💡 Default URL provides random images. You can change this to any image URL.
                                     </small>
                                 </div>
-                                <div class="url-group-divider">
+                                <div class="url-group-field">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="saveDownloadedImages" checked>
                                         <span>Save downloaded images to Downloads album</span>
                                     </label>
                                     <small class="helper-text">
-                                        When enabled, downloaded images are saved to SD card in the "Downloads" album.
+                                        💡 When enabled, downloaded images are saved to SD card in the "Downloads" album.
+                                    </small>
+                                </div>
+                                <div class="url-group-divider">
+                                    <label for="accessToken" class="field-label">Access Token (Optional)</label>
+                                    <input type="text" id="accessToken" placeholder="JWT token or API key">
+                                    <small class="helper-text">
+                                        💡 Automatically sets Authorization: Bearer &lt;token&gt; header for authenticated image URLs.
+                                    </small>
+                                </div>
+                                <div class="url-group-divider">
+                                    <label for="httpHeaderKey" class="field-label">Custom HTTP Header (Optional)</label>
+                                    <div class="http-header-inputs">
+                                        <input type="text" id="httpHeaderKey" placeholder="Header name (e.g., Authorization)">
+                                        <input type="text" id="httpHeaderValue" placeholder="Header value (e.g., Bearer token123)">
+                                    </div>
+                                    <small class="helper-text">
+                                        💡 Add a custom HTTP header for authentication (e.g., API tokens). Leave empty if not needed.
                                     </small>
                                 </div>
                             </div>

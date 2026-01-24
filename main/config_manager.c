@@ -22,6 +22,9 @@ static bool sleep_schedule_enabled = false;
 static int sleep_schedule_start = 1380;  // Minutes since midnight (23:00 = 23*60)
 static int sleep_schedule_end = 420;     // Minutes since midnight (07:00 = 7*60)
 static char tz_string[TIMEZONE_MAX_LEN] = {0};
+static char access_token[ACCESS_TOKEN_MAX_LEN] = {0};
+static char http_header_key[HTTP_HEADER_KEY_MAX_LEN] = {0};
+static char http_header_value[HTTP_HEADER_VALUE_MAX_LEN] = {0};
 
 esp_err_t config_manager_init(void)
 {
@@ -131,6 +134,24 @@ esp_err_t config_manager_init(void)
             strncpy(tz_string, DEFAULT_TIMEZONE, TIMEZONE_MAX_LEN - 1);
             tz_string[TIMEZONE_MAX_LEN - 1] = '\0';
             ESP_LOGI(TAG, "No timezone in NVS, using default: %s", tz_string);
+        }
+
+        size_t access_token_len = ACCESS_TOKEN_MAX_LEN;
+        if (nvs_get_str(nvs_handle, NVS_ACCESS_TOKEN_KEY, access_token, &access_token_len) ==
+            ESP_OK) {
+            ESP_LOGI(TAG, "Loaded access token from NVS (length: %zu)", access_token_len);
+        }
+
+        size_t http_header_key_len = HTTP_HEADER_KEY_MAX_LEN;
+        if (nvs_get_str(nvs_handle, NVS_HTTP_HEADER_KEY_KEY, http_header_key,
+                        &http_header_key_len) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded HTTP header key from NVS: %s", http_header_key);
+        }
+
+        size_t http_header_value_len = HTTP_HEADER_VALUE_MAX_LEN;
+        if (nvs_get_str(nvs_handle, NVS_HTTP_HEADER_VALUE_KEY, http_header_value,
+                        &http_header_value_len) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded HTTP header value from NVS (length: %zu)", http_header_value_len);
         }
 
         nvs_close(nvs_handle);
@@ -465,4 +486,76 @@ void config_manager_set_timezone(const char *tz)
 const char *config_manager_get_timezone(void)
 {
     return tz_string;
+}
+
+void config_manager_set_access_token(const char *token)
+{
+    if (token == NULL) {
+        return;
+    }
+
+    strncpy(access_token, token, ACCESS_TOKEN_MAX_LEN - 1);
+    access_token[ACCESS_TOKEN_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_ACCESS_TOKEN_KEY, access_token);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Access token set (length: %zu)", strlen(access_token));
+}
+
+const char *config_manager_get_access_token(void)
+{
+    return access_token;
+}
+
+void config_manager_set_http_header_key(const char *key)
+{
+    if (key == NULL) {
+        return;
+    }
+
+    strncpy(http_header_key, key, HTTP_HEADER_KEY_MAX_LEN - 1);
+    http_header_key[HTTP_HEADER_KEY_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_HTTP_HEADER_KEY_KEY, http_header_key);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "HTTP header key set to: %s", http_header_key);
+}
+
+const char *config_manager_get_http_header_key(void)
+{
+    return http_header_key;
+}
+
+void config_manager_set_http_header_value(const char *value)
+{
+    if (value == NULL) {
+        return;
+    }
+
+    strncpy(http_header_value, value, HTTP_HEADER_VALUE_MAX_LEN - 1);
+    http_header_value[HTTP_HEADER_VALUE_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_HTTP_HEADER_VALUE_KEY, http_header_value);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "HTTP header value set (length: %zu)", strlen(http_header_value));
+}
+
+const char *config_manager_get_http_header_value(void)
+{
+    return http_header_value;
 }

@@ -1280,6 +1280,9 @@ document
     }
   });
 
+// Store original config for comparison
+let originalConfig = {};
+
 async function loadConfig() {
   try {
     const response = await fetch(`${API_BASE}/api/config`);
@@ -1292,6 +1295,9 @@ async function loadConfig() {
       return;
     }
     const data = await response.json();
+
+    // Store original config for comparison
+    originalConfig = JSON.parse(JSON.stringify(data));
 
     document.getElementById("autoRotate").checked = data.auto_rotate || false;
 
@@ -1312,6 +1318,10 @@ async function loadConfig() {
     document.getElementById("haUrl").value = data.ha_url || "";
     document.getElementById("saveDownloadedImages").checked =
       data.save_downloaded_images !== false;
+    document.getElementById("accessToken").value = data.access_token || "";
+    document.getElementById("httpHeaderKey").value = data.http_header_key || "";
+    document.getElementById("httpHeaderValue").value =
+      data.http_header_value || "";
 
     // Set display orientation based on backend config
     const displayOrientation = data.display_orientation || "landscape";
@@ -1443,6 +1453,9 @@ async function saveAllSettings() {
   const sleepScheduleEnd = endHours * 60 + endMins;
 
   const deviceName = document.getElementById("deviceName").value;
+  const accessToken = document.getElementById("accessToken").value;
+  const httpHeaderKey = document.getElementById("httpHeaderKey").value;
+  const httpHeaderValue = document.getElementById("httpHeaderValue").value;
 
   // Convert UTC offset to POSIX timezone format
   // POSIX format is inverted: UTC-8 means 8 hours ahead (e.g., Asia)
@@ -1462,28 +1475,51 @@ async function saveAllSettings() {
     }
   }
 
+  // Build current config object
+  const currentConfig = {
+    auto_rotate: autoRotate,
+    rotate_interval: rotateInterval,
+    image_orientation: imageOrientation,
+    rotation_mode: rotationMode,
+    image_url: imageUrl,
+    ha_url: haUrl,
+    deep_sleep_enabled: deepSleepEnabled,
+    save_downloaded_images: saveDownloadedImages,
+    display_orientation: displayOrientation,
+    sleep_schedule_enabled: sleepScheduleEnabled,
+    sleep_schedule_start: sleepScheduleStart,
+    sleep_schedule_end: sleepScheduleEnd,
+    device_name: deviceName,
+    timezone: timezone,
+    access_token: accessToken,
+    http_header_key: httpHeaderKey,
+    http_header_value: httpHeaderValue,
+  };
+
+  // Compare with original config and only send changed fields
+  const changedFields = {};
+  for (const key in currentConfig) {
+    if (currentConfig[key] !== originalConfig[key]) {
+      changedFields[key] = currentConfig[key];
+    }
+  }
+
+  // If nothing changed, don't send request
+  if (Object.keys(changedFields).length === 0) {
+    statusDiv.className = "status-success";
+    statusDiv.textContent = "No changes to save";
+    return;
+  }
+
+  console.log("Saving changed fields:", changedFields);
+
   try {
     const response = await fetch(`${API_BASE}/api/config`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        auto_rotate: autoRotate,
-        rotate_interval: rotateInterval,
-        image_orientation: imageOrientation,
-        rotation_mode: rotationMode,
-        image_url: imageUrl,
-        ha_url: haUrl,
-        deep_sleep_enabled: deepSleepEnabled,
-        save_downloaded_images: saveDownloadedImages,
-        display_orientation: displayOrientation,
-        sleep_schedule_enabled: sleepScheduleEnabled,
-        sleep_schedule_start: sleepScheduleStart,
-        sleep_schedule_end: sleepScheduleEnd,
-        device_name: deviceName,
-        timezone: timezone,
-      }),
+      body: JSON.stringify(changedFields),
     });
 
     const data = await response.json();
@@ -1491,6 +1527,8 @@ async function saveAllSettings() {
     if (data.status === "success") {
       statusDiv.className = "status-success";
       statusDiv.textContent = "Settings saved successfully";
+      // Update original config with new values
+      Object.assign(originalConfig, changedFields);
     } else {
       statusDiv.className = "status-error";
       statusDiv.textContent = "Failed to save settings";

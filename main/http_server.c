@@ -1270,6 +1270,9 @@ static esp_err_t config_handler(httpd_req_t *req)
         int sleep_schedule_end = config_manager_get_sleep_schedule_end();
         const char *device_name = config_manager_get_device_name();
         const char *timezone = config_manager_get_timezone();
+        const char *access_token = config_manager_get_access_token();
+        const char *http_header_key = config_manager_get_http_header_key();
+        const char *http_header_value = config_manager_get_http_header_value();
 
         cJSON *root = cJSON_CreateObject();
         cJSON_AddNumberToObject(root, "rotate_interval", rotate_interval);
@@ -1289,6 +1292,10 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddNumberToObject(root, "sleep_schedule_end", sleep_schedule_end);
         cJSON_AddStringToObject(root, "device_name", device_name ? device_name : "PhotoFrame");
         cJSON_AddStringToObject(root, "timezone", timezone ? timezone : "UTC0");
+        cJSON_AddStringToObject(root, "access_token", access_token ? access_token : "");
+        cJSON_AddStringToObject(root, "http_header_key", http_header_key ? http_header_key : "");
+        cJSON_AddStringToObject(root, "http_header_value",
+                                http_header_value ? http_header_value : "");
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -1405,6 +1412,24 @@ static esp_err_t config_handler(httpd_req_t *req)
         if (timezone_obj && cJSON_IsString(timezone_obj)) {
             const char *tz = cJSON_GetStringValue(timezone_obj);
             config_manager_set_timezone(tz);
+        }
+
+        cJSON *access_token_obj = cJSON_GetObjectItem(root, "access_token");
+        if (access_token_obj && cJSON_IsString(access_token_obj)) {
+            const char *token = cJSON_GetStringValue(access_token_obj);
+            config_manager_set_access_token(token);
+        }
+
+        cJSON *http_header_key_obj = cJSON_GetObjectItem(root, "http_header_key");
+        if (http_header_key_obj && cJSON_IsString(http_header_key_obj)) {
+            const char *key = cJSON_GetStringValue(http_header_key_obj);
+            config_manager_set_http_header_key(key);
+        }
+
+        cJSON *http_header_value_obj = cJSON_GetObjectItem(root, "http_header_value");
+        if (http_header_value_obj && cJSON_IsString(http_header_value_obj)) {
+            const char *value = cJSON_GetStringValue(http_header_value_obj);
+            config_manager_set_http_header_value(value);
         }
 
         cJSON_Delete(root);
