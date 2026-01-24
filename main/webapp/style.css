@@ -41,19 +41,17 @@ header h1 {
 }
 
 .btn-icon {
-    background: rgba(255, 255, 255, 0.1);
-    border: 2px solid rgba(255, 255, 255, 0.3);
+    background: transparent;
+    border: none;
     border-radius: 8px;
     padding: 8px 12px;
     font-size: 1.2rem;
     cursor: pointer;
     transition: all 0.3s ease;
-    backdrop-filter: blur(10px);
 }
 
 .btn-icon:hover {
     background: rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.5);
     transform: translateY(-2px);
 }
 
@@ -166,22 +164,37 @@ header h1 {
 }
 
 .delete-btn {
-    background: #f44336;
-    color: white;
-    border: none;
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: rgba(255, 255, 255, 0.9);
+    color: #666;
+    border: 2px solid rgba(0, 0, 0, 0.1);
     border-radius: 50%;
     width: 28px;
     height: 28px;
     font-size: 20px;
     line-height: 1;
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: all 0.2s;
     flex-shrink: 0;
-    margin-left: 8px;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 10;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.image-item:hover .delete-btn,
+.album-item:hover .delete-btn {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .delete-btn:hover {
-    background: #d32f2f;
+    background: rgba(255, 255, 255, 1);
+    color: #f44336;
+    border-color: rgba(244, 67, 54, 0.3);
+    transform: scale(1.1);
 }
 
 .display-status {
@@ -544,9 +557,20 @@ footer {
         font-size: 1.5rem;
     }
 
+    .header-actions {
+        position: static;
+        justify-content: center;
+    }
+
     .battery-status {
         position: static;
         font-size: 1rem;
+    }
+
+    /* Make delete button always visible on mobile (no hover) */
+    .delete-btn {
+        opacity: 1;
+        pointer-events: auto;
     }
 
     .image-grid {
@@ -708,6 +732,7 @@ footer {
 }
 
 .album-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -741,10 +766,6 @@ footer {
     flex: 1;
     font-size: 1rem;
     color: #333;
-}
-
-.album-item .delete-btn {
-    margin-left: auto;
 }
 
 .btn-primary {

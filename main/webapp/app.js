@@ -118,7 +118,7 @@ async function loadBatteryStatus() {
 
     batteryDiv.innerHTML = `
             <span class="${batteryClass}">
-                ${batteryIcon} ${percent}% (${(voltage / 1000).toFixed(2)}V)
+                ${batteryIcon} ${percent}%
                 ${charging ? " Charging" : ""}
             </span>
         `;
