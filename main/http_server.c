@@ -48,8 +48,8 @@ extern const uint8_t image_processor_js_start[] asm("_binary_image_processor_js_
 extern const uint8_t image_processor_js_end[] asm("_binary_image_processor_js_end");
 extern const uint8_t favicon_svg_start[] asm("_binary_favicon_svg_start");
 extern const uint8_t favicon_svg_end[] asm("_binary_favicon_svg_end");
-extern const uint8_t calibration_bmp_start[] asm("_binary_calibration_bmp_start");
-extern const uint8_t calibration_bmp_end[] asm("_binary_calibration_bmp_end");
+extern const uint8_t calibration_png_start[] asm("_binary_calibration_png_start");
+extern const uint8_t calibration_png_end[] asm("_binary_calibration_png_end");
 extern const uint8_t measurement_sample_jpg_start[] asm("_binary_measurement_sample_jpg_start");
 extern const uint8_t measurement_sample_jpg_end[] asm("_binary_measurement_sample_jpg_end");
 
@@ -1870,17 +1870,17 @@ static esp_err_t keep_alive_handler(httpd_req_t *req)
 
 static esp_err_t display_calibration_handler(httpd_req_t *req)
 {
-    const size_t calibration_bmp_size = (calibration_bmp_end - calibration_bmp_start);
+    const size_t calibration_png_size = (calibration_png_end - calibration_png_start);
 
     ESP_LOGI(TAG, "Displaying calibration pattern on e-paper");
 
-    // Write embedded BMP to temporary file
-    const char *temp_path = "/sdcard/.calibration.bmp";
+    // Write embedded PNG to temporary file
+    const char *temp_path = "/sdcard/.calibration.png";
 
     // Copy embedded data to SPIRAM buffer first to avoid cache coherency issues
     // when writing directly from flash memory to SD card
-    uint8_t *bmp_buffer = (uint8_t *) heap_caps_malloc(calibration_bmp_size, MALLOC_CAP_SPIRAM);
-    if (!bmp_buffer) {
+    uint8_t *png_buffer = (uint8_t *) heap_caps_malloc(calibration_png_size, MALLOC_CAP_SPIRAM);
+    if (!png_buffer) {
         ESP_LOGE(TAG, "Failed to allocate SPIRAM buffer");
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_set_type(req, "application/json");
@@ -1888,12 +1888,12 @@ static esp_err_t display_calibration_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    memcpy(bmp_buffer, calibration_bmp_start, calibration_bmp_size);
+    memcpy(png_buffer, calibration_png_start, calibration_png_size);
 
     FILE *f = fopen(temp_path, "wb");
     if (!f) {
         ESP_LOGE(TAG, "Failed to create temporary calibration file");
-        free(bmp_buffer);
+        free(png_buffer);
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(
@@ -1902,12 +1902,12 @@ static esp_err_t display_calibration_handler(httpd_req_t *req)
     }
 
     // Write from SPIRAM buffer
-    size_t written = fwrite(bmp_buffer, 1, calibration_bmp_size, f);
-    free(bmp_buffer);
+    size_t written = fwrite(png_buffer, 1, calibration_png_size, f);
+    free(png_buffer);
     fclose(f);
 
-    if (written != calibration_bmp_size) {
-        ESP_LOGE(TAG, "Failed to write calibration BMP");
+    if (written != calibration_png_size) {
+        ESP_LOGE(TAG, "Failed to write calibration PNG");
         unlink(temp_path);
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_set_type(req, "application/json");
