@@ -817,8 +817,8 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             display_path = temp_bmp_path;
         } else {
             // Assume JPEG, convert to BMP
-            err = image_processor_convert_jpg_to_bmp(result.image_path, temp_bmp_path, false,
-                                                     proc_settings.dither_algorithm);
+            dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+            err = image_processor_convert_jpg_to_bmp(result.image_path, temp_bmp_path, false, algo);
             unlink(result.image_path);
             if (err != ESP_OK) {
                 if (result.has_thumbnail)
@@ -972,8 +972,8 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
         ESP_LOGI(TAG, "PNG saved: %s", temp_png_path);
     } else {
         // Convert JPG to BMP using image processor
-        err = image_processor_convert_jpg_to_bmp(temp_upload_path, temp_bmp_path, false,
-                                                 proc_settings.dither_algorithm);
+        dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+        err = image_processor_convert_jpg_to_bmp(temp_upload_path, temp_bmp_path, false, algo);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to convert JPG to BMP: %s", esp_err_to_name(err));
             unlink(temp_upload_path);
@@ -1956,6 +1956,7 @@ static esp_err_t processing_settings_handler(httpd_req_t *req)
         cJSON_AddStringToObject(response, "colorMethod", settings.color_method);
         cJSON_AddStringToObject(response, "processingMode", settings.processing_mode);
         cJSON_AddStringToObject(response, "ditherAlgorithm", settings.dither_algorithm);
+        cJSON_AddBoolToObject(response, "compressDynamicRange", settings.compress_dynamic_range);
 
         char *json_str = cJSON_Print(response);
         httpd_resp_set_type(req, "application/json");
@@ -2023,8 +2024,13 @@ static esp_err_t processing_settings_handler(httpd_req_t *req)
             strncpy(settings.processing_mode, item->valuestring,
                     sizeof(settings.processing_mode) - 1);
         }
-        if ((item = cJSON_GetObjectItem(json, "ditherAlgorithm")) && cJSON_IsString(item)) {
-            strncpy(settings.dither_algorithm, item->valuestring,
+        cJSON *compress_dr = cJSON_GetObjectItem(json, "compressDynamicRange");
+        if (compress_dr && cJSON_IsBool(compress_dr)) {
+            settings.compress_dynamic_range = cJSON_IsTrue(compress_dr);
+        }
+        cJSON *dither_algo = cJSON_GetObjectItem(json, "ditherAlgorithm");
+        if (dither_algo && cJSON_IsString(dither_algo)) {
+            strncpy(settings.dither_algorithm, dither_algo->valuestring,
                     sizeof(settings.dither_algorithm) - 1);
         }
 

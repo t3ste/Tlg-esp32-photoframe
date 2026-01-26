@@ -20,13 +20,6 @@ typedef struct {
     uint8_t b;
 } rgb_t;
 
-typedef enum {
-    DITHER_FLOYD_STEINBERG,
-    DITHER_STUCKI,
-    DITHER_BURKES,
-    DITHER_SIERRA
-} dither_algorithm_t;
-
 typedef struct {
     int dx;
     int dy;
@@ -45,35 +38,28 @@ static const rgb_t palette[7] = {
     {0, 255, 0}       // Green
 };
 
-// Measured palette - loaded from NVS or defaults
-static rgb_t palette_measured[7] = {
-    {2, 2, 2},        // Black (default)
-    {190, 190, 190},  // White (default)
-    {205, 202, 0},    // Yellow (default)
-    {135, 19, 0},     // Red (default)
-    {0, 0, 0},        // Reserved
-    {5, 64, 158},     // Blue (default)
-    {39, 102, 60}     // Green (default)
-};
+// Measured palette - loaded from config or defaults via color_palette module
+static rgb_t palette_measured[7];
 
-static void load_calibrated_palette(void)
+static esp_err_t load_calibrated_palette(void)
 {
-    color_palette_t cal_palette;
-    if (color_palette_load(&cal_palette) == ESP_OK) {
-        palette_measured[0] =
-            (rgb_t){cal_palette.black.r, cal_palette.black.g, cal_palette.black.b};
-        palette_measured[1] =
-            (rgb_t){cal_palette.white.r, cal_palette.white.g, cal_palette.white.b};
-        palette_measured[2] =
-            (rgb_t){cal_palette.yellow.r, cal_palette.yellow.g, cal_palette.yellow.b};
-        palette_measured[3] = (rgb_t){cal_palette.red.r, cal_palette.red.g, cal_palette.red.b};
-        palette_measured[5] = (rgb_t){cal_palette.blue.r, cal_palette.blue.g, cal_palette.blue.b};
-        palette_measured[6] =
-            (rgb_t){cal_palette.green.r, cal_palette.green.g, cal_palette.green.b};
-        ESP_LOGI(TAG, "Loaded calibrated color palette from NVS");
-    } else {
-        ESP_LOGI(TAG, "Using default color palette");
+    color_palette_t palette;
+    esp_err_t err = color_palette_load(&palette);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load palette: %s", esp_err_to_name(err));
+        return err;
     }
+
+    // Update palette_measured array with loaded values (stored or defaults)
+    palette_measured[0] = (rgb_t){palette.black.r, palette.black.g, palette.black.b};
+    palette_measured[1] = (rgb_t){palette.white.r, palette.white.g, palette.white.b};
+    palette_measured[2] = (rgb_t){palette.yellow.r, palette.yellow.g, palette.yellow.b};
+    palette_measured[3] = (rgb_t){palette.red.r, palette.red.g, palette.red.b};
+    palette_measured[5] = (rgb_t){palette.blue.r, palette.blue.g, palette.blue.b};
+    palette_measured[6] = (rgb_t){palette.green.r, palette.green.g, palette.green.b};
+
+    return ESP_OK;
 }
 
 static int find_closest_color(uint8_t r, uint8_t g, uint8_t b, const rgb_t *pal)
@@ -97,18 +83,6 @@ static int find_closest_color(uint8_t r, uint8_t g, uint8_t b, const rgb_t *pal)
     }
 
     return closest;
-}
-
-static dither_algorithm_t parse_dither_algorithm(const char *algo_str)
-{
-    if (strcmp(algo_str, "stucki") == 0) {
-        return DITHER_STUCKI;
-    } else if (strcmp(algo_str, "burkes") == 0) {
-        return DITHER_BURKES;
-    } else if (strcmp(algo_str, "sierra") == 0) {
-        return DITHER_SIERRA;
-    }
-    return DITHER_FLOYD_STEINBERG;  // Default
 }
 
 static void apply_error_diffusion_dither(uint8_t *image, int width, int height,
@@ -244,10 +218,15 @@ esp_err_t image_processor_init(void)
     return ESP_OK;
 }
 
-void image_processor_reload_palette(void)
+esp_err_t image_processor_reload_palette(void)
 {
-    load_calibrated_palette();
+    esp_err_t err = load_calibrated_palette();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reload calibrated palette");
+        return err;
+    }
     ESP_LOGI(TAG, "Calibrated palette reloaded");
+    return ESP_OK;
 }
 
 static uint8_t *resize_image(uint8_t *src, int src_w, int src_h, int dst_w, int dst_h)
@@ -402,11 +381,12 @@ static esp_err_t write_bmp_file(const char *filename, uint8_t *rgb_data, int wid
 }
 
 esp_err_t image_processor_convert_jpg_to_bmp(const char *jpg_path, const char *bmp_path,
-                                             bool use_stock_mode, const char *dither_algorithm)
+                                             bool use_stock_mode,
+                                             dither_algorithm_t dither_algorithm)
 {
+    const char *algo_names[] = {"floyd-steinberg", "stucki", "burkes", "sierra"};
     ESP_LOGI(TAG, "Converting %s to %s (mode: %s, dither: %s)", jpg_path, bmp_path,
-             use_stock_mode ? "stock" : "enhanced",
-             dither_algorithm ? dither_algorithm : "floyd-steinberg");
+             use_stock_mode ? "stock" : "enhanced", algo_names[dither_algorithm]);
 
     FILE *fp = fopen(jpg_path, "rb");
     if (!fp) {
@@ -660,14 +640,11 @@ esp_err_t image_processor_convert_jpg_to_bmp(const char *jpg_path, const char *b
     // Enhanced mode: use measured palette (accurate error diffusion)
     const rgb_t *dither_palette = use_stock_mode ? palette : palette_measured;
 
-    // Parse dithering algorithm
-    dither_algorithm_t algo =
-        parse_dither_algorithm(dither_algorithm ? dither_algorithm : "floyd-steinberg");
-    const char *algo_name = dither_algorithm ? dither_algorithm : "floyd-steinberg";
-
-    ESP_LOGI(TAG, "Applying %s dithering with %s palette", algo_name,
+    // Use dithering algorithm directly (already an enum)
+    ESP_LOGI(TAG, "Applying %s dithering with %s palette", algo_names[dither_algorithm],
              use_stock_mode ? "theoretical" : "measured");
-    apply_error_diffusion_dither(final_image, final_width, final_height, dither_palette, algo);
+    apply_error_diffusion_dither(final_image, final_width, final_height, dither_palette,
+                                 dither_algorithm);
 
     // Write BMP file
     ESP_LOGI(TAG, "Writing BMP file");

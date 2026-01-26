@@ -4,12 +4,48 @@
 // Display dimensions constants
 const DISPLAY_WIDTH_LANDSCAPE = 800;
 const DISPLAY_HEIGHT_LANDSCAPE = 480;
-const DISPLAY_WIDTH_PORTRAIT = 480;
-const DISPLAY_HEIGHT_PORTRAIT = 800;
 
 // Thumbnail dimensions (half of display resolution)
 const THUMBNAIL_WIDTH = 400;
 const THUMBNAIL_HEIGHT = 240;
+
+// Processing presets
+const PRESETS = {
+  cdr: {
+    exposure: 1.0,
+    saturation: 1.0,
+    toneMode: "contrast",
+    contrast: 1.0,
+    colorMethod: "rgb",
+    processingMode: "enhanced",
+    ditherAlgorithm: "floyd-steinberg",
+    compressDynamicRange: true,
+  },
+  scurve: {
+    exposure: 1.0,
+    saturation: 1.3,
+    toneMode: "scurve",
+    contrast: 1.0,
+    strength: 0.9,
+    shadowBoost: 0.0,
+    highlightCompress: 1.5,
+    midpoint: 0.5,
+    colorMethod: "rgb",
+    processingMode: "enhanced",
+    ditherAlgorithm: "floyd-steinberg",
+    compressDynamicRange: false,
+  },
+};
+
+// Get preset by name
+function getPreset(presetName) {
+  return PRESETS[presetName] ? { ...PRESETS[presetName] } : null;
+}
+
+// Get all preset names
+function getPresetNames() {
+  return Object.keys(PRESETS);
+}
 
 // Helper function to get canvas context with image smoothing disabled
 function getCanvasContext(canvas, contextType = "2d") {
@@ -31,26 +67,40 @@ function getCanvasContext(canvas, contextType = "2d") {
 }
 
 // Measured palette - actual displayed colors from e-paper
-const PALETTE_MEASURED = [
-  [2, 2, 2], // Black
-  [190, 190, 190], // White
-  [205, 202, 0], // Yellow
-  [135, 19, 0], // Red
-  [0, 0, 0], // Reserved (not used)
-  [5, 64, 158], // Blue
-  [39, 102, 60], // Green
-];
+const PALETTE_MEASURED = {
+  black: { r: 2, g: 2, b: 2 },
+  white: { r: 190, g: 190, b: 190 },
+  yellow: { r: 205, g: 202, b: 0 },
+  red: { r: 135, g: 19, b: 0 },
+  blue: { r: 5, g: 64, b: 158 },
+  green: { r: 39, g: 102, b: 60 },
+};
+
+// Default measured palette - canonical source of truth for default palette values
+const DEFAULT_MEASURED_PALETTE = PALETTE_MEASURED;
 
 // Theoretical palette - for BMP output
-const PALETTE_THEORETICAL = [
-  [0, 0, 0], // Black
-  [255, 255, 255], // White
-  [255, 255, 0], // Yellow
-  [255, 0, 0], // Red
-  [0, 0, 0], // Reserved
-  [0, 0, 255], // Blue
-  [0, 255, 0], // Green
-];
+const PALETTE_THEORETICAL = {
+  black: { r: 0, g: 0, b: 0 },
+  white: { r: 255, g: 255, b: 255 },
+  yellow: { r: 255, g: 255, b: 0 },
+  red: { r: 255, g: 0, b: 0 },
+  blue: { r: 0, g: 0, b: 255 },
+  green: { r: 0, g: 255, b: 0 },
+};
+
+// Helper to convert palette object to array format for indexing
+function paletteToArray(palette) {
+  return [
+    [palette.black.r, palette.black.g, palette.black.b],
+    [palette.white.r, palette.white.g, palette.white.b],
+    [palette.yellow.r, palette.yellow.g, palette.yellow.b],
+    [palette.red.r, palette.red.g, palette.red.b],
+    [0, 0, 0], // Reserved (not used)
+    [palette.blue.r, palette.blue.g, palette.blue.b],
+    [palette.green.r, palette.green.g, palette.green.b],
+  ];
+}
 
 function applyExposure(imageData, exposure) {
   if (exposure === 1.0) return;
@@ -222,6 +272,43 @@ function rgbToLab(r, g, b) {
   return xyzToLab(x, y, z);
 }
 
+function labToXyz(L, a, b) {
+  let y = (L + 16) / 116;
+  let x = a / 500 + y;
+  let z = y - b / 200;
+
+  x = x > 0.206897 ? Math.pow(x, 3) : (x - 16 / 116) / 7.787;
+  y = y > 0.206897 ? Math.pow(y, 3) : (y - 16 / 116) / 7.787;
+  z = z > 0.206897 ? Math.pow(z, 3) : (z - 16 / 116) / 7.787;
+
+  return [x * 95.047, y * 100.0, z * 108.883];
+}
+
+function xyzToRgb(x, y, z) {
+  x = x / 100;
+  y = y / 100;
+  z = z / 100;
+
+  let r = x * 3.2404542 + y * -1.5371385 + z * -0.4985314;
+  let g = x * -0.969266 + y * 1.8760108 + z * 0.041556;
+  let b = x * 0.0556434 + y * -0.2040259 + z * 1.0572252;
+
+  r = r > 0.0031308 ? 1.055 * Math.pow(r, 1 / 2.4) - 0.055 : 12.92 * r;
+  g = g > 0.0031308 ? 1.055 * Math.pow(g, 1 / 2.4) - 0.055 : 12.92 * g;
+  b = b > 0.0031308 ? 1.055 * Math.pow(b, 1 / 2.4) - 0.055 : 12.92 * b;
+
+  return [
+    Math.max(0, Math.min(255, Math.round(r * 255))),
+    Math.max(0, Math.min(255, Math.round(g * 255))),
+    Math.max(0, Math.min(255, Math.round(b * 255))),
+  ];
+}
+
+function labToRgb(L, a, b) {
+  const [x, y, z] = labToXyz(L, a, b);
+  return xyzToRgb(x, y, z);
+}
+
 function deltaE(lab1, lab2) {
   const dL = lab1[0] - lab2[0];
   const da = lab1[1] - lab2[1];
@@ -230,16 +317,24 @@ function deltaE(lab1, lab2) {
 }
 
 // Pre-compute LAB values for palette (done once)
-const PALETTE_LAB = PALETTE_MEASURED.map(([r, g, b]) => rgbToLab(r, g, b));
+const PALETTE_MEASURED_ARRAY = paletteToArray(PALETTE_MEASURED);
+const PALETTE_LAB = PALETTE_MEASURED_ARRAY.map(([r, g, b]) =>
+  rgbToLab(r, g, b),
+);
 
 function findClosestColorRGB(r, g, b, palette = PALETTE_MEASURED) {
+  // Convert palette object to array if needed
+  const paletteArray = Array.isArray(palette)
+    ? palette
+    : paletteToArray(palette);
+
   let minDist = Infinity;
   let closest = 1; // Default to white
 
-  for (let i = 0; i < palette.length; i++) {
+  for (let i = 0; i < paletteArray.length; i++) {
     if (i === 4) continue; // Skip reserved color
 
-    const [pr, pg, pb] = palette[i];
+    const [pr, pg, pb] = paletteArray[i];
     const dr = r - pr;
     const dg = g - pg;
     const db = b - pb;
@@ -263,7 +358,7 @@ function findClosestColorLAB(r, g, b) {
   // Convert input color to LAB
   const inputLab = rgbToLab(r, g, b);
 
-  for (let i = 0; i < PALETTE_MEASURED.length; i++) {
+  for (let i = 0; i < PALETTE_MEASURED_ARRAY.length; i++) {
     if (i === 4) continue; // Skip reserved color
 
     // Calculate perceptual distance in LAB space
@@ -293,6 +388,14 @@ function applyErrorDiffusionDither(
   ditherPalette = PALETTE_MEASURED,
   algorithm = "floyd-steinberg",
 ) {
+  // Convert palettes to array format if they're objects
+  const outputPaletteArray = Array.isArray(outputPalette)
+    ? outputPalette
+    : paletteToArray(outputPalette);
+  const ditherPaletteArray = Array.isArray(ditherPalette)
+    ? ditherPalette
+    : paletteToArray(ditherPalette);
+
   const width = imageData.width;
   const height = imageData.height;
   const data = imageData.data;
@@ -370,9 +473,9 @@ function applyErrorDiffusionDither(
         oldG,
         oldB,
         method,
-        ditherPalette,
+        ditherPaletteArray,
       );
-      const [newR, newG, newB] = outputPalette[colorIdx];
+      const [newR, newG, newB] = outputPaletteArray[colorIdx];
 
       // Set new pixel color (using output palette)
       data[idx] = newR;
@@ -380,7 +483,7 @@ function applyErrorDiffusionDither(
       data[idx + 2] = newB;
 
       // Calculate error using dither palette (for error diffusion)
-      const [ditherR, ditherG, ditherB] = ditherPalette[colorIdx];
+      const [ditherR, ditherG, ditherB] = ditherPaletteArray[colorIdx];
       const errR = oldR - ditherR;
       const errG = oldG - ditherG;
       const errB = oldB - ditherB;
@@ -438,6 +541,37 @@ function preprocessImage(imageData, params) {
       params.highlightCompress,
       params.midpoint,
     );
+  }
+
+  // 4. Compress dynamic range to display's actual luminance range if enabled
+  if (params.compressDynamicRange) {
+    const paletteBlack = params.measuredPalette.black;
+    const paletteWhite = params.measuredPalette.white;
+
+    // Calculate actual L* range of the display
+    const [blackL] = rgbToLab(paletteBlack.r, paletteBlack.g, paletteBlack.b);
+    const [whiteL] = rgbToLab(paletteWhite.r, paletteWhite.g, paletteWhite.b);
+
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      // Convert to LAB
+      const [l, a, bLab] = rgbToLab(r, g, b);
+
+      // Map L* from [0, 100] to display's actual range [blackL, whiteL]
+      const compressedL = blackL + (l / 100) * (whiteL - blackL);
+
+      // Convert back to RGB
+      const [newR, newG, newB] = labToRgb(compressedL, a, bLab);
+
+      data[i] = newR;
+      data[i + 1] = newG;
+      data[i + 2] = newB;
+      // Alpha unchanged
+    }
   }
 }
 
@@ -671,6 +805,9 @@ async function createPNG(canvas) {
   // 24-bit PNG is still 4-7x smaller than BMP and uploads much faster
   if (typeof Buffer !== "undefined" && typeof window === "undefined") {
     // Node.js environment
+    // Just return the buffer as-is - the color space issue is actually
+    // that macOS Preview applies gamma correction to PNGs without gAMA chunk
+    // The real fix is to ensure our pixel values are correct for the target display
     const buffer = canvas.toBuffer("image/png");
     return buffer;
   } else {
@@ -766,14 +903,18 @@ function processImage(
   }
 
   // Resize to display dimensions
-  // If portrait and skipRotation, use portrait dimensions; otherwise landscape
+  // When skipRotation is true with portrait image and landscape target dims, swap to portrait
+  // This handles case where we always pass 800x480 but want 480x800 for portrait preview
   let finalWidth, finalHeight;
-  if (isPortrait && skipRotation) {
-    finalWidth = targetWidth; // Portrait width
-    finalHeight = targetHeight; // Portrait height
+  const targetIsLandscape = targetWidth > targetHeight;
+  if (isPortrait && skipRotation && targetIsLandscape) {
+    // Swap landscape dims to portrait for preview
+    finalWidth = targetHeight;
+    finalHeight = targetWidth;
   } else {
-    finalWidth = targetWidth; // Landscape width
-    finalHeight = targetHeight; // Landscape height
+    // Use provided dimensions as-is
+    finalWidth = targetWidth;
+    finalHeight = targetHeight;
   }
 
   if (canvas.width !== finalWidth || canvas.height !== finalHeight) {
@@ -793,26 +934,15 @@ function processImage(
     canvas.height,
   );
 
-  // Convert device palette to array format if provided
-  let customPalette = null;
-  if (devicePalette) {
-    customPalette = [
-      [devicePalette.black.r, devicePalette.black.g, devicePalette.black.b],
-      [devicePalette.white.r, devicePalette.white.g, devicePalette.white.b],
-      [devicePalette.yellow.r, devicePalette.yellow.g, devicePalette.yellow.b],
-      [devicePalette.red.r, devicePalette.red.g, devicePalette.red.b],
-      [0, 0, 0], // Reserved
-      [devicePalette.blue.r, devicePalette.blue.g, devicePalette.blue.b],
-      [devicePalette.green.r, devicePalette.green.g, devicePalette.green.b],
-    ];
-    if (verbose) {
-      console.log(`  Using calibrated color palette from device`);
-    }
+  // Use device palette if provided, otherwise use measured palette
+  const measuredPalette = devicePalette || PALETTE_MEASURED;
+  if (devicePalette && verbose) {
+    console.log(`  Using calibrated color palette from device`);
   }
 
   const params = {
     ...processingParams,
-    customPalette: customPalette,
+    measuredPalette: measuredPalette,
     skipDithering: skipDithering,
   };
 
@@ -834,31 +964,51 @@ function processImage(
         console.log(`  Tone mapping: Simple Contrast (${params.contrast})`);
       }
       console.log(`  Color method: ${params.colorMethod}`);
+      if (params.compressDynamicRange) {
+        const paletteBlack = measuredPalette.black;
+        const paletteWhite = measuredPalette.white;
+        const [blackL] = rgbToLab(
+          paletteBlack.r,
+          paletteBlack.g,
+          paletteBlack.b,
+        );
+        const [whiteL] = rgbToLab(
+          paletteWhite.r,
+          paletteWhite.g,
+          paletteWhite.b,
+        );
+        console.log(
+          `  Compressed dynamic range to display L* range: ${Math.round(blackL)}-${Math.round(whiteL)}`,
+        );
+      }
     }
 
     if (params.renderMeasured) {
-      console.log(
-        `  Rendering BMP with measured colors (darker output for preview)`,
-      );
+      console.log(`  Rendering output with measured colors`);
     } else {
-      console.log(`  Rendering BMP with theoretical colors (standard output)`);
+      console.log(`  Rendering output with theoretical colors (for device)`);
     }
   }
 
-  // Apply tone mapping (exposure, saturation, contrast/S-curve)
+  // Apply tone mapping (exposure, saturation, contrast/S-curve, dynamic range compression)
   preprocessImage(imageData, params);
 
   // Apply dithering if not skipped
   if (!skipDithering) {
     const mode = params.processingMode || "enhanced";
-    const ditherPalette = customPalette || PALETTE_MEASURED;
+    const ditherPalette = measuredPalette || PALETTE_MEASURED;
     const ditherAlgorithm = params.ditherAlgorithm || "floyd-steinberg";
+
+    if (verbose) {
+      console.log(`  Applying dithering: ${ditherAlgorithm}`);
+    }
+
+    const outputPalette = params.renderMeasured
+      ? measuredPalette
+      : PALETTE_THEORETICAL;
 
     if (mode === "stock") {
       // Stock Waveshare algorithm: theoretical palette for dithering
-      const outputPalette = params.renderMeasured
-        ? ditherPalette
-        : PALETTE_THEORETICAL;
       applyErrorDiffusionDither(
         imageData,
         "rgb",
@@ -867,15 +1017,13 @@ function processImage(
         ditherAlgorithm,
       );
     } else {
-      // Enhanced algorithm: use color method and measured palette
-      const outputPalette = params.renderMeasured
-        ? ditherPalette
-        : PALETTE_THEORETICAL;
+      // Enhanced algorithm: use color method and appropriate palette
+      // Use the same palette for error diffusion as output to avoid artifacts
       applyErrorDiffusionDither(
         imageData,
         params.colorMethod,
         outputPalette,
-        ditherPalette,
+        measuredPalette,
         ditherAlgorithm,
       );
     }
@@ -894,4 +1042,8 @@ export {
   generateThumbnail,
   createPNG,
   getCanvasContext,
+  getPreset,
+  getPresetNames,
+  PALETTE_MEASURED,
+  DEFAULT_MEASURED_PALETTE,
 };

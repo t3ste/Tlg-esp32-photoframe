@@ -63,17 +63,17 @@ export async function processImagePipeline(
   devicePalette,
   options = {},
 ) {
-  const { verbose = false, skipDithering = false } = options;
+  const {
+    verbose = false,
+    skipDithering = false,
+    skipRotation = false,
+  } = options;
 
   // Load image (with HEIC conversion if needed)
   const img = await loadImageWithHeicSupport(imagePath);
   let canvas = createCanvas(img.width, img.height);
   const ctx = canvas.getContext("2d");
   ctx.drawImage(img, 0, 0);
-
-  if (verbose) {
-    console.log(`  Original size: ${canvas.width}x${canvas.height}`);
-  }
 
   // Apply EXIF orientation
   const orientation = getExifOrientation(imagePath);
@@ -94,5 +94,6 @@ export async function processImagePipeline(
     targetHeight: DISPLAY_HEIGHT,
     createCanvas,
     skipDithering,
+    skipRotation,
   });
 }

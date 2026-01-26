@@ -5,9 +5,17 @@
 
 #include "esp_err.h"
 
+typedef enum {
+    DITHER_FLOYD_STEINBERG,
+    DITHER_STUCKI,
+    DITHER_BURKES,
+    DITHER_SIERRA
+} dither_algorithm_t;
+
 esp_err_t image_processor_init(void);
 esp_err_t image_processor_convert_jpg_to_bmp(const char *jpg_path, const char *bmp_path,
-                                             bool use_stock_mode, const char *dither_algorithm);
-void image_processor_reload_palette(void);
+                                             bool use_stock_mode,
+                                             dither_algorithm_t dither_algorithm);
+esp_err_t image_processor_reload_palette(void);
 
 #endif

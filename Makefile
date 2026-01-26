@@ -12,7 +12,7 @@ C_FILES := $(shell find main -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/nul
 	   $(shell find components -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null)
 
 # Find all JS files in main/webapp/ and process-cli/ directories
-JS_FILES := $(shell find main/webapp process-cli -type f -name "*.js" 2>/dev/null | grep -v node_modules)
+JS_FILES := $(shell find main/webapp process-cli docs -type f -name "*.js" 2>/dev/null | grep -v node_modules)
 
 # Find all Python files in the project root and docs/
 PY_FILES := $(shell find main -type f -name "*.py" 2>/dev/null) \

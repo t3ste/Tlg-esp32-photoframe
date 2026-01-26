@@ -5,17 +5,14 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import http from "http";
-import url from "url";
 import { fileURLToPath } from "url";
-import { loadImage, createCanvas } from "canvas";
-import exifParser from "exif-parser";
-import heicConvert from "heic-convert";
+import { createCanvas } from "canvas";
 import FormData from "form-data";
-import fetch from "node-fetch";
 import {
-  processImage,
   generateThumbnail,
   createPNG,
+  getPreset,
+  getPresetNames,
 } from "./image-processor.js";
 import { processImagePipeline } from "./utils.js";
 import { createImageServer } from "./server.js";
@@ -23,26 +20,15 @@ import { createImageServer } from "./server.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Display dimensions constants
-const DISPLAY_WIDTH_LANDSCAPE = 800;
-const DISPLAY_HEIGHT_LANDSCAPE = 480;
-const DISPLAY_WIDTH_PORTRAIT = 480;
-const DISPLAY_HEIGHT_PORTRAIT = 800;
-
 // Thumbnail dimensions (half of display resolution)
 const THUMBNAIL_WIDTH = 400;
 const THUMBNAIL_HEIGHT = 240;
 
-// Legacy constants for backwards compatibility
-const DISPLAY_WIDTH = DISPLAY_WIDTH_LANDSCAPE;
-const DISPLAY_HEIGHT = DISPLAY_HEIGHT_LANDSCAPE;
-
-// Centralized default configuration for image processing
-// Keep in sync with webapp/app.js DEFAULT_PARAMS and firmware processing_settings.c
+// Centralized default configuration for image processing (using CDR preset values)
 const DEFAULT_PARAMS = {
-  exposure: 1.0,
-  saturation: 1.3,
-  toneMode: "scurve",
+  exposure: 1.05,
+  saturation: 1.0,
+  toneMode: "contrast",
   contrast: 1.0,
   strength: 0.9,
   shadowBoost: 0.0,
@@ -51,6 +37,7 @@ const DEFAULT_PARAMS = {
   colorMethod: "rgb",
   processingMode: "enhanced",
   ditherAlgorithm: "floyd-steinberg",
+  compressDynamicRange: true,
 };
 
 // Fetch processing settings from device
@@ -525,37 +512,6 @@ async function processFolderStructure(
   console.log(`Output directory: ${outputDir}`);
 }
 
-function getExifOrientation(filePath) {
-  try {
-    const buffer = fs.readFileSync(filePath);
-    const parser = ExifParser.create(buffer);
-    const result = parser.parse();
-    return result.tags.Orientation || 1;
-  } catch (error) {
-    return 1; // Default orientation if EXIF parsing fails
-  }
-}
-
-async function loadImageWithHeicSupport(inputPath) {
-  const ext = path.extname(inputPath).toLowerCase();
-
-  // Check if HEIC/HEIF format
-  if (ext === ".heic" || ext === ".heif") {
-    console.log(`  Converting HEIC to JPEG...`);
-    const inputBuffer = fs.readFileSync(inputPath);
-    const outputBuffer = await heicConvert({
-      buffer: inputBuffer,
-      format: "JPEG",
-      quality: 1.0,
-    });
-    // Load from converted buffer
-    return await loadImage(outputBuffer);
-  }
-
-  // Load normally for other formats
-  return await loadImage(inputPath);
-}
-
 async function processImageFile(
   inputPath,
   outputBmp,
@@ -570,37 +526,68 @@ async function processImageFile(
     exposure: options.exposure,
     saturation: options.saturation,
     toneMode: options.toneMode,
-    contrast: options.contrast,
-    strength: options.scurveStrength,
-    shadowBoost: options.scurveShadow,
-    highlightCompress: options.scurveHighlight,
-    midpoint: options.scurveMidpoint,
     colorMethod: options.colorMethod,
     renderMeasured: options.renderMeasured,
     processingMode: options.processingMode,
     ditherAlgorithm: options.ditherAlgorithm,
+    compressDynamicRange: options.compressDynamicRange,
   };
 
+  // Add tone mapping parameters based on mode
+  if (options.toneMode === "scurve") {
+    processingParams.strength = options.scurveStrength;
+    processingParams.shadowBoost = options.scurveShadow;
+    processingParams.highlightCompress = options.scurveHighlight;
+    processingParams.midpoint = options.scurveMidpoint;
+  } else {
+    processingParams.contrast = options.contrast;
+  }
+
+  // Log processing parameters
+  console.log(`  Processing parameters:`);
+  console.log(
+    `    Exposure: ${processingParams.exposure}, Saturation: ${processingParams.saturation}`,
+  );
+  if (processingParams.toneMode === "scurve") {
+    console.log(
+      `    Tone mapping: S-Curve (strength=${processingParams.strength}, shadow=${processingParams.shadowBoost}, highlight=${processingParams.highlightCompress}, midpoint=${processingParams.midpoint})`,
+    );
+  } else {
+    console.log(
+      `    Tone mapping: Simple Contrast (${processingParams.contrast})`,
+    );
+  }
+  console.log(
+    `    Color method: ${processingParams.colorMethod}, Dither: ${processingParams.ditherAlgorithm}`,
+  );
+  console.log(
+    `    Processing mode: ${processingParams.processingMode}, Compress dynamic range: ${processingParams.compressDynamicRange}`,
+  );
+
   // Use shared processing pipeline with verbose logging
+  // Skip rotation when rendering measured palette for easier preview viewing
   const { canvas, originalCanvas } = await processImagePipeline(
     inputPath,
     processingParams,
     devicePalette,
-    { verbose: true },
+    { verbose: true, skipRotation: options.renderMeasured },
   );
 
   const ctx = canvas.getContext("2d");
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
   // 5. Write output file (BMP or PNG)
-  if (options.outputPng) {
+  const format = options.format || "png";
+  if (format === "png") {
     const outputPng = outputBmp.replace(/\.bmp$/, ".png");
     console.log(`  Writing PNG: ${outputPng}`);
     const pngBuffer = await createPNG(canvas);
     fs.writeFileSync(outputPng, pngBuffer);
-  } else {
+  } else if (format === "bmp") {
     console.log(`  Writing BMP: ${outputBmp}`);
     writeBMP(imageData, outputBmp);
+  } else {
+    throw new Error(`Unsupported format: ${format}. Use 'png' or 'bmp'`);
   }
 
   // 6. Generate thumbnail if requested (from EXIF-corrected source, not processed image)
@@ -638,6 +625,12 @@ program
     "--suffix <suffix>",
     "Suffix to add to output filename (single file mode only)",
     "",
+  )
+  .option("--format <format>", "Output format: png or bmp", "png")
+  .option(
+    "--preset <name>",
+    `Processing preset: ${getPresetNames().join(", ")} `,
+    "cdr",
   )
   .option(
     "--upload",
@@ -825,13 +818,24 @@ program
         }
       }
 
-      // Use device settings if available, otherwise use CLI options
-      // Note: renderMeasured is CLI-only and always comes from options
-      // Always output PNG and generate thumbnails (matching webapp behavior)
+      // Apply preset if specified
+      let presetParams = null;
+      if (options.preset) {
+        presetParams = getPreset(options.preset);
+        if (!presetParams) {
+          console.error(`Error: Unknown preset "${options.preset}"`);
+          console.error(`Available presets: ${getPresetNames().join(", ")}`);
+          process.exit(1);
+        }
+        console.log(`Using preset: ${options.preset}`);
+      }
+
+      // Build processing options with priority: device settings > CLI options > preset > defaults
+      // When using device settings, they take full priority
+      // Otherwise: user CLI options override preset values, preset values override defaults
       const processOptions = deviceSettings
         ? {
             generateThumbnail: true,
-            outputPng: true,
             exposure: deviceSettings.exposure,
             saturation: deviceSettings.saturation,
             toneMode: deviceSettings.toneMode,
@@ -845,22 +849,62 @@ program
             processingMode: deviceSettings.processingMode,
             ditherAlgorithm:
               deviceSettings.ditherAlgorithm || options.ditherAlgorithm,
+            compressDynamicRange: deviceSettings.compressDynamicRange,
+            format: options.format,
           }
         : {
             generateThumbnail: true,
-            outputPng: true,
-            exposure: options.exposure,
-            saturation: options.saturation,
-            toneMode: options.toneMode,
-            contrast: options.contrast,
-            scurveStrength: options.scurveStrength,
-            scurveShadow: options.scurveShadow,
-            scurveHighlight: options.scurveHighlight,
-            scurveMidpoint: options.scurveMidpoint,
-            colorMethod: options.colorMethod,
-            renderMeasured: options.renderMeasured || false,
-            processingMode: options.processingMode,
-            ditherAlgorithm: options.ditherAlgorithm,
+            // User CLI options override preset values
+            exposure:
+              options.exposure ??
+              presetParams?.exposure ??
+              DEFAULT_PARAMS.exposure,
+            saturation:
+              options.saturation ??
+              presetParams?.saturation ??
+              DEFAULT_PARAMS.saturation,
+            toneMode:
+              options.toneMode ??
+              presetParams?.toneMode ??
+              DEFAULT_PARAMS.toneMode,
+            contrast:
+              options.contrast ??
+              presetParams?.contrast ??
+              DEFAULT_PARAMS.contrast,
+            scurveStrength:
+              options.scurveStrength ??
+              presetParams?.strength ??
+              DEFAULT_PARAMS.scurveStrength,
+            scurveShadow:
+              options.scurveShadow ??
+              presetParams?.shadowBoost ??
+              DEFAULT_PARAMS.scurveShadow,
+            scurveHighlight:
+              options.scurveHighlight ??
+              presetParams?.highlightCompress ??
+              DEFAULT_PARAMS.scurveHighlight,
+            scurveMidpoint:
+              options.scurveMidpoint ??
+              presetParams?.midpoint ??
+              DEFAULT_PARAMS.scurveMidpoint,
+            colorMethod:
+              options.colorMethod ??
+              presetParams?.colorMethod ??
+              DEFAULT_PARAMS.colorMethod,
+            renderMeasured: options.renderMeasured ?? false,
+            processingMode:
+              options.processingMode ??
+              presetParams?.processingMode ??
+              DEFAULT_PARAMS.processingMode,
+            ditherAlgorithm:
+              options.ditherAlgorithm ??
+              presetParams?.ditherAlgorithm ??
+              DEFAULT_PARAMS.ditherAlgorithm,
+            compressDynamicRange:
+              options.compressDynamicRange ??
+              presetParams?.compressDynamicRange ??
+              false,
+            format: options.format,
           };
 
       // Process based on input type
@@ -878,21 +922,27 @@ program
         // Process single file
         const baseName = path.basename(input, path.extname(input));
         const suffix = options.suffix || "";
-        const outputPng = path.join(outputDir, `${baseName}${suffix}.png`);
+        const format = options.format || "png";
+        const ext = format === "bmp" ? ".bmp" : ".png";
+        const outputFile = path.join(outputDir, `${baseName}${suffix}${ext}`);
         const outputThumb = path.join(outputDir, `${baseName}${suffix}.jpg`);
 
         await processImageFile(
           inputPath,
-          outputPng,
+          outputFile,
           outputThumb,
           processOptions,
           devicePalette,
         );
 
-        // Upload or display directly on device
+        // Upload or display directly on device (only works with PNG)
         if (options.upload || options.direct) {
-          if (!fs.existsSync(outputPng)) {
-            console.error(`Error: PNG file not found: ${outputPng}`);
+          if (format !== "png") {
+            console.error(`Error: Upload/direct display requires PNG format`);
+            process.exit(1);
+          }
+          if (!fs.existsSync(outputFile)) {
+            console.error(`Error: PNG file not found: ${outputFile}`);
             process.exit(1);
           }
           if (!fs.existsSync(outputThumb)) {
@@ -902,9 +952,9 @@ program
 
           try {
             if (options.direct) {
-              await displayDirectly(options.host, outputPng, outputThumb);
+              await displayDirectly(options.host, outputFile, outputThumb);
             } else {
-              await uploadToDevice(options.host, outputPng, outputThumb, null);
+              await uploadToDevice(options.host, outputFile, outputThumb, null);
             }
           } catch (error) {
             const action = options.direct ? "Display" : "Upload";

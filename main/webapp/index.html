@@ -80,6 +80,7 @@
                         <span>Dithered Preview →</span>
                     </div>
                 </div>
+                
                 <div class="curve-canvas-wrapper curve-wrapper">
                     <div>
                         <canvas id="curveCanvas" width="300" height="300"></canvas>
@@ -92,25 +93,25 @@
                         <div class="scurve-controls-grid">
                             <div class="form-group">
                                 <label for="scurveStrength">Strength: <span id="strengthValue"></span></label>
-                                <input type="range" id="scurveStrength" min="0" max="1" step="0.1">
+                                <input type="range" id="scurveStrength" min="0" max="1" step="0.01">
                                 <small>Overall tone mapping strength (0=linear, 1=strong)</small>
                             </div>
                             
                             <div class="form-group">
                                 <label for="scurveShadow">Shadow Boost: <span id="shadowValue"></span></label>
-                                <input type="range" id="scurveShadow" min="0" max="1" step="0.1">
+                                <input type="range" id="scurveShadow" min="0" max="1" step="0.01">
                                 <small>Brighten shadow areas (higher=brighter)</small>
                             </div>
                             
                             <div class="form-group">
                                 <label for="scurveHighlight">Highlight Compress: <span id="highlightValue"></span></label>
-                                <input type="range" id="scurveHighlight" min="0.5" max="5" step="0.1">
+                                <input type="range" id="scurveHighlight" min="0.5" max="5" step="0.01">
                                 <small>Protect highlights from over-exposure (higher=more protection)</small>
                             </div>
                             
                             <div class="form-group">
                                 <label for="scurveMidpoint">Midpoint: <span id="midpointValue"></span></label>
-                                <input type="range" id="scurveMidpoint" min="0.3" max="0.7" step="0.05">
+                                <input type="range" id="scurveMidpoint" min="0.3" max="0.7" step="0.01">
                                 <small>Where to split shadows/highlights</small>
                             </div>
                         </div>
@@ -118,7 +119,29 @@
                 </div>
             </div>
             
-            <!-- Row 1: Processing Algorithm & Color Matching Method -->
+            <!-- Preset Selection (Visually Distinct) -->
+            <div class="preset-selector">
+                <div class="preset-title">Processing Preset</div>
+                <div class="preset-options-horizontal">
+                    <label class="preset-option-horizontal">
+                        <input type="radio" name="preset" value="cdr" checked>
+                        <span>Compressed Dynamic Range</span>
+                    </label>
+                    <label class="preset-option-horizontal">
+                        <input type="radio" name="preset" value="scurve">
+                        <span>S-Curve</span>
+                    </label>
+                    <label class="preset-option-horizontal">
+                        <input type="radio" name="preset" value="custom">
+                        <span>Custom</span>
+                    </label>
+                </div>
+                <div class="preset-hint" id="presetHint">
+                    <small id="presetHintText">Prevents over-exposure and generates good image quality for all images. Images will have a slightly darker look.</small>
+                </div>
+            </div>
+            
+            <!-- Row 1: Processing Algorithm & Color Matching Method & Dithering Algorithm -->
             <div class="controls-grid processing-controls">
                 <div class="form-group">
                     <label>Processing Algorithm:</label>
@@ -178,14 +201,22 @@
                 <div class="controls-grid processing-controls">
                     <div class="form-group">
                         <label for="exposure">Exposure: <span id="exposureValue"></span></label>
-                        <input type="range" id="exposure" min="0.5" max="2.0" step="0.1">
+                        <input type="range" id="exposure" min="0.5" max="2.0" step="0.01">
                         <small>Overall brightness (1.0=normal, >1.0=brighter)</small>
                     </div>
                     
                     <div class="form-group">
                         <label for="saturation">Saturation: <span id="saturationValue"></span></label>
-                        <input type="range" id="saturation" min="0.5" max="2" step="0.1">
+                        <input type="range" id="saturation" min="0.5" max="2" step="0.01">
                         <small>Color vibrancy (1.0=normal, >1.0=more vibrant)</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="compressDynamicRange" checked>
+                            Compress Dynamic Range
+                        </label>
+                        <small>Map brightness range to display's actual white point to prevent overexposure</small>
                     </div>
                 </div>
                 
@@ -208,7 +239,7 @@
                     <!-- Contrast Control (Simple) -->
                     <div id="contrastControl" class="form-group hidden">
                         <label for="contrast">Contrast: <span id="contrastValue"></span></label>
-                        <input type="range" id="contrast" min="0.5" max="2.0" step="0.1">
+                        <input type="range" id="contrast" min="0.5" max="2.0" step="0.01">
                         <small>Tonal range (1.0=normal, >1.0=more contrast)</small>
                     </div>
                 </div>

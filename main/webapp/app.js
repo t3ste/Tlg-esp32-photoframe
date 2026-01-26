@@ -5,6 +5,9 @@ import {
   generateThumbnail,
   createPNG,
   getCanvasContext,
+  getPreset,
+  PALETTE_MEASURED,
+  DEFAULT_MEASURED_PALETTE,
 } from "./image-processor.js";
 
 const API_BASE = "";
@@ -513,19 +516,12 @@ async function selectImage(filename, element) {
 let currentImageFile = null;
 let currentImageCanvas = null;
 let sourceCanvas = null; // Store raw EXIF-corrected source for processing
+// Initialize with CDR preset from image-processor.js
+const defaultPreset = getPreset("cdr");
+let currentPreset = "cdr"; // Track current preset: "cdr", "scurve", or "custom"
 let currentParams = {
-  exposure: 1.0,
-  saturation: 1.3,
-  toneMode: "scurve",
-  contrast: 1.0,
-  strength: 0.9,
-  shadowBoost: 0.0,
-  highlightCompress: 1.5,
-  midpoint: 0.5,
-  colorMethod: "rgb",
-  renderMeasured: true,
-  processingMode: "enhanced",
-  ditherAlgorithm: "floyd-steinberg",
+  ...defaultPreset,
+  renderMeasured: true, // Add webapp-specific setting
 };
 
 document.getElementById("fileInput").addEventListener("change", async (e) => {
@@ -541,7 +537,20 @@ document.getElementById("fileInput").addEventListener("change", async (e) => {
 
   // Ensure controls and buttons are visible (in case they were hidden from previous upload)
   document.querySelector(".button-group").style.display = "flex";
-  document.querySelector(".controls-grid").style.display = "grid";
+  document.querySelectorAll(".controls-grid").forEach((grid) => {
+    grid.style.display = "grid";
+  });
+  const presetSelector = document.querySelector(".preset-selector");
+  presetSelector.style.display = "block";
+  const curveWrapper = document.querySelector(".curve-wrapper");
+  if (
+    currentParams.processingMode === "stock" ||
+    currentParams.toneMode === "contrast"
+  ) {
+    curveWrapper.style.display = "none";
+  } else {
+    curveWrapper.style.display = "flex";
+  }
   document.getElementById("uploadProgress").style.display = "none";
 
   await loadImagePreview(file);
@@ -908,16 +917,8 @@ function updatePreview() {
   // Update curve visualization
   drawCurveVisualization();
 
-  // Determine natural dimensions (portrait stays portrait in browser)
-  const isPortrait = sourceCanvas.height > sourceCanvas.width;
-  const naturalWidth = isPortrait
-    ? DISPLAY_WIDTH_PORTRAIT
-    : DISPLAY_WIDTH_LANDSCAPE;
-  const naturalHeight = isPortrait
-    ? DISPLAY_HEIGHT_PORTRAIT
-    : DISPLAY_HEIGHT_LANDSCAPE;
-
   // Process with dithering for preview (skipRotation for browser display)
+  // Always pass landscape dimensions - processImage will handle orientation
   const previewParams = { ...currentParams, renderMeasured: true };
   const { canvas: processedCanvas } = processImage(
     sourceCanvas,
@@ -926,12 +927,20 @@ function updatePreview() {
     {
       verbose: false,
       skipRotation: true,
-      targetWidth: naturalWidth,
-      targetHeight: naturalHeight,
+      targetWidth: DISPLAY_WIDTH_LANDSCAPE,
+      targetHeight: DISPLAY_HEIGHT_LANDSCAPE,
     },
   );
 
   // Create original JPEG version (just resized, no processing)
+  // Use same dimensions as processed canvas for comparison
+  const isPortrait = sourceCanvas.height > sourceCanvas.width;
+  const naturalWidth = isPortrait
+    ? DISPLAY_WIDTH_PORTRAIT
+    : DISPLAY_WIDTH_LANDSCAPE;
+  const naturalHeight = isPortrait
+    ? DISPLAY_HEIGHT_PORTRAIT
+    : DISPLAY_HEIGHT_LANDSCAPE;
   const originalResized = resizeImageCover(
     sourceCanvas,
     naturalWidth,
@@ -973,49 +982,70 @@ function updatePreview() {
 // Parameter change handlers
 document.getElementById("exposure").addEventListener("input", (e) => {
   currentParams.exposure = parseFloat(e.target.value);
-  document.getElementById("exposureValue").textContent = e.target.value;
+  document.getElementById("exposureValue").textContent = parseFloat(
+    e.target.value,
+  ).toFixed(2);
+  switchToCustomPreset();
   updatePreview();
   scheduleSaveSettings();
 });
 
 document.getElementById("saturation").addEventListener("input", (e) => {
   currentParams.saturation = parseFloat(e.target.value);
-  document.getElementById("saturationValue").textContent = e.target.value;
+  document.getElementById("saturationValue").textContent = parseFloat(
+    e.target.value,
+  ).toFixed(2);
+  switchToCustomPreset();
   updatePreview();
   scheduleSaveSettings();
 });
 
 document.getElementById("contrast").addEventListener("input", (e) => {
   currentParams.contrast = parseFloat(e.target.value);
-  document.getElementById("contrastValue").textContent = e.target.value;
+  document.getElementById("contrastValue").textContent = parseFloat(
+    e.target.value,
+  ).toFixed(2);
+  switchToCustomPreset();
   updatePreview();
   scheduleSaveSettings();
 });
 
 document.getElementById("scurveStrength").addEventListener("input", (e) => {
   currentParams.strength = parseFloat(e.target.value);
-  document.getElementById("strengthValue").textContent = e.target.value;
+  document.getElementById("strengthValue").textContent = parseFloat(
+    e.target.value,
+  ).toFixed(2);
+  switchToCustomPreset();
   updatePreview();
   scheduleSaveSettings();
 });
 
 document.getElementById("scurveShadow").addEventListener("input", (e) => {
   currentParams.shadowBoost = parseFloat(e.target.value);
-  document.getElementById("shadowValue").textContent = e.target.value;
+  document.getElementById("shadowValue").textContent = parseFloat(
+    e.target.value,
+  ).toFixed(2);
+  switchToCustomPreset();
   updatePreview();
   scheduleSaveSettings();
 });
 
 document.getElementById("scurveHighlight").addEventListener("input", (e) => {
   currentParams.highlightCompress = parseFloat(e.target.value);
-  document.getElementById("highlightValue").textContent = e.target.value;
+  document.getElementById("highlightValue").textContent = parseFloat(
+    e.target.value,
+  ).toFixed(2);
+  switchToCustomPreset();
   updatePreview();
   scheduleSaveSettings();
 });
 
 document.getElementById("scurveMidpoint").addEventListener("input", (e) => {
   currentParams.midpoint = parseFloat(e.target.value);
-  document.getElementById("midpointValue").textContent = e.target.value;
+  document.getElementById("midpointValue").textContent = parseFloat(
+    e.target.value,
+  ).toFixed(2);
+  switchToCustomPreset();
   updatePreview();
   scheduleSaveSettings();
 });
@@ -1024,6 +1054,7 @@ document.getElementById("scurveMidpoint").addEventListener("input", (e) => {
 document.querySelectorAll('input[name="colorMethod"]').forEach((radio) => {
   radio.addEventListener("change", (e) => {
     currentParams.colorMethod = e.target.value;
+    switchToCustomPreset();
     updatePreview();
     scheduleSaveSettings();
   });
@@ -1033,10 +1064,133 @@ document.querySelectorAll('input[name="colorMethod"]').forEach((radio) => {
 document.querySelectorAll('input[name="ditherAlgorithm"]').forEach((radio) => {
   radio.addEventListener("change", (e) => {
     currentParams.ditherAlgorithm = e.target.value;
+    switchToCustomPreset();
     updatePreview();
     scheduleSaveSettings();
   });
 });
+
+// Compress dynamic range checkbox
+document
+  .getElementById("compressDynamicRange")
+  .addEventListener("change", (e) => {
+    currentParams.compressDynamicRange = e.target.checked;
+    switchToCustomPreset();
+    updatePreview();
+    scheduleSaveSettings();
+  });
+
+// Preset selection
+document.querySelectorAll('input[name="preset"]').forEach((radio) => {
+  radio.addEventListener("change", (e) => {
+    const presetName = e.target.value;
+
+    // Update hint text
+    updatePresetHint(presetName);
+
+    if (presetName === "custom") {
+      currentPreset = "custom";
+      return;
+    }
+
+    // Load preset parameters
+    const preset = getPreset(presetName);
+    if (preset) {
+      currentPreset = presetName;
+      currentParams = { ...preset, renderMeasured: true };
+
+      // Update all UI controls
+      updateUIFromParams();
+      updatePreview();
+      scheduleSaveSettings();
+    }
+  });
+});
+
+// Update preset hint text based on selected preset
+function updatePresetHint(presetName) {
+  const hintText = document.getElementById("presetHintText");
+  const hints = {
+    cdr: "Prevents overexposure and generates good image quality for all images. Images will have a slightly darker look.",
+    scurve:
+      "Advanced tone mapping with brighter output. Some parts of the image may be over-exposed.",
+    custom: "Manually adjusted parameters",
+  };
+  hintText.textContent = hints[presetName] || "";
+}
+
+// Helper function to switch to custom preset when user manually adjusts parameters
+function switchToCustomPreset() {
+  if (currentPreset !== "custom") {
+    currentPreset = "custom";
+    document.querySelector('input[name="preset"][value="custom"]').checked =
+      true;
+    updatePresetHint("custom");
+  }
+}
+
+// Helper function to update all UI controls from currentParams
+function updateUIFromParams() {
+  document.getElementById("exposure").value = currentParams.exposure;
+  document.getElementById("exposureValue").textContent =
+    currentParams.exposure.toFixed(2);
+  document.getElementById("saturation").value = currentParams.saturation;
+  document.getElementById("saturationValue").textContent =
+    currentParams.saturation.toFixed(2);
+  document.getElementById("contrast").value = currentParams.contrast || 1.0;
+  document.getElementById("contrastValue").textContent = (
+    currentParams.contrast || 1.0
+  ).toFixed(2);
+
+  // S-curve parameters (use defaults if not defined, e.g., for CDR preset)
+  document.getElementById("scurveStrength").value =
+    currentParams.strength || 0.9;
+  document.getElementById("strengthValue").textContent = (
+    currentParams.strength || 0.9
+  ).toFixed(2);
+  document.getElementById("scurveShadow").value =
+    currentParams.shadowBoost || 0.0;
+  document.getElementById("shadowValue").textContent = (
+    currentParams.shadowBoost || 0.0
+  ).toFixed(2);
+  document.getElementById("scurveHighlight").value =
+    currentParams.highlightCompress || 1.5;
+  document.getElementById("highlightValue").textContent = (
+    currentParams.highlightCompress || 1.5
+  ).toFixed(2);
+  document.getElementById("scurveMidpoint").value =
+    currentParams.midpoint || 0.5;
+  document.getElementById("midpointValue").textContent = (
+    currentParams.midpoint || 0.5
+  ).toFixed(2);
+
+  document.getElementById("compressDynamicRange").checked =
+    currentParams.compressDynamicRange;
+
+  document.querySelector(
+    `input[name="colorMethod"][value="${currentParams.colorMethod}"]`,
+  ).checked = true;
+  document.querySelector(
+    `input[name="toneMode"][value="${currentParams.toneMode}"]`,
+  ).checked = true;
+  document.querySelector(
+    `input[name="processingMode"][value="${currentParams.processingMode}"]`,
+  ).checked = true;
+  document.querySelector(
+    `input[name="ditherAlgorithm"][value="${currentParams.ditherAlgorithm}"]`,
+  ).checked = true;
+
+  // Update UI visibility based on tone mode
+  const contrastControl = document.getElementById("contrastControl");
+  const curveCanvasWrapper = document.querySelector(".curve-canvas-wrapper");
+  if (currentParams.toneMode === "contrast") {
+    contrastControl.style.display = "block";
+    curveCanvasWrapper.style.display = "none";
+  } else {
+    contrastControl.style.display = "none";
+    curveCanvasWrapper.style.display = "flex";
+  }
+}
 
 // Tone mode radio buttons
 document.querySelectorAll('input[name="toneMode"]').forEach((radio) => {
@@ -1055,6 +1209,7 @@ document.querySelectorAll('input[name="toneMode"]').forEach((radio) => {
       curveCanvasWrapper.style.display = "flex";
     }
 
+    switchToCustomPreset();
     updatePreview();
     scheduleSaveSettings();
   });
@@ -1093,6 +1248,7 @@ document.querySelectorAll('input[name="processingMode"]').forEach((radio) => {
       }
     }
 
+    switchToCustomPreset();
     updatePreview();
     scheduleSaveSettings();
   });
@@ -1110,89 +1266,39 @@ document.getElementById("discardImage").addEventListener("click", () => {
   document.getElementById("uploadStatus").className = "";
 });
 
-// Reset to defaults - fetch from firmware backend
+// Reset to defaults - use CDR preset as single source of truth
 document.getElementById("resetParams").addEventListener("click", async () => {
   try {
-    // Reset to firmware defaults using DELETE method
-    const response = await fetch(`${API_BASE}/api/settings/processing`, {
-      method: "DELETE",
+    // Load CDR preset from image-processor.js (single source of truth)
+    const cdrPreset = getPreset("cdr");
+    const defaults = {
+      ...cdrPreset,
+      renderMeasured: currentParams.renderMeasured,
+    };
+
+    // Save CDR preset to firmware NVS
+    const saveResponse = await fetch(`${API_BASE}/api/settings/processing`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(defaults),
     });
-    if (response.ok) {
-      const defaults = await response.json();
 
-      // Update currentParams
-      currentParams = { ...defaults };
-
-      // Update UI
-      document.getElementById("exposure").value = defaults.exposure;
-      document.getElementById("exposureValue").textContent =
-        defaults.exposure.toFixed(1);
-      document.getElementById("saturation").value = defaults.saturation;
-      document.getElementById("saturationValue").textContent =
-        defaults.saturation.toFixed(1);
-      document.getElementById("contrast").value = defaults.contrast;
-      document.getElementById("contrastValue").textContent =
-        defaults.contrast.toFixed(1);
-      document.getElementById("scurveStrength").value = defaults.strength;
-      document.getElementById("strengthValue").textContent =
-        defaults.strength.toFixed(1);
-      document.getElementById("scurveShadow").value = defaults.shadowBoost;
-      document.getElementById("shadowValue").textContent =
-        defaults.shadowBoost.toFixed(1);
-      document.getElementById("scurveHighlight").value =
-        defaults.highlightCompress;
-      document.getElementById("highlightValue").textContent =
-        defaults.highlightCompress.toFixed(1);
-      document.getElementById("scurveMidpoint").value = defaults.midpoint;
-      document.getElementById("midpointValue").textContent =
-        defaults.midpoint.toFixed(1);
-      document.querySelector(
-        `input[name="colorMethod"][value="${defaults.colorMethod}"]`,
-      ).checked = true;
-      document.querySelector(
-        `input[name="toneMode"][value="${defaults.toneMode}"]`,
-      ).checked = true;
-      document.querySelector(
-        `input[name="processingMode"][value="${defaults.processingMode}"]`,
-      ).checked = true;
-      document.querySelector(
-        `input[name="ditherAlgorithm"][value="${defaults.ditherAlgorithm}"]`,
-      ).checked = true;
-
-      // Update UI visibility
-      const enhancedControls = document.getElementById("enhancedControls");
-      const colorMethodControl = document.getElementById("colorMethodControl");
-      const ditherAlgorithmControl = document.getElementById(
-        "ditherAlgorithmControl",
-      );
-      const contrastControl = document.getElementById("contrastControl");
-      const curveCanvasWrapper = document.querySelector(
-        ".curve-canvas-wrapper",
-      );
-
-      if (defaults.processingMode === "stock") {
-        enhancedControls.style.display = "none";
-        colorMethodControl.style.display = "none";
-        ditherAlgorithmControl.style.display = "none";
-        curveCanvasWrapper.style.display = "none";
-      } else {
-        enhancedControls.style.display = "grid";
-        colorMethodControl.style.display = "block";
-        ditherAlgorithmControl.style.display = "block";
-        if (defaults.toneMode === "scurve") {
-          contrastControl.style.display = "none";
-          curveCanvasWrapper.style.display = "flex";
-        } else {
-          contrastControl.style.display = "block";
-          curveCanvasWrapper.style.display = "none";
-        }
-      }
-
-      updatePreview();
-      scheduleSaveSettings();
-    } else {
-      console.error("Failed to fetch defaults from firmware");
+    if (!saveResponse.ok) {
+      console.error("Failed to save CDR preset to firmware");
+      return;
     }
+
+    // Update currentParams and preset selection
+    currentParams = { ...defaults };
+    currentPreset = "cdr";
+    document.querySelector('input[name="preset"][value="cdr"]').checked = true;
+    updatePresetHint("cdr");
+
+    // Update UI using the helper function
+    updateUIFromParams();
+
+    // Update preview
+    updatePreview();
   } catch (error) {
     console.error("Error resetting to defaults:", error);
   }
@@ -1210,11 +1316,17 @@ document
     const statusDiv = document.getElementById("uploadStatus");
     const uploadProgress = document.getElementById("uploadProgress");
     const buttonGroup = document.querySelector(".button-group");
-    const controlsGrid = document.querySelector(".controls-grid");
+    const controlsGrids = document.querySelectorAll(".controls-grid");
+    const presetSelector = document.querySelector(".preset-selector");
+    const curveWrapper = document.querySelector(".curve-wrapper");
 
     // Hide buttons and controls, show progress
     buttonGroup.style.display = "none";
-    controlsGrid.style.display = "none";
+    controlsGrids.forEach((grid) => {
+      grid.style.display = "none";
+    });
+    presetSelector.style.display = "none";
+    curveWrapper.style.display = "none";
     uploadProgress.style.display = "block";
     statusDiv.textContent = "";
     statusDiv.className = "";
@@ -1302,7 +1414,18 @@ document
       // Only show controls if upload failed (still on preview)
       if (!uploadSucceeded) {
         buttonGroup.style.display = "flex";
-        controlsGrid.style.display = "grid";
+        controlsGrids.forEach((grid) => {
+          grid.style.display = "grid";
+        });
+        presetSelector.style.display = "block";
+        if (
+          currentParams.processingMode === "stock" ||
+          currentParams.toneMode === "contrast"
+        ) {
+          curveWrapper.style.display = "none";
+        } else {
+          curveWrapper.style.display = "flex";
+        }
         uploadProgress.style.display = "none";
       }
     }
@@ -1748,26 +1871,37 @@ function scheduleSaveSettings() {
 function initializeUI() {
   document.getElementById("exposure").value = currentParams.exposure;
   document.getElementById("exposureValue").textContent =
-    currentParams.exposure.toFixed(1);
+    currentParams.exposure.toFixed(2);
   document.getElementById("saturation").value = currentParams.saturation;
   document.getElementById("saturationValue").textContent =
-    currentParams.saturation.toFixed(1);
-  document.getElementById("contrast").value = currentParams.contrast;
-  document.getElementById("contrastValue").textContent =
-    currentParams.contrast.toFixed(1);
-  document.getElementById("scurveStrength").value = currentParams.strength;
-  document.getElementById("strengthValue").textContent =
-    currentParams.strength.toFixed(1);
-  document.getElementById("scurveShadow").value = currentParams.shadowBoost;
-  document.getElementById("shadowValue").textContent =
-    currentParams.shadowBoost.toFixed(1);
+    currentParams.saturation.toFixed(2);
+  document.getElementById("contrast").value = currentParams.contrast || 1.0;
+  document.getElementById("contrastValue").textContent = (
+    currentParams.contrast || 1.0
+  ).toFixed(2);
+
+  // S-curve parameters (use defaults if not defined, e.g., for CDR preset)
+  document.getElementById("scurveStrength").value =
+    currentParams.strength || 0.9;
+  document.getElementById("strengthValue").textContent = (
+    currentParams.strength || 0.9
+  ).toFixed(2);
+  document.getElementById("scurveShadow").value =
+    currentParams.shadowBoost || 0.0;
+  document.getElementById("shadowValue").textContent = (
+    currentParams.shadowBoost || 0.0
+  ).toFixed(2);
   document.getElementById("scurveHighlight").value =
-    currentParams.highlightCompress;
-  document.getElementById("highlightValue").textContent =
-    currentParams.highlightCompress.toFixed(1);
-  document.getElementById("scurveMidpoint").value = currentParams.midpoint;
-  document.getElementById("midpointValue").textContent =
-    currentParams.midpoint.toFixed(1);
+    currentParams.highlightCompress || 1.5;
+  document.getElementById("highlightValue").textContent = (
+    currentParams.highlightCompress || 1.5
+  ).toFixed(2);
+  document.getElementById("scurveMidpoint").value =
+    currentParams.midpoint || 0.5;
+  document.getElementById("midpointValue").textContent = (
+    currentParams.midpoint || 0.5
+  ).toFixed(2);
+
   document.querySelector(
     `input[name="colorMethod"][value="${currentParams.colorMethod}"]`,
   ).checked = true;
@@ -1780,6 +1914,8 @@ function initializeUI() {
   document.querySelector(
     `input[name="ditherAlgorithm"][value="${currentParams.ditherAlgorithm}"]`,
   ).checked = true;
+  document.getElementById("compressDynamicRange").checked =
+    currentParams.compressDynamicRange;
 
   // Update UI visibility based on settings
   const enhancedControls = document.getElementById("enhancedControls");
@@ -1846,42 +1982,30 @@ let measuredPaletteData = null;
 let currentPaletteData = null;
 let originalPaletteData = null;
 // Default palette object for processImage (fallback when API not available)
-let devicePaletteObject = {
-  black: { r: 2, g: 2, b: 2 },
-  white: { r: 190, g: 190, b: 190 },
-  yellow: { r: 205, g: 202, b: 0 },
-  red: { r: 135, g: 19, b: 0 },
-  blue: { r: 5, g: 64, b: 158 },
-  green: { r: 39, g: 102, b: 60 },
-};
+let devicePaletteObject = DEFAULT_MEASURED_PALETTE;
 
 async function loadColorPalette() {
   try {
     const response = await fetch(`${API_BASE}/api/settings/palette`);
     if (response.ok) {
       const palette = await response.json();
+
+      // Backend always returns defaults if nothing stored, so just use it directly
       currentPaletteData = JSON.parse(JSON.stringify(palette));
       originalPaletteData = JSON.parse(JSON.stringify(palette));
-
-      // Store palette object for processImage
       devicePaletteObject = palette;
-
       displayPalette(palette);
+      console.log("Loaded palette from device");
 
       // Update preview if image is loaded
       if (currentImageCanvas && sourceCanvas) {
         updatePreview();
       }
-
-      console.log("Loaded calibrated palette from device");
     } else {
-      console.log("API not available, using default measured palette");
+      console.log("API not available, using default palette");
     }
   } catch (error) {
-    console.log(
-      "API not available, using default measured palette:",
-      error.message,
-    );
+    console.log("API not available, using default palette:", error.message);
   }
 }
 
@@ -2494,6 +2618,18 @@ document.getElementById("cancelPaletteBtn").addEventListener("click", () => {
   document.getElementById("savePaletteStatus").innerHTML = "";
 });
 
+// Helper function to write palette to backend
+async function writePaletteToBackend(palette) {
+  const response = await fetch(`${API_BASE}/api/settings/palette`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(palette),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to write palette to backend");
+  }
+}
+
 // Reset palette to defaults
 document
   .getElementById("resetPaletteBtn")
@@ -2501,24 +2637,35 @@ document
     if (!confirm("Reset color palette to default values?")) return;
 
     try {
+      // Use DELETE to reset to defaults on backend
       const response = await fetch(`${API_BASE}/api/settings/palette`, {
         method: "DELETE",
       });
 
-      if (response.ok) {
-        // Reload palette from backend (which now has defaults)
-        loadColorPalette();
-
-        // Close calibration flow if it's open
-        document.getElementById("calibrationFlow").style.display = "none";
-        document.getElementById("startCalibrationBtn").style.display =
-          "inline-block";
-        measuredPaletteData = null;
-
-        alert("Palette reset to defaults");
-      } else {
+      if (!response.ok) {
         throw new Error("Failed to reset palette");
       }
+
+      // Update local state
+      currentPaletteData = JSON.parse(JSON.stringify(DEFAULT_MEASURED_PALETTE));
+      originalPaletteData = JSON.parse(
+        JSON.stringify(DEFAULT_MEASURED_PALETTE),
+      );
+      devicePaletteObject = DEFAULT_MEASURED_PALETTE;
+      displayPalette(DEFAULT_MEASURED_PALETTE);
+
+      // Close calibration flow if it's open
+      document.getElementById("calibrationFlow").style.display = "none";
+      document.getElementById("startCalibrationBtn").style.display =
+        "inline-block";
+      measuredPaletteData = null;
+
+      // Update preview if image is loaded
+      if (currentImageCanvas && sourceCanvas) {
+        updatePreview();
+      }
+
+      alert("Palette reset to defaults");
     } catch (error) {
       alert("Error resetting palette: " + error.message);
     }
