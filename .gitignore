@@ -20,5 +20,3 @@ demo/manifest.json
 demo/manifest-dev.json
 demo/photoframe-firmware-merged.bin
 demo/photoframe-firmware-dev.bin
-
-package-lock.json
