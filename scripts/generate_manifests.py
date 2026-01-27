@@ -28,8 +28,8 @@ def check_firmware_exists(firmware_path):
     return True
 
 
-def copy_firmware_to_docs(build_dir, docs_dir):
-    """Copy firmware files from build directory to docs."""
+def copy_firmware_to_demo(build_dir, demo_dir):
+    """Copy firmware files from build directory to demo."""
     import shutil
 
     # Source files
@@ -43,7 +43,7 @@ def copy_firmware_to_docs(build_dir, docs_dir):
         return False
 
     # Create merged firmware using esptool
-    merged_bin = os.path.join(docs_dir, "photoframe-firmware-merged.bin")
+    merged_bin = os.path.join(demo_dir, "photoframe-firmware-merged.bin")
 
     try:
         subprocess.run(
@@ -101,40 +101,40 @@ def generate_manifest(output_path, version, firmware_file, is_dev=False):
     print(f"  Firmware: {firmware_file}")
 
 
-def generate_manifests(docs_dir, build_dir=None, dev_mode=False):
+def generate_manifests(demo_dir, build_dir=None, dev_mode=False):
     """Generate manifest files for web flasher."""
 
-    docs_path = Path(docs_dir)
-    docs_path.mkdir(exist_ok=True)
+    demo_path = Path(demo_dir)
+    demo_path.mkdir(exist_ok=True)
 
     # Get stable version (latest tag)
     stable_version = version_module.get_stable_version()
 
     # Copy firmware if build_dir provided
     if build_dir:
-        if not copy_firmware_to_docs(build_dir, docs_dir):
+        if not copy_firmware_to_demo(build_dir, demo_dir):
             return False
 
     # Check if firmware exists
     firmware_file = "photoframe-firmware-merged.bin"
-    firmware_path = docs_path / firmware_file
+    firmware_path = demo_path / firmware_file
 
     if not check_firmware_exists(firmware_path):
         return False
 
     # Generate stable manifest
-    manifest_path = docs_path / "manifest.json"
+    manifest_path = demo_path / "manifest.json"
     generate_manifest(manifest_path, stable_version, firmware_file, is_dev=False)
 
     # Generate dev manifest if in dev mode
     if dev_mode:
         # Get dev version (commit hash)
         dev_version = version_module.get_dev_version()
-        dev_manifest_path = docs_path / "manifest-dev.json"
+        dev_manifest_path = demo_path / "manifest-dev.json"
         # Dev manifest points to dev firmware file
         dev_firmware_file = "photoframe-firmware-dev.bin"
         # Check if dev firmware exists, fallback to merged if not
-        if not (docs_path / dev_firmware_file).exists():
+        if not (demo_path / dev_firmware_file).exists():
             dev_firmware_file = firmware_file
         generate_manifest(
             dev_manifest_path, dev_version, dev_firmware_file, is_dev=True
@@ -148,7 +148,7 @@ def main():
         description="Generate ESP Web Tools manifests for firmware flashing"
     )
     parser.add_argument(
-        "--docs-dir", default="docs", help="Documentation directory (default: docs)"
+        "--demo-dir", default="demo", help="Demo directory (default: demo)"
     )
     parser.add_argument(
         "--build-dir",
@@ -171,12 +171,12 @@ def main():
     # Get absolute paths - resolve relative to project root (parent of scripts dir)
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
-    docs_dir = project_root / args.docs_dir
+    demo_dir = project_root / args.demo_dir
     build_dir = project_root / args.build_dir if not args.no_copy else None
 
     # Generate manifests
     print("Generating manifests...")
-    if not generate_manifests(docs_dir, build_dir, args.dev):
+    if not generate_manifests(demo_dir, build_dir, args.dev):
         sys.exit(1)
 
     print("\nManifests generated successfully!")

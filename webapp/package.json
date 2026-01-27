@@ -1,0 +1,33 @@
+{
+  "name": "photoframe-webapp",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:demo": "vite --config vite.config.demo.js",
+    "build": "vite build",
+    "build:demo": "vite build --config vite.config.demo.js",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix",
+    "lint:check": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs",
+    "format": "prettier --write \"src/**/*.{vue,js,jsx,ts,tsx,css,scss,json}\"",
+    "format:check": "prettier --check \"src/**/*.{vue,js,jsx,ts,tsx,css,scss,json}\""
+  },
+  "dependencies": {
+    "epaper-image-convert": "github:aitjcize/epaper-image-convert",
+    "pinia": "^2.1.7",
+    "vue": "^3.5.24",
+    "vue-router": "^4.3.0",
+    "vuetify": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "eslint": "^8.57.0",
+    "eslint-plugin-vue": "^9.23.0",
+    "prettier": "^3.2.5",
+    "sass": "^1.71.0",
+    "vite": "^7.2.4",
+    "vite-plugin-vuetify": "^2.0.1"
+  }
+}

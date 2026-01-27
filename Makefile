@@ -47,6 +47,9 @@ format:
 		python3 -m black $(PY_FILES); \
 		echo "Done! Formatted $(words $(PY_FILES)) Python files."; \
 	fi
+	@echo "Formatting webapp Vue files..."
+	@cd webapp && npm run format
+	@echo "Done! Formatted webapp files."
 
 format-check:
 	@echo "Checking C/H files formatting..."
@@ -62,6 +65,8 @@ format-check:
 		python3 -m isort --check-only $(PY_FILES); \
 		python3 -m black --check $(PY_FILES); \
 	fi
+	@echo "Checking webapp Vue files formatting..."
+	@cd webapp && npm run format:check
 	@echo "All files are properly formatted!"
 
 format-diff:

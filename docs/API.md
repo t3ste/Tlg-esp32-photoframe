@@ -24,29 +24,33 @@ GET /api/images?album=Vacation
 ```json
 [
   {
-    "name": "photo1.bmp"
+    "filename": "photo1.bmp",
+    "album": "Vacation",
+    "thumbnail": "photo1.jpg"
   },
   {
-    "name": "photo2.bmp"
+    "filename": "photo2.bmp",
+    "album": "Vacation",
+    "thumbnail": "photo2.jpg"
   }
 ]
 ```
 
 ---
 
-### `GET /api/image?name=<path>`
+### `GET /api/image?filepath=<path>`
 
 Serve image thumbnail (JPEG) or fallback to BMP.
 
 **Parameters:**
-- `name`: Image path in `album/filename` format (e.g., `Vacation/photo.jpg`)
+- `filepath`: Image path in `album/filename` format (e.g., `Vacation/photo.jpg`)
 
 **Response:** Image file (JPEG or BMP)
 
 **Examples:**
 ```
-GET /api/image?name=Vacation/photo.jpg
-GET /api/image?name=Default/photo.jpg
+GET /api/image?filepath=Vacation/photo.jpg
+GET /api/image?filepath=Default/photo.jpg
 ```
 
 ---
@@ -201,7 +205,7 @@ Display a specific image on the e-paper.
 **Request:**
 ```json
 {
-  "filename": "Vacation/photo.bmp"
+  "filepath": "Vacation/photo.bmp"
 }
 ```
 
@@ -346,7 +350,7 @@ Delete an image and its thumbnail.
 **Request:**
 ```json
 {
-  "filename": "Vacation/photo.bmp"
+  "filepath": "Vacation/photo.bmp"
 }
 ```
 

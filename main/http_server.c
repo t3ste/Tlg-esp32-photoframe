@@ -40,18 +40,23 @@ static bool system_ready = false;
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
-extern const uint8_t style_css_start[] asm("_binary_style_css_start");
-extern const uint8_t style_css_end[] asm("_binary_style_css_end");
-extern const uint8_t app_js_start[] asm("_binary_app_js_start");
-extern const uint8_t app_js_end[] asm("_binary_app_js_end");
-extern const uint8_t image_processor_js_start[] asm("_binary_image_processor_js_start");
-extern const uint8_t image_processor_js_end[] asm("_binary_image_processor_js_end");
+extern const uint8_t index_css_start[] asm("_binary_index_css_start");
+extern const uint8_t index_css_end[] asm("_binary_index_css_end");
+extern const uint8_t index_js_start[] asm("_binary_index_js_start");
+extern const uint8_t index_js_end[] asm("_binary_index_js_end");
+extern const uint8_t index2_js_start[] asm("_binary_index2_js_start");
+extern const uint8_t index2_js_end[] asm("_binary_index2_js_end");
+extern const uint8_t exif_reader_js_start[] asm("_binary_exif_reader_js_start");
+extern const uint8_t exif_reader_js_end[] asm("_binary_exif_reader_js_end");
+extern const uint8_t browser_js_start[] asm("_binary_browser_js_start");
+extern const uint8_t browser_js_end[] asm("_binary_browser_js_end");
+extern const uint8_t vite_browser_external_js_start[] asm(
+    "_binary___vite_browser_external_js_start");
+extern const uint8_t vite_browser_external_js_end[] asm("_binary___vite_browser_external_js_end");
 extern const uint8_t favicon_svg_start[] asm("_binary_favicon_svg_start");
 extern const uint8_t favicon_svg_end[] asm("_binary_favicon_svg_end");
 extern const uint8_t calibration_png_start[] asm("_binary_calibration_png_start");
 extern const uint8_t calibration_png_end[] asm("_binary_calibration_png_end");
-extern const uint8_t measurement_sample_jpg_start[] asm("_binary_measurement_sample_jpg_start");
-extern const uint8_t measurement_sample_jpg_end[] asm("_binary_measurement_sample_jpg_end");
 
 static esp_err_t index_handler(httpd_req_t *req)
 {
@@ -61,27 +66,53 @@ static esp_err_t index_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static esp_err_t style_handler(httpd_req_t *req)
+static esp_err_t index_css_handler(httpd_req_t *req)
 {
-    const size_t style_css_size = (style_css_end - style_css_start);
+    const size_t index_css_size = (index_css_end - index_css_start);
     httpd_resp_set_type(req, "text/css");
-    httpd_resp_send(req, (const char *) style_css_start, style_css_size);
+    httpd_resp_send(req, (const char *) index_css_start, index_css_size);
     return ESP_OK;
 }
 
-static esp_err_t app_js_handler(httpd_req_t *req)
+static esp_err_t index_js_handler(httpd_req_t *req)
 {
-    const size_t app_js_size = (app_js_end - app_js_start);
+    const size_t index_js_size = (index_js_end - index_js_start);
     httpd_resp_set_type(req, "application/javascript");
-    httpd_resp_send(req, (const char *) app_js_start, app_js_size);
+    httpd_resp_send(req, (const char *) index_js_start, index_js_size);
     return ESP_OK;
 }
 
-static esp_err_t image_processor_js_handler(httpd_req_t *req)
+static esp_err_t index2_js_handler(httpd_req_t *req)
 {
-    const size_t image_processor_js_size = (image_processor_js_end - image_processor_js_start);
+    const size_t index2_js_size = (index2_js_end - index2_js_start);
     httpd_resp_set_type(req, "application/javascript");
-    httpd_resp_send(req, (const char *) image_processor_js_start, image_processor_js_size);
+    httpd_resp_send(req, (const char *) index2_js_start, index2_js_size);
+    return ESP_OK;
+}
+
+static esp_err_t exif_reader_js_handler(httpd_req_t *req)
+{
+    const size_t exif_reader_js_size = (exif_reader_js_end - exif_reader_js_start);
+    httpd_resp_set_type(req, "application/javascript");
+    httpd_resp_send(req, (const char *) exif_reader_js_start, exif_reader_js_size);
+    return ESP_OK;
+}
+
+static esp_err_t browser_js_handler(httpd_req_t *req)
+{
+    const size_t browser_js_size = (browser_js_end - browser_js_start);
+    httpd_resp_set_type(req, "application/javascript");
+    httpd_resp_send(req, (const char *) browser_js_start, browser_js_size);
+    return ESP_OK;
+}
+
+static esp_err_t vite_browser_external_js_handler(httpd_req_t *req)
+{
+    const size_t vite_browser_external_js_size =
+        (vite_browser_external_js_end - vite_browser_external_js_start);
+    httpd_resp_set_type(req, "application/javascript");
+    httpd_resp_send(req, (const char *) vite_browser_external_js_start,
+                    vite_browser_external_js_size);
     return ESP_OK;
 }
 
@@ -90,15 +121,6 @@ static esp_err_t favicon_handler(httpd_req_t *req)
     const size_t favicon_svg_size = (favicon_svg_end - favicon_svg_start);
     httpd_resp_set_type(req, "image/svg+xml");
     httpd_resp_send(req, (const char *) favicon_svg_start, favicon_svg_size);
-    return ESP_OK;
-}
-
-static esp_err_t measurement_sample_handler(httpd_req_t *req)
-{
-    const size_t measurement_sample_jpg_size =
-        (measurement_sample_jpg_end - measurement_sample_jpg_start);
-    httpd_resp_set_type(req, "image/jpeg");
-    httpd_resp_send(req, (const char *) measurement_sample_jpg_start, measurement_sample_jpg_size);
     return ESP_OK;
 }
 
@@ -409,7 +431,7 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
 
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "success");
-    cJSON_AddStringToObject(response, "filename", png_filename);
+    cJSON_AddStringToObject(response, "filepath", final_png_path);
 
     char *json_str = cJSON_Print(response);
     httpd_resp_set_type(req, "application/json");
@@ -459,10 +481,10 @@ static esp_err_t serve_image_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Extract 'name' parameter value
+    // Extract 'filepath' parameter value (album/filename format)
     char param_value[128];
-    if (httpd_query_key_value(filename, "name", param_value, sizeof(param_value)) != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing name parameter");
+    if (httpd_query_key_value(filename, "filepath", param_value, sizeof(param_value)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing filepath parameter");
         return ESP_FAIL;
     }
 
@@ -570,27 +592,27 @@ static esp_err_t delete_image_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    cJSON *filename_obj = cJSON_GetObjectItem(root, "filename");
-    if (!filename_obj || !cJSON_IsString(filename_obj)) {
+    cJSON *filepath_obj = cJSON_GetObjectItem(root, "filepath");
+    if (!filepath_obj || !cJSON_IsString(filepath_obj)) {
         cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing filename");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing filepath");
         return ESP_FAIL;
     }
 
-    const char *filename = filename_obj->valuestring;
+    const char *filepath_str = filepath_obj->valuestring;
 
-    // Copy filename to local buffer before deleting JSON
-    char filename_copy[256];
-    strncpy(filename_copy, filename, sizeof(filename_copy) - 1);
-    filename_copy[sizeof(filename_copy) - 1] = '\0';
+    // Copy filepath to local buffer before deleting JSON
+    char filepath_copy[256];
+    strncpy(filepath_copy, filepath_str, sizeof(filepath_copy) - 1);
+    filepath_copy[sizeof(filepath_copy) - 1] = '\0';
 
-    // Build path - filename can be "album/file.bmp" or just "file.bmp"
+    // Build full path - filepath is "album/file.bmp" format
     char filepath[512];
-    snprintf(filepath, sizeof(filepath), "%s/%s", IMAGE_DIRECTORY, filename_copy);
+    snprintf(filepath, sizeof(filepath), "%s/%s", IMAGE_DIRECTORY, filepath_copy);
 
     // Also delete the corresponding JPEG thumbnail
     char jpg_filename[256];
-    strncpy(jpg_filename, filename_copy, sizeof(jpg_filename) - 1);
+    strncpy(jpg_filename, filepath_copy, sizeof(jpg_filename) - 1);
     jpg_filename[sizeof(jpg_filename) - 1] = '\0';
     char *ext = strrchr(jpg_filename, '.');
     if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0)) {
@@ -612,7 +634,7 @@ static esp_err_t delete_image_handler(httpd_req_t *req)
     // Delete thumbnail (ignore errors if it doesn't exist)
     unlink(jpg_path);
 
-    ESP_LOGI(TAG, "Image deleted successfully: %s", filename_copy);
+    ESP_LOGI(TAG, "Image deleted successfully: %s", filepath_copy);
 
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "success");
@@ -668,18 +690,18 @@ static esp_err_t display_image_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    cJSON *filename_obj = cJSON_GetObjectItem(root, "filename");
-    if (!filename_obj || !cJSON_IsString(filename_obj)) {
+    cJSON *filepath_obj = cJSON_GetObjectItem(root, "filepath");
+    if (!filepath_obj || !cJSON_IsString(filepath_obj)) {
         cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing filename");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing filepath");
         return ESP_FAIL;
     }
 
-    const char *filename = filename_obj->valuestring;
+    const char *filepath_str = filepath_obj->valuestring;
 
-    // Build absolute path - filename can be "album/file.bmp" or just "file.bmp"
+    // Build absolute path - filepath is "album/file.bmp" format
     char filepath[512];
-    snprintf(filepath, sizeof(filepath), "%s/%s", IMAGE_DIRECTORY, filename);
+    snprintf(filepath, sizeof(filepath), "%s/%s", IMAGE_DIRECTORY, filepath_str);
 
     esp_err_t err = display_manager_show_image(filepath);
 
@@ -1687,7 +1709,7 @@ static esp_err_t album_images_handler(httpd_req_t *req)
             if (ext && (strcmp(ext, ".bmp") == 0 || strcmp(ext, ".BMP") == 0 ||
                         strcmp(ext, ".png") == 0 || strcmp(ext, ".PNG") == 0)) {
                 cJSON *image_obj = cJSON_CreateObject();
-                cJSON_AddStringToObject(image_obj, "name", entry->d_name);
+                cJSON_AddStringToObject(image_obj, "filename", entry->d_name);
                 cJSON_AddStringToObject(image_obj, "album", album_name);
 
                 // Check if a corresponding JPG thumbnail exists for any image type
@@ -2272,31 +2294,47 @@ esp_err_t http_server_init(void)
             .uri = "/", .method = HTTP_GET, .handler = index_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &index_uri);
 
-        httpd_uri_t style_uri = {
-            .uri = "/style.css", .method = HTTP_GET, .handler = style_handler, .user_ctx = NULL};
-        httpd_register_uri_handler(server, &style_uri);
+        httpd_uri_t index_css_uri = {.uri = "/assets/index.css",
+                                     .method = HTTP_GET,
+                                     .handler = index_css_handler,
+                                     .user_ctx = NULL};
+        httpd_register_uri_handler(server, &index_css_uri);
 
-        httpd_uri_t app_js_uri = {
-            .uri = "/app.js", .method = HTTP_GET, .handler = app_js_handler, .user_ctx = NULL};
-        httpd_register_uri_handler(server, &app_js_uri);
+        httpd_uri_t index_js_uri = {.uri = "/assets/index.js",
+                                    .method = HTTP_GET,
+                                    .handler = index_js_handler,
+                                    .user_ctx = NULL};
+        httpd_register_uri_handler(server, &index_js_uri);
 
-        httpd_uri_t image_processor_js_uri = {.uri = "/image-processor.js",
-                                              .method = HTTP_GET,
-                                              .handler = image_processor_js_handler,
-                                              .user_ctx = NULL};
-        httpd_register_uri_handler(server, &image_processor_js_uri);
+        httpd_uri_t index2_js_uri = {.uri = "/assets/index2.js",
+                                     .method = HTTP_GET,
+                                     .handler = index2_js_handler,
+                                     .user_ctx = NULL};
+        httpd_register_uri_handler(server, &index2_js_uri);
+
+        httpd_uri_t exif_reader_js_uri = {.uri = "/assets/exif-reader.js",
+                                          .method = HTTP_GET,
+                                          .handler = exif_reader_js_handler,
+                                          .user_ctx = NULL};
+        httpd_register_uri_handler(server, &exif_reader_js_uri);
+
+        httpd_uri_t browser_js_uri = {.uri = "/assets/browser.js",
+                                      .method = HTTP_GET,
+                                      .handler = browser_js_handler,
+                                      .user_ctx = NULL};
+        httpd_register_uri_handler(server, &browser_js_uri);
+
+        httpd_uri_t vite_browser_external_js_uri = {.uri = "/assets/__vite-browser-external.js",
+                                                    .method = HTTP_GET,
+                                                    .handler = vite_browser_external_js_handler,
+                                                    .user_ctx = NULL};
+        httpd_register_uri_handler(server, &vite_browser_external_js_uri);
 
         httpd_uri_t favicon_uri = {.uri = "/favicon.svg",
                                    .method = HTTP_GET,
                                    .handler = favicon_handler,
                                    .user_ctx = NULL};
         httpd_register_uri_handler(server, &favicon_uri);
-
-        httpd_uri_t measurement_sample_uri = {.uri = "/measurement_sample.jpg",
-                                              .method = HTTP_GET,
-                                              .handler = measurement_sample_handler,
-                                              .user_ctx = NULL};
-        httpd_register_uri_handler(server, &measurement_sample_uri);
 
         httpd_uri_t upload_uri = {.uri = "/api/upload",
                                   .method = HTTP_POST,

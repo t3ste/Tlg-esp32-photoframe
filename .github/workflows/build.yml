@@ -123,22 +123,33 @@ jobs:
         name: photoframe-firmware
         path: firmware
     
-    - name: Copy firmware to docs and generate manifests
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Build demo webapp
       run: |
-        # Copy image-processor.js for demo page
-        cp process-cli/image-processor.js docs/
+        cd webapp
+        npm ci
+        npm run build:demo
+    
+    - name: Copy firmware and generate manifests
+      run: |
+        # Create demo directory if it doesn't exist
+        mkdir -p demo
         
         # Copy sample image for demo page
-        cp .img/sample.jpg docs/
+        cp .img/sample.jpg demo/
         
         # Copy firmware files
         if [[ "${{ github.ref }}" == refs/tags/* ]]; then
           # For releases: copy as both stable and dev firmware
-          cp firmware/photoframe-firmware-merged.bin docs/photoframe-firmware-merged.bin
-          cp firmware/photoframe-firmware-merged.bin docs/photoframe-firmware-dev.bin
+          cp firmware/photoframe-firmware-merged.bin demo/photoframe-firmware-merged.bin
+          cp firmware/photoframe-firmware-merged.bin demo/photoframe-firmware-dev.bin
         else
           # For main branch: copy dev firmware
-          cp firmware/photoframe-firmware-merged.bin docs/photoframe-firmware-dev.bin
+          cp firmware/photoframe-firmware-merged.bin demo/photoframe-firmware-dev.bin
           
           # Download latest stable release firmware from GitHub
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "unknown")
@@ -146,16 +157,16 @@ jobs:
           
           # Try to download from GitHub releases
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/download/${LATEST_TAG}/photoframe-firmware-merged.bin"
-          if curl -L -f -o docs/photoframe-firmware-merged.bin "${RELEASE_URL}"; then
+          if curl -L -f -o demo/photoframe-firmware-merged.bin "${RELEASE_URL}"; then
             echo "Successfully downloaded stable firmware ${LATEST_TAG}"
           else
             echo "Warning: Could not download stable firmware, using dev build as fallback"
-            cp firmware/photoframe-firmware-merged.bin docs/photoframe-firmware-merged.bin
+            cp firmware/photoframe-firmware-merged.bin demo/photoframe-firmware-merged.bin
           fi
         fi
         
         # Always generate both stable and dev manifests
-        python3 scripts/generate_manifests.py --no-copy --dev
+        python3 scripts/generate_manifests.py --no-copy --dev --demo-dir demo
     
     - name: Setup Pages
       uses: actions/configure-pages@v4
@@ -163,7 +174,7 @@ jobs:
     - name: Upload Pages artifact
       uses: actions/upload-pages-artifact@v3
       with:
-        path: docs
+        path: demo
     
     - name: Deploy to GitHub Pages
       uses: actions/deploy-pages@v4

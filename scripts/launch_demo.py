@@ -5,14 +5,16 @@ Launch the ESP32 PhotoFrame demo page locally.
 This script:
 1. Builds firmware with idf.py build (optional)
 2. Downloads latest stable release from GitHub
-3. Copies required files (image-processor.js, sample.jpg) to docs/
-4. Generates manifests for both stable and dev versions
-5. Starts a local web server
+3. Builds the Vue demo webapp (npm run build:demo)
+4. Copies sample.jpg to demo/
+5. Generates manifests for both stable and dev versions
+6. Starts a local web server
 
 Usage:
     python launch_demo.py              # Build, download, and serve
     python launch_demo.py --port 8080  # Custom port
     python launch_demo.py --skip-build # Skip building firmware
+    python launch_demo.py --dev        # Use Vite dev server instead of static
 """
 
 import argparse
@@ -68,7 +70,7 @@ def build_firmware(project_root):
         return False
 
 
-def download_stable_firmware(docs_dir, project_root):
+def download_stable_firmware(demo_dir, project_root):
     """Download latest stable release firmware from GitHub."""
 
     print("\nDownloading stable release firmware...")
@@ -111,7 +113,7 @@ def download_stable_firmware(docs_dir, project_root):
 
             # Download URL
             download_url = f"https://github.com/{repo_path}/releases/download/{latest_tag}/photoframe-firmware-merged.bin"
-            output_file = docs_dir / "photoframe-firmware-merged.bin"
+            output_file = demo_dir / "photoframe-firmware-merged.bin"
 
             print(f"  Downloading from: {download_url}")
 
@@ -132,24 +134,56 @@ def download_stable_firmware(docs_dir, project_root):
         return False
 
 
-def copy_required_files(docs_dir, project_root):
+def build_demo_webapp(project_root):
+    """Build the Vue demo webapp."""
+
+    print("\nBuilding demo webapp...")
+
+    webapp_dir = project_root / "webapp"
+
+    if not webapp_dir.exists():
+        print(f"  ✗ Error: {webapp_dir} not found")
+        return False
+
+    try:
+        # Install dependencies
+        print("  Installing dependencies...")
+        subprocess.run(
+            ["npm", "i"],
+            cwd=webapp_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        # Build demo
+        print("  Building demo...")
+        subprocess.run(
+            ["npm", "run", "build:demo"],
+            cwd=webapp_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        print("  ✓ Demo webapp built successfully")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"  ✗ Error building demo webapp: {e}")
+        if e.stderr:
+            for line in e.stderr.strip().split("\n")[-10:]:
+                print(f"    {line}")
+        return False
+
+
+def copy_required_files(demo_dir, project_root):
     """Copy required files for the demo page."""
 
     print("\nCopying required files...")
 
-    # Copy image-processor.js
-    src_js = project_root / "process-cli" / "image-processor.js"
-    dst_js = docs_dir / "image-processor.js"
-
-    if src_js.exists():
-        shutil.copy2(src_js, dst_js)
-        print(f"  ✓ Copied {src_js.name}")
-    else:
-        print(f"  ⚠ Warning: {src_js} not found")
-
     # Copy sample image
     src_img = project_root / ".img" / "sample.jpg"
-    dst_img = docs_dir / "sample.jpg"
+    dst_img = demo_dir / "sample.jpg"
 
     if src_img.exists():
         shutil.copy2(src_img, dst_img)
@@ -164,8 +198,8 @@ def generate_manifests(project_root):
     print("\nGenerating manifests...")
 
     # Check if firmware file exists
-    docs_dir = project_root / "docs"
-    firmware_file = docs_dir / "photoframe-firmware-merged.bin"
+    demo_dir = project_root / "demo"
+    firmware_file = demo_dir / "photoframe-firmware-merged.bin"
 
     if not firmware_file.exists():
         print(f"  ⚠ Warning: Firmware file not found: {firmware_file}")
@@ -173,7 +207,7 @@ def generate_manifests(project_root):
         print(f"    1. Build: idf.py build")
         print(f"    2. Generate: python3 scripts/generate_manifests.py --dev")
         print(f"  Or create dummy file for UI testing:")
-        print(f"    touch docs/photoframe-firmware-merged.bin")
+        print(f"    touch demo/photoframe-firmware-merged.bin")
         return False
 
     manifest_script = project_root / "scripts" / "generate_manifests.py"
@@ -184,10 +218,17 @@ def generate_manifests(project_root):
 
     try:
         # Run manifest generation with --dev and --no-copy flags
-        # We don't copy firmware here since it should already be in docs/
+        # We don't copy firmware here since it should already be in demo/
         # or user should build first with: idf.py build
         result = subprocess.run(
-            ["python3", str(manifest_script), "--dev", "--no-copy"],
+            [
+                "python3",
+                str(manifest_script),
+                "--dev",
+                "--no-copy",
+                "--demo-dir",
+                "demo",
+            ],
             cwd=project_root,
             capture_output=True,
             text=True,
@@ -207,10 +248,29 @@ def generate_manifests(project_root):
         return False
 
 
-def serve_demo(docs_dir, port=8000):
-    """Start local web server to serve the demo page."""
+def serve_demo(demo_dir, port=8000):
+    """Start local web server to serve the demo page.
 
-    os.chdir(docs_dir)
+    The demo is built with base="/esp32-photoframe/" for GitHub Pages.
+    To serve locally, we serve from the parent directory and create
+    a symlink so /esp32-photoframe/ maps to the demo folder.
+    """
+
+    project_root = demo_dir.parent
+    symlink_path = project_root / "esp32-photoframe"
+
+    # Create symlink: project_root/esp32-photoframe -> demo/
+    # This allows /esp32-photoframe/assets/* to resolve correctly
+    if not symlink_path.exists():
+        symlink_path.symlink_to(demo_dir.name)
+        print(f"  Created symlink: esp32-photoframe -> {demo_dir.name}")
+    elif symlink_path.is_symlink():
+        # Symlink exists, verify it points to demo
+        pass
+    else:
+        print(f"  ⚠ Warning: {symlink_path} exists but is not a symlink")
+
+    os.chdir(project_root)
 
     server = HTTPServer(("localhost", port), CORSRequestHandler)
 
@@ -218,9 +278,9 @@ def serve_demo(docs_dir, port=8000):
     print("ESP32 PhotoFrame Demo Page")
     print("=" * 60)
     print(f"\nDemo page available at:")
-    print(f"  http://localhost:{port}/")
+    print(f"  http://localhost:{port}/esp32-photoframe/")
     print(f"\nWeb flasher available at:")
-    print(f"  http://localhost:{port}/")
+    print(f"  http://localhost:{port}/esp32-photoframe/")
     print(f"\nPress Ctrl+C to stop the server")
     print("=" * 60 + "\n")
 
@@ -253,13 +313,21 @@ def main():
     parser.add_argument(
         "--skip-manifests", action="store_true", help="Skip generating manifests"
     )
+    parser.add_argument(
+        "--skip-webapp", action="store_true", help="Skip building demo webapp"
+    )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Use Vite dev server instead of building and serving static files",
+    )
 
     args = parser.parse_args()
 
-    # Get paths - script is now in scripts/, not docs/
+    # Get paths
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
-    docs_dir = project_root / "docs"
+    demo_dir = project_root / "demo"
 
     print("=" * 60)
     print("ESP32 PhotoFrame Demo Launcher")
@@ -273,7 +341,7 @@ def main():
             if response.lower() != "y":
                 sys.exit(1)
 
-    # Copy dev firmware from build to docs
+    # Copy dev firmware from build to demo
     if not args.skip_build:
         print("\nCopying dev firmware...")
         build_dir = project_root / "build"
@@ -287,8 +355,8 @@ def main():
             )
 
             # Copy merged firmware as dev version
-            src_firmware = docs_dir / "photoframe-firmware-merged.bin"
-            dst_firmware = docs_dir / "photoframe-firmware-dev.bin"
+            src_firmware = demo_dir / "photoframe-firmware-merged.bin"
+            dst_firmware = demo_dir / "photoframe-firmware-dev.bin"
             if src_firmware.exists():
                 shutil.copy2(src_firmware, dst_firmware)
                 print("  ✓ Copied dev firmware")
@@ -297,27 +365,51 @@ def main():
 
     # Download stable firmware
     if not args.skip_download:
-        stable_downloaded = download_stable_firmware(docs_dir, project_root)
+        stable_downloaded = download_stable_firmware(demo_dir, project_root)
 
         # If download failed, use dev build as fallback
         if not stable_downloaded:
-            dev_firmware = docs_dir / "photoframe-firmware-dev.bin"
-            stable_firmware = docs_dir / "photoframe-firmware-merged.bin"
+            dev_firmware = demo_dir / "photoframe-firmware-dev.bin"
+            stable_firmware = demo_dir / "photoframe-firmware-merged.bin"
             if dev_firmware.exists() and not stable_firmware.exists():
                 shutil.copy2(dev_firmware, stable_firmware)
                 print("  ✓ Using dev build as stable fallback")
 
     # Copy required files
     if not args.skip_copy:
-        copy_required_files(docs_dir, project_root)
+        copy_required_files(demo_dir, project_root)
 
     # Generate manifests
     if not args.skip_manifests:
         if not generate_manifests(project_root):
             print("\n⚠ Warning: Manifest generation failed, but continuing...")
 
+    # Handle --dev mode: use Vite dev server
+    if args.dev:
+        print("\n" + "=" * 60)
+        print("Starting Vite dev server...")
+        print("=" * 60)
+        webapp_dir = project_root / "webapp"
+        try:
+            subprocess.run(
+                ["npm", "run", "dev:demo"],
+                cwd=webapp_dir,
+                check=True,
+            )
+        except KeyboardInterrupt:
+            print("\nShutting down dev server...")
+        return
+
+    # Build demo webapp (for static serving)
+    if not args.skip_webapp:
+        if not build_demo_webapp(project_root):
+            print("\n⚠ Warning: Demo webapp build failed")
+            response = input("Continue anyway? (y/n): ")
+            if response.lower() != "y":
+                sys.exit(1)
+
     # Serve the demo
-    serve_demo(docs_dir, args.port)
+    serve_demo(demo_dir, args.port)
 
 
 if __name__ == "__main__":
