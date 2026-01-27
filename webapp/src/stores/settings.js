@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
-import { getPreset, getPresetOptions } from "epaper-image-convert";
+import { getPreset, getPresetOptions } from "@aitjcize/epaper-image-convert";
 
 export const useSettingsStore = defineStore("settings", () => {
   const API_BASE = "";

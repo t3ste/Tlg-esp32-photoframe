@@ -25,7 +25,7 @@ const THUMBNAIL_HEIGHT = 240;
 let imageProcessor = null;
 
 onMounted(async () => {
-  imageProcessor = await import("epaper-image-convert");
+  imageProcessor = await import("@aitjcize/epaper-image-convert");
 });
 
 function triggerFileSelect() {

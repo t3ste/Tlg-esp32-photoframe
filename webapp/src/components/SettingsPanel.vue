@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from "vue";
-import { getDitherOptions, getPresetOptions } from "epaper-image-convert";
+import { getDitherOptions, getPresetOptions } from "@aitjcize/epaper-image-convert";
 import { useSettingsStore } from "../stores";
 import PaletteCalibration from "./PaletteCalibration.vue";
 

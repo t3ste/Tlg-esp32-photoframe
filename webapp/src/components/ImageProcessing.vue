@@ -40,7 +40,7 @@ let isReady = ref(false);
 onMounted(async () => {
   // Load the image processing library
   try {
-    imageProcessor = await import("epaper-image-convert");
+    imageProcessor = await import("@aitjcize/epaper-image-convert");
     isReady.value = true;
     // Process if file was already set
     if (props.imageFile) {

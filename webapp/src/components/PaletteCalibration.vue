@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from "vue";
 import { useSettingsStore } from "../stores";
-import { getCanvasContext, applyExifOrientation } from "epaper-image-convert";
+import { getCanvasContext, applyExifOrientation } from "@aitjcize/epaper-image-convert";
 
 const settingsStore = useSettingsStore();
 

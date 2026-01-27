@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { getDitherOptions, getPresetOptions } from "epaper-image-convert";
+import { getDitherOptions, getPresetOptions } from "@aitjcize/epaper-image-convert";
 
 const props = defineProps({
   params: {

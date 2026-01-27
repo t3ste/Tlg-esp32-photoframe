@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, watch } from "vue";
-import { getPreset, getPresetOptions } from "epaper-image-convert";
+import { getPreset, getPresetOptions } from "@aitjcize/epaper-image-convert";
 import ImageProcessing from "../components/ImageProcessing.vue";
 import ProcessingControls from "../components/ProcessingControls.vue";
 
