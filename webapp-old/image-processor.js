@@ -1,1 +1,0 @@
-../../process-cli/image-processor.js
