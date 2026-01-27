@@ -7,7 +7,11 @@ import fs from "fs";
 import { loadImage, createCanvas } from "canvas";
 import exifParser from "exif-parser";
 import heicConvert from "heic-convert";
-import { processImage, applyExifOrientation } from "./image-processor.js";
+import {
+  processImage,
+  applyExifOrientation,
+  SPECTRA6,
+} from "epaper-image-convert";
 
 /**
  * Load image with HEIC support
@@ -89,18 +93,30 @@ export async function processImagePipeline(
     }
   }
 
+  // Build palette object for the library
+  // The library expects { theoretical, perceived } format
+  // devicePalette from the device is the "perceived" palette
+  let palette;
+  if (devicePalette) {
+    // Use SPECTRA6 theoretical with device-provided perceived palette
+    palette = {
+      theoretical: SPECTRA6.theoretical,
+      perceived: devicePalette,
+    };
+  } else {
+    // Use default SPECTRA6 palette
+    palette = SPECTRA6;
+  }
+
   // Call shared processImage pipeline (handles rotation, resize, preprocessing, dithering)
-  return processImage(
-    canvas,
-    processingParams,
+  return processImage(canvas, {
     displayWidth,
     displayHeight,
-    devicePalette,
-    {
-      verbose,
-      createCanvas,
-      skipDithering,
-      skipRotation,
-    },
-  );
+    palette,
+    params: processingParams,
+    verbose,
+    createCanvas,
+    skipDithering,
+    skipRotation,
+  });
 }

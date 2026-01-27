@@ -11,9 +11,10 @@ import FormData from "form-data";
 import {
   generateThumbnail,
   createPNG,
+  createBMP,
   getPreset,
   getPresetNames,
-} from "./image-processor.js";
+} from "epaper-image-convert";
 import { processImagePipeline } from "./utils.js";
 import { createImageServer } from "./server.js";
 

@@ -1,12 +1,10 @@
 # ESP32 PhotoFrame CLI
 
-Node.js CLI tool for processing images for ESP32 PhotoFrame. Shares the exact same image processing code (`image-processor.js`) with the webapp for consistent results.
+Node.js CLI tool for processing images for ESP32 PhotoFrame. Uses the [epaper-image-convert](https://github.com/aitjcize/epaper-image-convert) library for advanced image processing pipeline for epaper displays.
 
 ## Features
 
-- Shared processing code with webapp for consistent results
-- S-curve tone mapping, saturation adjustment, Floyd-Steinberg dithering
-- Measured palette for accurate e-paper color matching
+- Advanced image processing pipeline with [epaper-image-convert](https://github.com/aitjcize/epaper-image-convert)
 - Batch folder processing with automatic album organization
 - Device parameter sync and direct upload
 - Image server mode for HTTP-based serving

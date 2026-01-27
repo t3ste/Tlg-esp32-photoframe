@@ -10,7 +10,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createCanvas } from "canvas";
 import { processImagePipeline } from "./utils.js";
-import { generateThumbnail, createPNG } from "./image-processor.js";
+import { generateThumbnail, createPNG, createBMP } from "epaper-image-convert";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,74 +29,9 @@ const DEFAULT_PARAMS = {
   processingMode: "enhanced",
 };
 
-/**
- * Helper function to write BMP to buffer
- */
-function writeBMPToBuffer(imageData) {
-  const width = imageData.width;
-  const height = imageData.height;
-  const data = imageData.data;
-
-  // BMP header sizes
-  const fileHeaderSize = 14;
-  const infoHeaderSize = 40;
-  const rowSize = Math.floor((24 * width + 31) / 32) * 4;
-  const pixelDataSize = rowSize * height;
-  const fileSize = fileHeaderSize + infoHeaderSize + pixelDataSize;
-
-  const buffer = Buffer.alloc(fileSize);
-  let offset = 0;
-
-  // File header (14 bytes)
-  buffer.write("BM", offset);
-  offset += 2;
-  buffer.writeUInt32LE(fileSize, offset);
-  offset += 4;
-  buffer.writeUInt32LE(0, offset);
-  offset += 4;
-  buffer.writeUInt32LE(fileHeaderSize + infoHeaderSize, offset);
-  offset += 4;
-
-  // Info header (40 bytes)
-  buffer.writeUInt32LE(infoHeaderSize, offset);
-  offset += 4;
-  buffer.writeInt32LE(width, offset);
-  offset += 4;
-  buffer.writeInt32LE(height, offset);
-  offset += 4;
-  buffer.writeUInt16LE(1, offset);
-  offset += 2;
-  buffer.writeUInt16LE(24, offset);
-  offset += 2;
-  buffer.writeUInt32LE(0, offset);
-  offset += 4;
-  buffer.writeUInt32LE(pixelDataSize, offset);
-  offset += 4;
-  buffer.writeInt32LE(2835, offset);
-  offset += 4;
-  buffer.writeInt32LE(2835, offset);
-  offset += 4;
-  buffer.writeUInt32LE(0, offset);
-  offset += 4;
-  buffer.writeUInt32LE(0, offset);
-  offset += 4;
-
-  // Pixel data (bottom-up, BGR format)
-  const padding = rowSize - width * 3;
-  for (let y = height - 1; y >= 0; y--) {
-    for (let x = 0; x < width; x++) {
-      const i = (y * width + x) * 4;
-      buffer[offset++] = data[i + 2]; // B
-      buffer[offset++] = data[i + 1]; // G
-      buffer[offset++] = data[i]; // R
-    }
-    for (let p = 0; p < padding; p++) {
-      buffer[offset++] = 0;
-    }
-  }
-
-  return buffer;
-}
+// Display dimensions
+const DEFAULT_DISPLAY_WIDTH = 800;
+const DEFAULT_DISPLAY_HEIGHT = 480;
 
 /**
  * Create and start an HTTP server for serving processed images
@@ -240,6 +175,8 @@ export async function createImageServer(
           await processImagePipeline(
             image.path,
             processingParams,
+            DEFAULT_DISPLAY_WIDTH,
+            DEFAULT_DISPLAY_HEIGHT,
             devicePalette,
             {
               skipDithering: serveFormat === "jpg",
@@ -274,14 +211,7 @@ export async function createImageServer(
           imageBuffer = await createPNG(processedCanvas);
         } else if (serveFormat === "bmp") {
           contentType = "image/bmp";
-          const ctx = processedCanvas.getContext("2d");
-          const imageData = ctx.getImageData(
-            0,
-            0,
-            processedCanvas.width,
-            processedCanvas.height,
-          );
-          imageBuffer = writeBMPToBuffer(imageData);
+          imageBuffer = createBMP(processedCanvas);
         }
 
         // Set headers
@@ -343,6 +273,8 @@ export async function createImageServer(
         const { originalCanvas } = await processImagePipeline(
           image.path,
           processingParams,
+          DEFAULT_DISPLAY_WIDTH,
+          DEFAULT_DISPLAY_HEIGHT,
           devicePalette,
           { skipDithering: true },
         );
