@@ -11,10 +11,10 @@ import FormData from "form-data";
 import {
   generateThumbnail,
   createPNG,
-  createBMP,
   getPreset,
   getPresetNames,
-} from "epaper-image-convert";
+  getDefaultParams,
+} from "@aitjcize/epaper-image-convert";
 import { processImagePipeline } from "./utils.js";
 import { createImageServer } from "./server.js";
 
@@ -25,20 +25,10 @@ const __dirname = path.dirname(__filename);
 const THUMBNAIL_WIDTH = 400;
 const THUMBNAIL_HEIGHT = 240;
 
-// Centralized default configuration for image processing (using CDR preset values)
+// Get default parameters from the library
 const DEFAULT_PARAMS = {
-  exposure: 1.05,
-  saturation: 1.0,
-  toneMode: "contrast",
-  contrast: 1.0,
-  strength: 0.9,
-  shadowBoost: 0.0,
-  highlightCompress: 1.5,
-  midpoint: 0.5,
-  colorMethod: "rgb",
+  ...getDefaultParams(),
   processingMode: "enhanced",
-  ditherAlgorithm: "floyd-steinberg",
-  compressDynamicRange: true,
 };
 
 // Fetch processing settings from device
@@ -544,28 +534,7 @@ async function processImageFile(
     processingParams.contrast = options.contrast;
   }
 
-  // Log processing parameters
-  console.log(`  Processing parameters:`);
-  console.log(
-    `    Exposure: ${processingParams.exposure}, Saturation: ${processingParams.saturation}`,
-  );
-  if (processingParams.toneMode === "scurve") {
-    console.log(
-      `    Tone mapping: S-Curve (strength=${processingParams.strength}, shadow=${processingParams.shadowBoost}, highlight=${processingParams.highlightCompress}, midpoint=${processingParams.midpoint})`,
-    );
-  } else {
-    console.log(
-      `    Tone mapping: Simple Contrast (${processingParams.contrast})`,
-    );
-  }
-  console.log(
-    `    Color method: ${processingParams.colorMethod}, Dither: ${processingParams.ditherAlgorithm}`,
-  );
-  console.log(
-    `    Processing mode: ${processingParams.processingMode}, Compress dynamic range: ${processingParams.compressDynamicRange}`,
-  );
-
-  // Use shared processing pipeline with verbose logging
+  // Use shared processing pipeline with verbose logging (library handles parameter logging)
   // Skip rotation when rendering measured palette for easier preview viewing
   const { canvas, originalCanvas } = await processImagePipeline(
     inputPath,
@@ -636,7 +605,7 @@ program
   .option(
     "--preset <name>",
     `Processing preset: ${getPresetNames().join(", ")} `,
-    "cdr",
+    "balanced",
   )
   .option(
     "--upload",

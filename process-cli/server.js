@@ -10,22 +10,19 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createCanvas } from "canvas";
 import { processImagePipeline } from "./utils.js";
-import { generateThumbnail, createPNG, createBMP } from "epaper-image-convert";
+import {
+  generateThumbnail,
+  createPNG,
+  createBMP,
+  getDefaultParams,
+} from "@aitjcize/epaper-image-convert";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Default parameters for image processing
+// Get default parameters from the library
 const DEFAULT_PARAMS = {
-  exposure: 1.0,
-  saturation: 1.3,
-  toneMode: "scurve",
-  contrast: 1.0,
-  scurveStrength: 0.9,
-  shadowBoost: 0.0,
-  highlightCompress: 1.5,
-  midpoint: 0.5,
-  colorMethod: "rgb",
+  ...getDefaultParams(),
   processingMode: "enhanced",
 };
 
@@ -66,7 +63,7 @@ export async function createImageServer(
     saturation: options.saturation ?? DEFAULT_PARAMS.saturation,
     toneMode: options.toneMode ?? DEFAULT_PARAMS.toneMode,
     contrast: options.contrast ?? DEFAULT_PARAMS.contrast,
-    strength: options.scurveStrength ?? DEFAULT_PARAMS.scurveStrength,
+    strength: options.scurveStrength ?? DEFAULT_PARAMS.strength,
     shadowBoost: options.scurveShadow ?? DEFAULT_PARAMS.shadowBoost,
     highlightCompress:
       options.scurveHighlight ?? DEFAULT_PARAMS.highlightCompress,

@@ -64,7 +64,7 @@ export const useSettingsStore = defineStore("settings", () => {
   });
 
   // Preset
-  const preset = ref("cdr");
+  const preset = ref("balanced");
 
   // Get preset names from library (excluding "custom")
   const presetNames = getPresetOptions().map((p) => p.value);

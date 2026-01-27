@@ -15,7 +15,7 @@ const fileInput = ref(null);
 const selectedFile = ref(null);
 
 // Processing parameters
-const currentPreset = ref("cdr");
+const currentPreset = ref("balanced");
 const params = ref({
   exposure: 1.0,
   saturation: 1.3,

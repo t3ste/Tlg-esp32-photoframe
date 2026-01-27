@@ -11,7 +11,7 @@ import {
   processImage,
   applyExifOrientation,
   SPECTRA6,
-} from "epaper-image-convert";
+} from "@aitjcize/epaper-image-convert";
 
 /**
  * Load image with HEIC support
