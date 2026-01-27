@@ -77,9 +77,9 @@ function getThumbnailUrl(image) {
 
     <v-card-text>
       <!-- Album List -->
-      <div class="d-flex align-center mb-4">
-        <span class="text-body-2 text-grey mr-4">
-          ✓ = Enabled for auto-rotation • Click album to view images
+      <div class="d-flex align-center mb-2">
+        <span class="text-body-2 text-grey">
+          ✓ = Enabled for auto-rotation • Click album name to view images
         </span>
         <v-spacer />
         <v-btn color="primary" size="small" @click="newAlbumDialog = true">
@@ -88,34 +88,35 @@ function getThumbnailUrl(image) {
         </v-btn>
       </div>
 
-      <v-chip-group
-        :model-value="appStore.selectedAlbum"
-        mandatory
-        selected-class="text-primary"
-        @update:model-value="appStore.selectAlbum($event)"
-      >
-        <v-chip
+      <div class="d-flex align-center flex-wrap gap-2 mb-4">
+        <div
           v-for="album in appStore.sortedAlbums"
           :key="album.name"
-          :value="album.name"
-          :prepend-icon="album.enabled ? 'mdi-check-circle' : 'mdi-circle-outline'"
-          variant="outlined"
-          class="mr-2"
+          class="album-chip d-flex align-center"
+          :class="{ 'album-chip--selected': appStore.selectedAlbum === album.name }"
         >
-          {{ album.name }}
-          <template #append>
-            <v-btn
-              v-if="album.name !== 'Default'"
-              icon
-              size="x-small"
-              variant="text"
-              @click.stop="confirmDeleteAlbum(album)"
-            >
-              <v-icon size="small"> mdi-close </v-icon>
-            </v-btn>
-          </template>
-        </v-chip>
-      </v-chip-group>
+          <v-checkbox-btn
+            :model-value="album.enabled"
+            color="primary"
+            hide-details
+            density="compact"
+            @click.stop
+            @update:model-value="appStore.toggleAlbumEnabled(album.name, $event)"
+          />
+          <span class="album-name" @click="appStore.selectAlbum(album.name)">
+            {{ album.name }}
+          </span>
+          <v-btn
+            v-if="album.name !== 'Default'"
+            icon
+            size="x-small"
+            variant="text"
+            @click.stop="confirmDeleteAlbum(album)"
+          >
+            <v-icon size="small"> mdi-close </v-icon>
+          </v-btn>
+        </div>
+      </div>
 
       <v-divider class="my-4" />
 
@@ -247,6 +248,24 @@ function getThumbnailUrl(image) {
 </template>
 
 <style scoped>
+.album-chip {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 20px;
+  padding: 4px 4px 4px 4px;
+  background: white;
+  cursor: pointer;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+.album-chip--selected {
+  border-color: rgb(var(--v-theme-primary));
+  background: rgb(var(--v-theme-primary) / 0.08);
+}
+.album-name {
+  cursor: pointer;
+  user-select: none;
+  padding: 0 4px;
+}
 .image-card {
   transition:
     transform 0.2s,

@@ -2,6 +2,7 @@
 import { ref, computed } from "vue";
 import { getDitherOptions, getPresetOptions } from "epaper-image-convert";
 import { useSettingsStore } from "../stores";
+import PaletteCalibration from "./PaletteCalibration.vue";
 
 const settingsStore = useSettingsStore();
 
@@ -517,63 +518,7 @@ async function saveSettings() {
 
         <!-- Calibration Tab -->
         <v-tabs-window-item value="calibration">
-          <v-alert type="info" variant="tonal" class="mb-4">
-            Calibrate the measured color palette for your specific E6 display batch. This improves
-            color accuracy during image processing.
-          </v-alert>
-
-          <h3 class="text-h6 mb-4">Current Palette</h3>
-
-          <v-row>
-            <v-col
-              v-for="(color, name) in settingsStore.palette"
-              :key="name"
-              cols="6"
-              md="4"
-              lg="2"
-            >
-              <v-card variant="outlined">
-                <div
-                  class="color-swatch"
-                  :style="{ backgroundColor: `rgb(${color.r}, ${color.g}, ${color.b})` }"
-                />
-                <v-card-text class="pa-2">
-                  <div class="text-subtitle-2 text-capitalize mb-2">
-                    {{ name }}
-                  </div>
-                  <v-text-field
-                    v-model.number="color.r"
-                    label="R"
-                    type="number"
-                    density="compact"
-                    variant="outlined"
-                    :min="0"
-                    :max="255"
-                    class="mb-1"
-                  />
-                  <v-text-field
-                    v-model.number="color.g"
-                    label="G"
-                    type="number"
-                    density="compact"
-                    variant="outlined"
-                    :min="0"
-                    :max="255"
-                    class="mb-1"
-                  />
-                  <v-text-field
-                    v-model.number="color.b"
-                    label="B"
-                    type="number"
-                    density="compact"
-                    variant="outlined"
-                    :min="0"
-                    :max="255"
-                  />
-                </v-card-text>
-              </v-card>
-            </v-col>
-          </v-row>
+          <PaletteCalibration />
         </v-tabs-window-item>
       </v-tabs-window>
     </v-card-text>
@@ -594,9 +539,4 @@ async function saveSettings() {
   </v-card>
 </template>
 
-<style scoped>
-.color-swatch {
-  height: 60px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-}
-</style>
+<style scoped></style>
