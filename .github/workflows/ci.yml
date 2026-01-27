@@ -55,6 +55,17 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Building version: ${VERSION}"
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build webapp
+        run: |
+          cd webapp
+          npm ci
+          npm run build
+
       - name: Setup ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
