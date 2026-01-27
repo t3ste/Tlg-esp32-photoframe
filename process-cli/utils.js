@@ -9,9 +9,6 @@ import exifParser from "exif-parser";
 import heicConvert from "heic-convert";
 import { processImage, applyExifOrientation } from "./image-processor.js";
 
-const DISPLAY_WIDTH = 800;
-const DISPLAY_HEIGHT = 480;
-
 /**
  * Load image with HEIC support
  * @param {string} imagePath - Path to image file
@@ -48,19 +45,24 @@ function getExifOrientation(imagePath) {
 }
 
 /**
- * Complete image processing pipeline from file to device-ready output
- * Loads image file, applies EXIF orientation, then processes through image-processor.js
- *
+ * Process image pipeline: load, apply EXIF, process, return canvas
  * @param {string} imagePath - Path to image file
  * @param {Object} processingParams - Processing parameters
+ * @param {number} displayWidth - Display width in pixels
+ * @param {number} displayHeight - Display height in pixels
  * @param {Object} devicePalette - Optional device-specific palette
- * @param {Object} options - Additional options (verbose, skipDithering)
- * @returns {Promise<Object>} { canvas: processed canvas, originalCanvas: EXIF-corrected source }
+ * @param {Object} options - Processing options:
+ *   - verbose {boolean} - Enable verbose logging
+ *   - skipDithering {boolean} - Skip dithering step
+ *   - skipRotation {boolean} - Skip portrait rotation
+ * @returns {Promise<Object>} { canvas, originalCanvas, thumbnail }
  */
 export async function processImagePipeline(
   imagePath,
   processingParams,
-  devicePalette,
+  displayWidth,
+  displayHeight,
+  devicePalette = null,
   options = {},
 ) {
   const {
@@ -88,12 +90,17 @@ export async function processImagePipeline(
   }
 
   // Call shared processImage pipeline (handles rotation, resize, preprocessing, dithering)
-  return processImage(canvas, processingParams, devicePalette, {
-    verbose,
-    targetWidth: DISPLAY_WIDTH,
-    targetHeight: DISPLAY_HEIGHT,
-    createCanvas,
-    skipDithering,
-    skipRotation,
-  });
+  return processImage(
+    canvas,
+    processingParams,
+    displayWidth,
+    displayHeight,
+    devicePalette,
+    {
+      verbose,
+      createCanvas,
+      skipDithering,
+      skipRotation,
+    },
+  );
 }

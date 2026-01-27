@@ -1,13 +1,13 @@
 // Image processing functions for S-curve tone mapping and dithering
 // This file is shared between the webapp and CLI
 
-// Display dimensions constants
-const DISPLAY_WIDTH_LANDSCAPE = 800;
-const DISPLAY_HEIGHT_LANDSCAPE = 480;
+// Display native resolution in landscape mode (can be overridden via function parameters)
+const DEFAULT_DISPLAY_WIDTH = 800;
+const DEFAULT_DISPLAY_HEIGHT = 480;
 
-// Thumbnail dimensions (half of display resolution)
-const THUMBNAIL_WIDTH = 400;
-const THUMBNAIL_HEIGHT = 240;
+// Default thumbnail dimensions (can be overridden via function parameters)
+const DEFAULT_THUMBNAIL_WIDTH = 400;
+const DEFAULT_THUMBNAIL_HEIGHT = 240;
 
 // Processing presets
 const PRESETS = {
@@ -666,23 +666,23 @@ function applyExifOrientation(canvas, orientation, createCanvas = null) {
 /**
  * Resize image with cover mode (scale and crop to fill)
  * @param {Canvas} sourceCanvas - Source canvas (browser Canvas or node-canvas)
- * @param {number} targetWidth - Target width
- * @param {number} targetHeight - Target height
+ * @param {number} outputWidth - Output width in pixels
+ * @param {number} outputHeight - Output height in pixels
  * @param {Function} createCanvas - Canvas creation function (for Node.js compatibility)
  * @returns {Canvas} Resized canvas
  */
 function resizeImageCover(
   sourceCanvas,
-  targetWidth,
-  targetHeight,
+  outputWidth,
+  outputHeight,
   createCanvas = null,
 ) {
   const srcWidth = sourceCanvas.width;
   const srcHeight = sourceCanvas.height;
 
   // Calculate scale to cover (larger of the two ratios)
-  const scaleX = targetWidth / srcWidth;
-  const scaleY = targetHeight / srcHeight;
+  const scaleX = outputWidth / srcWidth;
+  const scaleY = outputHeight / srcHeight;
   const scale = Math.max(scaleX, scaleY);
 
   const scaledWidth = Math.round(srcWidth * scale);
@@ -700,29 +700,29 @@ function resizeImageCover(
   const tempCtx = getCanvasContext(tempCanvas);
   tempCtx.drawImage(sourceCanvas, 0, 0, scaledWidth, scaledHeight);
 
-  // Crop to target size (center crop)
-  const cropX = Math.round((scaledWidth - targetWidth) / 2);
-  const cropY = Math.round((scaledHeight - targetHeight) / 2);
+  // Crop to output size (center crop)
+  const cropX = Math.round((scaledWidth - outputWidth) / 2);
+  const cropY = Math.round((scaledHeight - outputHeight) / 2);
 
   let outputCanvas;
   if (createCanvas) {
-    outputCanvas = createCanvas(targetWidth, targetHeight);
+    outputCanvas = createCanvas(outputWidth, outputHeight);
   } else {
     outputCanvas = document.createElement("canvas");
-    outputCanvas.width = targetWidth;
-    outputCanvas.height = targetHeight;
+    outputCanvas.width = outputWidth;
+    outputCanvas.height = outputHeight;
   }
   const outputCtx = getCanvasContext(outputCanvas);
   outputCtx.drawImage(
     tempCanvas,
     cropX,
     cropY,
-    targetWidth,
-    targetHeight,
+    outputWidth,
+    outputHeight,
     0,
     0,
-    targetWidth,
-    targetHeight,
+    outputWidth,
+    outputHeight,
   );
 
   return outputCanvas;
@@ -731,15 +731,15 @@ function resizeImageCover(
 /**
  * Generate thumbnail from canvas with proper orientation handling
  * @param {Canvas} sourceCanvas - Source canvas (browser Canvas or node-canvas)
- * @param {number} targetWidth - Target width for landscape orientation
- * @param {number} targetHeight - Target height for landscape orientation
- * @param {Function} createCanvas - Canvas creation function (for Node.js compatibility)
+ * @param {number} outputWidth - Output width for landscape orientation in pixels (default: 400)
+ * @param {number} outputHeight - Output height for landscape orientation in pixels (default: 240)
+ * @param {Function} createCanvas - Canvas creation function for Node.js compatibility (default: null)
  * @returns {Canvas} Thumbnail canvas
  */
 function generateThumbnail(
   sourceCanvas,
-  targetWidth = THUMBNAIL_WIDTH,
-  targetHeight = THUMBNAIL_HEIGHT,
+  outputWidth = DEFAULT_THUMBNAIL_WIDTH,
+  outputHeight = DEFAULT_THUMBNAIL_HEIGHT,
   createCanvas = null,
 ) {
   const srcWidth = sourceCanvas.width;
@@ -747,8 +747,8 @@ function generateThumbnail(
 
   // Maintain source orientation - swap dimensions for portrait images
   const isPortrait = srcHeight > srcWidth;
-  const thumbWidth = isPortrait ? targetHeight : targetWidth;
-  const thumbHeight = isPortrait ? targetWidth : targetHeight;
+  const thumbWidth = isPortrait ? outputHeight : outputWidth;
+  const thumbHeight = isPortrait ? outputWidth : outputHeight;
 
   // Create thumbnail canvas
   let thumbCanvas;
@@ -830,20 +830,28 @@ async function createPNG(canvas) {
  *
  * @param {Canvas|ImageData} source - Source canvas (should already have EXIF orientation applied)
  * @param {Object} processingParams - Processing parameters
- * @param {Object} devicePalette - Optional device-specific palette
- * @param {Object} options - Additional options (verbose, targetWidth, targetHeight, createCanvas, skipRotation, skipDithering)
+ * @param {number} displayWidth - Display width in pixels
+ * @param {number} displayHeight - Display height in pixels
+ * @param {Object} devicePalette - Optional device-specific palette in OBJECT format:
+ *   { black: {r, g, b}, white: {r, g, b}, yellow: {r, g, b}, red: {r, g, b}, blue: {r, g, b}, green: {r, g, b} }
+ *   If null, uses PALETTE_MEASURED. This palette is used for dithering calculations.
+ * @param {Object} options - Additional options:
+ *   - verbose {boolean} - Enable verbose logging (default: false)
+ *   - createCanvas {Function} - Canvas creation function for Node.js (default: null)
+ *   - skipRotation {boolean} - Skip portrait-to-landscape rotation (default: false)
+ *   - skipDithering {boolean} - Skip dithering step (default: false)
  * @returns {Object} { canvas: processed canvas, originalCanvas: EXIF-corrected source }
  */
 function processImage(
   source,
   processingParams,
+  displayWidth,
+  displayHeight,
   devicePalette = null,
   options = {},
 ) {
   const {
     verbose = false,
-    targetWidth = DISPLAY_WIDTH_LANDSCAPE,
-    targetHeight = DISPLAY_HEIGHT_LANDSCAPE,
     createCanvas = null,
     skipRotation = false,
     skipDithering = false,
@@ -903,18 +911,17 @@ function processImage(
   }
 
   // Resize to display dimensions
-  // When skipRotation is true with portrait image and landscape target dims, swap to portrait
-  // This handles case where we always pass 800x480 but want 480x800 for portrait preview
+  // When skipRotation is true with portrait image and landscape display dims, swap to portrait
   let finalWidth, finalHeight;
-  const targetIsLandscape = targetWidth > targetHeight;
-  if (isPortrait && skipRotation && targetIsLandscape) {
+  const displayIsLandscape = displayWidth > displayHeight;
+  if (isPortrait && skipRotation && displayIsLandscape) {
     // Swap landscape dims to portrait for preview
-    finalWidth = targetHeight;
-    finalHeight = targetWidth;
+    finalWidth = displayHeight;
+    finalHeight = displayWidth;
   } else {
     // Use provided dimensions as-is
-    finalWidth = targetWidth;
-    finalHeight = targetHeight;
+    finalWidth = displayWidth;
+    finalHeight = displayHeight;
   }
 
   if (canvas.width !== finalWidth || canvas.height !== finalHeight) {

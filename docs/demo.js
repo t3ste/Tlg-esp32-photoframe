@@ -62,12 +62,18 @@ async function getLatestRelease() {
 
 getLatestRelease();
 
-// Demo functionality
+// Shared image processing code
 import {
   processImage,
+  resizeImageCover,
   getCanvasContext,
   getPreset,
+  DEFAULT_MEASURED_PALETTE,
 } from "./image-processor.js";
+
+// Display dimensions
+const DISPLAY_WIDTH = 800;
+const DISPLAY_HEIGHT = 480;
 
 let currentImageFile = null;
 let sourceCanvas = null; // Store as canvas instead of ImageData
@@ -296,12 +302,12 @@ function updatePreviews() {
   const { canvas: enhancedProcessed } = processImage(
     sourceCanvas,
     enhancedParams,
+    DISPLAY_WIDTH,
+    DISPLAY_HEIGHT,
     null, // no custom palette
     {
       verbose: false,
-      skipRotation: true, // Don't rotate in browser preview
-      targetWidth: 800,
-      targetHeight: 480,
+      skipRotation: true, // Don't rotate for browser preview
     },
   );
 
@@ -316,12 +322,12 @@ function updatePreviews() {
   const { canvas: stockProcessed } = processImage(
     sourceCanvas,
     stockParams,
+    DISPLAY_WIDTH,
+    DISPLAY_HEIGHT,
     null, // no custom palette
     {
       verbose: false,
-      skipRotation: true, // Don't rotate in browser preview
-      targetWidth: 800,
-      targetHeight: 480,
+      skipRotation: true, // Don't rotate for browser preview
     },
   );
 

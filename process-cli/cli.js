@@ -569,8 +569,13 @@ async function processImageFile(
   const { canvas, originalCanvas } = await processImagePipeline(
     inputPath,
     processingParams,
+    options.displayWidth,
+    options.displayHeight,
     devicePalette,
-    { verbose: true, skipRotation: options.renderMeasured },
+    {
+      verbose: true,
+      skipRotation: options.renderMeasured,
+    },
   );
 
   const ctx = canvas.getContext("2d");
@@ -721,6 +726,13 @@ program
     "--dither-algorithm <algorithm>",
     "Dithering algorithm: floyd-steinberg, stucki, burkes, or sierra",
     DEFAULT_PARAMS.ditherAlgorithm,
+  )
+  .option("--display-width <width>", "Display width in pixels", parseInt, 800)
+  .option(
+    "--display-height <height>",
+    "Display height in pixels",
+    parseInt,
+    480,
   )
   .action(async (input, options) => {
     try {

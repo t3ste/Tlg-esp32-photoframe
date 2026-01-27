@@ -12,8 +12,8 @@ import {
 const API_BASE = "";
 
 // Display dimensions constants
-const DISPLAY_WIDTH_LANDSCAPE = 800;
-const DISPLAY_HEIGHT_LANDSCAPE = 480;
+const DISPLAY_WIDTH = 800;
+const DISPLAY_HEIGHT = 480;
 const DISPLAY_WIDTH_PORTRAIT = 480;
 const DISPLAY_HEIGHT_PORTRAIT = 800;
 
@@ -922,24 +922,20 @@ function updatePreview() {
   const { canvas: processedCanvas } = processImage(
     sourceCanvas,
     previewParams,
+    DISPLAY_WIDTH,
+    DISPLAY_HEIGHT,
     devicePaletteObject,
     {
       verbose: false,
       skipRotation: true,
-      targetWidth: DISPLAY_WIDTH_LANDSCAPE,
-      targetHeight: DISPLAY_HEIGHT_LANDSCAPE,
     },
   );
 
   // Create original JPEG version (just resized, no processing)
   // Use same dimensions as processed canvas for comparison
   const isPortrait = sourceCanvas.height > sourceCanvas.width;
-  const naturalWidth = isPortrait
-    ? DISPLAY_WIDTH_PORTRAIT
-    : DISPLAY_WIDTH_LANDSCAPE;
-  const naturalHeight = isPortrait
-    ? DISPLAY_HEIGHT_PORTRAIT
-    : DISPLAY_HEIGHT_LANDSCAPE;
+  const naturalWidth = isPortrait ? DISPLAY_WIDTH_PORTRAIT : DISPLAY_WIDTH;
+  const naturalHeight = isPortrait ? DISPLAY_HEIGHT_PORTRAIT : DISPLAY_HEIGHT;
   const originalResized = resizeImageCover(
     sourceCanvas,
     naturalWidth,
@@ -1339,12 +1335,17 @@ document
       // Process image with theoretical palette for device upload using shared pipeline
       const uploadParams = { ...currentParams, renderMeasured: false };
       const { canvas: processedCanvas, originalCanvas: exifCorrectedCanvas } =
-        processImage(sourceCanvas, uploadParams, devicePaletteObject, {
-          verbose: false,
-          skipRotation: false, // Rotate for device
-          targetWidth: DISPLAY_WIDTH_LANDSCAPE,
-          targetHeight: DISPLAY_HEIGHT_LANDSCAPE,
-        });
+        processImage(
+          sourceCanvas,
+          uploadParams,
+          DISPLAY_WIDTH,
+          DISPLAY_HEIGHT,
+          devicePaletteObject,
+          {
+            verbose: false,
+            skipRotation: false, // Rotate for device
+          },
+        );
 
       // Convert the processed canvas to PNG
       const pngBlob = await canvasToPNG(processedCanvas);
@@ -1462,7 +1463,7 @@ async function loadConfig() {
       data.image_orientation || 180;
     document.getElementById("imageUrl").value =
       data.image_url ||
-      `https://loremflickr.com/${DISPLAY_WIDTH_LANDSCAPE}/${DISPLAY_HEIGHT_LANDSCAPE}`;
+      `https://loremflickr.com/${DISPLAY_WIDTH}/${DISPLAY_HEIGHT}`;
     document.getElementById("deepSleepEnabled").checked =
       data.deep_sleep_enabled !== false;
     document.getElementById("haUrl").value = data.ha_url || "";
