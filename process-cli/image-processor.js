@@ -1044,6 +1044,5 @@ export {
   getCanvasContext,
   getPreset,
   getPresetNames,
-  PALETTE_MEASURED,
   DEFAULT_MEASURED_PALETTE,
 };

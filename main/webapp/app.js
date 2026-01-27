@@ -6,7 +6,6 @@ import {
   createPNG,
   getCanvasContext,
   getPreset,
-  PALETTE_MEASURED,
   DEFAULT_MEASURED_PALETTE,
 } from "./image-processor.js";
 
