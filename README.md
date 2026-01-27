@@ -12,10 +12,21 @@ A modern, feature-rich firmware for the **Waveshare ESP32-S3-PhotoPainter** that
 
 - 🎨 **Superior Image Quality**: Measured color palette with automatic calibration produces significantly better results than stock firmware
 - 🔋 **Smart Power Management**: Deep sleep mode for weeks of battery life, or always-on for Home Assistant
-- 📁 **Flexible Image Sources**: SD card rotation or URL-based fetching (weather, news, random images)
+- 📁 **Flexible Image Sources**: SD card rotation or URL-based fetching (weather, news, random images from image server)
 - 🌐 **Modern Web Interface**: Drag-and-drop uploads, gallery view, real-time battery status
 - 🔌 **RESTful API**: Full programmatic control ([API docs](docs/API.md))
+- 🖼️ **Image Server**: [Companion server](https://github.com/aitjcize/esp32-photoframe-server) with Google Photos, Synology DS Photos, and Telegram Bot support
 - 🏠 **Home Assistant Ready**: [Companion integration](https://github.com/aitjcize/ha-esp32-photoframe) available
+
+## Ecosystem
+
+This project has companion tools for different use cases:
+
+| Project | Description |
+|---------|-------------|
+| [**ha-esp32-photoframe**](https://github.com/aitjcize/ha-esp32-photoframe) | Home Assistant integration for control, monitoring, and automation |
+| [**esp32-photoframe-server**](https://github.com/aitjcize/esp32-photoframe-server) | Image server with text overlay, Google Photos, Synology DS Photos, and Telegram Bot integration. Can be run as a Home Assistant add-on. |
+| [**epaper-image-convert**](https://github.com/aitjcize/epaper-image-convert) | CLI tool & npm library for e-paper image conversion with advanced dithering |
 
 ## Image Quality Comparison
 
