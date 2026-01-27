@@ -706,11 +706,12 @@ static esp_err_t display_image_handler(httpd_req_t *req)
     esp_err_t err = display_manager_show_image(filepath);
 
     cJSON_Delete(root);
-
     if (err != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
         return ESP_FAIL;
     }
+
+    ha_notify_update();
 
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "success");
@@ -870,7 +871,6 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
 
-        // Notify HA
         ha_notify_update();
 
         cJSON *response = cJSON_CreateObject();
@@ -1020,7 +1020,6 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
 
     // Display the image (PNG or BMP) - display_manager handles both
     err = display_manager_show_image(display_path);
-
     if (err != ESP_OK) {
         unlink(temp_upload_path);
         unlink(temp_bmp_path);
@@ -1028,6 +1027,8 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
         return ESP_FAIL;
     }
+
+    ha_notify_update();
 
     if (upload_is_bmp || upload_is_png) {
         // BMP/PNG upload - no separate thumbnail
@@ -1183,8 +1184,6 @@ static esp_err_t rotate_handler(httpd_req_t *req)
 
     power_manager_reset_sleep_timer();
     trigger_image_rotation();
-
-    // Notify HA that image has been updated
     ha_notify_update();
 
     cJSON *response = cJSON_CreateObject();
