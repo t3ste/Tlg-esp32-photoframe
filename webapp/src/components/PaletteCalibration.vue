@@ -1,7 +1,7 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref } from "vue";
 import { useSettingsStore } from "../stores";
-import { getCanvasContext, applyExifOrientation } from "@aitjcize/epaper-image-convert";
+import { getCanvasContext } from "@aitjcize/epaper-image-convert";
 
 const settingsStore = useSettingsStore();
 
@@ -272,7 +272,7 @@ function extractColorBoxes(ctx, width, height) {
   return palette;
 }
 
-function clusterColors(samples, k) {
+function clusterColors(samples) {
   const groups = [];
   const threshold = 40;
 
