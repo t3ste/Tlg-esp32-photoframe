@@ -1292,44 +1292,49 @@ static esp_err_t config_handler(httpd_req_t *req)
     }
 
     if (req->method == HTTP_GET) {
-        int rotate_interval = config_manager_get_rotate_interval();
-        int image_orientation = config_manager_get_image_orientation();
-        bool auto_rotate = config_manager_get_auto_rotate();
-        bool deep_sleep_enabled = power_manager_get_deep_sleep_enabled();
-        const char *image_url = config_manager_get_image_url();
-        const char *ha_url = config_manager_get_ha_url();
-        rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
-        bool save_downloaded_images = config_manager_get_save_downloaded_images();
-        display_orientation_t display_orientation = config_manager_get_display_orientation();
-        bool sleep_schedule_enabled = config_manager_get_sleep_schedule_enabled();
-        int sleep_schedule_start = config_manager_get_sleep_schedule_start();
-        int sleep_schedule_end = config_manager_get_sleep_schedule_end();
-        const char *device_name = config_manager_get_device_name();
-        const char *timezone = config_manager_get_timezone();
-        const char *access_token = config_manager_get_access_token();
-        const char *http_header_key = config_manager_get_http_header_key();
-        const char *http_header_value = config_manager_get_http_header_value();
-
         cJSON *root = cJSON_CreateObject();
-        cJSON_AddNumberToObject(root, "rotate_interval", rotate_interval);
-        cJSON_AddNumberToObject(root, "image_orientation", image_orientation);
-        cJSON_AddBoolToObject(root, "auto_rotate", auto_rotate);
-        cJSON_AddBoolToObject(root, "deep_sleep_enabled", deep_sleep_enabled);
+        cJSON_AddNumberToObject(root, "image_orientation", config_manager_get_image_orientation());
+        cJSON_AddNumberToObject(root, "rotate_interval", config_manager_get_rotate_interval());
+        cJSON_AddBoolToObject(root, "auto_rotate", config_manager_get_auto_rotate());
+        cJSON_AddBoolToObject(root, "auto_rotate_aligned",
+                              config_manager_get_auto_rotate_aligned());
+        cJSON_AddStringToObject(
+            root, "rotation_mode",
+            config_manager_get_rotation_mode() == ROTATION_MODE_URL ? "url" : "sdcard");
+        cJSON_AddBoolToObject(root, "save_downloaded_images",
+                              config_manager_get_save_downloaded_images());
+        cJSON_AddBoolToObject(root, "deep_sleep_enabled", power_manager_get_deep_sleep_enabled());
+
+        const char *image_url = config_manager_get_image_url();
         cJSON_AddStringToObject(root, "image_url", image_url ? image_url : "");
+
+        const char *ha_url = config_manager_get_ha_url();
         cJSON_AddStringToObject(root, "ha_url", ha_url ? ha_url : "");
-        cJSON_AddStringToObject(root, "rotation_mode",
-                                rotation_mode == ROTATION_MODE_URL ? "url" : "sdcard");
-        cJSON_AddBoolToObject(root, "save_downloaded_images", save_downloaded_images);
+
         cJSON_AddStringToObject(
             root, "display_orientation",
-            display_orientation == DISPLAY_ORIENTATION_LANDSCAPE ? "landscape" : "portrait");
-        cJSON_AddBoolToObject(root, "sleep_schedule_enabled", sleep_schedule_enabled);
-        cJSON_AddNumberToObject(root, "sleep_schedule_start", sleep_schedule_start);
-        cJSON_AddNumberToObject(root, "sleep_schedule_end", sleep_schedule_end);
+            config_manager_get_display_orientation() == DISPLAY_ORIENTATION_LANDSCAPE ? "landscape"
+                                                                                      : "portrait");
+        cJSON_AddBoolToObject(root, "sleep_schedule_enabled",
+                              config_manager_get_sleep_schedule_enabled());
+        cJSON_AddNumberToObject(root, "sleep_schedule_start",
+                                config_manager_get_sleep_schedule_start());
+        cJSON_AddNumberToObject(root, "sleep_schedule_end",
+                                config_manager_get_sleep_schedule_end());
+
+        const char *device_name = config_manager_get_device_name();
         cJSON_AddStringToObject(root, "device_name", device_name ? device_name : "PhotoFrame");
+
+        const char *timezone = config_manager_get_timezone();
         cJSON_AddStringToObject(root, "timezone", timezone ? timezone : "UTC0");
+
+        const char *access_token = config_manager_get_access_token();
         cJSON_AddStringToObject(root, "access_token", access_token ? access_token : "");
+
+        const char *http_header_key = config_manager_get_http_header_key();
         cJSON_AddStringToObject(root, "http_header_key", http_header_key ? http_header_key : "");
+
+        const char *http_header_value = config_manager_get_http_header_value();
         cJSON_AddStringToObject(root, "http_header_value",
                                 http_header_value ? http_header_value : "");
 
@@ -1356,21 +1361,42 @@ static esp_err_t config_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
 
-        cJSON *interval_obj = cJSON_GetObjectItem(root, "rotate_interval");
-        if (interval_obj && cJSON_IsNumber(interval_obj)) {
-            config_manager_set_rotate_interval(interval_obj->valueint);
-            power_manager_reset_rotate_timer();
-        }
-
         cJSON *img_orientation_obj = cJSON_GetObjectItem(root, "image_orientation");
         if (img_orientation_obj && cJSON_IsNumber(img_orientation_obj)) {
             config_manager_set_image_orientation(img_orientation_obj->valueint);
             display_manager_initialize_paint();
         }
 
+        cJSON *interval_obj = cJSON_GetObjectItem(root, "rotate_interval");
+        if (interval_obj && cJSON_IsNumber(interval_obj)) {
+            config_manager_set_rotate_interval(interval_obj->valueint);
+            power_manager_reset_rotate_timer();
+        }
+
         cJSON *auto_rotate_obj = cJSON_GetObjectItem(root, "auto_rotate");
         if (auto_rotate_obj && cJSON_IsBool(auto_rotate_obj)) {
             config_manager_set_auto_rotate(cJSON_IsTrue(auto_rotate_obj));
+            power_manager_reset_rotate_timer();
+        }
+
+        cJSON *auto_rotate_aligned_obj = cJSON_GetObjectItem(root, "auto_rotate_aligned");
+        if (auto_rotate_aligned_obj && cJSON_IsBool(auto_rotate_aligned_obj)) {
+            config_manager_set_auto_rotate_aligned(cJSON_IsTrue(auto_rotate_aligned_obj));
+            power_manager_reset_rotate_timer();
+        }
+
+        cJSON *rotation_mode_obj = cJSON_GetObjectItem(root, "rotation_mode");
+        if (rotation_mode_obj && cJSON_IsString(rotation_mode_obj)) {
+            const char *mode_str = cJSON_GetStringValue(rotation_mode_obj);
+            rotation_mode_t mode =
+                (strcmp(mode_str, "url") == 0) ? ROTATION_MODE_URL : ROTATION_MODE_SDCARD;
+            config_manager_set_rotation_mode(mode);
+        }
+
+        cJSON *save_dl_obj = cJSON_GetObjectItem(root, "save_downloaded_images");
+        if (save_dl_obj && cJSON_IsBool(save_dl_obj)) {
+            bool save_dl = cJSON_IsTrue(save_dl_obj);
+            config_manager_set_save_downloaded_images(save_dl);
         }
 
         cJSON *deep_sleep_obj = cJSON_GetObjectItem(root, "deep_sleep_enabled");
@@ -1388,20 +1414,6 @@ static esp_err_t config_handler(httpd_req_t *req)
         if (ha_url_obj && cJSON_IsString(ha_url_obj)) {
             const char *url = cJSON_GetStringValue(ha_url_obj);
             config_manager_set_ha_url(url);
-        }
-
-        cJSON *rotation_mode_obj = cJSON_GetObjectItem(root, "rotation_mode");
-        if (rotation_mode_obj && cJSON_IsString(rotation_mode_obj)) {
-            const char *mode_str = cJSON_GetStringValue(rotation_mode_obj);
-            rotation_mode_t mode =
-                (strcmp(mode_str, "url") == 0) ? ROTATION_MODE_URL : ROTATION_MODE_SDCARD;
-            config_manager_set_rotation_mode(mode);
-        }
-
-        cJSON *save_dl_obj = cJSON_GetObjectItem(root, "save_downloaded_images");
-        if (save_dl_obj && cJSON_IsBool(save_dl_obj)) {
-            bool save_dl = cJSON_IsTrue(save_dl_obj);
-            config_manager_set_save_downloaded_images(save_dl);
         }
 
         cJSON *display_orient_obj = cJSON_GetObjectItem(root, "display_orientation");

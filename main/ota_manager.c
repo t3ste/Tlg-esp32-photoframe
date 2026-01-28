@@ -22,7 +22,6 @@
 #include "power_manager.h"
 
 static const char *TAG = "ota_manager";
-#define OTA_CHECK_TASK_NAME "ota_check"
 #define OTA_NVS_NAMESPACE "ota"
 #define OTA_NVS_LATEST_VERSION_KEY "latest_ver"
 #define OTA_NVS_STATE_KEY "state"

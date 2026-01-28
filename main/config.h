@@ -65,6 +65,7 @@ typedef enum {
 #define NVS_WIFI_PASS_KEY "wifi_pass"
 #define NVS_ROTATE_INTERVAL_KEY "rotate_int"
 #define NVS_AUTO_ROTATE_KEY "auto_rotate"
+#define NVS_AUTO_ROTATE_ALIGNED_KEY "ar_align"
 #define NVS_IMAGE_ORIENTATION_KEY "image_ori"
 #define NVS_DEEP_SLEEP_KEY "deep_sleep"
 #define NVS_ENABLED_ALBUMS_KEY "enabled_albums"

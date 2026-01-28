@@ -39,8 +39,6 @@
 
 static const char *TAG = "main";
 
-#define SNTP_TASK_NAME "sntp_sync"
-
 // Periodic callback for SNTP sync
 static esp_err_t sntp_sync_periodic_callback(void)
 {

@@ -13,6 +13,7 @@ static char device_name[DEVICE_NAME_MAX_LEN] = {0};
 static int rotate_interval = IMAGE_ROTATE_INTERVAL_SEC;
 static int image_orientation = IMAGE_ORIENTATION_DEG;
 static bool auto_rotate_enabled = false;
+static bool auto_rotate_aligned = true;
 static char image_url[IMAGE_URL_MAX_LEN] = {0};
 static char ha_url[HA_URL_MAX_LEN] = {0};
 static rotation_mode_t rotation_mode = ROTATION_MODE_SDCARD;
@@ -43,6 +44,13 @@ esp_err_t config_manager_init(void)
             auto_rotate_enabled = (stored_enabled != 0);
             ESP_LOGI(TAG, "Loaded auto-rotate enabled from NVS: %s",
                      auto_rotate_enabled ? "yes" : "no");
+        }
+
+        uint8_t stored_aligned = 1;
+        if (nvs_get_u8(nvs_handle, NVS_AUTO_ROTATE_ALIGNED_KEY, &stored_aligned) == ESP_OK) {
+            auto_rotate_aligned = (stored_aligned != 0);
+            ESP_LOGI(TAG, "Loaded auto-rotate aligned from NVS: %s",
+                     auto_rotate_aligned ? "yes" : "no");
         }
 
         int32_t stored_image_orientation = IMAGE_ORIENTATION_DEG;
@@ -174,7 +182,6 @@ esp_err_t config_manager_init(void)
     struct tm utc_timeinfo;
     gmtime_r(&now, &utc_timeinfo);
     int offset_hours = timeinfo.tm_hour - utc_timeinfo.tm_hour;
-    int offset_mins = timeinfo.tm_min - utc_timeinfo.tm_min;
 
     // Handle day boundary crossing
     if (offset_hours > 12)
@@ -265,6 +272,25 @@ void config_manager_set_auto_rotate(bool enabled)
 bool config_manager_get_auto_rotate(void)
 {
     return auto_rotate_enabled;
+}
+
+void config_manager_set_auto_rotate_aligned(bool enabled)
+{
+    auto_rotate_aligned = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_AUTO_ROTATE_ALIGNED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Auto-rotate aligned %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_auto_rotate_aligned(void)
+{
+    return auto_rotate_aligned;
 }
 
 void config_manager_set_image_url(const char *url)

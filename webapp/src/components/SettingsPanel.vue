@@ -219,136 +219,154 @@ async function saveSettings() {
             v-model="settingsStore.deviceSettings.autoRotate"
             label="Enable Auto-Rotate"
             color="primary"
-            class="mb-4"
+            class="mb-2"
+            hide-details
           />
 
-          <v-row>
-            <v-col cols="6" md="3">
-              <v-text-field
-                v-model.number="settingsStore.deviceSettings.rotateHours"
-                label="Hours"
-                type="number"
-                :min="0"
-                :max="23"
-                variant="outlined"
-                :disabled="!settingsStore.deviceSettings.autoRotate"
-              />
-            </v-col>
-            <v-col cols="6" md="3">
-              <v-text-field
-                v-model.number="settingsStore.deviceSettings.rotateMinutes"
-                label="Minutes"
-                type="number"
-                :min="0"
-                :max="59"
-                variant="outlined"
-                :disabled="!settingsStore.deviceSettings.autoRotate"
-              />
-            </v-col>
-          </v-row>
+          <div class="ml-10">
+            <v-row class="mb-0">
+              <v-col cols="6" md="3">
+                <v-text-field
+                  v-model.number="settingsStore.deviceSettings.rotateHours"
+                  label="Hours"
+                  type="number"
+                  :min="0"
+                  :max="23"
+                  variant="outlined"
+                  :disabled="!settingsStore.deviceSettings.autoRotate"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="6" md="3">
+                <v-text-field
+                  v-model.number="settingsStore.deviceSettings.rotateMinutes"
+                  label="Minutes"
+                  type="number"
+                  :min="0"
+                  :max="59"
+                  variant="outlined"
+                  :disabled="!settingsStore.deviceSettings.autoRotate"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
 
-          <v-alert type="info" variant="tonal" density="compact" class="mb-4">
-            Rotation aligns to clock boundaries. 1 hour rotates at 1:00, 2:00, etc.
-          </v-alert>
-
-          <v-select
-            v-model="settingsStore.deviceSettings.rotationMode"
-            :items="rotationModeOptions"
-            item-title="title"
-            item-value="value"
-            label="Rotation Mode"
-            variant="outlined"
-            class="mb-4"
-            :disabled="!settingsStore.deviceSettings.autoRotate"
-          />
-
-          <v-expand-transition>
-            <v-card
-              v-if="settingsStore.deviceSettings.rotationMode === 'url'"
+            <v-checkbox
+              v-model="settingsStore.deviceSettings.autoRotateAligned"
+              label="Align rotation to clock boundaries"
+              hide-details
+              class="mb-0 ml-2"
+              :disabled="!settingsStore.deviceSettings.autoRotate"
+            />
+            <v-alert
+              v-if="settingsStore.deviceSettings.autoRotateAligned"
+              type="info"
               variant="tonal"
-              class="mb-4"
+              density="compact"
             >
-              <v-card-text>
-                <v-text-field
-                  v-model="settingsStore.deviceSettings.imageUrl"
-                  label="Image URL"
-                  variant="outlined"
-                  hint="Default provides random images"
-                  persistent-hint
-                  class="mb-4"
-                />
+              Rotation aligns to clock boundaries. 1 hour rotates at 1:00, 2:00, etc.
+            </v-alert>
 
-                <v-checkbox
-                  v-model="settingsStore.deviceSettings.saveDownloadedImages"
-                  label="Save downloaded images to Downloads album"
-                  color="primary"
-                />
+            <v-select
+              v-model="settingsStore.deviceSettings.rotationMode"
+              :items="rotationModeOptions"
+              item-title="title"
+              item-value="value"
+              label="Rotation Mode"
+              variant="outlined"
+              class="mt-8 mb-4"
+              :disabled="!settingsStore.deviceSettings.autoRotate"
+            />
 
-                <v-text-field
-                  v-model="settingsStore.deviceSettings.accessToken"
-                  label="Access Token (Optional)"
-                  variant="outlined"
-                  hint="Sets Authorization: Bearer header"
-                  persistent-hint
-                  class="mt-4"
-                />
+            <v-expand-transition>
+              <v-card
+                v-if="settingsStore.deviceSettings.rotationMode === 'url'"
+                variant="tonal"
+                class="mb-4"
+              >
+                <v-card-text>
+                  <v-text-field
+                    v-model="settingsStore.deviceSettings.imageUrl"
+                    label="Image URL"
+                    variant="outlined"
+                    hide-details
+                    class="mb-4"
+                  />
 
-                <v-row class="mt-4">
-                  <v-col cols="12" md="6">
-                    <v-text-field
-                      v-model="settingsStore.deviceSettings.httpHeaderKey"
-                      label="Custom Header Name"
-                      variant="outlined"
-                      placeholder="e.g., X-API-Key"
-                    />
-                  </v-col>
-                  <v-col cols="12" md="6">
-                    <v-text-field
-                      v-model="settingsStore.deviceSettings.httpHeaderValue"
-                      label="Custom Header Value"
-                      variant="outlined"
-                    />
-                  </v-col>
-                </v-row>
-              </v-card-text>
-            </v-card>
-          </v-expand-transition>
+                  <v-checkbox
+                    v-model="settingsStore.deviceSettings.saveDownloadedImages"
+                    label="Save downloaded images to Downloads album"
+                    color="primary"
+                    class="mb-8"
+                    hide-details
+                  />
+
+                  <v-text-field
+                    v-model="settingsStore.deviceSettings.accessToken"
+                    label="Access Token (Optional)"
+                    variant="outlined"
+                    hint="Sets Authorization: Bearer header"
+                    persistent-hint
+                    class="mt-4"
+                  />
+
+                  <v-row class="mt-4">
+                    <v-col cols="12" md="6">
+                      <v-text-field
+                        v-model="settingsStore.deviceSettings.httpHeaderKey"
+                        label="Custom Header Name"
+                        variant="outlined"
+                        placeholder="e.g., X-API-Key"
+                      />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <v-text-field
+                        v-model="settingsStore.deviceSettings.httpHeaderValue"
+                        label="Custom Header Value"
+                        variant="outlined"
+                      />
+                    </v-col>
+                  </v-row>
+                </v-card-text>
+              </v-card>
+            </v-expand-transition>
+          </div>
 
           <v-divider class="my-4" />
-
-          <h3 class="text-subtitle-1 mb-4">Sleep Schedule</h3>
 
           <v-switch
             v-model="settingsStore.deviceSettings.sleepScheduleEnabled"
             label="Enable Sleep Schedule"
             color="primary"
-            class="mb-4"
+            class="mb-2"
+            hide-details
           />
+          <div class="ml-10">
+            <v-row>
+              <v-col cols="6" md="3">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.sleepScheduleStart"
+                  label="From"
+                  type="time"
+                  variant="outlined"
+                  :disabled="!settingsStore.deviceSettings.sleepScheduleEnabled"
+                />
+              </v-col>
+              <v-col cols="6" md="3">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.sleepScheduleEnd"
+                  label="To"
+                  type="time"
+                  variant="outlined"
+                  :disabled="!settingsStore.deviceSettings.sleepScheduleEnabled"
+                />
+              </v-col>
+            </v-row>
 
-          <v-row>
-            <v-col cols="6" md="3">
-              <v-text-field
-                v-model="settingsStore.deviceSettings.sleepScheduleStart"
-                label="From"
-                type="time"
-                variant="outlined"
-                :disabled="!settingsStore.deviceSettings.sleepScheduleEnabled"
-              />
-            </v-col>
-            <v-col cols="6" md="3">
-              <v-text-field
-                v-model="settingsStore.deviceSettings.sleepScheduleEnd"
-                label="To"
-                type="time"
-                variant="outlined"
-                :disabled="!settingsStore.deviceSettings.sleepScheduleEnabled"
-              />
-            </v-col>
-          </v-row>
-
-          <v-alert type="info" variant="tonal" density="compact">
-            Images won't rotate during this period. Useful for night hours.
-          </v-alert>
+            <v-alert type="info" variant="tonal" density="compact">
+              Images won't rotate during this period. Useful for night hours.
+            </v-alert>
+          </div>
         </v-tabs-window-item>
 
         <!-- Power Tab -->

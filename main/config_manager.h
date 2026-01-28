@@ -17,6 +17,9 @@ int config_manager_get_rotate_interval(void);
 void config_manager_set_auto_rotate(bool enabled);
 bool config_manager_get_auto_rotate(void);
 
+void config_manager_set_auto_rotate_aligned(bool enabled);
+bool config_manager_get_auto_rotate_aligned(void);
+
 void config_manager_set_image_orientation(int orientation);
 int config_manager_get_image_orientation(void);
 

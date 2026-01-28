@@ -6,9 +6,9 @@
 
 #include "esp_err.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+// Periodic tasks names
+#define SNTP_TASK_NAME "sntp_sync"
+#define OTA_CHECK_TASK_NAME "ota_check"
 
 /**
  * @brief Periodic task callback function type
@@ -76,9 +76,5 @@ esp_err_t periodic_tasks_get_last_run(const char *task_name, int64_t *last_run_t
  * @return ESP_OK on success, error code on failure
  */
 esp_err_t periodic_tasks_force_run(const char *task_name);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif  // PERIODIC_TASKS_H

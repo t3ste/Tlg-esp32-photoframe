@@ -30,6 +30,7 @@ export const useSettingsStore = defineStore("settings", () => {
     timezoneOffset: 0,
     // Auto rotate
     autoRotate: true,
+    autoRotateAligned: true,
     rotateHours: 1,
     rotateMinutes: 0,
     rotationMode: "sdcard",
@@ -152,6 +153,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
       // Parse config into UI-friendly format
       deviceSettings.value.autoRotate = data.auto_rotate || false;
+      deviceSettings.value.autoRotateAligned = data.auto_rotate_aligned !== false;
 
       // Convert seconds to hours and minutes
       const rotateIntervalSeconds = data.rotate_interval || 3600;
@@ -230,6 +232,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
     const currentConfig = {
       auto_rotate: deviceSettings.value.autoRotate,
+      auto_rotate_aligned: deviceSettings.value.autoRotateAligned,
       rotate_interval: rotateInterval,
       image_orientation: deviceSettings.value.imageOrientation,
       rotation_mode: deviceSettings.value.rotationMode,
