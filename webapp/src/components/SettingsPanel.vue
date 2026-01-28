@@ -9,14 +9,28 @@ const settingsStore = useSettingsStore();
 // Device time state
 const deviceTime = ref("");
 const syncingTime = ref(false);
-let timeInterval = null;
+let deviceTimestamp = null; // Unix timestamp from device
+let localTimeOffset = 0; // Offset between device time and local time
+let tickInterval = null;
+
+function updateDisplayTime() {
+  if (deviceTimestamp === null) return;
+  // Calculate current device time based on elapsed local time
+  const elapsed = Math.floor((Date.now() - localTimeOffset) / 1000);
+  const currentTimestamp = deviceTimestamp + elapsed;
+  const date = new Date(currentTimestamp * 1000);
+  // Format as YYYY-MM-DD HH:MM:SS (ISO format without timezone)
+  deviceTime.value = date.toISOString().slice(0, 19).replace("T", " ");
+}
 
 async function fetchDeviceTime() {
   try {
     const response = await fetch("/api/time");
     if (response.ok) {
       const data = await response.json();
-      deviceTime.value = data.time;
+      deviceTimestamp = data.timestamp;
+      localTimeOffset = Date.now();
+      updateDisplayTime();
     }
   } catch (error) {
     console.error("Failed to fetch device time:", error);
@@ -30,7 +44,9 @@ async function syncTime() {
     if (response.ok) {
       const data = await response.json();
       if (data.status === "success") {
-        deviceTime.value = data.time;
+        deviceTimestamp = data.timestamp;
+        localTimeOffset = Date.now();
+        updateDisplayTime();
       }
     }
   } catch (error) {
@@ -42,13 +58,13 @@ async function syncTime() {
 
 onMounted(() => {
   fetchDeviceTime();
-  // Update time every 10 seconds
-  timeInterval = setInterval(fetchDeviceTime, 10000);
+  // Tick every second to update display
+  tickInterval = setInterval(updateDisplayTime, 1000);
 });
 
 onUnmounted(() => {
-  if (timeInterval) {
-    clearInterval(timeInterval);
+  if (tickInterval) {
+    clearInterval(tickInterval);
   }
 });
 
