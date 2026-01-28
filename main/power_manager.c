@@ -305,8 +305,10 @@ void power_manager_reset_sleep_timer(void)
 void power_manager_reset_rotate_timer(void)
 {
     int rotate_interval = config_manager_get_rotate_interval();
-    next_rotation_time = esp_timer_get_time() + (rotate_interval * 1000000LL);
-    ESP_LOGI(TAG, "Rotation timer reset, next rotation in %d seconds", rotate_interval);
+    int seconds_until_next = calculate_next_aligned_wakeup(rotate_interval);
+    next_rotation_time = esp_timer_get_time() + (seconds_until_next * 1000000LL);
+    ESP_LOGI(TAG, "Rotation timer reset, next rotation in %d seconds (clock-aligned)",
+             seconds_until_next);
 }
 
 bool power_manager_is_timer_wakeup(void)
