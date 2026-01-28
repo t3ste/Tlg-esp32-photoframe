@@ -1,10 +1,56 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { getDitherOptions, getPresetOptions } from "@aitjcize/epaper-image-convert";
 import { useSettingsStore } from "../stores";
 import PaletteCalibration from "./PaletteCalibration.vue";
 
 const settingsStore = useSettingsStore();
+
+// Device time state
+const deviceTime = ref("");
+const syncingTime = ref(false);
+let timeInterval = null;
+
+async function fetchDeviceTime() {
+  try {
+    const response = await fetch("/api/time");
+    if (response.ok) {
+      const data = await response.json();
+      deviceTime.value = data.time;
+    }
+  } catch (error) {
+    console.error("Failed to fetch device time:", error);
+  }
+}
+
+async function syncTime() {
+  syncingTime.value = true;
+  try {
+    const response = await fetch("/api/time/sync", { method: "POST" });
+    if (response.ok) {
+      const data = await response.json();
+      if (data.status === "success") {
+        deviceTime.value = data.time;
+      }
+    }
+  } catch (error) {
+    console.error("Failed to sync time:", error);
+  } finally {
+    syncingTime.value = false;
+  }
+}
+
+onMounted(() => {
+  fetchDeviceTime();
+  // Update time every 10 seconds
+  timeInterval = setInterval(fetchDeviceTime, 10000);
+});
+
+onUnmounted(() => {
+  if (timeInterval) {
+    clearInterval(timeInterval);
+  }
+});
 
 const tab = computed({
   get: () => settingsStore.activeSettingsTab,
@@ -65,6 +111,9 @@ async function saveSettings() {
     saveSuccess.value = true;
     saveMessage.value = deviceResult.message || "Settings saved!";
     setTimeout(() => (saveSuccess.value = false), 3000);
+
+    // Refresh device time in case timezone changed
+    await fetchDeviceTime();
   }
 }
 </script>
@@ -95,11 +144,13 @@ async function saveSettings() {
                 v-model="settingsStore.deviceSettings.deviceName"
                 label="Device Name"
                 variant="outlined"
-                hint="Used for mDNS hostname (e.g., 'Living Room' → living-room.local)"
+                hint="Used for mDNS hostname (e.g., 'Living Room Frame' → living-room-frame.local)"
                 persistent-hint
               />
             </v-col>
+          </v-row>
 
+          <v-row>
             <v-col cols="12" md="6">
               <v-select
                 v-model="settingsStore.deviceSettings.displayOrientation"
@@ -113,6 +164,23 @@ async function saveSettings() {
           </v-row>
 
           <v-row>
+            <v-col cols="12" md="6">
+              <v-text-field
+                :model-value="deviceTime || 'Loading...'"
+                label="Device Time"
+                variant="outlined"
+                readonly
+                hint="Click sync to update from NTP server"
+                persistent-hint
+              >
+                <template #append-inner>
+                  <v-btn icon variant="text" size="small" :loading="syncingTime" @click="syncTime">
+                    <v-icon>mdi-sync</v-icon>
+                    <v-tooltip activator="parent" location="top">Sync NTP</v-tooltip>
+                  </v-btn>
+                </template>
+              </v-text-field>
+            </v-col>
             <v-col cols="12" md="6">
               <v-text-field
                 v-model.number="settingsStore.deviceSettings.timezoneOffset"

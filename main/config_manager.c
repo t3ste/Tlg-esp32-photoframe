@@ -182,8 +182,6 @@ esp_err_t config_manager_init(void)
     if (offset_hours < -12)
         offset_hours += 24;
 
-    ESP_LOGI(TAG, "System time: %s (UTC%+d:%02d)", strftime_buf, offset_hours, abs(offset_mins));
-
     ESP_LOGI(TAG, "Config manager initialized");
     return ESP_OK;
 }

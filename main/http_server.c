@@ -23,6 +23,7 @@
 #include "image_processor.h"
 #include "mdns_service.h"
 #include "ota_manager.h"
+#include "periodic_tasks.h"
 #include "power_manager.h"
 #include "processing_settings.h"
 #include "shtc3_sensor.h"
@@ -2106,6 +2107,86 @@ static esp_err_t processing_settings_handler(httpd_req_t *req)
     return ESP_FAIL;
 }
 
+static esp_err_t time_handler(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET) {
+        // Return current device time
+        time_t now;
+        struct tm timeinfo;
+        time(&now);
+        localtime_r(&now, &timeinfo);
+
+        char time_str[64];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &timeinfo);
+
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "time", time_str);
+        cJSON_AddNumberToObject(response, "timestamp", (double) now);
+
+        char *json_str = cJSON_Print(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, json_str);
+
+        free(json_str);
+        cJSON_Delete(response);
+        return ESP_OK;
+    }
+
+    httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+    return ESP_FAIL;
+}
+
+static esp_err_t time_sync_handler(httpd_req_t *req)
+{
+    if (req->method == HTTP_POST) {
+        ESP_LOGI(TAG, "Manual NTP sync requested");
+
+        // Force SNTP sync
+        esp_err_t err = periodic_tasks_force_run("sntp_sync");
+        if (err != ESP_OK) {
+            cJSON *response = cJSON_CreateObject();
+            cJSON_AddStringToObject(response, "status", "error");
+            cJSON_AddStringToObject(response, "message", "Failed to trigger NTP sync");
+
+            char *json_str = cJSON_Print(response);
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_sendstr(req, json_str);
+
+            free(json_str);
+            cJSON_Delete(response);
+            return ESP_OK;
+        }
+
+        // Run the sync immediately
+        periodic_tasks_check_and_run();
+
+        // Get the new time
+        time_t now;
+        struct tm timeinfo;
+        time(&now);
+        localtime_r(&now, &timeinfo);
+
+        char time_str[64];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &timeinfo);
+
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "status", "success");
+        cJSON_AddStringToObject(response, "time", time_str);
+        cJSON_AddNumberToObject(response, "timestamp", (double) now);
+
+        char *json_str = cJSON_Print(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, json_str);
+
+        free(json_str);
+        cJSON_Delete(response);
+        return ESP_OK;
+    }
+
+    httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+    return ESP_FAIL;
+}
+
 static esp_err_t color_palette_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET) {
@@ -2408,6 +2489,16 @@ esp_err_t http_server_init(void)
                                    .handler = version_handler,
                                    .user_ctx = NULL};
         httpd_register_uri_handler(server, &version_uri);
+
+        httpd_uri_t time_uri = {
+            .uri = "/api/time", .method = HTTP_GET, .handler = time_handler, .user_ctx = NULL};
+        httpd_register_uri_handler(server, &time_uri);
+
+        httpd_uri_t time_sync_uri = {.uri = "/api/time/sync",
+                                     .method = HTTP_POST,
+                                     .handler = time_sync_handler,
+                                     .user_ctx = NULL};
+        httpd_register_uri_handler(server, &time_sync_uri);
 
         httpd_uri_t ota_status_uri = {.uri = "/api/ota/status",
                                       .method = HTTP_GET,
