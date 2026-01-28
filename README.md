@@ -93,7 +93,7 @@ Configure via web interface **Settings** section.
 
 ### Web Flasher (Easiest) ⚡
 
-**[🌐 Flash from Browser](https://aitjcize.github.io/esp32-photoframe/)** - Chrome/Edge/Opera required
+**[🌐 Flash from Browser](https://aitjcize.github.io/esp32-photoframe/#flash)** - Chrome/Edge/Opera required
 
 ### Manual Flash
 

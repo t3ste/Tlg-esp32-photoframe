@@ -103,7 +103,7 @@ jobs:
           ### 🌐 Web Flasher (Easiest)
 
           Flash directly from your browser (Chrome/Edge/Opera required):
-          **[https://aitjcize.github.io/esp32-photoframe/](https://aitjcize.github.io/esp32-photoframe/)**
+          **[https://aitjcize.github.io/esp32-photoframe/#flash](https://aitjcize.github.io/esp32-photoframe/)**
 
           ### 📦 Manually
           `photoframe-firmware-merged.bin` - Single file containing bootloader, partition table, and application
