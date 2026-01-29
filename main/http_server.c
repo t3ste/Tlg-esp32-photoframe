@@ -1719,7 +1719,8 @@ static esp_err_t album_images_handler(httpd_req_t *req)
     url_decode(decoded_album_name, album_name, sizeof(decoded_album_name));
 
     char album_path[256];
-    if (album_manager_get_album_path(decoded_album_name, album_path, sizeof(album_path)) != ESP_OK) {
+    if (album_manager_get_album_path(decoded_album_name, album_path, sizeof(album_path)) !=
+        ESP_OK) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid album");
         return ESP_FAIL;
     }
