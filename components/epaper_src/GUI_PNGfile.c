@@ -100,38 +100,26 @@ UBYTE GUI_ReadPng_RGB_6Color(const char *path, UWORD Xstart, UWORD Ystart)
     // Get actual row bytes after transformations
     size_t rowbytes = png_get_rowbytes(png_ptr, info_ptr);
 
-    // Allocate row pointers
-    row_pointers = malloc(sizeof(png_bytep) * height);
-    if (!row_pointers) {
-        ESP_LOGE(TAG, "Failed to allocate row pointers");
-        goto cleanup;
-    }
-
-    // Allocate RGB buffer
-    size_t rgb_size = rowbytes * height;
+    // Allocate RGB buffer for one row
+    size_t rgb_size = rowbytes;
     rgb_buffer = heap_caps_malloc(rgb_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!rgb_buffer) {
         ESP_LOGE(TAG, "Failed to allocate RGB buffer (%zu bytes)", rgb_size);
         goto cleanup;
     }
 
+    // Process image row by row
+    ESP_LOGI(TAG, "PNG decoded successfully (stream processing)");
+
     for (int y = 0; y < height; y++) {
-        row_pointers[y] = (png_bytep) (rgb_buffer + (y * rowbytes));
-    }
+        png_read_row(png_ptr, (png_bytep) rgb_buffer, NULL);
 
-    // Read image data
-    png_read_image(png_ptr, row_pointers);
-
-    ESP_LOGI(TAG, "PNG decoded successfully");
-
-    // Convert RGB to 6-color palette and paint directly to display
-    for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             if (x >= Paint.Width || y >= Paint.Height) {
                 continue;
             }
 
-            int offset = (y * rowbytes) + (x * 3);
+            int offset = x * 3;  // 3 bytes per pixel (RGB)
             uint8_t r = rgb_buffer[offset + 0];
             uint8_t g = rgb_buffer[offset + 1];
             uint8_t b = rgb_buffer[offset + 2];
@@ -160,7 +148,6 @@ UBYTE GUI_ReadPng_RGB_6Color(const char *path, UWORD Xstart, UWORD Ystart)
     }
 
     heap_caps_free(rgb_buffer);
-    free(row_pointers);
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     fclose(fp);
 

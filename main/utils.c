@@ -6,7 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "axp_prot.h"
+#include "board_hal.h"
 #include "cJSON.h"
 #include "config.h"
 #include "config_manager.h"
@@ -64,7 +64,7 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
     const char *temp_jpg_path = CURRENT_JPG_PATH;
     const char *temp_upload_path = CURRENT_UPLOAD_PATH;
     const char *temp_bmp_path = CURRENT_BMP_PATH;
-    const char *temp_png_path = "/sdcard/.current.png";
+    const char *temp_png_path = CURRENT_PNG_PATH;
 
     esp_err_t err = ESP_FAIL;
     int status_code = 0;
@@ -149,6 +149,14 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
                 ESP_LOGI(TAG, "Added custom HTTP header: %s", header_key);
             }
         }
+
+        // Add display resolution headers
+        char width_str[16];
+        char height_str[16];
+        snprintf(width_str, sizeof(width_str), "%d", board_hal_get_display_width());
+        snprintf(height_str, sizeof(height_str), "%d", board_hal_get_display_height());
+        esp_http_client_set_header(client, "X-Display-Width", width_str);
+        esp_http_client_set_header(client, "X-Display-Height", height_str);
 
         err = esp_http_client_perform(client);
 
@@ -305,6 +313,7 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
         free(thumbnail_url_buffer);
     }
 
+#ifdef CONFIG_HAS_SDCARD
     // Check if we should save downloaded images
     bool save_images = config_manager_get_save_downloaded_images();
 
@@ -410,7 +419,9 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
 
         // Return the saved image path via output parameter
         snprintf(saved_bmp_path, path_size, "%s", final_image_path);
-    } else {
+    } else
+#endif
+    {
         // Just use temp path without saving to album
         ESP_LOGI(TAG, "Displaying image without saving (save_downloaded_images disabled)");
         snprintf(saved_bmp_path, path_size, "%s", final_path);
@@ -469,8 +480,10 @@ esp_err_t trigger_image_rotation(void)
             display_manager_show_image(saved_bmp_path);
             result = ESP_OK;
         } else {
+#ifdef CONFIG_HAS_SDCARD
             ESP_LOGE(TAG, "Failed to download image from URL, falling back to SD card rotation");
             display_manager_rotate_from_sdcard();
+#endif
             result = ESP_FAIL;
         }
     } else {
@@ -489,11 +502,11 @@ cJSON *create_battery_json(void)
         return NULL;
     }
 
-    int battery_percent = axp_get_battery_percent();
-    int battery_voltage = axp_get_battery_voltage();
-    bool is_charging = axp_is_charging();
-    bool usb_connected = axp_is_usb_connected();
-    bool battery_connected = axp_is_battery_connected();
+    int battery_percent = board_hal_get_battery_percent();
+    int battery_voltage = board_hal_get_battery_voltage();
+    bool is_charging = board_hal_is_charging();
+    bool usb_connected = board_hal_is_usb_connected();
+    bool battery_connected = board_hal_is_battery_connected();
 
     cJSON_AddNumberToObject(json, "battery_level", battery_percent);
     cJSON_AddNumberToObject(json, "battery_voltage", battery_voltage);

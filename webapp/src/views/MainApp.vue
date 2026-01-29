@@ -14,6 +14,7 @@ onMounted(async () => {
   await Promise.all([
     appStore.loadBatteryStatus(),
     appStore.loadAlbums(),
+    appStore.loadSystemInfo(),
     settingsStore.loadSettings(),
     settingsStore.loadDeviceSettings(),
     settingsStore.loadPalette(),
@@ -31,7 +32,7 @@ onMounted(async () => {
 
     <v-main class="bg-grey-lighten-4">
       <v-container class="py-6" style="max-width: 1200px">
-        <AlbumGallery />
+        <AlbumGallery v-if="appStore.systemInfo.has_sdcard" />
 
         <ImageUpload class="mt-6" />
 
@@ -42,7 +43,9 @@ onMounted(async () => {
     </v-main>
 
     <v-footer app class="text-center d-flex justify-center">
-      <span class="text-body-2 text-grey">ESP32-S3 PhotoFrame v1.0</span>
+      <span class="text-body-2 text-grey">
+        {{ appStore.systemInfo.project_name }} {{ appStore.systemInfo.version }}
+      </span>
     </v-footer>
   </v-app>
 </template>

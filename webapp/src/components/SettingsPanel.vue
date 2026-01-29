@@ -1,10 +1,11 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { getDitherOptions, getPresetOptions } from "@aitjcize/epaper-image-convert";
-import { useSettingsStore } from "../stores";
+import { useSettingsStore, useAppStore } from "../stores";
 import PaletteCalibration from "./PaletteCalibration.vue";
 
 const settingsStore = useSettingsStore();
+const appStore = useAppStore();
 
 // Device time state
 const deviceTime = ref("");
@@ -73,15 +74,32 @@ const tab = computed({
   set: (val) => (settingsStore.activeSettingsTab = val),
 });
 
-const orientationOptions = [
-  { title: "Landscape (800×480)", value: "landscape" },
-  { title: "Portrait (480×800)", value: "portrait" },
+const orientationOptions = computed(() => {
+  const width = appStore.systemInfo.width || 800;
+  const height = appStore.systemInfo.height || 480;
+  const maxDim = Math.max(width, height);
+  const minDim = Math.min(width, height);
+
+  return [
+    { title: `Landscape (${maxDim}×${minDim})`, value: "landscape" },
+    { title: `Portrait (${minDim}×${maxDim})`, value: "portrait" },
+  ];
+});
+
+const rotationOptions = [
+  { title: "0°", value: 0 },
+  { title: "90°", value: 90 },
+  { title: "180°", value: 180 },
+  { title: "270°", value: 270 },
 ];
 
-const rotationModeOptions = [
-  { title: "SD Card - Rotate through images", value: "sdcard" },
-  { title: "URL - Fetch image from URL", value: "url" },
-];
+const rotationModeOptions = computed(() => {
+  const options = [{ title: "URL - Fetch image from URL", value: "url" }];
+  if (appStore.systemInfo.has_sdcard) {
+    options.unshift({ title: "SD Card - Rotate through images", value: "sdcard" });
+  }
+  return options;
+});
 const saving = ref(false);
 const saveSuccess = ref(false);
 
@@ -174,6 +192,16 @@ async function saveSettings() {
                 item-title="title"
                 item-value="value"
                 label="Display Orientation"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-select
+                v-model="settingsStore.deviceSettings.imageOrientation"
+                :items="rotationOptions"
+                item-title="title"
+                item-value="value"
+                label="Display Rotation"
                 variant="outlined"
               />
             </v-col>
@@ -294,6 +322,7 @@ async function saveSettings() {
                   />
 
                   <v-checkbox
+                    v-if="appStore.systemInfo.has_sdcard"
                     v-model="settingsStore.deviceSettings.saveDownloadedImages"
                     label="Save downloaded images to Downloads album"
                     color="primary"

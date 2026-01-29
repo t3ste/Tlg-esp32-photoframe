@@ -14,8 +14,9 @@ Color Index
 #define EPD_7IN3E_BLUE 0x5
 #define EPD_7IN3E_GREEN 0x6
 
-#define EXAMPLE_LCD_WIDTH 800
-#define EXAMPLE_LCD_HEIGHT 480
+// Resolution APIs
+uint16_t epaper_get_width(void);
+uint16_t epaper_get_height(void);
 
 /**********************************
 Color Index

@@ -1,10 +1,10 @@
-#include "epaper_port.h"
-
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "epaper_port.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 
@@ -52,6 +52,18 @@ static void epaper_gpio_init(void)
 /*
   Ink screen reset
 */
+
+// Resolution
+// 800x480 for 7.3 inch WaveShare
+uint16_t epaper_get_width(void)
+{
+    return 800;
+}
+uint16_t epaper_get_height(void)
+{
+    return 480;
+}
+
 static void epaper_reset(void)
 {
     epaper_rst_1;
@@ -71,7 +83,7 @@ static void epaper_spi_init(void)
     buscfg.sclk_io_num = EPD_SCK_PIN;
     buscfg.quadwp_io_num = -1;
     buscfg.quadhd_io_num = -1;
-    buscfg.max_transfer_sz = EXAMPLE_LCD_WIDTH * EXAMPLE_LCD_HEIGHT;
+    buscfg.max_transfer_sz = epaper_get_width() * epaper_get_height();
     spi_device_interface_config_t devcfg = {};
     devcfg.spics_io_num = -1;
     devcfg.clock_speed_hz = 10 * 1000 * 1000;  // Clock out at 10 MHz
@@ -297,8 +309,9 @@ clear screen
 void epaper_port_clear(uint8_t *Image, uint8_t color)
 {
     uint16_t Width, Height;
-    Width = (EXAMPLE_LCD_WIDTH % 2 == 0) ? (EXAMPLE_LCD_WIDTH / 2) : (EXAMPLE_LCD_WIDTH / 2 + 1);
-    Height = EXAMPLE_LCD_HEIGHT;
+    uint16_t lcd_width = epaper_get_width();
+    Width = (lcd_width % 2 == 0) ? (lcd_width / 2) : (lcd_width / 2 + 1);
+    Height = epaper_get_height();
 
     epaper_SendCommand(0x10);
     for (int j = 0; j < Height * Width; j++) {
@@ -314,8 +327,9 @@ display
 void epaper_port_display(uint8_t *Image)
 {
     uint16_t Width, Height;
-    Width = (EXAMPLE_LCD_WIDTH % 2 == 0) ? (EXAMPLE_LCD_WIDTH / 2) : (EXAMPLE_LCD_WIDTH / 2 + 1);
-    Height = EXAMPLE_LCD_HEIGHT;
+    uint16_t lcd_width = epaper_get_width();
+    Width = (lcd_width % 2 == 0) ? (lcd_width / 2) : (lcd_width / 2 + 1);
+    Height = epaper_get_height();
 
     ESP_LOGI("epaper_port", "Starting display update: %d x %d = %d bytes", Width, Height,
              Height * Width);

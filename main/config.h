@@ -42,13 +42,23 @@ typedef enum {
 #define IMAGE_DIRECTORY "/sdcard/images"
 #define DEFAULT_ALBUM_NAME "Default"
 
-#define CURRENT_UPLOAD_PATH "/sdcard/.current.tmp"
-#define CURRENT_JPG_PATH "/sdcard/.current.jpg"
-#define CURRENT_BMP_PATH "/sdcard/.current.bmp"
-#define CURRENT_IMAGE_LINK "/sdcard/.current.lnk"
+#include "board_hal.h"
 
-#define DISPLAY_WIDTH 800
-#define DISPLAY_HEIGHT 480
+#ifdef CONFIG_HAS_SDCARD
+#define TEMP_MOUNT_POINT "/sdcard"
+#else
+#define TEMP_MOUNT_POINT "/ram"
+#endif
+
+#define CURRENT_UPLOAD_PATH TEMP_MOUNT_POINT "/.current.tmp"
+#define CURRENT_JPG_PATH TEMP_MOUNT_POINT "/.current.jpg"
+#define CURRENT_BMP_PATH TEMP_MOUNT_POINT "/.current.bmp"
+#define CURRENT_PNG_PATH TEMP_MOUNT_POINT "/.current.png"
+#define CURRENT_IMAGE_LINK TEMP_MOUNT_POINT "/.current.lnk"
+#define CURRENT_CALIBRATION_PATH TEMP_MOUNT_POINT "/.calibration.png"
+
+#define DISPLAY_WIDTH board_hal_get_display_width()
+#define DISPLAY_HEIGHT board_hal_get_display_height()
 
 #ifdef DEBUG_DEEP_SLEEP_WAKE
 #define AUTO_SLEEP_TIMEOUT_SEC 60
@@ -57,7 +67,9 @@ typedef enum {
 #endif
 
 #define IMAGE_ROTATE_INTERVAL_SEC 3600
-#define IMAGE_ORIENTATION_DEG 180
+
+// Use Board HAL to get default orientation
+#define IMAGE_ORIENTATION_DEG board_hal_get_display_rotation()
 
 #define NVS_NAMESPACE "photoframe"
 #define NVS_DEVICE_NAME_KEY "device_name"

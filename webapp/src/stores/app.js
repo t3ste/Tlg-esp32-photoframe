@@ -12,10 +12,21 @@ export const useAppStore = defineStore("app", () => {
     voltage: 0,
     charging: false,
   });
+  const systemInfo = ref({
+    width: 800,
+    height: 480,
+    has_sdcard: false,
+    version: "v1.0",
+    project_name: "PhotoFrame",
+    compile_time: "",
+    compile_date: "",
+    idf_version: "",
+  });
   const loading = ref({
     albums: false,
     images: false,
     battery: false,
+    systemInfo: false,
   });
 
   // API base URL (empty for same-origin)
@@ -54,6 +65,10 @@ export const useAppStore = defineStore("app", () => {
   async function loadAlbums() {
     loading.value.albums = true;
     try {
+      if (!systemInfo.value.has_sdcard) {
+        albums.value = [{ name: "Default", enabled: true, image_count: 0 }];
+        return;
+      }
       const response = await fetch(`${API_BASE}/api/albums`);
       if (!response.ok || response.headers.get("content-type")?.includes("text/html")) {
         albums.value = [{ name: "Default", enabled: true, image_count: 0 }];
@@ -71,6 +86,10 @@ export const useAppStore = defineStore("app", () => {
   async function loadImages(albumName) {
     loading.value.images = true;
     try {
+      if (!systemInfo.value.has_sdcard) {
+        images.value = [];
+        return;
+      }
       const response = await fetch(`${API_BASE}/api/images?album=${encodeURIComponent(albumName)}`);
       if (!response.ok || response.headers.get("content-type")?.includes("text/html")) {
         images.value = [];
@@ -199,12 +218,27 @@ export const useAppStore = defineStore("app", () => {
     }
   }
 
+  async function loadSystemInfo() {
+    loading.value.systemInfo = true;
+    try {
+      const response = await fetch(`${API_BASE}/api/system-info`);
+      if (response.ok) {
+        systemInfo.value = await response.json();
+      }
+    } catch (error) {
+      console.error("Failed to load system info:", error);
+    } finally {
+      loading.value.systemInfo = false;
+    }
+  }
+
   return {
     // State
     albums,
     selectedAlbum,
     images,
     battery,
+    systemInfo,
     loading,
     // Getters
     sortedAlbums,
@@ -221,5 +255,6 @@ export const useAppStore = defineStore("app", () => {
     displayImage,
     enterSleep,
     rotateNow,
+    loadSystemInfo,
   };
 });

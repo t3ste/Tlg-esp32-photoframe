@@ -5,37 +5,38 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "album_manager.h"
-#include "axp_prot.h"
+#include "board_hal.h"
 #include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
 #include "display_manager.h"
 #include "driver/gpio.h"
-#include "driver/sdmmc_host.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_sntp.h"
 #include "esp_system.h"
-#include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_integration.h"
 #include "http_server.h"
-#include "i2c_bsp.h"
 #include "image_processor.h"
 #include "mdns_service.h"
+#include "memfs.h"
 #include "nvs_flash.h"
 #include "ota_manager.h"
-#include "pcf85063_rtc.h"
 #include "periodic_tasks.h"
 #include "power_manager.h"
 #include "processing_settings.h"
-#include "sdmmc_cmd.h"
-#include "shtc3_sensor.h"
 #include "utils.h"
 #include "wifi_manager.h"
 #include "wifi_provisioning.h"
+
+#ifdef CONFIG_HAS_SDCARD
+#include "album_manager.h"
+#include "driver/sdmmc_host.h"
+#include "esp_vfs_fat.h"
+#include "sdmmc_cmd.h"
+#endif
 
 static const char *TAG = "main";
 
@@ -70,8 +71,8 @@ static esp_err_t sntp_sync_periodic_callback(void)
 
         // Update external RTC with synced time
         time(&now);
-        if (pcf85063_is_available()) {
-            esp_err_t ret = pcf85063_write_time(now);
+        if (board_hal_rtc_is_available()) {
+            esp_err_t ret = board_hal_rtc_set_time(now);
             if (ret == ESP_OK) {
                 ESP_LOGI(TAG, "Updated external RTC with SNTP time");
             } else {
@@ -116,6 +117,7 @@ static bool connect_to_wifi_with_timeout(int timeout_seconds)
     }
 }
 
+#ifdef CONFIG_HAS_SDCARD
 static esp_err_t init_sdcard(void)
 {
     ESP_LOGI(TAG, "Initializing SD card");
@@ -183,6 +185,7 @@ static esp_err_t init_sdcard(void)
     ESP_LOGI(TAG, "SD card initialized successfully");
     return ESP_OK;
 }
+#endif
 
 static void button_task(void *arg)
 {
@@ -330,28 +333,31 @@ void app_main(void)
     ESP_LOGI(TAG, "Free heap: %lu bytes, Largest free block: %lu bytes", esp_get_free_heap_size(),
              heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
-    // Initialize I2C bus (required for AXP2101 communication)
-    ESP_LOGI(TAG, "Initializing I2C bus...");
-    i2c_master_Init();
+    // Initialize Power HAL (wraps PMIC/Charger specific logic and Sensors)
+    ESP_LOGI(TAG, "Initializing Power HAL...");
+    ESP_ERROR_CHECK(board_hal_init());
+    ESP_LOGI(TAG, "Power HAL initialized");
 
-    // Initialize AXP2101 power management chip (required for e-paper display power)
-    ESP_LOGI(TAG, "Initializing AXP2101 power management...");
-    axp_i2c_prot_init();
-    axp_cmd_init();
-    ESP_LOGI(TAG, "AXP2101 initialized");
+#ifndef CONFIG_HAS_SDCARD
+    // Initialize RAM filesystem for temporary images
+    ESP_LOGI(TAG, "Mounting RAM filesystem...");
+    ESP_ERROR_CHECK(memfs_mount(TEMP_MOUNT_POINT, 10));
+#endif
 
-    // Initialize SHTC3 temperature/humidity sensor
-    ESP_LOGI(TAG, "Initializing SHTC3 sensor...");
-    esp_err_t shtc3_ret = shtc3_init();
-    if (shtc3_ret == ESP_OK) {
-        ESP_LOGI(TAG, "SHTC3 sensor initialized successfully");
+    // Initialize external RTC (via HAL)
+    ESP_LOGI(TAG, "Initializing RTC...");
+    esp_err_t rtc_ret = board_hal_rtc_init();
+    if (rtc_ret == ESP_OK) {
+        ESP_LOGI(TAG, "RTC initialized successfully");
+    } else if (rtc_ret == ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGI(TAG, "External RTC not supported on this board");
     } else {
-        ESP_LOGW(TAG, "SHTC3 sensor initialization failed (sensor may not be present)");
+        ESP_LOGW(TAG, "RTC initialization failed: %s", esp_err_to_name(rtc_ret));
     }
 
     // Wait for power rails to stabilize after AXP2101 initialization
-    // The AXP2101 enables DC1, ALDO3, ALDO4 at 3.3V which power the SD card
-    // Increase delay to ensure SD card power is fully stable
+    // The AXP2101 enables DC1, ALDO3, ALDO4 at 3.3V which power the SD card (if present)
+    // Increase delay to ensure power is fully stable
     ESP_LOGI(TAG, "Waiting for power rails to stabilize...");
     vTaskDelay(pdMS_TO_TICKS(500));  // Increased from 200ms to 500ms
 
@@ -364,22 +370,13 @@ void app_main(void)
 
     ESP_ERROR_CHECK(config_manager_init());
 
-    // Initialize external RTC
-    ESP_LOGI(TAG, "Initializing PCF85063 external RTC...");
-    esp_err_t rtc_ret = pcf85063_init();
-    if (rtc_ret == ESP_OK) {
-        ESP_LOGI(TAG, "PCF85063 RTC initialized successfully");
-    } else {
-        ESP_LOGW(TAG, "PCF85063 RTC initialization failed (RTC may not be present)");
-    }
-
     // Always restore time from external RTC (internal RTC is inaccurate)
     ESP_LOGI(TAG, "Checking external RTC for time restoration...");
     bool time_restored = false;
 
-    if (pcf85063_is_available()) {
+    if (board_hal_rtc_is_available()) {
         time_t external_time;
-        esp_err_t ret = pcf85063_read_time(&external_time);
+        esp_err_t ret = board_hal_rtc_get_time(&external_time);
         if (ret == ESP_OK) {
             struct tm external_timeinfo;
             localtime_r(&external_time, &external_timeinfo);
@@ -401,7 +398,7 @@ void app_main(void)
             ESP_LOGW(TAG, "Failed to read external RTC: %s", esp_err_to_name(ret));
         }
     } else {
-        ESP_LOGW(TAG, "External RTC not available");
+        ESP_LOGI(TAG, "External RTC not available, skipping time restoration");
     }
 
     // If external RTC failed or invalid, force SNTP sync (don't trust internal RTC)
@@ -433,15 +430,19 @@ void app_main(void)
 
     ESP_ERROR_CHECK(ota_manager_init());
 
+#ifdef CONFIG_HAS_SDCARD
     ret = init_sdcard();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SD card initialization failed - triggering hard reset");
         vTaskDelay(pdMS_TO_TICKS(1000));  // Give time for log to flush
-        axp_shutdown();                   // Hard power-off
+        board_hal_shutdown();             // Hard power-off
         // Won't reach here
     }
 
     ESP_ERROR_CHECK(album_manager_init());
+#else
+    ESP_LOGI(TAG, "SD Card support disabled (No-SDCard Mode)");
+#endif
 
     // Check wake-up source with priority: Timer > KEY > BOOT
     bool is_timer = power_manager_is_timer_wakeup();
@@ -463,6 +464,8 @@ void app_main(void)
     ESP_ERROR_CHECK(wifi_provisioning_init());
 
     if (!wifi_provisioning_is_provisioned()) {
+        bool creds_loaded = false;
+#ifdef CONFIG_HAS_SDCARD
         // Try to load WiFi credentials from SD card first
         char sd_ssid[WIFI_SSID_MAX_LEN] = {0};
         char sd_password[WIFI_PASS_MAX_LEN] = {0};
@@ -479,36 +482,42 @@ void app_main(void)
                 ESP_LOGI(TAG, "Restarting to connect with new credentials...");
                 vTaskDelay(pdMS_TO_TICKS(2000));
                 esp_restart();
+                creds_loaded = true;
             } else {
                 ESP_LOGE(TAG, "Failed to save WiFi credentials to NVS");
             }
         }
+#endif
 
         // No SD card credentials found, start captive portal provisioning
-        ESP_LOGI(TAG, "===========================================");
-        ESP_LOGI(TAG, "No WiFi credentials found - Starting AP mode");
-        ESP_LOGI(TAG, "===========================================");
-        ESP_LOGI(TAG, "Option 1: Place wifi.txt on SD card with:");
-        ESP_LOGI(TAG, "  Line 1: WiFi SSID");
-        ESP_LOGI(TAG, "  Line 2: WiFi Password");
-        ESP_LOGI(TAG, "  Line 3: Device Name (optional, default: PhotoFrame)");
-        ESP_LOGI(TAG, "  Then restart the device");
-        ESP_LOGI(TAG, "===========================================");
-        ESP_LOGI(TAG, "Option 2: Use captive portal:");
-        ESP_LOGI(TAG, "1. Connect to WiFi: PhotoFrame-Setup");
-        ESP_LOGI(TAG, "2. Open browser to: http://192.168.4.1");
-        ESP_LOGI(TAG, "3. Enter your WiFi credentials");
-        ESP_LOGI(TAG, "===========================================");
+        if (!creds_loaded) {
+            ESP_LOGI(TAG, "===========================================");
+            ESP_LOGI(TAG, "No WiFi credentials found - Starting AP mode");
+            ESP_LOGI(TAG, "===========================================");
+#ifdef CONFIG_HAS_SDCARD
+            ESP_LOGI(TAG, "Option 1: Place wifi.txt on SD card with:");
+            ESP_LOGI(TAG, "  Line 1: WiFi SSID");
+            ESP_LOGI(TAG, "  Line 2: WiFi Password");
+            ESP_LOGI(TAG, "  Line 3: Device Name (optional, default: PhotoFrame)");
+            ESP_LOGI(TAG, "  Then restart the device");
+            ESP_LOGI(TAG, "===========================================");
+#endif
+            ESP_LOGI(TAG, "Option 2: Use captive portal:");
+            ESP_LOGI(TAG, "1. Connect to WiFi: PhotoFrame-Setup");
+            ESP_LOGI(TAG, "2. Open browser to: http://192.168.4.1");
+            ESP_LOGI(TAG, "3. Enter your WiFi credentials");
+            ESP_LOGI(TAG, "===========================================");
 
-        ESP_ERROR_CHECK(wifi_provisioning_start_ap());
+            ESP_ERROR_CHECK(wifi_provisioning_start_ap());
 
-        while (!wifi_provisioning_is_provisioned()) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            while (!wifi_provisioning_is_provisioned()) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+
+            ESP_LOGI(TAG, "WiFi credentials saved! Restarting...");
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            esp_restart();
         }
-
-        ESP_LOGI(TAG, "WiFi credentials saved! Restarting...");
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        esp_restart();
     }
 
     if (connect_to_wifi_with_timeout(30)) {

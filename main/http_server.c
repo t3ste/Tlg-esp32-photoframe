@@ -9,12 +9,13 @@
 #include <unistd.h>
 
 #include "album_manager.h"
-#include "axp_prot.h"
+#include "board_hal.h"
 #include "cJSON.h"
 #include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
 #include "display_manager.h"
+#include "epaper_port.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
@@ -26,7 +27,6 @@
 #include "periodic_tasks.h"
 #include "power_manager.h"
 #include "processing_settings.h"
-#include "shtc3_sensor.h"
 #include "utils.h"
 
 #ifndef MIN
@@ -146,6 +146,8 @@ static esp_err_t parse_multipart_upload(httpd_req_t *req, const char *base_dir,
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
         return ESP_FAIL;
     }
+
+    ESP_LOGI(TAG, "Processing multipart upload, content length: %d", req->content_len);
 
     int buf_len = 0;
     int remaining = req->content_len;
@@ -325,6 +327,341 @@ static esp_err_t parse_multipart_upload(httpd_req_t *req, const char *base_dir,
     return ESP_OK;
 }
 
+static esp_err_t display_image_direct_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    power_manager_reset_sleep_timer();
+
+    // Check if display is already busy
+    if (display_manager_is_busy()) {
+        ESP_LOGW(TAG, "Display is busy, rejecting request");
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "status", "busy");
+        cJSON_AddStringToObject(response, "message", "Display is currently updating, please wait");
+
+        char *json_str = cJSON_Print(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_sendstr(req, json_str);
+
+        free(json_str);
+        cJSON_Delete(response);
+        return ESP_OK;
+    }
+
+    // Get content type to determine if it's JPG, BMP, PNG, or multipart
+    char content_type[128] = {0};
+    if (httpd_req_get_hdr_value_str(req, "Content-Type", content_type, sizeof(content_type)) !=
+        ESP_OK) {
+        strcpy(content_type, "image/jpeg");  // Default to JPEG
+    }
+
+    // Check if this is a multipart upload (with optional thumbnail)
+    bool is_multipart = (strstr(content_type, "multipart/form-data") != NULL);
+
+    if (is_multipart) {
+        // Handle multipart upload with optional thumbnail using shared helper
+        multipart_result_t result;
+        const char *temp_dir = TEMP_MOUNT_POINT;
+
+        esp_err_t err = parse_multipart_upload(req, temp_dir, ".current_upload.tmp",
+                                               ".current_thumb.tmp", &result, false);
+        if (err != ESP_OK) {
+            return ESP_FAIL;
+        }
+
+        if (!result.has_image) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No image file in multipart upload");
+            return ESP_FAIL;
+        }
+
+        // Detect image type from uploaded file
+        bool upload_is_png = false;
+        bool upload_is_bmp = false;
+        FILE *test_fp = fopen(result.image_path, "rb");
+        if (test_fp) {
+            unsigned char header[8];
+            if (fread(header, 1, 8, test_fp) == 8) {
+                // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+                if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E &&
+                    header[3] == 0x47) {
+                    upload_is_png = true;
+                }
+                // BMP signature: 42 4D
+                else if (header[0] == 0x42 && header[1] == 0x4D) {
+                    upload_is_bmp = true;
+                }
+            }
+            fclose(test_fp);
+        }
+
+        const char *temp_bmp_path = CURRENT_BMP_PATH;
+        const char *temp_png_path = CURRENT_PNG_PATH;
+        const char *temp_jpg_path = CURRENT_JPG_PATH;
+        const char *display_path = NULL;
+
+        // Load processing settings to get dithering algorithm
+        processing_settings_t proc_settings;
+        if (processing_settings_load(&proc_settings) != ESP_OK) {
+            processing_settings_get_defaults(&proc_settings);
+        }
+
+        // Process the uploaded image
+        if (upload_is_png) {
+            unlink(temp_png_path);
+            if (rename(result.image_path, temp_png_path) != 0) {
+                ESP_LOGE(TAG, "Failed to move PNG");
+                unlink(result.image_path);
+                if (result.has_thumbnail)
+                    unlink(result.thumbnail_path);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process PNG");
+                return ESP_FAIL;
+            }
+            display_path = temp_png_path;
+        } else if (upload_is_bmp) {
+            unlink(temp_bmp_path);
+            if (rename(result.image_path, temp_bmp_path) != 0) {
+                ESP_LOGE(TAG, "Failed to move BMP");
+                unlink(result.image_path);
+                if (result.has_thumbnail)
+                    unlink(result.thumbnail_path);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process BMP");
+                return ESP_FAIL;
+            }
+            display_path = temp_bmp_path;
+        } else {
+            // Assume JPEG, convert to BMP
+            dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+            err = image_processor_convert_jpg_to_bmp(result.image_path, temp_bmp_path, false, algo);
+            unlink(result.image_path);
+            if (err != ESP_OK) {
+                if (result.has_thumbnail)
+                    unlink(result.thumbnail_path);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                    "Failed to convert image");
+                return ESP_FAIL;
+            }
+            display_path = temp_bmp_path;
+        }
+
+        // Handle thumbnail if provided
+        if (result.has_thumbnail) {
+            unlink(temp_jpg_path);
+            if (rename(result.thumbnail_path, temp_jpg_path) != 0) {
+                ESP_LOGW(TAG, "Failed to save thumbnail");
+                unlink(result.thumbnail_path);
+            } else {
+                ESP_LOGI(TAG, "Thumbnail saved: %s", temp_jpg_path);
+            }
+        }
+
+        // Display the image
+        err = display_manager_show_image(display_path);
+        if (err != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
+            return ESP_FAIL;
+        }
+
+        ha_notify_update();
+
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "status", "success");
+        char *json_str = cJSON_Print(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, json_str);
+        free(json_str);
+        cJSON_Delete(response);
+
+        return ESP_OK;
+    }
+
+    bool upload_is_bmp = (strcmp(content_type, "image/bmp") == 0);
+    bool upload_is_png = (strcmp(content_type, "image/png") == 0);
+
+    // Get content length
+    size_t content_len = req->content_len;
+    const size_t MAX_UPLOAD_SIZE = 5 * 1024 * 1024;  // 5MB max
+
+    if (content_len == 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty request body");
+        return ESP_FAIL;
+    }
+
+    if (content_len > MAX_UPLOAD_SIZE) {
+        ESP_LOGW(TAG, "Upload rejected: %zu bytes exceeds limit of %zu bytes", content_len,
+                 MAX_UPLOAD_SIZE);
+        char error_msg[128];
+        snprintf(error_msg, sizeof(error_msg),
+                 "File too large: %zu KB (max: %zu KB). Please compress or resize your image.",
+                 content_len / 1024, MAX_UPLOAD_SIZE / 1024);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, error_msg);
+        return ESP_FAIL;
+    }
+
+    const char *format = upload_is_bmp ? "BMP" : (upload_is_png ? "PNG" : "JPG");
+    ESP_LOGI(TAG, "Receiving %s image for direct display, size: %zu bytes (%.1f KB)", format,
+             content_len, content_len / 1024.0);
+
+    // Use fixed paths for current image and thumbnail
+    const char *temp_upload_path = CURRENT_UPLOAD_PATH;
+    const char *temp_jpg_path = CURRENT_JPG_PATH;
+    const char *temp_bmp_path = CURRENT_BMP_PATH;
+    const char *temp_png_path = CURRENT_PNG_PATH;
+
+    // Delete old files to prevent caching issues
+    unlink(temp_upload_path);
+    unlink(temp_jpg_path);
+    unlink(temp_bmp_path);
+    unlink(temp_png_path);
+
+    // Open file for writing
+    FILE *fp = fopen(temp_upload_path, "wb");
+    if (!fp) {
+        ESP_LOGE(TAG, "Failed to create temporary file");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "Failed to create temporary file");
+        return ESP_FAIL;
+    }
+
+    // Receive and write data in chunks
+    char *buf = malloc(4096);
+    if (!buf) {
+        fclose(fp);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
+        return ESP_FAIL;
+    }
+
+    size_t received = 0;
+    while (received < content_len) {
+        size_t to_read = MIN(4096, content_len - received);
+        int ret = httpd_req_recv(req, buf, to_read);
+        if (ret <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                continue;
+            }
+            ESP_LOGE(TAG, "Failed to receive data");
+            free(buf);
+            fclose(fp);
+            unlink(temp_upload_path);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to receive data");
+            return ESP_FAIL;
+        }
+        fwrite(buf, 1, ret, fp);
+        received += ret;
+    }
+
+    free(buf);
+    fclose(fp);
+
+    ESP_LOGI(TAG, "Image received successfully, processing...");
+
+    // Load processing settings to get dithering algorithm
+    processing_settings_t proc_settings;
+    if (processing_settings_load(&proc_settings) != ESP_OK) {
+        processing_settings_get_defaults(&proc_settings);
+    }
+
+    esp_err_t err = ESP_OK;
+    const char *display_path = NULL;
+
+    if (upload_is_bmp) {
+        // Move uploaded BMP to temp location
+        if (rename(temp_upload_path, temp_bmp_path) != 0) {
+            ESP_LOGE(TAG, "Failed to move uploaded BMP to temp location");
+            unlink(temp_upload_path);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process BMP");
+            return ESP_FAIL;
+        }
+        display_path = temp_bmp_path;
+    } else if (upload_is_png) {
+        // Save PNG directly - display_manager can handle PNG now
+        if (rename(temp_upload_path, temp_png_path) != 0) {
+            ESP_LOGE(TAG, "Failed to move uploaded PNG to temp location");
+            unlink(temp_upload_path);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process PNG");
+            return ESP_FAIL;
+        }
+        display_path = temp_png_path;
+        ESP_LOGI(TAG, "PNG saved: %s", temp_png_path);
+    } else {
+        // Convert JPG to BMP using image processor
+        dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+        err = image_processor_convert_jpg_to_bmp(temp_upload_path, temp_bmp_path, false, algo);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to convert JPG to BMP: %s", esp_err_to_name(err));
+            unlink(temp_upload_path);
+
+            // Provide specific error messages based on error type
+            if (err == ESP_ERR_INVALID_SIZE) {
+                httpd_resp_send_err(
+                    req, HTTPD_400_BAD_REQUEST,
+                    "Image is too large (max: 6400x3840). Please resize your image and try again.");
+            } else if (err == ESP_ERR_NO_MEM) {
+                httpd_resp_send_err(
+                    req, HTTPD_400_BAD_REQUEST,
+                    "Image requires too much memory to process. Please use a smaller image.");
+            } else {
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                    "Failed to process image");
+            }
+            return ESP_FAIL;
+        }
+        display_path = temp_bmp_path;
+    }
+
+    // Display the image (PNG or BMP) - display_manager handles both
+    err = display_manager_show_image(display_path);
+    if (err != ESP_OK) {
+        unlink(temp_upload_path);
+        unlink(temp_bmp_path);
+        unlink(temp_png_path);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
+        return ESP_FAIL;
+    }
+
+    ha_notify_update();
+
+    if (upload_is_bmp || upload_is_png) {
+        // BMP/PNG upload - no separate thumbnail
+        ESP_LOGI(TAG, "%s image displayed: %s", upload_is_bmp ? "BMP" : "PNG", display_path);
+    } else {
+        // JPG upload - move to thumbnail location for HA integration
+        unlink(temp_jpg_path);
+        if (rename(temp_upload_path, temp_jpg_path) != 0) {
+            ESP_LOGW(TAG, "Failed to save JPG thumbnail");
+        } else {
+            // Keep both .current.bmp and .current.jpg for HA integration
+            // .current.bmp is referenced by current_image
+            // .current.jpg is the thumbnail served by /api/current_image
+            ESP_LOGI(TAG, "Image and thumbnail saved: %s, %s", temp_bmp_path, temp_jpg_path);
+        }
+    }
+
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "status", "success");
+    cJSON_AddStringToObject(response, "message", "Image displayed successfully");
+
+    char *json_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+
+    esp_err_t send_err = httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(response);
+
+    if (send_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to send response (connection likely closed): %d", send_err);
+    }
+
+    return ESP_OK;
+}
+
+#ifdef CONFIG_HAS_SDCARD
 static esp_err_t upload_image_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -443,7 +780,9 @@ static esp_err_t upload_image_handler(httpd_req_t *req)
 
     return ESP_OK;
 }
+#endif
 
+#ifdef CONFIG_HAS_SDCARD
 // URL decode helper function to handle encoded characters like %20 for space
 static void url_decode(char *dst, const char *src, size_t dst_size)
 {
@@ -732,339 +1071,7 @@ static esp_err_t display_image_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static esp_err_t display_image_direct_handler(httpd_req_t *req)
-{
-    if (!system_ready) {
-        httpd_resp_set_status(req, HTTPD_503);
-        httpd_resp_sendstr(req, "System is still initializing");
-        return ESP_FAIL;
-    }
-
-    power_manager_reset_sleep_timer();
-
-    // Check if display is already busy
-    if (display_manager_is_busy()) {
-        ESP_LOGW(TAG, "Display is busy, rejecting request");
-        cJSON *response = cJSON_CreateObject();
-        cJSON_AddStringToObject(response, "status", "busy");
-        cJSON_AddStringToObject(response, "message", "Display is currently updating, please wait");
-
-        char *json_str = cJSON_Print(response);
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        httpd_resp_sendstr(req, json_str);
-
-        free(json_str);
-        cJSON_Delete(response);
-        return ESP_OK;
-    }
-
-    // Get content type to determine if it's JPG, BMP, PNG, or multipart
-    char content_type[128] = {0};
-    if (httpd_req_get_hdr_value_str(req, "Content-Type", content_type, sizeof(content_type)) !=
-        ESP_OK) {
-        strcpy(content_type, "image/jpeg");  // Default to JPEG
-    }
-
-    // Check if this is a multipart upload (with optional thumbnail)
-    bool is_multipart = (strstr(content_type, "multipart/form-data") != NULL);
-
-    if (is_multipart) {
-        // Handle multipart upload with optional thumbnail using shared helper
-        multipart_result_t result;
-        const char *temp_dir = "/sdcard";
-
-        esp_err_t err = parse_multipart_upload(req, temp_dir, ".current_upload.tmp",
-                                               ".current_thumb.tmp", &result, false);
-        if (err != ESP_OK) {
-            return ESP_FAIL;
-        }
-
-        if (!result.has_image) {
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No image file in multipart upload");
-            return ESP_FAIL;
-        }
-
-        // Detect image type from uploaded file
-        bool upload_is_png = false;
-        bool upload_is_bmp = false;
-        FILE *test_fp = fopen(result.image_path, "rb");
-        if (test_fp) {
-            unsigned char header[8];
-            if (fread(header, 1, 8, test_fp) == 8) {
-                // PNG signature: 89 50 4E 47 0D 0A 1A 0A
-                if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E &&
-                    header[3] == 0x47) {
-                    upload_is_png = true;
-                }
-                // BMP signature: 42 4D
-                else if (header[0] == 0x42 && header[1] == 0x4D) {
-                    upload_is_bmp = true;
-                }
-            }
-            fclose(test_fp);
-        }
-
-        const char *temp_bmp_path = CURRENT_BMP_PATH;
-        const char *temp_png_path = "/sdcard/.current.png";
-        const char *temp_jpg_path = CURRENT_JPG_PATH;
-        const char *display_path = NULL;
-
-        // Load processing settings to get dithering algorithm
-        processing_settings_t proc_settings;
-        if (processing_settings_load(&proc_settings) != ESP_OK) {
-            processing_settings_get_defaults(&proc_settings);
-        }
-
-        // Process the uploaded image
-        if (upload_is_png) {
-            unlink(temp_png_path);
-            if (rename(result.image_path, temp_png_path) != 0) {
-                ESP_LOGE(TAG, "Failed to move PNG");
-                unlink(result.image_path);
-                if (result.has_thumbnail)
-                    unlink(result.thumbnail_path);
-                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process PNG");
-                return ESP_FAIL;
-            }
-            display_path = temp_png_path;
-        } else if (upload_is_bmp) {
-            unlink(temp_bmp_path);
-            if (rename(result.image_path, temp_bmp_path) != 0) {
-                ESP_LOGE(TAG, "Failed to move BMP");
-                unlink(result.image_path);
-                if (result.has_thumbnail)
-                    unlink(result.thumbnail_path);
-                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process BMP");
-                return ESP_FAIL;
-            }
-            display_path = temp_bmp_path;
-        } else {
-            // Assume JPEG, convert to BMP
-            dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
-            err = image_processor_convert_jpg_to_bmp(result.image_path, temp_bmp_path, false, algo);
-            unlink(result.image_path);
-            if (err != ESP_OK) {
-                if (result.has_thumbnail)
-                    unlink(result.thumbnail_path);
-                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                                    "Failed to convert image");
-                return ESP_FAIL;
-            }
-            display_path = temp_bmp_path;
-        }
-
-        // Handle thumbnail if provided
-        if (result.has_thumbnail) {
-            unlink(temp_jpg_path);
-            if (rename(result.thumbnail_path, temp_jpg_path) != 0) {
-                ESP_LOGW(TAG, "Failed to save thumbnail");
-                unlink(result.thumbnail_path);
-            } else {
-                ESP_LOGI(TAG, "Thumbnail saved: %s", temp_jpg_path);
-            }
-        }
-
-        // Display the image
-        err = display_manager_show_image(display_path);
-        if (err != ESP_OK) {
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
-            return ESP_FAIL;
-        }
-
-        ha_notify_update();
-
-        cJSON *response = cJSON_CreateObject();
-        cJSON_AddStringToObject(response, "status", "success");
-        char *json_str = cJSON_Print(response);
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_sendstr(req, json_str);
-        free(json_str);
-        cJSON_Delete(response);
-
-        return ESP_OK;
-    }
-
-    bool upload_is_bmp = (strcmp(content_type, "image/bmp") == 0);
-    bool upload_is_png = (strcmp(content_type, "image/png") == 0);
-
-    // Get content length
-    size_t content_len = req->content_len;
-    const size_t MAX_UPLOAD_SIZE = 5 * 1024 * 1024;  // 5MB max
-
-    if (content_len == 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty request body");
-        return ESP_FAIL;
-    }
-
-    if (content_len > MAX_UPLOAD_SIZE) {
-        ESP_LOGW(TAG, "Upload rejected: %zu bytes exceeds limit of %zu bytes", content_len,
-                 MAX_UPLOAD_SIZE);
-        char error_msg[128];
-        snprintf(error_msg, sizeof(error_msg),
-                 "File too large: %zu KB (max: %zu KB). Please compress or resize your image.",
-                 content_len / 1024, MAX_UPLOAD_SIZE / 1024);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, error_msg);
-        return ESP_FAIL;
-    }
-
-    const char *format = upload_is_bmp ? "BMP" : (upload_is_png ? "PNG" : "JPG");
-    ESP_LOGI(TAG, "Receiving %s image for direct display, size: %zu bytes (%.1f KB)", format,
-             content_len, content_len / 1024.0);
-
-    // Use fixed paths for current image and thumbnail
-    const char *temp_upload_path = CURRENT_UPLOAD_PATH;
-    const char *temp_jpg_path = CURRENT_JPG_PATH;
-    const char *temp_bmp_path = CURRENT_BMP_PATH;
-    const char *temp_png_path = "/sdcard/.current.png";
-
-    // Delete old files to prevent caching issues
-    unlink(temp_upload_path);
-    unlink(temp_jpg_path);
-    unlink(temp_bmp_path);
-    unlink(temp_png_path);
-
-    // Open file for writing
-    FILE *fp = fopen(temp_upload_path, "wb");
-    if (!fp) {
-        ESP_LOGE(TAG, "Failed to create temporary file");
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "Failed to create temporary file");
-        return ESP_FAIL;
-    }
-
-    // Receive and write data in chunks
-    char *buf = malloc(4096);
-    if (!buf) {
-        fclose(fp);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
-        return ESP_FAIL;
-    }
-
-    size_t received = 0;
-    while (received < content_len) {
-        size_t to_read = MIN(4096, content_len - received);
-        int ret = httpd_req_recv(req, buf, to_read);
-        if (ret <= 0) {
-            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-                continue;
-            }
-            ESP_LOGE(TAG, "Failed to receive data");
-            free(buf);
-            fclose(fp);
-            unlink(temp_upload_path);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to receive data");
-            return ESP_FAIL;
-        }
-        fwrite(buf, 1, ret, fp);
-        received += ret;
-    }
-
-    free(buf);
-    fclose(fp);
-
-    ESP_LOGI(TAG, "Image received successfully, processing...");
-
-    // Load processing settings to get dithering algorithm
-    processing_settings_t proc_settings;
-    if (processing_settings_load(&proc_settings) != ESP_OK) {
-        processing_settings_get_defaults(&proc_settings);
-    }
-
-    esp_err_t err = ESP_OK;
-    const char *display_path = NULL;
-
-    if (upload_is_bmp) {
-        // Move uploaded BMP to temp location
-        if (rename(temp_upload_path, temp_bmp_path) != 0) {
-            ESP_LOGE(TAG, "Failed to move uploaded BMP to temp location");
-            unlink(temp_upload_path);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process BMP");
-            return ESP_FAIL;
-        }
-        display_path = temp_bmp_path;
-    } else if (upload_is_png) {
-        // Save PNG directly - display_manager can handle PNG now
-        if (rename(temp_upload_path, temp_png_path) != 0) {
-            ESP_LOGE(TAG, "Failed to move uploaded PNG to temp location");
-            unlink(temp_upload_path);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process PNG");
-            return ESP_FAIL;
-        }
-        display_path = temp_png_path;
-        ESP_LOGI(TAG, "PNG saved: %s", temp_png_path);
-    } else {
-        // Convert JPG to BMP using image processor
-        dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
-        err = image_processor_convert_jpg_to_bmp(temp_upload_path, temp_bmp_path, false, algo);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to convert JPG to BMP: %s", esp_err_to_name(err));
-            unlink(temp_upload_path);
-
-            // Provide specific error messages based on error type
-            if (err == ESP_ERR_INVALID_SIZE) {
-                httpd_resp_send_err(
-                    req, HTTPD_400_BAD_REQUEST,
-                    "Image is too large (max: 6400x3840). Please resize your image and try again.");
-            } else if (err == ESP_ERR_NO_MEM) {
-                httpd_resp_send_err(
-                    req, HTTPD_400_BAD_REQUEST,
-                    "Image requires too much memory to process. Please use a smaller image.");
-            } else {
-                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                                    "Failed to process image");
-            }
-            return ESP_FAIL;
-        }
-        display_path = temp_bmp_path;
-    }
-
-    // Display the image (PNG or BMP) - display_manager handles both
-    err = display_manager_show_image(display_path);
-    if (err != ESP_OK) {
-        unlink(temp_upload_path);
-        unlink(temp_bmp_path);
-        unlink(temp_png_path);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
-        return ESP_FAIL;
-    }
-
-    ha_notify_update();
-
-    if (upload_is_bmp || upload_is_png) {
-        // BMP/PNG upload - no separate thumbnail
-        ESP_LOGI(TAG, "%s image displayed: %s", upload_is_bmp ? "BMP" : "PNG", display_path);
-    } else {
-        // JPG upload - move to thumbnail location for HA integration
-        unlink(temp_jpg_path);
-        if (rename(temp_upload_path, temp_jpg_path) != 0) {
-            ESP_LOGW(TAG, "Failed to save JPG thumbnail");
-        } else {
-            // Keep both .current.bmp and .current.jpg for HA integration
-            // .current.bmp is referenced by current_image
-            // .current.jpg is the thumbnail served by /api/current_image
-            ESP_LOGI(TAG, "Image and thumbnail saved: %s, %s", temp_bmp_path, temp_jpg_path);
-        }
-    }
-
-    cJSON *response = cJSON_CreateObject();
-    cJSON_AddStringToObject(response, "status", "success");
-    cJSON_AddStringToObject(response, "message", "Image displayed successfully");
-
-    char *json_str = cJSON_Print(response);
-    httpd_resp_set_type(req, "application/json");
-
-    esp_err_t send_err = httpd_resp_sendstr(req, json_str);
-
-    free(json_str);
-    cJSON_Delete(response);
-
-    if (send_err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to send response (connection likely closed): %d", send_err);
-    }
-
-    return ESP_OK;
-}
+#endif
 
 static esp_err_t battery_handler(httpd_req_t *req)
 {
@@ -1107,23 +1114,19 @@ static esp_err_t sensor_handler(httpd_req_t *req)
     }
 
     // Check if sensor is available
-    if (shtc3_is_available()) {
-        float temperature, humidity;
-        esp_err_t ret = shtc3_read(&temperature, &humidity);
+    // Check if sensor is available
+    float temperature, humidity;
+    bool has_temp = (board_hal_get_temperature(&temperature) == ESP_OK);
+    bool has_hum = (board_hal_get_humidity(&humidity) == ESP_OK);
 
-        if (ret == ESP_OK) {
-            cJSON_AddNumberToObject(response, "temperature", temperature);
-            cJSON_AddNumberToObject(response, "humidity", humidity);
-            cJSON_AddStringToObject(response, "status", "ok");
-        } else {
-            cJSON_AddNullToObject(response, "temperature");
-            cJSON_AddNullToObject(response, "humidity");
-            cJSON_AddStringToObject(response, "status", "read_error");
-        }
+    if (has_temp && has_hum) {
+        cJSON_AddNumberToObject(response, "temperature", temperature);
+        cJSON_AddNumberToObject(response, "humidity", humidity);
+        cJSON_AddStringToObject(response, "status", "ok");
     } else {
         cJSON_AddNullToObject(response, "temperature");
         cJSON_AddNullToObject(response, "humidity");
-        cJSON_AddStringToObject(response, "status", "not_available");
+        cJSON_AddStringToObject(response, "status", "read_error");
     }
 
     char *json_str = cJSON_Print(response);
@@ -1201,6 +1204,7 @@ static esp_err_t rotate_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+#ifdef CONFIG_HAS_SDCARD
 static esp_err_t current_image_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -1282,6 +1286,8 @@ static esp_err_t current_image_handler(httpd_req_t *req)
 
     return ESP_OK;
 }
+
+#endif
 
 static esp_err_t config_handler(httpd_req_t *req)
 {
@@ -1499,6 +1505,7 @@ static esp_err_t config_handler(httpd_req_t *req)
     return ESP_FAIL;
 }
 
+#ifdef CONFIG_HAS_SDCARD
 static esp_err_t albums_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -1754,12 +1761,21 @@ static esp_err_t album_images_handler(httpd_req_t *req)
     cJSON_Delete(response);
     return ESP_OK;
 }
+#endif
 
-static esp_err_t version_handler(httpd_req_t *req)
+static esp_err_t system_info_handler(httpd_req_t *req)
 {
     const esp_app_desc_t *app_desc = esp_app_get_description();
-
     cJSON *response = cJSON_CreateObject();
+
+    cJSON_AddNumberToObject(response, "width", board_hal_get_display_width());
+    cJSON_AddNumberToObject(response, "height", board_hal_get_display_height());
+#ifdef CONFIG_HAS_SDCARD
+    cJSON_AddBoolToObject(response, "has_sdcard", true);
+#else
+    cJSON_AddBoolToObject(response, "has_sdcard", false);
+#endif
+
     cJSON_AddStringToObject(response, "version", app_desc->version);
     cJSON_AddStringToObject(response, "project_name", app_desc->project_name);
     cJSON_AddStringToObject(response, "compile_time", app_desc->time);
@@ -1909,7 +1925,7 @@ static esp_err_t display_calibration_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Displaying calibration pattern on e-paper");
 
     // Write embedded PNG to temporary file
-    const char *temp_path = "/sdcard/.calibration.png";
+    const char *temp_path = CURRENT_CALIBRATION_PATH;
 
     // Copy embedded data to SPIRAM buffer first to avoid cache coherency issues
     // when writing directly from flash memory to SD card
@@ -2428,45 +2444,17 @@ esp_err_t http_server_init(void)
                                    .user_ctx = NULL};
         httpd_register_uri_handler(server, &favicon_uri);
 
-        httpd_uri_t upload_uri = {.uri = "/api/upload",
-                                  .method = HTTP_POST,
-                                  .handler = upload_image_handler,
-                                  .user_ctx = NULL};
-        httpd_register_uri_handler(server, &upload_uri);
-
-        httpd_uri_t display_uri = {.uri = "/api/display",
-                                   .method = HTTP_POST,
-                                   .handler = display_image_handler,
-                                   .user_ctx = NULL};
-        httpd_register_uri_handler(server, &display_uri);
-
-        httpd_uri_t display_image_direct_uri = {.uri = "/api/display-image",
-                                                .method = HTTP_POST,
-                                                .handler = display_image_direct_handler,
-                                                .user_ctx = NULL};
-        httpd_register_uri_handler(server, &display_image_direct_uri);
-
-        httpd_uri_t delete_uri = {.uri = "/api/delete",
-                                  .method = HTTP_POST,
-                                  .handler = delete_image_handler,
-                                  .user_ctx = NULL};
-        httpd_register_uri_handler(server, &delete_uri);
-
-        httpd_uri_t serve_image_uri = {.uri = "/api/image",
-                                       .method = HTTP_GET,
-                                       .handler = serve_image_handler,
-                                       .user_ctx = NULL};
-        httpd_register_uri_handler(server, &serve_image_uri);
-
         httpd_uri_t rotate_uri = {
             .uri = "/api/rotate", .method = HTTP_POST, .handler = rotate_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &rotate_uri);
 
+#ifdef CONFIG_HAS_SDCARD
         httpd_uri_t current_image_uri = {.uri = "/api/current_image",
                                          .method = HTTP_GET,
                                          .handler = current_image_handler,
                                          .user_ctx = NULL};
         httpd_register_uri_handler(server, &current_image_uri);
+#endif
 
         httpd_uri_t config_get_uri = {
             .uri = "/api/config", .method = HTTP_GET, .handler = config_handler, .user_ctx = NULL};
@@ -2496,11 +2484,11 @@ esp_err_t http_server_init(void)
             .uri = "/api/sleep", .method = HTTP_POST, .handler = sleep_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &sleep_uri);
 
-        httpd_uri_t version_uri = {.uri = "/api/version",
-                                   .method = HTTP_GET,
-                                   .handler = version_handler,
-                                   .user_ctx = NULL};
-        httpd_register_uri_handler(server, &version_uri);
+        httpd_uri_t system_info_uri = {.uri = "/api/system-info",
+                                       .method = HTTP_GET,
+                                       .handler = system_info_handler,
+                                       .user_ctx = NULL};
+        httpd_register_uri_handler(server, &system_info_uri);
 
         httpd_uri_t time_uri = {
             .uri = "/api/time", .method = HTTP_GET, .handler = time_handler, .user_ctx = NULL};
@@ -2530,6 +2518,19 @@ esp_err_t http_server_init(void)
                                       .user_ctx = NULL};
         httpd_register_uri_handler(server, &ota_update_uri);
 
+        httpd_uri_t keep_alive_uri = {.uri = "/api/keep_alive",
+                                      .method = HTTP_POST,
+                                      .handler = keep_alive_handler,
+                                      .user_ctx = NULL};
+        httpd_register_uri_handler(server, &keep_alive_uri);
+
+        httpd_uri_t display_image_direct_uri = {.uri = "/api/display-image",
+                                                .method = HTTP_POST,
+                                                .handler = display_image_direct_handler,
+                                                .user_ctx = NULL};
+        httpd_register_uri_handler(server, &display_image_direct_uri);
+
+#ifdef CONFIG_HAS_SDCARD
         httpd_uri_t albums_get_uri = {
             .uri = "/api/albums", .method = HTTP_GET, .handler = albums_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &albums_get_uri);
@@ -2555,6 +2556,31 @@ esp_err_t http_server_init(void)
                                   .handler = album_images_handler,
                                   .user_ctx = NULL};
         httpd_register_uri_handler(server, &images_uri);
+
+        httpd_uri_t upload_uri = {.uri = "/api/upload",
+                                  .method = HTTP_POST,
+                                  .handler = upload_image_handler,
+                                  .user_ctx = NULL};
+        httpd_register_uri_handler(server, &upload_uri);
+
+        httpd_uri_t display_uri = {.uri = "/api/display",
+                                   .method = HTTP_POST,
+                                   .handler = display_image_handler,
+                                   .user_ctx = NULL};
+        httpd_register_uri_handler(server, &display_uri);
+
+        httpd_uri_t delete_uri = {.uri = "/api/delete",
+                                  .method = HTTP_POST,
+                                  .handler = delete_image_handler,
+                                  .user_ctx = NULL};
+        httpd_register_uri_handler(server, &delete_uri);
+
+        httpd_uri_t serve_image_uri = {.uri = "/api/image",
+                                       .method = HTTP_GET,
+                                       .handler = serve_image_handler,
+                                       .user_ctx = NULL};
+        httpd_register_uri_handler(server, &serve_image_uri);
+#endif
 
         httpd_uri_t processing_settings_get_uri = {.uri = "/api/settings/processing",
                                                    .method = HTTP_GET,
@@ -2597,12 +2623,6 @@ esp_err_t http_server_init(void)
                                                .handler = display_calibration_handler,
                                                .user_ctx = NULL};
         httpd_register_uri_handler(server, &display_calibration_uri);
-
-        httpd_uri_t keep_alive_uri = {.uri = "/api/keep_alive",
-                                      .method = HTTP_POST,
-                                      .handler = keep_alive_handler,
-                                      .user_ctx = NULL};
-        httpd_register_uri_handler(server, &keep_alive_uri);
 
         ESP_LOGI(TAG, "HTTP server started");
         return ESP_OK;

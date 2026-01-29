@@ -28,7 +28,6 @@ const THUMBNAIL_HEIGHT = 240;
 // Get default parameters from the library
 const DEFAULT_PARAMS = {
   ...getDefaultParams(),
-  processingMode: "enhanced",
 };
 
 // Fetch processing settings from device
@@ -409,7 +408,6 @@ async function processFolderStructure(
   inputDir,
   outputDir,
   options,
-  deviceSettings,
   devicePalette,
   uploadHost = null,
 ) {
@@ -507,44 +505,22 @@ async function processImageFile(
   inputPath,
   outputBmp,
   outputThumb,
-  options,
+  processingOptions,
   devicePalette = null,
 ) {
   console.log(`Processing: ${inputPath}`);
-
-  // Build processing parameters from options
-  const processingParams = {
-    exposure: options.exposure,
-    saturation: options.saturation,
-    toneMode: options.toneMode,
-    colorMethod: options.colorMethod,
-    renderMeasured: options.renderMeasured,
-    processingMode: options.processingMode,
-    ditherAlgorithm: options.ditherAlgorithm,
-    compressDynamicRange: options.compressDynamicRange,
-  };
-
-  // Add tone mapping parameters based on mode
-  if (options.toneMode === "scurve") {
-    processingParams.strength = options.scurveStrength;
-    processingParams.shadowBoost = options.scurveShadow;
-    processingParams.highlightCompress = options.scurveHighlight;
-    processingParams.midpoint = options.scurveMidpoint;
-  } else {
-    processingParams.contrast = options.contrast;
-  }
 
   // Use shared processing pipeline with verbose logging (library handles parameter logging)
   // Skip rotation when rendering measured palette for easier preview viewing
   const { canvas, originalCanvas } = await processImagePipeline(
     inputPath,
-    processingParams,
-    options.displayWidth,
-    options.displayHeight,
+    processingOptions,
+    processingOptions.displayWidth,
+    processingOptions.displayHeight,
     devicePalette,
     {
-      verbose: true,
-      skipRotation: options.renderMeasured,
+      verbose: processingOptions.verbose || true,
+      skipRotation: processingOptions.renderMeasured,
     },
   );
 
@@ -601,6 +577,7 @@ program
     "Suffix to add to output filename (single file mode only)",
     "",
   )
+  .option("-v, --verbose", "Enable verbose logging")
   .option("--format <format>", "Output format: png or bmp", "png")
   .option(
     "--preset <name>",
@@ -635,67 +612,42 @@ program
     "--exposure <value>",
     "Exposure multiplier (0.5-2.0, 1.0=normal)",
     parseFloat,
-    DEFAULT_PARAMS.exposure,
   )
   .option(
     "--saturation <value>",
     "Saturation multiplier (0.5-2.0, 1.0=normal)",
     parseFloat,
-    DEFAULT_PARAMS.saturation,
   )
-  .option(
-    "--tone-mode <mode>",
-    "Tone mapping mode: scurve or contrast",
-    DEFAULT_PARAMS.toneMode,
-  )
+  .option("--tone-mode <mode>", "Tone mapping mode: scurve or contrast")
   .option(
     "--contrast <value>",
     "Contrast multiplier for simple mode (0.5-2.0, 1.0=normal)",
     parseFloat,
-    DEFAULT_PARAMS.contrast,
   )
   .option(
     "--scurve-strength <value>",
     "S-curve overall strength (0.0-1.0)",
     parseFloat,
-    DEFAULT_PARAMS.strength,
   )
   .option(
     "--scurve-shadow <value>",
     "S-curve shadow boost (0.0-1.0)",
     parseFloat,
-    DEFAULT_PARAMS.shadowBoost,
   )
   .option(
     "--scurve-highlight <value>",
     "S-curve highlight compress (0.5-5.0)",
     parseFloat,
-    DEFAULT_PARAMS.highlightCompress,
   )
-  .option(
-    "--scurve-midpoint <value>",
-    "S-curve midpoint (0.3-0.7)",
-    parseFloat,
-    DEFAULT_PARAMS.midpoint,
-  )
-  .option(
-    "--color-method <method>",
-    "Color matching: rgb or lab",
-    DEFAULT_PARAMS.colorMethod,
-  )
+  .option("--scurve-midpoint <value>", "S-curve midpoint (0.3-0.7)", parseFloat)
+  .option("--color-method <method>", "Color matching: rgb or lab")
   .option(
     "--render-measured",
     "Render BMP with measured palette colors (darker output for preview)",
   )
   .option(
-    "--processing-mode <mode>",
-    "Processing algorithm: enhanced (with tone mapping) or stock (Waveshare original)",
-    DEFAULT_PARAMS.processingMode,
-  )
-  .option(
     "--dither-algorithm <algorithm>",
     "Dithering algorithm: floyd-steinberg, stucki, burkes, or sierra",
-    DEFAULT_PARAMS.ditherAlgorithm,
   )
   .option("--display-width <width>", "Display width in pixels", parseInt, 800)
   .option(
@@ -704,7 +656,29 @@ program
     parseInt,
     480,
   )
+  .option(
+    "-d, --dimension <WxH>",
+    "Display dimension (e.g., 800x480) - overrides display-width/height",
+  )
+  .option("--compress-dynamic-range", "Compress dynamic range to display range")
+  .option("--no-compress-dynamic-range", "Disable dynamic range compression")
   .action(async (input, options) => {
+    let outputDir;
+    let useTmpDir = false;
+
+    // Fetch device settings if --device-parameters is specified
+    let deviceSettings = null;
+    let devicePalette = null;
+    if (options.deviceParameters) {
+      try {
+        deviceSettings = await fetchDeviceSettings(options.host);
+        devicePalette = await fetchDevicePalette(options.host);
+      } catch (error) {
+        console.error(`Error: ${error.message}`);
+        process.exit(1);
+      }
+    }
+
     try {
       const inputPath = path.resolve(input);
       if (!fs.existsSync(inputPath)) {
@@ -712,104 +686,68 @@ program
         process.exit(1);
       }
 
-      // Check if --serve mode is enabled
-      if (options.serve) {
-        const inputStats = fs.statSync(inputPath);
-        if (!inputStats.isDirectory()) {
+      // Parse dimension if provided
+      if (options.dimension) {
+        const match = options.dimension.match(/^(\d+)x(\d+)$/);
+        if (match) {
+          options.displayWidth = parseInt(match[1]);
+          options.displayHeight = parseInt(match[2]);
+        } else {
           console.error(
-            "Error: --serve mode requires a directory with album structure",
+            `Error: Invalid dimension format "${options.dimension}". Use WxH (e.g. 800x480)`,
           );
           process.exit(1);
         }
-
-        const port = parseInt(options.servePort);
-        if (isNaN(port) || port < 1 || port > 65535) {
-          console.error(`Error: Invalid port number: ${options.servePort}`);
-          process.exit(1);
-        }
-
-        // Fetch device settings if --device-parameters is specified
-        let deviceSettings = null;
-        let devicePalette = null;
-        if (options.deviceParameters) {
-          try {
-            console.log(`Fetching device parameters from ${options.host}...`);
-            deviceSettings = await fetchDeviceSettings(options.host);
-            devicePalette = await fetchDevicePalette(options.host);
-            console.log(`Device parameters fetched successfully`);
-          } catch (error) {
-            console.error(`Error fetching device parameters: ${error.message}`);
-            console.error(`Falling back to default parameters`);
-          }
-        }
-
-        // Start HTTP server and keep running
-        await createImageServer(
-          inputPath,
-          port,
-          options.serveFormat,
-          devicePalette,
-          deviceSettings,
-          options,
-        );
-        return; // Server runs indefinitely
       }
 
-      // Validate --direct and --upload are mutually exclusive
-      if (options.direct && options.upload) {
-        console.error("Error: --direct and --upload cannot be used together");
-        process.exit(1);
-      }
+      // Apply preset values if not overridden by explicit options
+      const presetName = options.preset || "balanced";
+      // presetParams is declared here, ensure no duplicate declaration below
+      const presetParams = getPreset(presetName) || {};
 
-      // Check input type and validate --direct option
-      const inputStats = fs.statSync(inputPath);
-      const isDirectory = inputStats.isDirectory();
-
-      // Validate --direct requires single file
-      if (options.direct && isDirectory) {
-        console.error(
-          "Error: --direct option requires a single file input, not a directory",
-        );
-        process.exit(1);
-      }
-
-      // Use tmpdir when uploading or displaying directly, otherwise use specified output directory
-      let outputDir;
-      let useTmpDir = false;
-      if (options.upload || options.direct) {
-        outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "photoframe-"));
-        useTmpDir = true;
-        console.log(`Using temporary directory: ${outputDir}`);
-      } else {
-        outputDir = path.resolve(options.outputDir);
-        if (!fs.existsSync(outputDir)) {
-          fs.mkdirSync(outputDir, { recursive: true });
+      // Helper to set option if not defined, strictly checking undefined
+      // so that 0 is treated as a valid value
+      const setIfNotDefined = (key, value) => {
+        if (options[key] === undefined && value !== undefined) {
+          options[key] = value;
         }
-      }
+      };
 
-      // Fetch device settings if --device-parameters is specified
-      let deviceSettings = null;
-      let devicePalette = null;
-      if (options.deviceParameters) {
-        try {
-          deviceSettings = await fetchDeviceSettings(options.host);
-          devicePalette = await fetchDevicePalette(options.host);
-        } catch (error) {
-          console.error(`Error: ${error.message}`);
-          process.exit(1);
-        }
-      }
+      // Set defaults from preset
+      setIfNotDefined("exposure", presetParams.exposure);
+      setIfNotDefined("saturation", presetParams.saturation);
+      setIfNotDefined("toneMode", presetParams.toneMode);
+      setIfNotDefined("contrast", presetParams.contrast);
+      setIfNotDefined("scurveStrength", presetParams.strength);
+      setIfNotDefined("scurveShadow", presetParams.shadowBoost);
+      setIfNotDefined("scurveHighlight", presetParams.highlightCompress);
+      setIfNotDefined("scurveMidpoint", presetParams.midpoint);
+      setIfNotDefined("colorMethod", presetParams.colorMethod);
+      setIfNotDefined("ditherAlgorithm", presetParams.ditherAlgorithm);
+      setIfNotDefined(
+        "compressDynamicRange",
+        presetParams.compressDynamicRange,
+      );
 
-      // Apply preset if specified
-      let presetParams = null;
-      if (options.preset) {
-        presetParams = getPreset(options.preset);
-        if (!presetParams) {
-          console.error(`Error: Unknown preset "${options.preset}"`);
-          console.error(`Available presets: ${getPresetNames().join(", ")}`);
-          process.exit(1);
-        }
-        console.log(`Using preset: ${options.preset}`);
+      // Set fallback defaults if still undefined (from global defaults)
+      const libraryDefaults = getDefaultParams();
+      setIfNotDefined("exposure", libraryDefaults.exposure);
+      setIfNotDefined("saturation", libraryDefaults.saturation);
+      setIfNotDefined("toneMode", libraryDefaults.toneMode);
+      setIfNotDefined("contrast", libraryDefaults.contrast);
+      setIfNotDefined("scurveStrength", libraryDefaults.strength);
+      setIfNotDefined("scurveShadow", libraryDefaults.shadowBoost);
+      setIfNotDefined("scurveHighlight", libraryDefaults.highlightCompress);
+      setIfNotDefined("scurveMidpoint", libraryDefaults.midpoint);
+      setIfNotDefined("colorMethod", libraryDefaults.colorMethod);
+      setIfNotDefined("ditherAlgorithm", libraryDefaults.ditherAlgorithm);
+      setIfNotDefined(
+        "compressDynamicRange",
+        libraryDefaults.compressDynamicRange,
+      );
+
+      if (!options.silent) {
+        console.log(`Using preset: ${presetName}`);
       }
 
       // Build processing options with priority: device settings > CLI options > preset > defaults
@@ -827,11 +765,12 @@ program
             scurveHighlight: deviceSettings.highlightCompress,
             scurveMidpoint: deviceSettings.midpoint,
             colorMethod: deviceSettings.colorMethod,
-            renderMeasured: options.renderMeasured || false,
-            processingMode: deviceSettings.processingMode,
+            renderMeasured: options.renderMeasured || false, // Not in device settings usually
             ditherAlgorithm:
               deviceSettings.ditherAlgorithm || options.ditherAlgorithm,
             compressDynamicRange: deviceSettings.compressDynamicRange,
+            displayWidth: options.displayWidth,
+            displayHeight: options.displayHeight,
             format: options.format,
           }
         : {
@@ -856,28 +795,24 @@ program
             scurveStrength:
               options.scurveStrength ??
               presetParams?.strength ??
-              DEFAULT_PARAMS.scurveStrength,
+              DEFAULT_PARAMS.strength,
             scurveShadow:
               options.scurveShadow ??
               presetParams?.shadowBoost ??
-              DEFAULT_PARAMS.scurveShadow,
+              DEFAULT_PARAMS.shadowBoost,
             scurveHighlight:
               options.scurveHighlight ??
               presetParams?.highlightCompress ??
-              DEFAULT_PARAMS.scurveHighlight,
+              DEFAULT_PARAMS.highlightCompress,
             scurveMidpoint:
               options.scurveMidpoint ??
               presetParams?.midpoint ??
-              DEFAULT_PARAMS.scurveMidpoint,
+              DEFAULT_PARAMS.midpoint,
             colorMethod:
               options.colorMethod ??
               presetParams?.colorMethod ??
               DEFAULT_PARAMS.colorMethod,
             renderMeasured: options.renderMeasured ?? false,
-            processingMode:
-              options.processingMode ??
-              presetParams?.processingMode ??
-              DEFAULT_PARAMS.processingMode,
             ditherAlgorithm:
               options.ditherAlgorithm ??
               presetParams?.ditherAlgorithm ??
@@ -885,9 +820,77 @@ program
             compressDynamicRange:
               options.compressDynamicRange ??
               presetParams?.compressDynamicRange ??
-              false,
+              DEFAULT_PARAMS.compressDynamicRange,
+            displayWidth: options.displayWidth,
+            displayHeight: options.displayHeight,
             format: options.format,
           };
+
+      // Check if --serve mode is enabled
+      if (options.serve) {
+        const inputStats = fs.statSync(inputPath);
+        if (!inputStats.isDirectory()) {
+          console.error(
+            "Error: --serve mode requires a directory with album structure",
+          );
+          process.exit(1);
+        }
+
+        const port = parseInt(options.servePort);
+        if (isNaN(port) || port < 1 || port > 65535) {
+          console.error(`Error: Invalid port number: ${options.servePort}`);
+          process.exit(1);
+        }
+
+        // Start HTTP server and keep running
+        await createImageServer(
+          inputPath,
+          port,
+          options.serveFormat,
+          devicePalette,
+          processOptions, // Pass resolved options
+          options,
+        );
+        return; // Server runs indefinitely
+      }
+
+      // Validate --direct and --upload are mutually exclusive
+      if (options.direct && options.upload) {
+        console.error("Error: --direct and --upload cannot be used together");
+        process.exit(1);
+      }
+
+      // Check input type and validate --direct option
+      const inputStats = fs.statSync(inputPath);
+      const isDirectory = inputStats.isDirectory();
+
+      // Validate --direct requires single file
+      if (options.direct && isDirectory) {
+        console.error(
+          "Error: --direct option requires a single file input, not a directory",
+        );
+        process.exit(1);
+      }
+
+      if (options.upload || options.direct) {
+        outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "photoframe-"));
+        useTmpDir = true;
+        console.log(`Using temporary directory: ${outputDir}`);
+      } else {
+        outputDir = path.resolve(options.outputDir);
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true });
+        }
+      }
+
+      // Explicit preset option validation
+      if (options.preset) {
+        if (!getPreset(options.preset)) {
+          console.error(`Error: Unknown preset "${options.preset}"`);
+          console.error(`Available presets: ${getPresetNames().join(", ")}`);
+          process.exit(1);
+        }
+      }
 
       // Process based on input type
       if (isDirectory) {
@@ -896,7 +899,6 @@ program
           inputPath,
           outputDir,
           processOptions,
-          deviceSettings,
           devicePalette,
           options.upload ? options.host : null,
         );

@@ -12,12 +12,11 @@
 #include <nvs_flash.h>
 #include <time.h>
 
-#include "axp_prot.h"
+#include "board_hal.h"
 #include "config.h"
 #include "config_manager.h"
 #include "ha_integration.h"
 #include "periodic_tasks.h"
-#include "shtc3_sensor.h"
 #include "utils.h"
 
 // RTC memory to store expected wakeup time (persists across deep sleep)
@@ -50,7 +49,7 @@ static void rotation_timer_task(void *arg)
         // Run active rotation when:
         // 1. USB is connected (device stays awake), OR
         // 2. Deep sleep is disabled (device stays awake on battery)
-        bool should_use_active_rotation = axp_is_usb_connected() || !deep_sleep_enabled;
+        bool should_use_active_rotation = board_hal_is_usb_connected() || !deep_sleep_enabled;
 
         if (!should_use_active_rotation) {
             // Device will auto-sleep after 120 seconds, no need to reset timer
@@ -73,14 +72,16 @@ static void rotation_timer_task(void *arg)
                 int seconds_until_next = get_next_rotation_interval();
 
                 next_rotation_time = now + (seconds_until_next * 1000000LL);
-                const char *reason = axp_is_usb_connected() ? "USB powered" : "deep sleep disabled";
+                const char *reason =
+                    board_hal_is_usb_connected() ? "USB powered" : "deep sleep disabled";
                 ESP_LOGI(TAG, "Active rotation scheduled in %d seconds (%s, %s)",
                          seconds_until_next,
                          config_manager_get_auto_rotate_aligned() ? "clock-aligned" : "interval",
                          reason);
             } else if (now >= next_rotation_time) {
                 // Time to rotate
-                const char *reason = axp_is_usb_connected() ? "USB powered" : "deep sleep disabled";
+                const char *reason =
+                    board_hal_is_usb_connected() ? "USB powered" : "deep sleep disabled";
                 ESP_LOGI(TAG, "Active rotation triggered (%s)", reason);
 
                 trigger_image_rotation();
@@ -109,7 +110,7 @@ static void sleep_timer_task(void *arg)
 
 #ifndef DEBUG_DEEP_SLEEP_WAKE
         // Skip auto-sleep when USB is connected
-        if (axp_is_usb_connected()) {
+        if (board_hal_is_usb_connected()) {
             // Reset timer so it doesn't trigger immediately when USB is unplugged
             next_sleep_time = 0;
             continue;
@@ -249,7 +250,7 @@ esp_err_t power_manager_init(void)
     }
 
     // Configure button GPIOs as input with pull-ups
-    // NOTE: PWR_BUTTON_GPIO (GPIO 5) is NOT configured here - it's AXP2101 SYS_OUT pin
+    // NOTE: PWR_BUTTON_GPIO (GPIO 5) is NOT configured here - it's PMIC specific
     gpio_config_t io_conf = {.intr_type = GPIO_INTR_DISABLE,
                              .mode = GPIO_MODE_INPUT,
                              .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO) | (1ULL << KEY_BUTTON_GPIO),
@@ -280,6 +281,9 @@ esp_err_t power_manager_init(void)
     xTaskCreate(rotation_timer_task, "rotation_timer", 16384, NULL, 5, &rotation_timer_task_handle);
 
     power_manager_enable_auto_light_sleep();
+
+    // Initialize Power HAL
+    ESP_ERROR_CHECK(board_hal_init());
 
     ESP_LOGI(TAG, "Power manager initialized");
     return ESP_OK;
@@ -317,14 +321,8 @@ void power_manager_enter_sleep(void)
     esp_sleep_enable_ext1_wakeup((1ULL << BOOT_BUTTON_GPIO) | (1ULL << KEY_BUTTON_GPIO),
                                  ESP_EXT1_WAKEUP_ANY_LOW);
 
-    // Put SHTC3 sensor to sleep to save power
-    if (shtc3_is_available()) {
-        shtc3_sleep();
-        ESP_LOGI(TAG, "SHTC3 sensor put to sleep");
-    }
-
-    ESP_LOGI(TAG, "Configuring AXP2101 for deep sleep");
-    axp_basic_sleep_start();
+    ESP_LOGI(TAG, "Configuring Power HAL for deep sleep");
+    board_hal_prepare_for_sleep();
 
     ESP_LOGI(TAG, "Entering deep sleep now");
     vTaskDelay(pdMS_TO_TICKS(100));

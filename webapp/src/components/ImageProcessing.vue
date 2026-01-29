@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from "vue";
 import ToneCurve from "./ToneCurve.vue";
+import { useAppStore } from "../stores";
 
 const props = defineProps({
   imageFile: {
@@ -18,6 +19,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["processed"]);
+const appStore = useAppStore();
 
 // Canvas refs
 const originalCanvasRef = ref(null);
@@ -27,10 +29,6 @@ const processedCanvasRef = ref(null);
 const processing = ref(false);
 const sliderPosition = ref(0);
 const isDragging = ref(false);
-
-// Display dimensions
-const DISPLAY_WIDTH = 800;
-const DISPLAY_HEIGHT = 480;
 
 // Source canvas for reprocessing
 let sourceCanvas = null;
@@ -121,40 +119,75 @@ async function updatePreview() {
     palette.perceived = props.palette;
   }
 
-  // Determine if image is portrait (height > width)
-  const isPortrait = sourceCanvas.height > sourceCanvas.width;
-  const displayWidth = isPortrait ? DISPLAY_HEIGHT : DISPLAY_WIDTH; // 480 or 800
-  const displayHeight = isPortrait ? DISPLAY_WIDTH : DISPLAY_HEIGHT; // 800 or 480
+  // Use store values for device dimensions
+  const deviceWidth = appStore.systemInfo.width;
+  const deviceHeight = appStore.systemInfo.height;
 
-  // Process image with dithering for preview
-  // Use skipRotation: true to display portrait images in portrait mode
+  // For the actual image processing, we want to match the device's native resolution.
+  // We should NOT flip these based on image orientation if the device is already portrait.
+  // The processor library handles rotation if needed (skipRotation: false).
+  // However, for the PREVIEW, if we want to show how it looks on device, we should
+  // use the device dimensions.
+
+  // Logic:
+  // If the device is Landscape (W > H), and image is Portrait, processor usually rotates it (unless skipRotation is true).
+  // If the device is Portrait (H > W), and image is Portrait, no rotation needed.
+
+  // Here for preview we just want to process it to the target dimensions.
+  const targetWidth = deviceWidth;
+  const targetHeight = deviceHeight;
+
+  // Process image for preview
+  // validRotation: true means let the processor rotate if it thinks it should (e.g. Portrait on Landscape).
+  // But for preview of "native" display, we might want to be careful.
+  // The user complained about square images.
+  // If device is 1200x1600 (Portrait), and we upload Portrait, it should stay 1200x1600.
+
   const result = imageProcessor.processImage(sourceCanvas, {
-    displayWidth: isPortrait ? DISPLAY_HEIGHT : DISPLAY_WIDTH,
-    displayHeight: isPortrait ? DISPLAY_WIDTH : DISPLAY_HEIGHT,
+    displayWidth: targetWidth,
+    displayHeight: targetHeight,
     palette,
     params: processingParams,
-    skipRotation: true,
+    skipRotation: false, // Let the processor decide based on fit, similar to upload
     usePerceivedOutput: true,
   });
 
-  // Set canvas dimensions to exact display size
-  originalCanvasRef.value.width = displayWidth;
-  originalCanvasRef.value.height = displayHeight;
-  processedCanvasRef.value.width = displayWidth;
-  processedCanvasRef.value.height = displayHeight;
+  // Update canvas dimensions to match the processed result
+  originalCanvasRef.value.width = targetWidth;
+  originalCanvasRef.value.height = targetHeight;
+  processedCanvasRef.value.width = targetWidth;
+  processedCanvasRef.value.height = targetHeight;
+
+  // Scale down the visual size if larger than 800px while maintaining aspect ratio
+  const MAX_PREVIEW_SIZE = 800;
+  let styleWidth = targetWidth;
+  let styleHeight = targetHeight;
+
+  if (styleWidth > MAX_PREVIEW_SIZE || styleHeight > MAX_PREVIEW_SIZE) {
+    const ratio = Math.min(MAX_PREVIEW_SIZE / styleWidth, MAX_PREVIEW_SIZE / styleHeight);
+    styleWidth = Math.round(styleWidth * ratio);
+    styleHeight = Math.round(styleHeight * ratio);
+  }
+
+  // Update logic to set style on the canvas elements directly or wrapper
+  if (originalCanvasRef.value) {
+    originalCanvasRef.value.style.width = `${styleWidth}px`;
+    originalCanvasRef.value.style.height = `${styleHeight}px`;
+  }
+  if (processedCanvasRef.value) {
+    processedCanvasRef.value.style.width = `${styleWidth}px`;
+    processedCanvasRef.value.style.height = `${styleHeight}px`;
+  }
 
   // Draw original using cover mode (same as old webapp)
-  const originalResized = imageProcessor.resizeImageCover(
-    sourceCanvas,
-    displayWidth,
-    displayHeight
-  );
+  // Draw original using cover mode (same as old webapp)
+  const originalResized = imageProcessor.resizeImageCover(sourceCanvas, targetWidth, targetHeight);
   const originalCtx = originalCanvasRef.value.getContext("2d");
   originalCtx.drawImage(originalResized, 0, 0);
 
   // Draw processed result
   const processedCtx = processedCanvasRef.value.getContext("2d");
-  processedCtx.drawImage(result.canvas, 0, 0, displayWidth, displayHeight);
+  processedCtx.drawImage(result.canvas, 0, 0, targetWidth, targetHeight);
 
   emit("processed", result);
 }
@@ -260,6 +293,8 @@ onUnmounted(() => {
 
 .preview-canvas {
   display: block;
+  max-width: 100%;
+  height: auto;
 }
 
 .preview-canvas.processed {

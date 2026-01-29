@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "board_hal.h"
 #include "config.h"
 #include "esp_log.h"
 #include "nvs.h"
@@ -11,12 +12,16 @@ static const char *TAG = "config_manager";
 
 static char device_name[DEVICE_NAME_MAX_LEN] = {0};
 static int rotate_interval = IMAGE_ROTATE_INTERVAL_SEC;
-static int image_orientation = IMAGE_ORIENTATION_DEG;
+static int image_orientation = 0;
 static bool auto_rotate_enabled = false;
 static bool auto_rotate_aligned = true;
 static char image_url[IMAGE_URL_MAX_LEN] = {0};
 static char ha_url[HA_URL_MAX_LEN] = {0};
+#ifdef CONFIG_HAS_SDCARD
 static rotation_mode_t rotation_mode = ROTATION_MODE_SDCARD;
+#else
+static rotation_mode_t rotation_mode = ROTATION_MODE_URL;
+#endif
 static bool save_downloaded_images = true;
 static display_orientation_t display_orientation = DISPLAY_ORIENTATION_LANDSCAPE;
 static bool sleep_schedule_enabled = false;
@@ -53,7 +58,7 @@ esp_err_t config_manager_init(void)
                      auto_rotate_aligned ? "yes" : "no");
         }
 
-        int32_t stored_image_orientation = IMAGE_ORIENTATION_DEG;
+        int32_t stored_image_orientation = board_hal_get_display_rotation();
         if (nvs_get_i32(nvs_handle, NVS_IMAGE_ORIENTATION_KEY, &stored_image_orientation) ==
             ESP_OK) {
             image_orientation = stored_image_orientation;
@@ -73,6 +78,11 @@ esp_err_t config_manager_init(void)
         uint8_t stored_mode = ROTATION_MODE_SDCARD;
         if (nvs_get_u8(nvs_handle, NVS_ROTATION_MODE_KEY, &stored_mode) == ESP_OK) {
             rotation_mode = (rotation_mode_t) stored_mode;
+#ifndef CONFIG_HAS_SDCARD
+            if (rotation_mode == ROTATION_MODE_SDCARD) {
+                rotation_mode = ROTATION_MODE_URL;
+            }
+#endif
             ESP_LOGI(TAG, "Loaded rotation mode from NVS: %s",
                      rotation_mode == ROTATION_MODE_URL ? "url" : "sdcard");
         }
@@ -323,6 +333,12 @@ const char *config_manager_get_image_url(void)
 
 void config_manager_set_rotation_mode(rotation_mode_t mode)
 {
+#ifndef CONFIG_HAS_SDCARD
+    if (mode == ROTATION_MODE_SDCARD) {
+        ESP_LOGE(TAG, "Cannot set rotation mode to SDCARD: SD card not supported");
+        return;
+    }
+#endif
     rotation_mode = mode;
 
     nvs_handle_t nvs_handle;

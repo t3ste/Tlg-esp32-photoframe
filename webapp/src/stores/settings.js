@@ -160,7 +160,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.rotateHours = Math.floor(rotateIntervalSeconds / 3600);
       deviceSettings.value.rotateMinutes = Math.floor((rotateIntervalSeconds % 3600) / 60);
 
-      deviceSettings.value.imageOrientation = data.image_orientation || 180;
+      deviceSettings.value.imageOrientation = data.image_orientation ?? 180;
       deviceSettings.value.imageUrl = data.image_url || "https://loremflickr.com/800/480";
       deviceSettings.value.deepSleepEnabled = data.deep_sleep_enabled !== false;
       deviceSettings.value.haUrl = data.ha_url || "";

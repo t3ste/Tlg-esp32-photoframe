@@ -2,7 +2,6 @@
 
 #include <string.h>
 
-#include "axp_prot.h"
 #include "cJSON.h"
 #include "config_manager.h"
 #include "display_manager.h"

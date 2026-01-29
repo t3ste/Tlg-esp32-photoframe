@@ -480,66 +480,79 @@ UBYTE GUI_ReadBmp_RGB_6Color(const char *path, UWORD Xstart, UWORD Ystart)
     fseek(fp, 0, SEEK_SET);
     fread(&bmpFileHeader, sizeof(BMPFILEHEADER), 1, fp);  // sizeof(BMPFILEHEADER) must be 14
     fread(&bmpInfoHeader, sizeof(BMPINFOHEADER), 1, fp);  // sizeof(BMPFILEHEADER) must be 50
-    ESP_LOGW(TAG, "(width,height) = (%ld * %ld)", bmpInfoHeader.biWidth, bmpInfoHeader.biHeight);
+    ESP_LOGI(TAG, "BMP: width=%ld, height=%ld, bitCount=%d", bmpInfoHeader.biWidth,
+             bmpInfoHeader.biHeight, bmpInfoHeader.biBitCount);
 
-    UDOUBLE Image_Byte = bmpInfoHeader.biWidth * bmpInfoHeader.biHeight * 3;
-
-    int readbyte = bmpInfoHeader.biBitCount;
-    if (readbyte != 24) {
+    if (bmpInfoHeader.biBitCount != 24) {
         ESP_LOGE(TAG, "Bmp image is not 24 bitmap!");
         fclose(fp);
         return 1;
     }
 
-    UBYTE *Image = (UBYTE *) heap_caps_malloc(Image_Byte * sizeof(uint8_t), MALLOC_CAP_SPIRAM);
-    UWORD x, y;
-    UBYTE Rdata[3];
+    // Allocate buffer for one row (3 bytes per pixel)
+    // Row size in BMP is padded to 4 bytes
+    int width = bmpInfoHeader.biWidth;
+    int height = bmpInfoHeader.biHeight;
+    int row_padded = (width * 3 + 3) & (~3);
+
+    UBYTE *row_data = (UBYTE *) heap_caps_malloc(row_padded, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!row_data) {
+        ESP_LOGE(TAG, "Failed to allocate row buffer");
+        fclose(fp);
+        return 1;
+    }
+
     fseek(fp, bmpFileHeader.bOffset, SEEK_SET);
 
-    for (y = 0; y < bmpInfoHeader.biHeight; y++) {     // Total display column
-        for (x = 0; x < bmpInfoHeader.biWidth; x++) {  // Show a line in the line
-            if (fread((char *) Rdata, 1, 1, fp) != 1) {
-                ESP_LOGE(TAG, "Get Bmpdata Failure");
-                break;
-            }
-            if (fread((char *) Rdata + 1, 1, 1, fp) != 1) {
-                ESP_LOGE(TAG, "Get Bmpdata Failure");
-                break;
-            }
-            if (fread((char *) Rdata + 2, 1, 1, fp) != 1) {
-                ESP_LOGE(TAG, "Get Bmpdata Failure");
+    // BMP stores lines from bottom to top
+    // So current file row 'y' corresponds to display row 'height - 1 - y'
+    for (int y = 0; y < height; y++) {
+        if (fread(row_data, 1, row_padded, fp) != row_padded) {
+            ESP_LOGE(TAG, "Get Bmpdata Failure");
+            break;
+        }
+
+        int display_y = height - 1 - y;
+        if (Ystart + display_y >= Paint.Height) {
+            continue;
+        }
+
+        for (int x = 0; x < width; x++) {
+            if (Xstart + x >= Paint.Width) {
                 break;
             }
 
-            if (Rdata[0] == 0 && Rdata[1] == 0 && Rdata[2] == 0) {
-                Image[x + (y * bmpInfoHeader.biWidth)] = 0;  // Black
-            } else if (Rdata[0] == 255 && Rdata[1] == 255 && Rdata[2] == 255) {
-                Image[x + (y * bmpInfoHeader.biWidth)] = 1;  // White
-            } else if (Rdata[0] == 0 && Rdata[1] == 255 && Rdata[2] == 255) {
-                Image[x + (y * bmpInfoHeader.biWidth)] = 2;  // Yellow
-            } else if (Rdata[0] == 0 && Rdata[1] == 0 && Rdata[2] == 255) {
-                Image[x + (y * bmpInfoHeader.biWidth)] = 3;  // Red
-            } else if (Rdata[0] == 255 && Rdata[1] == 0 && Rdata[2] == 0) {
-                Image[x + (y * bmpInfoHeader.biWidth)] = 5;  // Blue
-            } else if (Rdata[0] == 0 && Rdata[1] == 255 && Rdata[2] == 0) {
-                Image[x + (y * bmpInfoHeader.biWidth)] = 6;  // Green
+            int offset = x * 3;
+            uint8_t r = row_data[offset + 2];  // BMP is BGR
+            uint8_t g = row_data[offset + 1];
+            uint8_t b = row_data[offset + 0];
+
+            // Map RGB to 6-color palette index
+            UBYTE color;
+            if (r == 0 && g == 0 && b == 0) {
+                color = 0;  // Black
+            } else if (r == 255 && g == 255 && b == 255) {
+                color = 1;  // White
+            } else if (r == 255 && g == 255 && b == 0) {
+                color = 2;  // Yellow
+            } else if (r == 255 && g == 0 && b == 0) {
+                color = 3;  // Red
+            } else if (r == 0 && g == 0 && b == 255) {
+                color = 5;  // Blue
+            } else if (r == 0 && g == 255 && b == 0) {
+                color = 6;  // Green
+            } else {
+                color = 1;  // Default to white for unknown colors
             }
+
+            // Paint pixel directly
+            Paint_SetPixel(Xstart + x, Ystart + display_y, color);
         }
     }
+
+    heap_caps_free(row_data);
     fclose(fp);
-
-    for (y = 0; y < bmpInfoHeader.biHeight; y++) {
-        for (x = 0; x < bmpInfoHeader.biWidth; x++) {
-            if (x > Paint.Width || y > Paint.Height) {
-                break;
-            }
-            Paint_SetPixel(Xstart + x, Ystart + y,
-                           Image[bmpInfoHeader.biHeight * bmpInfoHeader.biWidth - 1 -
-                                 (bmpInfoHeader.biWidth - x - 1 + (y * bmpInfoHeader.biWidth))]);
-        }
-    }
-    heap_caps_free(Image);
-    Image = NULL;
+    ESP_LOGI(TAG, "BMP displayed successfully (stream processing)");
     return 0;
 }
 #else

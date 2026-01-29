@@ -15,16 +15,14 @@ import {
   createPNG,
   createBMP,
   getDefaultParams,
+  getPreset,
 } from "@aitjcize/epaper-image-convert";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Get default parameters from the library
-const DEFAULT_PARAMS = {
-  ...getDefaultParams(),
-  processingMode: "enhanced",
-};
+const DEFAULT_PARAMS = getDefaultParams();
 
 // Display dimensions
 const DEFAULT_DISPLAY_WIDTH = 800;
@@ -37,16 +35,17 @@ const DEFAULT_DISPLAY_HEIGHT = 480;
  * @param {number} port - Port to listen on
  * @param {string} serveFormat - Output format (jpg, png, bmp)
  * @param {Object} devicePalette - Optional device color palette
- * @param {Object} deviceSettings - Optional device processing settings
+ * @param {Object} processingOptions - Resolved processing parameters
  * @param {Object} options - Additional options (silent, etc.)
  * @returns {Promise<http.Server>} The HTTP server instance
  */
+
 export async function createImageServer(
   albumDir,
   port,
   serveFormat,
   devicePalette,
-  deviceSettings,
+  processingOptions,
   options = {},
 ) {
   // Validate serve format
@@ -57,44 +56,8 @@ export async function createImageServer(
     );
   }
 
-  // Build processing parameters
-  const processingParams = {
-    exposure: options.exposure ?? DEFAULT_PARAMS.exposure,
-    saturation: options.saturation ?? DEFAULT_PARAMS.saturation,
-    toneMode: options.toneMode ?? DEFAULT_PARAMS.toneMode,
-    contrast: options.contrast ?? DEFAULT_PARAMS.contrast,
-    strength: options.scurveStrength ?? DEFAULT_PARAMS.strength,
-    shadowBoost: options.scurveShadow ?? DEFAULT_PARAMS.shadowBoost,
-    highlightCompress:
-      options.scurveHighlight ?? DEFAULT_PARAMS.highlightCompress,
-    midpoint: options.scurveMidpoint ?? DEFAULT_PARAMS.midpoint,
-    colorMethod: options.colorMethod ?? DEFAULT_PARAMS.colorMethod,
-    processingMode: options.processingMode ?? DEFAULT_PARAMS.processingMode,
-  };
-
-  // Override with device settings if provided
-  if (deviceSettings) {
-    Object.assign(processingParams, {
-      exposure: deviceSettings.exposure,
-      saturation: deviceSettings.saturation,
-      toneMode: deviceSettings.toneMode,
-      contrast: deviceSettings.contrast,
-      strength: deviceSettings.strength,
-      shadowBoost: deviceSettings.shadowBoost,
-      highlightCompress: deviceSettings.highlightCompress,
-      midpoint: deviceSettings.midpoint,
-      colorMethod: deviceSettings.colorMethod,
-      processingMode: deviceSettings.processingMode,
-    });
-
-    if (!options.silent) {
-      console.log(`Using device parameters:`);
-      console.log(`  Exposure: ${processingParams.exposure}`);
-      console.log(`  Saturation: ${processingParams.saturation}`);
-      console.log(`  Tone mode: ${processingParams.toneMode}`);
-      console.log(`  Color method: ${processingParams.colorMethod}`);
-    }
-  }
+  // Use pre-resolved processing params
+  const processingParams = { ...processingOptions };
 
   // Scan albums and collect all images
   const albums = {};
@@ -167,15 +130,30 @@ export async function createImageServer(
       const image = allImages[randomIndex];
 
       try {
+        // Get display dimensions from headers or use defaults
+        const width =
+          parseInt(req.headers["x-display-width"]) ||
+          processingOptions.displayWidth ||
+          DEFAULT_DISPLAY_WIDTH;
+        const height =
+          parseInt(req.headers["x-display-height"]) ||
+          processingOptions.displayHeight ||
+          DEFAULT_DISPLAY_HEIGHT;
+
+        if (!options.silent) {
+          console.log(`Processing for display: ${width}x${height}`);
+        }
+
         // Process image through pipeline
         const { canvas: processedCanvas, originalCanvas } =
           await processImagePipeline(
             image.path,
             processingParams,
-            DEFAULT_DISPLAY_WIDTH,
-            DEFAULT_DISPLAY_HEIGHT,
+            width,
+            height,
             devicePalette,
             {
+              verbose: options.verbose,
               skipDithering: serveFormat === "jpg",
             },
           );

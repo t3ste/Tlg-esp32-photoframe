@@ -1,4 +1,12 @@
+set(srcs "")
+if(CONFIG_EP_DRIVER_WAVESHARE_7IN3)
+    list(APPEND srcs "src/driver_waveshare_7in3.c")
+elseif(CONFIG_EP_DRIVER_XIAO_EE02)
+    list(APPEND srcs "src/driver_xiao_ee02.c")
+endif()
+
 idf_component_register(
-  SRCS "epaper_port.c"
-  PRIV_REQUIRES driver fatfs sdmmc sdcard_bsp
-  INCLUDE_DIRS "./")
+    SRCS "${srcs}"
+    INCLUDE_DIRS "./include"
+    REQUIRES driver esp_timer epaper_src esp_driver_gpio esp_driver_spi
+)

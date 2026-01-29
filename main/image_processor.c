@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "board_hal.h"
 #include "color_palette.h"
 #include "config.h"
 #include "esp_heap_caps.h"
@@ -439,7 +440,8 @@ esp_err_t image_processor_convert_jpg_to_bmp(const char *jpg_path, const char *b
 
     // If image is much larger than display, use JPEG decoder's built-in scaling
     // This reduces memory usage significantly (e.g., 1/2 scale = 1/4 memory)
-    if (outimg.width > DISPLAY_WIDTH * 2 || outimg.height > DISPLAY_HEIGHT * 2) {
+    if (outimg.width > board_hal_get_display_width() * 2 ||
+        outimg.height > board_hal_get_display_height() * 2) {
         decode_scale = JPEG_IMAGE_SCALE_1_2;  // 1:2 scale
         scaled_width = outimg.width / 2;
         scaled_height = outimg.height / 2;
@@ -447,7 +449,8 @@ esp_err_t image_processor_convert_jpg_to_bmp(const char *jpg_path, const char *b
                  outimg.height, scaled_width, scaled_height);
     }
 
-    if (outimg.width > DISPLAY_WIDTH * 4 || outimg.height > DISPLAY_HEIGHT * 4) {
+    if (outimg.width > board_hal_get_display_width() * 4 ||
+        outimg.height > board_hal_get_display_height() * 4) {
         decode_scale = JPEG_IMAGE_SCALE_1_4;  // 1:4 scale
         scaled_width = outimg.width / 4;
         scaled_height = outimg.height / 4;
@@ -457,9 +460,11 @@ esp_err_t image_processor_convert_jpg_to_bmp(const char *jpg_path, const char *b
 
     // Check if image is still too large even after maximum scaling
     // Maximum supported: 1:8 scale would be ~6400x3840 original -> 800x480 scaled
-    if (outimg.width > DISPLAY_WIDTH * 8 || outimg.height > DISPLAY_HEIGHT * 8) {
+    if (outimg.width > board_hal_get_display_width() * 8 ||
+        outimg.height > board_hal_get_display_height() * 8) {
         ESP_LOGE(TAG, "Image is too large: %dx%d (max supported: %dx%d)", outimg.width,
-                 outimg.height, DISPLAY_WIDTH * 8, DISPLAY_HEIGHT * 8);
+                 outimg.height, board_hal_get_display_width() * 8,
+                 board_hal_get_display_height() * 8);
         free(jpg_buffer);
         return ESP_ERR_INVALID_SIZE;
     }
@@ -527,14 +532,14 @@ esp_err_t image_processor_convert_jpg_to_bmp(const char *jpg_path, const char *b
     if (is_portrait) {
         // Portrait: resize to fit display width after rotation
         // Target height = display width (800), maintain aspect ratio
-        target_width = (outimg.width * DISPLAY_WIDTH) / outimg.height;
-        target_height = DISPLAY_WIDTH;
+        target_width = (outimg.width * board_hal_get_display_width()) / outimg.height;
+        target_height = board_hal_get_display_width();
         ESP_LOGI(TAG, "Portrait image: resizing %dx%d -> %dx%d (will rotate after)", final_width,
                  final_height, target_width, target_height);
     } else {
         // Landscape: resize directly to display size
-        target_width = DISPLAY_WIDTH;
-        target_height = DISPLAY_HEIGHT;
+        target_width = board_hal_get_display_width();
+        target_height = board_hal_get_display_height();
         ESP_LOGI(TAG, "Landscape image: resizing %dx%d -> %dx%d", final_width, final_height,
                  target_width, target_height);
     }
@@ -604,14 +609,16 @@ esp_err_t image_processor_convert_jpg_to_bmp(const char *jpg_path, const char *b
     }
 
     // STEP 3: Final resize if still needed (shouldn't happen normally)
-    if (final_width != DISPLAY_WIDTH || final_height != DISPLAY_HEIGHT) {
+    if (final_width != board_hal_get_display_width() ||
+        final_height != board_hal_get_display_height()) {
         ESP_LOGE(TAG, "Unexpected dimensions %dx%d after processing, expected %dx%d", final_width,
-                 final_height, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+                 final_height, board_hal_get_display_width(), board_hal_get_display_height());
         uint8_t *final_resized =
-            resize_image(final_image, final_width, final_height, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+            resize_image(final_image, final_width, final_height, board_hal_get_display_width(),
+                         board_hal_get_display_height());
         if (!final_resized) {
             ESP_LOGE(TAG, "Final resize failed from %dx%d to %dx%d", final_width, final_height,
-                     DISPLAY_WIDTH, DISPLAY_HEIGHT);
+                     board_hal_get_display_width(), board_hal_get_display_height());
             if (rotated)
                 free(rotated);
             else if (resized)
@@ -631,8 +638,8 @@ esp_err_t image_processor_convert_jpg_to_bmp(const char *jpg_path, const char *b
             rgb_buffer = NULL;
         }
         final_image = final_resized;
-        final_width = DISPLAY_WIDTH;
-        final_height = DISPLAY_HEIGHT;
+        final_width = board_hal_get_display_width();
+        final_height = board_hal_get_display_height();
     }
 
     // Apply dithering based on processing mode
