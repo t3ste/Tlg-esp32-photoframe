@@ -1791,6 +1791,7 @@ static esp_err_t system_info_handler(httpd_req_t *req)
     const esp_app_desc_t *app_desc = esp_app_get_description();
     cJSON *response = cJSON_CreateObject();
 
+    cJSON_AddStringToObject(response, "device_name", config_manager_get_device_name());
     cJSON_AddNumberToObject(response, "width", board_hal_get_display_width());
     cJSON_AddNumberToObject(response, "height", board_hal_get_display_height());
     cJSON_AddStringToObject(response, "board_name", board_hal_get_name());
