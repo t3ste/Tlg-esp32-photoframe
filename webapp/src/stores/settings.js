@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
-import { getPreset, getPresetOptions } from "@aitjcize/epaper-image-convert";
+import { getPreset, getPresetOptions, SPECTRA6 } from "@aitjcize/epaper-image-convert";
 
 export const useSettingsStore = defineStore("settings", () => {
   const API_BASE = "";
@@ -55,15 +55,8 @@ export const useSettingsStore = defineStore("settings", () => {
   let originalConfig = {};
   let originalParams = {};
 
-  // Palette
-  const palette = ref({
-    black: { r: 2, g: 2, b: 2 },
-    white: { r: 190, g: 190, b: 190 },
-    yellow: { r: 205, g: 202, b: 0 },
-    red: { r: 135, g: 19, b: 0 },
-    blue: { r: 5, g: 64, b: 158 },
-    green: { r: 39, g: 102, b: 60 },
-  });
+  // Palette - use defaults from epaper-image-convert library
+  const palette = ref({ ...SPECTRA6.perceived });
 
   // Preset
   const preset = ref("balanced");

@@ -258,14 +258,27 @@ function extractColorBoxes(ctx, width, height) {
   });
 
   // Map to color names
+  // Order: black (0), white (1), yellow (2), red (3), blue (4), green (5)
   const colors = ["black", "white", "yellow", "red", "blue", "green"];
+
+  // Calculate exposure adjustment based on white box brightness
+  // White box is at index 1 after sorting
+  const whiteBox = boxes[1];
+  const whiteBrightness =
+    (whiteBox.medianColor.r + whiteBox.medianColor.g + whiteBox.medianColor.b) / 3;
+
+  // Target white brightness - e-paper white isn't pure white, so use a lower target
+  const targetWhite = 210;
+  const exposureMultiplier = whiteBrightness > 0 ? targetWhite / whiteBrightness : 1;
+
   const palette = {};
 
   boxes.forEach((box, idx) => {
+    // Apply exposure adjustment and clamp to 0-255
     palette[colors[idx]] = {
-      r: Math.round(box.medianColor.r),
-      g: Math.round(box.medianColor.g),
-      b: Math.round(box.medianColor.b),
+      r: Math.round(Math.min(255, box.medianColor.r * exposureMultiplier)),
+      g: Math.round(Math.min(255, box.medianColor.g * exposureMultiplier)),
+      b: Math.round(Math.min(255, box.medianColor.b * exposureMultiplier)),
     };
   });
 
