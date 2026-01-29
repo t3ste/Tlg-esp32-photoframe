@@ -58,6 +58,8 @@ extern const uint8_t favicon_svg_start[] asm("_binary_favicon_svg_start");
 extern const uint8_t favicon_svg_end[] asm("_binary_favicon_svg_end");
 extern const uint8_t calibration_png_start[] asm("_binary_calibration_png_start");
 extern const uint8_t calibration_png_end[] asm("_binary_calibration_png_end");
+extern const uint8_t measurement_sample_jpg_start[] asm("_binary_measurement_sample_jpg_start");
+extern const uint8_t measurement_sample_jpg_end[] asm("_binary_measurement_sample_jpg_end");
 
 static esp_err_t index_handler(httpd_req_t *req)
 {
@@ -122,6 +124,15 @@ static esp_err_t favicon_handler(httpd_req_t *req)
     const size_t favicon_svg_size = (favicon_svg_end - favicon_svg_start);
     httpd_resp_set_type(req, "image/svg+xml");
     httpd_resp_send(req, (const char *) favicon_svg_start, favicon_svg_size);
+    return ESP_OK;
+}
+
+static esp_err_t measurement_sample_handler(httpd_req_t *req)
+{
+    const size_t measurement_sample_jpg_size =
+        (measurement_sample_jpg_end - measurement_sample_jpg_start);
+    httpd_resp_set_type(req, "image/jpeg");
+    httpd_resp_send(req, (const char *) measurement_sample_jpg_start, measurement_sample_jpg_size);
     return ESP_OK;
 }
 
@@ -2457,6 +2468,12 @@ esp_err_t http_server_init(void)
                                    .handler = favicon_handler,
                                    .user_ctx = NULL};
         httpd_register_uri_handler(server, &favicon_uri);
+
+        httpd_uri_t measurement_sample_uri = {.uri = "/measurement_sample.jpg",
+                                              .method = HTTP_GET,
+                                              .handler = measurement_sample_handler,
+                                              .user_ctx = NULL};
+        httpd_register_uri_handler(server, &measurement_sample_uri);
 
         httpd_uri_t rotate_uri = {
             .uri = "/api/rotate", .method = HTTP_POST, .handler = rotate_handler, .user_ctx = NULL};

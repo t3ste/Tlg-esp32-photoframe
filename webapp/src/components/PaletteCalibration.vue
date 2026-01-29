@@ -532,7 +532,7 @@ async function savePalette() {
           <v-card variant="outlined" class="mb-4 pa-3">
             <p class="text-subtitle-2 mb-2">Example Photo:</p>
             <img
-              src="/measurement_sample.jpg"
+              :src="'/measurement_sample.jpg'"
               alt="Sample calibration photo"
               class="sample-image"
             />
