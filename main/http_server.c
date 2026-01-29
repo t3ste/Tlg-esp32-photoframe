@@ -1214,7 +1214,6 @@ static esp_err_t rotate_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-#ifdef CONFIG_HAS_SDCARD
 static esp_err_t current_image_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -1296,8 +1295,6 @@ static esp_err_t current_image_handler(httpd_req_t *req)
 
     return ESP_OK;
 }
-
-#endif
 
 static esp_err_t config_handler(httpd_req_t *req)
 {
@@ -2385,13 +2382,11 @@ esp_err_t http_server_init(void)
             .uri = "/api/rotate", .method = HTTP_POST, .handler = rotate_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &rotate_uri);
 
-#ifdef CONFIG_HAS_SDCARD
         httpd_uri_t current_image_uri = {.uri = "/api/current_image",
                                          .method = HTTP_GET,
                                          .handler = current_image_handler,
                                          .user_ctx = NULL};
         httpd_register_uri_handler(server, &current_image_uri);
-#endif
 
         httpd_uri_t config_get_uri = {
             .uri = "/api/config", .method = HTTP_GET, .handler = config_handler, .user_ctx = NULL};
