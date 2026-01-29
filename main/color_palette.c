@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "cJSON.h"
 #include "config.h"
 #include "esp_log.h"
 #include "nvs.h"
@@ -80,4 +81,35 @@ esp_err_t color_palette_load(color_palette_t *palette)
     }
 
     return ESP_OK;
+}
+
+static cJSON *color_to_json(const color_rgb_t *color)
+{
+    cJSON *obj = cJSON_CreateObject();
+    if (obj) {
+        cJSON_AddNumberToObject(obj, "r", color->r);
+        cJSON_AddNumberToObject(obj, "g", color->g);
+        cJSON_AddNumberToObject(obj, "b", color->b);
+    }
+    return obj;
+}
+
+char *color_palette_to_json(const color_palette_t *palette)
+{
+    cJSON *json = cJSON_CreateObject();
+    if (!json) {
+        return NULL;
+    }
+
+    cJSON_AddItemToObject(json, "black", color_to_json(&palette->black));
+    cJSON_AddItemToObject(json, "white", color_to_json(&palette->white));
+    cJSON_AddItemToObject(json, "yellow", color_to_json(&palette->yellow));
+    cJSON_AddItemToObject(json, "red", color_to_json(&palette->red));
+    cJSON_AddItemToObject(json, "blue", color_to_json(&palette->blue));
+    cJSON_AddItemToObject(json, "green", color_to_json(&palette->green));
+
+    char *json_str = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+
+    return json_str;
 }

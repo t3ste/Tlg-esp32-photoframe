@@ -8,6 +8,7 @@
 
 #include "board_hal.h"
 #include "cJSON.h"
+#include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
 #include "display_manager.h"
@@ -178,6 +179,17 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
         if (settings_json) {
             esp_http_client_set_header(client, "X-Processing-Settings", settings_json);
             free(settings_json);
+        }
+
+        // Add color palette as JSON header
+        color_palette_t palette;
+        if (color_palette_load(&palette) != ESP_OK) {
+            color_palette_get_defaults(&palette);
+        }
+        char *palette_json = color_palette_to_json(&palette);
+        if (palette_json) {
+            esp_http_client_set_header(client, "X-Color-Palette", palette_json);
+            free(palette_json);
         }
 
         err = esp_http_client_perform(client);

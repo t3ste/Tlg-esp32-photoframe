@@ -2189,50 +2189,15 @@ static esp_err_t color_palette_handler(httpd_req_t *req)
             color_palette_get_defaults(&palette);
         }
 
-        cJSON *response = cJSON_CreateObject();
+        char *json_str = color_palette_to_json(&palette);
+        if (!json_str) {
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
 
-        cJSON *black = cJSON_CreateObject();
-        cJSON_AddNumberToObject(black, "r", palette.black.r);
-        cJSON_AddNumberToObject(black, "g", palette.black.g);
-        cJSON_AddNumberToObject(black, "b", palette.black.b);
-        cJSON_AddItemToObject(response, "black", black);
-
-        cJSON *white = cJSON_CreateObject();
-        cJSON_AddNumberToObject(white, "r", palette.white.r);
-        cJSON_AddNumberToObject(white, "g", palette.white.g);
-        cJSON_AddNumberToObject(white, "b", palette.white.b);
-        cJSON_AddItemToObject(response, "white", white);
-
-        cJSON *yellow = cJSON_CreateObject();
-        cJSON_AddNumberToObject(yellow, "r", palette.yellow.r);
-        cJSON_AddNumberToObject(yellow, "g", palette.yellow.g);
-        cJSON_AddNumberToObject(yellow, "b", palette.yellow.b);
-        cJSON_AddItemToObject(response, "yellow", yellow);
-
-        cJSON *red = cJSON_CreateObject();
-        cJSON_AddNumberToObject(red, "r", palette.red.r);
-        cJSON_AddNumberToObject(red, "g", palette.red.g);
-        cJSON_AddNumberToObject(red, "b", palette.red.b);
-        cJSON_AddItemToObject(response, "red", red);
-
-        cJSON *blue = cJSON_CreateObject();
-        cJSON_AddNumberToObject(blue, "r", palette.blue.r);
-        cJSON_AddNumberToObject(blue, "g", palette.blue.g);
-        cJSON_AddNumberToObject(blue, "b", palette.blue.b);
-        cJSON_AddItemToObject(response, "blue", blue);
-
-        cJSON *green = cJSON_CreateObject();
-        cJSON_AddNumberToObject(green, "r", palette.green.r);
-        cJSON_AddNumberToObject(green, "g", palette.green.g);
-        cJSON_AddNumberToObject(green, "b", palette.green.b);
-        cJSON_AddItemToObject(response, "green", green);
-
-        char *json_str = cJSON_Print(response);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, json_str);
-
         free(json_str);
-        cJSON_Delete(response);
         return ESP_OK;
 
     } else if (req->method == HTTP_POST) {
