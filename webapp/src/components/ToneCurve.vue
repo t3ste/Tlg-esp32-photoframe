@@ -12,10 +12,34 @@ const props = defineProps({
     type: Number,
     default: 200,
   },
+  palette: {
+    type: Object,
+    default: null,
+  },
 });
 
 const attrs = useAttrs();
 const canvasRef = ref(null);
+
+// Simple RGB to LAB L* conversion (approximate)
+function rgbToL(r, g, b) {
+  // Convert to linear RGB
+  const toLinear = (c) => {
+    c = c / 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const lr = toLinear(r);
+  const lg = toLinear(g);
+  const lb = toLinear(b);
+
+  // Convert to Y (luminance)
+  const y = 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+
+  // Convert Y to L*
+  const yn = 1.0; // Reference white Y
+  const fy = y / yn > 0.008856 ? Math.pow(y / yn, 1 / 3) : ((903.3 * y) / yn + 16) / 116;
+  return 116 * fy - 16;
+}
 
 function drawToneCurve() {
   if (!canvasRef.value) return;
@@ -56,6 +80,16 @@ function drawToneCurve() {
 
   const params = props.params;
 
+  // Calculate dynamic range compression bounds if enabled
+  let blackL = 0;
+  let whiteL = 100;
+  if (params.compressDynamicRange && props.palette) {
+    const black = props.palette.black || { r: 0, g: 0, b: 0 };
+    const white = props.palette.white || { r: 255, g: 255, b: 255 };
+    blackL = rgbToL(black.r, black.g, black.b);
+    whiteL = rgbToL(white.r, white.g, white.b);
+  }
+
   for (let x = 0; x <= size; x++) {
     const input = x / size;
     let output;
@@ -82,6 +116,14 @@ function drawToneCurve() {
     }
 
     output = Math.max(0, Math.min(1, output));
+
+    // Apply dynamic range compression if enabled
+    if (params.compressDynamicRange && props.palette) {
+      // Map output from 0-1 to blackL-whiteL range (normalized to 0-1)
+      output = (blackL + output * (whiteL - blackL)) / 100;
+    }
+
+    output = Math.max(0, Math.min(1, output));
     const y = size - output * size;
 
     if (x === 0) {
@@ -105,6 +147,15 @@ onMounted(async () => {
 
 watch(
   () => props.params,
+  async () => {
+    await nextTick();
+    scheduleDraw();
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.palette,
   async () => {
     await nextTick();
     scheduleDraw();

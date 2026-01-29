@@ -35,11 +35,18 @@ let sourceCanvas = null;
 let imageProcessor = null;
 let isReady = ref(false);
 
+// Reactive palette for ToneCurve (will be set after imageProcessor loads)
+const effectivePalette = ref(null);
+
 onMounted(async () => {
   // Load the image processing library
   try {
     imageProcessor = await import("@aitjcize/epaper-image-convert");
     isReady.value = true;
+
+    // Set effective palette for ToneCurve (use props.palette if provided, otherwise SPECTRA6.perceived)
+    effectivePalette.value = props.palette || imageProcessor.SPECTRA6.perceived;
+
     // Process if file was already set
     if (props.imageFile) {
       await loadAndProcessImage(props.imageFile);
@@ -246,7 +253,7 @@ onUnmounted(() => {
           <v-card variant="outlined" class="tone-curve-card">
             <v-card-subtitle class="pt-2"> Tone Curve </v-card-subtitle>
             <div class="d-flex justify-center pa-4">
-              <ToneCurve :params="params" class="curve-canvas" />
+              <ToneCurve :params="params" :palette="effectivePalette" class="curve-canvas" />
             </div>
           </v-card>
         </div>
