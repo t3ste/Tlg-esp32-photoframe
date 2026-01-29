@@ -66,6 +66,10 @@ jobs:
         0x20000 firmware/esp32-photoframe.bin
         EOF
 
+        # Copy binaries from build directory
+        cp build/bootloader/bootloader.bin firmware/
+        cp build/partition_table/partition-table.bin firmware/
+
         # Copy OTA binary with board name for release
         cp build/esp32-photoframe.bin firmware/esp32-photoframe-${{ matrix.board }}.bin
         
@@ -79,8 +83,8 @@ jobs:
     
     - name: Create merged firmware
       run: |
-        esptool.py --chip esp32s3 merge_bin -o firmware/photoframe-firmware-${{ matrix.board }}-merged.bin \
-          --flash_mode dio --flash_freq 80m --flash_size 16MB \
+        esptool --chip esp32s3 merge-bin -o firmware/photoframe-firmware-${{ matrix.board }}-merged.bin \
+          --flash-mode dio --flash-freq 80m --flash-size 16MB \
           0x0 firmware/bootloader.bin \
           0x8000 firmware/partition-table.bin \
           0x20000 firmware/esp32-photoframe.bin
