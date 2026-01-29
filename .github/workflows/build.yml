@@ -87,7 +87,7 @@ jobs:
           --flash-mode dio --flash-freq 80m --flash-size 16MB \
           0x0 firmware/bootloader.bin \
           0x8000 firmware/partition-table.bin \
-          0x20000 firmware/esp32-photoframe.bin
+          0x20000 firmware/esp32-photoframe-${{ matrix.board }}.bin
     
     - name: Upload firmware artifacts
       uses: actions/upload-artifact@v4
