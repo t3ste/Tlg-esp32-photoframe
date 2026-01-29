@@ -6,10 +6,6 @@ export const useAppStore = defineStore("app", () => {
   const albums = ref([]);
   const selectedAlbum = ref("Default");
   const images = ref([]);
-  const boardOptions = [
-    { label: 'Waveshare 7.3" (7-color)', value: "waveshare_photopainter_73" },
-    { label: "Seeed Studio XIAO EE02", value: "seeedstudio_xiao_ee02" },
-  ];
   const battery = ref({
     connected: false,
     level: 0,

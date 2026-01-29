@@ -3,11 +3,9 @@ import { ref, onMounted, watch } from "vue";
 import { getPreset, getPresetOptions } from "@aitjcize/epaper-image-convert";
 import ImageProcessing from "../components/ImageProcessing.vue";
 import ProcessingControls from "../components/ProcessingControls.vue";
-import { useAppStore } from "../stores/app";
 
 // State
 const tab = ref("demo");
-const appStore = useAppStore();
 const stableVersion = ref("-");
 const devVersion = ref("Loading...");
 const selectedVersion = ref("stable");
@@ -191,6 +189,15 @@ function newImage() {
       <v-chip variant="outlined" class="mr-2">
         {{ stableVersion }}
       </v-chip>
+      <v-btn
+        icon
+        variant="text"
+        href="https://github.com/aitjcize/esp32-photoframe"
+        target="_blank"
+        title="View on GitHub"
+      >
+        <v-icon icon="mdi-github" />
+      </v-btn>
     </v-app-bar>
 
     <v-main class="bg-grey-lighten-4">
