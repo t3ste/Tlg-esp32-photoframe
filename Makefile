@@ -12,19 +12,13 @@ C_FILES := $(shell find main -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/nul
 	   $(shell find components -type f \( -name "*.c" -o -name "*.h" \) 2>/dev/null) \
 	   $(shell find host_tests -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" \) 2>/dev/null)
 
-# Find all JS files in main/webapp/ and process-cli/ directories
-JS_FILES := $(shell find main/webapp process-cli docs -type f -name "*.js" 2>/dev/null | grep -v node_modules)
-
-# Find all HTML files in docs/ and main/webapp/ directories
-HTML_FILES := $(shell find docs main/webapp -type f -name "*.html" 2>/dev/null)
-
 # Find all Python files in the project root and docs/
 PY_FILES := $(shell find main -type f -name "*.py" 2>/dev/null) \
 	    $(shell find scripts -type f -name "*.py" 3>/dev/null)
 
 help:
 	@echo "Available targets:"
-	@echo "  format        - Format all C/H/JS/HTML/Python files with clang-format, prettier, black, and isort"
+	@echo "  format        - Format all C/H/Python and JS/Vue files"
 	@echo "  format-check  - Check if files need formatting (non-zero exit if changes needed)"
 	@echo "  format-diff   - Show what would change without modifying files"
 	@echo "  test          - Build and run unit tests (requires ESP-IDF environment)"
@@ -33,14 +27,6 @@ format:
 	@echo "Formatting C/H files..."
 	@$(CLANG_FORMAT) -i $(C_FILES)
 	@echo "Done! Formatted $(words $(C_FILES)) C/H files."
-	@echo "Formatting JS files..."
-	@npx prettier --write $(JS_FILES)
-	@echo "Done! Formatted $(words $(JS_FILES)) JS files."
-	@if [ -n "$(HTML_FILES)" ]; then \
-		echo "Formatting HTML files..."; \
-		npx prettier --write $(HTML_FILES); \
-		echo "Done! Formatted $(words $(HTML_FILES)) HTML files."; \
-	fi
 	@if [ -n "$(PY_FILES)" ]; then \
 		echo "Formatting Python files with isort..."; \
 		python3 -m isort $(PY_FILES); \
@@ -48,26 +34,26 @@ format:
 		python3 -m black $(PY_FILES); \
 		echo "Done! Formatted $(words $(PY_FILES)) Python files."; \
 	fi
-	@echo "Formatting webapp Vue files..."
 	@cd webapp && npm run format
 	@echo "Done! Formatted webapp files."
+	@echo "Formatting process-cli JS files..."
+	@cd process-cli && npm run format
+	@echo "Done! Formatted process-cli files."
 
 format-check:
 	@echo "Checking C/H files formatting..."
 	@$(CLANG_FORMAT) --dry-run --Werror $(C_FILES)
-	@echo "Checking JS files formatting..."
-	@npx prettier --check $(JS_FILES)
-	@if [ -n "$(HTML_FILES)" ]; then \
-		echo "Checking HTML files formatting..."; \
-		npx prettier --check $(HTML_FILES); \
-	fi
 	@if [ -n "$(PY_FILES)" ]; then \
 		echo "Checking Python files formatting..."; \
 		python3 -m isort --check-only $(PY_FILES); \
 		python3 -m black --check $(PY_FILES); \
 	fi
 	@echo "Checking webapp Vue files formatting..."
+	@cd webapp && [ -d node_modules ] || npm ci
 	@cd webapp && npm run format:check
+	@echo "Checking process-cli JS files formatting..."
+	@cd process-cli && [ -d node_modules ] || npm ci
+	@cd process-cli && npm run format:check
 	@echo "All files are properly formatted!"
 
 format-diff:
@@ -76,18 +62,6 @@ format-diff:
 		echo "=== $$file ==="; \
 		$(CLANG_FORMAT) "$$file" | diff -u "$$file" - || true; \
 	done
-	@echo "Showing formatting differences for JS files..."
-	@for file in $(JS_FILES); do \
-		echo "=== $$file ==="; \
-		npx prettier "$$file" | diff -u "$$file" - || true; \
-	done
-	@if [ -n "$(HTML_FILES)" ]; then \
-		echo "Showing formatting differences for HTML files..."; \
-		for file in $(HTML_FILES); do \
-			echo "=== $$file ==="; \
-			npx prettier "$$file" | diff -u "$$file" - || true; \
-		done; \
-	fi
 	@if [ -n "$(PY_FILES)" ]; then \
 		echo "Showing formatting differences for Python files..."; \
 		for file in $(PY_FILES); do \

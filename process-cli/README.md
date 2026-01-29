@@ -23,15 +23,18 @@ npm link  # Makes photoframe-process command available globally
 After installation, the `photoframe-process` command will be available globally.
 
 **System Requirements:**
+
 - Node.js 14+ up to Node.js 20 (dependencies are no longer supported for higher versions)
 - macOS/Linux: Install Cairo dependencies (see below)
 
 **macOS:**
+
 ```bash
 brew install pkg-config cairo pango libpng jpeg giflib librsvg pixman
 ```
 
 **Linux (Ubuntu/Debian):**
+
 ```bash
 sudo apt-get install build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
 ```

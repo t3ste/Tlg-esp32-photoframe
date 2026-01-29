@@ -36,6 +36,11 @@ jobs:
           cd webapp
           npm ci
 
+      - name: Install process-cli dependencies
+        run: |
+          cd process-cli
+          npm ci
+
       - name: Check code formatting
         run: make format-check
 

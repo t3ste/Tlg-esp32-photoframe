@@ -159,7 +159,9 @@ export async function createImageServer(
         let currentProcessingParams = { ...processingParams };
         if (req.headers["x-processing-settings"]) {
           try {
-            const headerSettings = JSON.parse(req.headers["x-processing-settings"]);
+            const headerSettings = JSON.parse(
+              req.headers["x-processing-settings"],
+            );
             currentProcessingParams = {
               ...currentProcessingParams,
               ...headerSettings,
@@ -177,7 +179,9 @@ export async function createImageServer(
           try {
             currentDevicePalette = JSON.parse(req.headers["x-color-palette"]);
           } catch (e) {
-            console.error(`Failed to parse X-Color-Palette header: ${e.message}`);
+            console.error(
+              `Failed to parse X-Color-Palette header: ${e.message}`,
+            );
           }
         }
 
