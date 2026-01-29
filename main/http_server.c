@@ -661,6 +661,8 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+#ifdef CONFIG_HAS_SDCARD
+
 // URL decode helper function to handle encoded characters like %20 for space
 static void url_decode(char *dst, const char *src, size_t dst_size)
 {
@@ -681,8 +683,6 @@ static void url_decode(char *dst, const char *src, size_t dst_size)
     }
     dst[j] = '\0';
 }
-
-#ifdef CONFIG_HAS_SDCARD
 
 static esp_err_t upload_image_handler(httpd_req_t *req)
 {
