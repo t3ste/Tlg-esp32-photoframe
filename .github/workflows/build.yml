@@ -186,6 +186,8 @@ jobs:
             
             if curl -L -f -o "demo/$board/photoframe-firmware-$board-merged.bin" "${RELEASE_URL}"; then
               echo "Successfully downloaded stable firmware ${LATEST_TAG} for $board"
+            elif [[ "$board" == "waveshare_photopainter_73" ]] && curl -L -f -o "demo/$board/photoframe-firmware-$board-merged.bin" "https://github.com/${{ github.repository }}/releases/download/${LATEST_TAG}/photoframe-firmware-merged.bin"; then
+              echo "Successfully downloaded legacy stable firmware for $board"
             else
               echo "Warning: Could not download stable firmware for $board, using dev build as fallback"
               cp "demo/$board/photoframe-firmware-$board-dev.bin" "demo/$board/photoframe-firmware-$board-merged.bin"
