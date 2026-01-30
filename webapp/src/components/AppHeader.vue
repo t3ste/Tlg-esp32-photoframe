@@ -27,12 +27,10 @@ function getBatteryColor(level) {
 <template>
   <v-app-bar color="primary" density="comfortable">
     <template #prepend>
-      <v-avatar size="40" class="ml-2">
-        <v-img src="/favicon.svg" alt="PhotoFrame" />
-      </v-avatar>
+      <v-img src="/favicon.svg" alt="PhotoFrame" width="40" height="40" class="ml-2 mr-n2" />
     </template>
 
-    <v-app-bar-title>PhotoFrame Control Panel</v-app-bar-title>
+    <v-app-bar-title class="ml-4">PhotoFrame Control Panel</v-app-bar-title>
 
     <template #append>
       <!-- Rotate Now Button -->
