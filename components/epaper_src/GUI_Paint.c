@@ -907,19 +907,21 @@ void Paint_DrawCalibrationPattern(void)
 
             UWORD box_idx;
             if (is_portrait) {
-                // Portrait: 2 cols x 3 rows, remap to match landscape color order
+                // Portrait: 2 cols x 3 rows, 90° CW rotation of landscape
                 // Landscape layout (row-major):
                 //   [0:Black] [1:White] [2:Yellow]
                 //   [3:Red]   [4:Blue]  [5:Green]
-                // Portrait layout (2 cols x 3 rows), we want:
-                //   [0:Black] [3:Red]
-                //   [1:White] [4:Blue]
-                //   [2:Yellow][5:Green]
+                // Portrait layout (90° CW rotation):
+                //   [3:Red]   [0:Black]
+                //   [4:Blue]  [1:White]
+                //   [5:Green] [2:Yellow]
                 if (box_row > 2)
                     box_row = 2;
                 if (box_col > 1)
                     box_col = 1;
-                box_idx = box_row + box_col * 3;
+                // Map: (row, col) -> landscape index
+                // (0,0)->3, (0,1)->0, (1,0)->4, (1,1)->1, (2,0)->5, (2,1)->2
+                box_idx = box_row + (1 - box_col) * 3;
             } else {
                 // Landscape: 3 cols x 2 rows
                 if (box_row > 1)
