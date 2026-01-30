@@ -77,6 +77,20 @@ watch(
   { deep: true }
 );
 
+// Watch for palette changes - reprocess and update ToneCurve
+watch(
+  () => props.palette,
+  async (newPalette) => {
+    if (newPalette) {
+      effectivePalette.value = newPalette;
+    }
+    if (sourceCanvas && isReady.value) {
+      await updatePreview();
+    }
+  },
+  { deep: true }
+);
+
 async function loadAndProcessImage(file) {
   if (!originalCanvasRef.value || !processedCanvasRef.value) return;
 

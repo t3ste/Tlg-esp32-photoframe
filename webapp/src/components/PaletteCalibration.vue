@@ -1,7 +1,36 @@
 <script setup>
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { useSettingsStore } from "../stores";
-import { getCanvasContext } from "@aitjcize/epaper-image-convert";
+import { getCanvasContext, rgbToLab } from "@aitjcize/epaper-image-convert";
+
+// LAB to RGB conversion (not exported from library)
+function labToRgb(L, a, b) {
+  // LAB to XYZ
+  let y = (L + 16) / 116;
+  let x = a / 500 + y;
+  let z = y - b / 200;
+
+  const delta = 6 / 29;
+  const f = (t) => (t > delta ? t * t * t : 3 * delta * delta * (t - 4 / 29));
+
+  // D65 illuminant
+  x = 0.95047 * f(x);
+  y = 1.0 * f(y);
+  z = 1.08883 * f(z);
+
+  // XYZ to RGB
+  let r = x * 3.2406 + y * -1.5372 + z * -0.4986;
+  let g = x * -0.9689 + y * 1.8758 + z * 0.0415;
+  let bOut = x * 0.0557 + y * -0.204 + z * 1.057;
+
+  // Gamma correction
+  const gamma = (c) => (c > 0.0031308 ? 1.055 * Math.pow(c, 1 / 2.4) - 0.055 : 12.92 * c);
+  r = Math.round(Math.max(0, Math.min(255, gamma(r) * 255)));
+  g = Math.round(Math.max(0, Math.min(255, gamma(g) * 255)));
+  bOut = Math.round(Math.max(0, Math.min(255, gamma(bOut) * 255)));
+
+  return [r, g, bOut];
+}
 
 const settingsStore = useSettingsStore();
 
@@ -18,7 +47,24 @@ const hasUploadedPhoto = ref(false);
 
 const colorNames = ["black", "white", "yellow", "red", "blue", "green"];
 
+// Store original palette to restore on cancel
+let originalPalette = null;
+
+// Watch measuredPalette changes during review step to update preview in real-time
+watch(
+  measuredPalette,
+  (newPalette) => {
+    if (newPalette && calibrationStep.value === 4) {
+      // Update settingsStore.palette to trigger preview update
+      Object.assign(settingsStore.palette, newPalette);
+    }
+  },
+  { deep: true }
+);
+
 function startCalibration() {
+  // Save original palette to restore on cancel
+  originalPalette = JSON.parse(JSON.stringify(settingsStore.palette));
   calibrationStep.value = 1;
   statusMessage.value = "";
   measuredPalette.value = null;
@@ -26,6 +72,11 @@ function startCalibration() {
 }
 
 function cancelCalibration() {
+  // Restore original palette if we modified it during review
+  if (originalPalette) {
+    Object.assign(settingsStore.palette, originalPalette);
+    originalPalette = null;
+  }
   calibrationStep.value = 0;
   statusMessage.value = "";
   measuredPalette.value = null;
@@ -138,7 +189,7 @@ function loadImage(file) {
 
 function validateExtractedColors(palette) {
   const expectations = {
-    black: { maxBrightness: 50, name: "Black" },
+    black: { maxBrightness: 70, name: "Black" },
     white: { minBrightness: 150, name: "White" },
     yellow: { minR: 150, minG: 150, maxB: 100, name: "Yellow" },
     red: { minR: 100, maxG: 80, maxB: 80, name: "Red" },
@@ -194,93 +245,150 @@ function extractColorBoxes(ctx, width, height) {
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
 
-  // Downsample for faster processing
-  const step = 4;
-  const samples = [];
+  // Detect orientation: portrait (height > width) or landscape
+  const isPortrait = height > width;
+  const cols = isPortrait ? 2 : 3;
+  const rows = isPortrait ? 3 : 2;
 
-  for (let y = 0; y < height; y += step) {
-    for (let x = 0; x < width; x += step) {
-      const idx = (y * width + x) * 4;
-      samples.push({
-        x: x,
-        y: y,
-        r: data[idx],
-        g: data[idx + 1],
-        b: data[idx + 2],
+  // Step 1: Divide image into 6 grid cells and run clustering on each cell
+  const cellWidth = width / cols;
+  const cellHeight = height / rows;
+  const boxes = [];
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const cellX = col * cellWidth;
+      const cellY = row * cellHeight;
+
+      // Sample pixels from center 90% of the cell (small margin to avoid grid lines)
+      const marginX = cellWidth * 0.05;
+      const marginY = cellHeight * 0.05;
+      const samples = [];
+      const step = 2;
+
+      for (let y = cellY + marginY; y < cellY + cellHeight - marginY; y += step) {
+        for (let x = cellX + marginX; x < cellX + cellWidth - marginX; x += step) {
+          const px = Math.floor(x);
+          const py = Math.floor(y);
+          if (px >= 0 && px < width && py >= 0 && py < height) {
+            const idx = (py * width + px) * 4;
+            samples.push({
+              x: px,
+              y: py,
+              r: data[idx],
+              g: data[idx + 1],
+              b: data[idx + 2],
+            });
+          }
+        }
+      }
+
+      // Cluster colors within this cell
+      const clusters = clusterColors(samples);
+
+      // Get the dominant cluster (largest by point count)
+      clusters.sort((a, b) => b.points.length - a.points.length);
+      const dominant = clusters[0];
+
+      // Recalculate median from the dominant cluster's points
+      const rValues = dominant.points.map((p) => p.r).sort((a, b) => a - b);
+      const gValues = dominant.points.map((p) => p.g).sort((a, b) => a - b);
+      const bValues = dominant.points.map((p) => p.b).sort((a, b) => a - b);
+      const mid = Math.floor(dominant.points.length / 2);
+
+      // Calculate bounding box from dominant cluster points
+      const minX = Math.min(...dominant.points.map((p) => p.x));
+      const maxX = Math.max(...dominant.points.map((p) => p.x));
+      const minY = Math.min(...dominant.points.map((p) => p.y));
+      const maxY = Math.max(...dominant.points.map((p) => p.y));
+
+      boxes.push({
+        gridRow: row,
+        gridCol: col,
+        medianColor: {
+          r: rValues[mid],
+          g: gValues[mid],
+          b: bValues[mid],
+        },
+        boundingBox: { minX, maxX, minY, maxY },
       });
     }
   }
-
-  // Cluster colors
-  const colorGroups = clusterColors(samples, 7);
-
-  // Filter out white background and get top 6 color groups
-  const boxes = colorGroups
-    .filter((group) => {
-      const medR = group.medianColor.r;
-      const medG = group.medianColor.g;
-      const medB = group.medianColor.b;
-      const brightness = (medR + medG + medB) / 3;
-      const maxDiff = Math.max(Math.abs(medR - medG), Math.abs(medG - medB), Math.abs(medR - medB));
-      return !(brightness > 200 && maxDiff < 30);
-    })
-    .sort((a, b) => b.points.length - a.points.length)
-    .slice(0, 6);
-
-  if (boxes.length < 6) {
-    throw new Error(
-      "Could not detect all 6 color boxes. Please ensure the entire display is visible and well-lit."
-    );
-  }
-
-  // Sort by position
-  boxes.forEach((box) => {
-    box.centerX = box.points.reduce((sum, p) => sum + p.x, 0) / box.points.length;
-    box.centerY = box.points.reduce((sum, p) => sum + p.y, 0) / box.points.length;
-  });
-
-  boxes.sort((a, b) => {
-    const rowA = Math.floor(a.centerY / (height / 2));
-    const rowB = Math.floor(b.centerY / (height / 2));
-    if (rowA !== rowB) return rowA - rowB;
-    return a.centerX - b.centerX;
-  });
 
   // Draw detected regions
   ctx.strokeStyle = "lime";
   ctx.lineWidth = 3;
   boxes.forEach((box) => {
-    const minX = Math.min(...box.points.map((p) => p.x));
-    const maxX = Math.max(...box.points.map((p) => p.x));
-    const minY = Math.min(...box.points.map((p) => p.y));
-    const maxY = Math.max(...box.points.map((p) => p.y));
+    const { minX, maxX, minY, maxY } = box.boundingBox;
     ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
   });
 
-  // Map to color names
-  // Order: black (0), white (1), yellow (2), red (3), blue (4), green (5)
-  const colors = ["black", "white", "yellow", "red", "blue", "green"];
+  // Map grid positions to color names based on orientation
+  // Landscape layout (row-major):
+  //   [0:Black] [1:White] [2:Yellow]
+  //   [3:Red]   [4:Blue]  [5:Green]
+  // Portrait layout (90° CW rotation):
+  //   [3:Red]   [0:Black]
+  //   [4:Blue]  [1:White]
+  //   [5:Green] [2:Yellow]
+  const colorNames = ["black", "white", "yellow", "red", "blue", "green"];
+  const portraitIndexMap = [3, 0, 4, 1, 5, 2]; // Maps grid position to color index
 
-  // Calculate exposure adjustment based on white box brightness
-  // White box is at index 1 after sorting
-  const whiteBox = boxes[1];
-  const whiteBrightness =
-    (whiteBox.medianColor.r + whiteBox.medianColor.g + whiteBox.medianColor.b) / 3;
-
-  // Target white brightness - e-paper white isn't pure white, so use a lower target
-  const targetWhite = 210;
-  const exposureMultiplier = whiteBrightness > 0 ? targetWhite / whiteBrightness : 1;
+  // Toggle LAB brightness scaling (set to false to use raw measured colors)
+  const ENABLE_LAB_BRIGHTNESS_SCALING = false;
 
   const palette = {};
 
-  boxes.forEach((box, idx) => {
-    // Apply exposure adjustment and clamp to 0-255
-    palette[colors[idx]] = {
-      r: Math.round(Math.min(255, box.medianColor.r * exposureMultiplier)),
-      g: Math.round(Math.min(255, box.medianColor.g * exposureMultiplier)),
-      b: Math.round(Math.min(255, box.medianColor.b * exposureMultiplier)),
-    };
-  });
+  if (ENABLE_LAB_BRIGHTNESS_SCALING) {
+    // Get measured L* values for black and white
+    const blackGridIdx = isPortrait ? portraitIndexMap.indexOf(0) : 0; // black is color index 0
+    const whiteGridIdx = isPortrait ? portraitIndexMap.indexOf(1) : 1; // white is color index 1
+    const blackBox = boxes[blackGridIdx];
+    const whiteBox = boxes[whiteGridIdx];
+
+    const [measuredBlackL] = rgbToLab(
+      blackBox.medianColor.r,
+      blackBox.medianColor.g,
+      blackBox.medianColor.b
+    );
+    const [measuredWhiteL] = rgbToLab(
+      whiteBox.medianColor.r,
+      whiteBox.medianColor.g,
+      whiteBox.medianColor.b
+    );
+
+    // Target L* values: black ~10, white ~90
+    const targetBlackL = 0;
+    const targetWhiteL = 100;
+
+    // Calculate linear mapping from measured L* to target L*
+    const measuredRange = measuredWhiteL - measuredBlackL;
+    const targetRange = targetWhiteL - targetBlackL;
+
+    boxes.forEach((box, gridIdx) => {
+      const colorIdx = isPortrait ? portraitIndexMap[gridIdx] : gridIdx;
+      const colorName = colorNames[colorIdx];
+
+      // Convert to LAB
+      const [l, a, b] = rgbToLab(box.medianColor.r, box.medianColor.g, box.medianColor.b);
+
+      // Map L* from measured range to target range
+      const normalizedL = (l - measuredBlackL) / measuredRange;
+      const adjustedL = targetBlackL + normalizedL * targetRange;
+
+      // Convert back to RGB
+      const [r, g, bOut] = labToRgb(adjustedL, a, b);
+
+      palette[colorName] = { r, g, b: bOut };
+    });
+  } else {
+    // Use raw measured colors without adjustment
+    boxes.forEach((box, gridIdx) => {
+      const colorIdx = isPortrait ? portraitIndexMap[gridIdx] : gridIdx;
+      const colorName = colorNames[colorIdx];
+      palette[colorName] = { ...box.medianColor };
+    });
+  }
 
   return palette;
 }
@@ -354,8 +462,11 @@ async function saveCalibration() {
       statusMessage.value = "Calibration saved successfully";
       statusType.value = "success";
 
-      // Update store palette
+      // Update store palette (already updated via watcher, but ensure it's set)
       Object.assign(settingsStore.palette, measuredPalette.value);
+
+      // Clear original palette since we're saving the new one
+      originalPalette = null;
 
       setTimeout(() => {
         calibrationStep.value = 0;
@@ -504,7 +615,7 @@ async function savePalette() {
     </div>
 
     <!-- Calibration Flow -->
-    <v-card v-else variant="tonal" class="mt-4">
+    <v-card v-else variant="outlined" class="mt-4">
       <v-card-text>
         <!-- Step 1: Display Pattern -->
         <div v-if="calibrationStep === 1">
