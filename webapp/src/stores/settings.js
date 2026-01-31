@@ -1,6 +1,11 @@
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
-import { getPreset, getPresetOptions, SPECTRA6 } from "@aitjcize/epaper-image-convert";
+import {
+  getPreset,
+  getPresetOptions,
+  SPECTRA6,
+  getDefaultParams,
+} from "@aitjcize/epaper-image-convert";
 
 export const useSettingsStore = defineStore("settings", () => {
   const API_BASE = "";
@@ -9,19 +14,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const activeSettingsTab = ref("general");
 
   // Processing parameters
-  const params = ref({
-    exposure: 1.0,
-    saturation: 1.0,
-    toneMode: "contrast",
-    contrast: 1.0,
-    strength: 0.9,
-    shadowBoost: 0.0,
-    highlightCompress: 1.5,
-    midpoint: 0.5,
-    colorMethod: "rgb",
-    ditherAlgorithm: "floyd-steinberg",
-    compressDynamicRange: true,
-  });
+  const params = ref(getDefaultParams());
 
   // Device settings (UI representation)
   const deviceSettings = ref({

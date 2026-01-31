@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, watch } from "vue";
-import { getPreset, getPresetOptions } from "@aitjcize/epaper-image-convert";
+import { getPreset, getPresetOptions, getDefaultParams } from "@aitjcize/epaper-image-convert";
 import ImageProcessing from "../components/ImageProcessing.vue";
 import ProcessingControls from "../components/ProcessingControls.vue";
 
@@ -23,19 +23,7 @@ const selectedFile = ref(null);
 
 // Processing parameters
 const currentPreset = ref("balanced");
-const params = ref({
-  exposure: 1.0,
-  saturation: 1.3,
-  toneMode: "scurve",
-  contrast: 1.0,
-  strength: 0.9,
-  shadowBoost: 0.0,
-  highlightCompress: 1.5,
-  midpoint: 0.5,
-  colorMethod: "rgb",
-  ditherAlgorithm: "floyd-steinberg",
-  compressDynamicRange: true,
-});
+const params = ref(getDefaultParams());
 
 // Get preset names for matching
 const presetNames = getPresetOptions().map((p) => p.value);
