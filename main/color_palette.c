@@ -14,7 +14,7 @@ static const char *NVS_KEY_PALETTE = "palette";
 void color_palette_get_defaults(color_palette_t *palette)
 {
     palette->black = (color_rgb_t){2, 2, 2};
-    palette->white = (color_rgb_t){190, 190, 190};
+    palette->white = (color_rgb_t){190, 200, 200};
     palette->yellow = (color_rgb_t){205, 202, 0};
     palette->red = (color_rgb_t){135, 19, 0};
     palette->blue = (color_rgb_t){5, 64, 158};
