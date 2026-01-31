@@ -1,8 +1,8 @@
-# ESP32-S3 PhotoFrame
+# ESP32 PhotoFrame
+
+A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently supporting **Waveshare PhotoPainter** and **Seeed Studio XIAO EE02**). This firmware replaces stock firmware with a powerful RESTful API, web interface, and **significantly better image quality**.
 
 ![PhotoFrame](.img/esp32-photoframe.png)
-
-A modern, feature-rich firmware for ESP32-S3 based e-paper photo frames (currently supporting **Waveshare PhotoPainter** and **Seeed Studio XIAO EE02**). This firmware replaces stock firmware with a powerful RESTful API, web interface, and **significantly better image quality**.
 
 **🏠 Home Assistant Integration**: [ha-esp32-photoframe](https://github.com/aitjcize/ha-esp32-photoframe) - Companion integration for comprehensive control and monitoring through Home Assistant
 
@@ -90,7 +90,7 @@ Configure via web interface **Settings** section.
 ### Seeed Studio XIAO EE02
 - **Product**: [Seeed Studio XIAO EE02](https://www.seeedstudio.com/XIAO-ePaper-Display-Board-ESP32-S3-EE02-p-6639.html)
 - **Board Name**: `seeedstudio_xiao_ee02`
-- **Configuration**: Setup using Seeed Studio XIAO EE02 (ESP32S3 + TI 13.3" ePaper display)
+- **Configuration**: Setup using Seeed Studio XIAO EE02 + dedicated 13.3" ePaper display
 
 ### Known Issues / Work in Progress 🚧
 
