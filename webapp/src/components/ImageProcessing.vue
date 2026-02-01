@@ -224,11 +224,11 @@ async function updatePreview() {
   // Update logic to set style on the canvas elements directly or wrapper
   if (originalCanvasRef.value) {
     originalCanvasRef.value.style.width = `${styleWidth}px`;
-    originalCanvasRef.value.style.height = `${styleHeight}px`;
+    originalCanvasRef.value.style.height = '';
   }
   if (processedCanvasRef.value) {
     processedCanvasRef.value.style.width = `${styleWidth}px`;
-    processedCanvasRef.value.style.height = `${styleHeight}px`;
+    processedCanvasRef.value.style.height = '';
   }
 
   // Draw original using cover mode (same as old webapp)
