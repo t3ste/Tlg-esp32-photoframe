@@ -11,10 +11,12 @@ const appStore = useAppStore();
 const settingsStore = useSettingsStore();
 
 onMounted(async () => {
+  // Load system info first to check for SD card
+  await appStore.loadSystemInfo();
+
   await Promise.all([
     appStore.loadBatteryStatus(),
     appStore.loadAlbums(),
-    appStore.loadSystemInfo(),
     settingsStore.loadSettings(),
     settingsStore.loadDeviceSettings(),
     settingsStore.loadPalette(),
