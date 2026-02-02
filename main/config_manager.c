@@ -19,8 +19,12 @@ static char image_url[IMAGE_URL_MAX_LEN] = {0};
 static char ha_url[HA_URL_MAX_LEN] = {0};
 #ifdef CONFIG_HAS_SDCARD
 static rotation_mode_t rotation_mode = ROTATION_MODE_SDCARD;
+static sd_rotation_mode_t sd_rotation_mode = SD_ROTATION_RANDOM;
+static int32_t last_index = -1;
 #else
 static rotation_mode_t rotation_mode = ROTATION_MODE_URL;
+static sd_rotation_mode_t sd_rotation_mode = SD_ROTATION_RANDOM;
+static int32_t last_index = -1;
 #endif
 static bool save_downloaded_images = true;
 static display_orientation_t display_orientation = DISPLAY_ORIENTATION_LANDSCAPE;
@@ -85,6 +89,19 @@ esp_err_t config_manager_init(void)
 #endif
             ESP_LOGI(TAG, "Loaded rotation mode from NVS: %s",
                      rotation_mode == ROTATION_MODE_URL ? "url" : "sdcard");
+        }
+
+        uint8_t stored_sd_mode = SD_ROTATION_RANDOM;
+        if (nvs_get_u8(nvs_handle, NVS_SD_ROTATION_MODE_KEY, &stored_sd_mode) == ESP_OK) {
+            sd_rotation_mode = (sd_rotation_mode_t) stored_sd_mode;
+            ESP_LOGI(TAG, "Loaded SD rotation mode from NVS: %s",
+                     sd_rotation_mode == SD_ROTATION_SEQUENTIAL ? "sequential" : "random");
+        }
+
+        int32_t stored_last_index = -1;
+        if (nvs_get_i32(nvs_handle, NVS_LAST_INDEX_KEY, &stored_last_index) == ESP_OK) {
+            last_index = stored_last_index;
+            ESP_LOGI(TAG, "Loaded last index from NVS: %ld", (long) last_index);
         }
 
         uint8_t stored_save_dl = 1;
@@ -601,4 +618,41 @@ void config_manager_set_http_header_value(const char *value)
 const char *config_manager_get_http_header_value(void)
 {
     return http_header_value;
+}
+
+void config_manager_set_sd_rotation_mode(sd_rotation_mode_t mode)
+{
+    sd_rotation_mode = mode;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_SD_ROTATION_MODE_KEY, (uint8_t) mode);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "SD rotation mode set to: %s",
+             mode == SD_ROTATION_SEQUENTIAL ? "sequential" : "random");
+}
+
+sd_rotation_mode_t config_manager_get_sd_rotation_mode(void)
+{
+    return sd_rotation_mode;
+}
+
+void config_manager_set_last_index(int32_t index)
+{
+    last_index = index;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_i32(nvs_handle, NVS_LAST_INDEX_KEY, index);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int32_t config_manager_get_last_index(void)
+{
+    return last_index;
 }

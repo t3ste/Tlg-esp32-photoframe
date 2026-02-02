@@ -1319,6 +1319,10 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddStringToObject(
             root, "rotation_mode",
             config_manager_get_rotation_mode() == ROTATION_MODE_URL ? "url" : "sdcard");
+        cJSON_AddStringToObject(root, "sd_rotation_mode",
+                                config_manager_get_sd_rotation_mode() == SD_ROTATION_SEQUENTIAL
+                                    ? "sequential"
+                                    : "random");
         cJSON_AddBoolToObject(root, "save_downloaded_images",
                               config_manager_get_save_downloaded_images());
         cJSON_AddBoolToObject(root, "deep_sleep_enabled", power_manager_get_deep_sleep_enabled());
@@ -1415,6 +1419,14 @@ static esp_err_t config_handler(httpd_req_t *req)
             rotation_mode_t mode =
                 (strcmp(mode_str, "url") == 0) ? ROTATION_MODE_URL : ROTATION_MODE_SDCARD;
             config_manager_set_rotation_mode(mode);
+        }
+
+        cJSON *sd_rotation_mode_obj = cJSON_GetObjectItem(root, "sd_rotation_mode");
+        if (sd_rotation_mode_obj && cJSON_IsString(sd_rotation_mode_obj)) {
+            const char *mode_str = cJSON_GetStringValue(sd_rotation_mode_obj);
+            sd_rotation_mode_t mode =
+                (strcmp(mode_str, "sequential") == 0) ? SD_ROTATION_SEQUENTIAL : SD_ROTATION_RANDOM;
+            config_manager_set_sd_rotation_mode(mode);
         }
 
         cJSON *save_dl_obj = cJSON_GetObjectItem(root, "save_downloaded_images");

@@ -228,6 +228,181 @@ const char *display_manager_get_current_image(void)
     return current_image;
 }
 
+static void rotate_sequential(char **enabled_albums, int album_count)
+{
+    ESP_LOGI(TAG, "Sequential rotation mode");
+    int32_t last_idx = config_manager_get_last_index();
+    int32_t target_idx = last_idx + 1;
+    int32_t current_idx = 0;
+    char first_image[512] = {0};
+    bool found_target = false;
+
+    for (int i = 0; i < album_count; i++) {
+        char album_path[256];
+        album_manager_get_album_path(enabled_albums[i], album_path, sizeof(album_path));
+
+        DIR *dir = opendir(album_path);
+        if (!dir) {
+            continue;
+        }
+
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_type == DT_REG) {
+                if (entry->d_name[0] == '.' && entry->d_name[1] == '_') {
+                    continue;
+                }
+
+                const char *ext = strrchr(entry->d_name, '.');
+                if (ext && (strcmp(ext, ".bmp") == 0 || strcmp(ext, ".BMP") == 0 ||
+                            strcmp(ext, ".png") == 0 || strcmp(ext, ".PNG") == 0)) {
+                    char fullpath[512];
+                    snprintf(fullpath, sizeof(fullpath), "%s/%s", album_path, entry->d_name);
+
+                    // Keep track of the very first image in case we need to wrap
+                    if (first_image[0] == '\0') {
+                        strncpy(first_image, fullpath, sizeof(first_image) - 1);
+                    }
+
+                    if (current_idx == target_idx) {
+                        ESP_LOGI(TAG, "Found target index %ld: %s", (long) target_idx, fullpath);
+                        display_manager_show_image(fullpath);
+                        save_last_displayed_image(fullpath);
+                        config_manager_set_last_index(target_idx);
+                        found_target = true;
+                        closedir(dir);
+                        return;
+                    }
+                    current_idx++;
+                }
+            }
+        }
+        closedir(dir);
+    }
+
+    // If we reached here, we didn't find the target index (or the list has changed and is
+    // shorter) Wrap around to the first image
+    if (!found_target) {
+        if (first_image[0] != '\0') {
+            ESP_LOGI(TAG, "Wrapping around to start. Displaying: %s", first_image);
+            display_manager_show_image(first_image);
+            save_last_displayed_image(first_image);
+            config_manager_set_last_index(0);  // Reset index to 0
+        } else {
+            ESP_LOGW(TAG, "No images found in any enabled albums.");
+        }
+    }
+}
+
+static void rotate_random(char **enabled_albums, int album_count)
+{
+    ESP_LOGI(TAG, "Random rotation mode");
+
+    // Count total images across all enabled albums
+    int total_image_count = 0;
+    for (int i = 0; i < album_count; i++) {
+        char album_path[256];
+        album_manager_get_album_path(enabled_albums[i], album_path, sizeof(album_path));
+
+        DIR *dir = opendir(album_path);
+        if (!dir) {
+            ESP_LOGW(TAG, "Failed to open album: %s", enabled_albums[i]);
+            continue;
+        }
+
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_type == DT_REG) {
+                if (entry->d_name[0] == '.' && entry->d_name[1] == '_') {
+                    continue;
+                }
+                const char *ext = strrchr(entry->d_name, '.');
+                if (ext && (strcmp(ext, ".bmp") == 0 || strcmp(ext, ".BMP") == 0 ||
+                            strcmp(ext, ".png") == 0 || strcmp(ext, ".PNG") == 0)) {
+                    total_image_count++;
+                }
+            }
+        }
+        closedir(dir);
+    }
+
+    if (total_image_count == 0) {
+        ESP_LOGW(TAG, "No images found in enabled albums");
+        return;
+    }
+
+    // Build image list with absolute paths from all enabled albums
+    char **image_list = malloc(total_image_count * sizeof(char *));
+    int idx = 0;
+
+    for (int i = 0; i < album_count; i++) {
+        char album_path[256];
+        album_manager_get_album_path(enabled_albums[i], album_path, sizeof(album_path));
+
+        DIR *dir = opendir(album_path);
+        if (!dir) {
+            continue;
+        }
+
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL && idx < total_image_count) {
+            if (entry->d_type == DT_REG) {
+                if (entry->d_name[0] == '.' && entry->d_name[1] == '_') {
+                    continue;
+                }
+
+                const char *ext = strrchr(entry->d_name, '.');
+                if (ext && (strcmp(ext, ".bmp") == 0 || strcmp(ext, ".BMP") == 0 ||
+                            strcmp(ext, ".png") == 0 || strcmp(ext, ".PNG") == 0)) {
+                    char *fullpath = malloc(512);
+                    snprintf(fullpath, 512, "%s/%s", album_path, entry->d_name);
+                    image_list[idx] = fullpath;
+                    idx++;
+                }
+            }
+        }
+        closedir(dir);
+    }
+
+    // Load last displayed image if not already loaded
+    if (last_displayed_image[0] == '\0') {
+        load_last_displayed_image();
+    }
+
+    // Select random image, avoiding the last displayed image if possible
+    int random_index = esp_random() % total_image_count;
+
+    // If we have more than one image and the random selection matches the last image,
+    // try to pick a different one (up to 10 attempts)
+    if (total_image_count > 1 && last_displayed_image[0] != '\0') {
+        int attempts = 0;
+        while (attempts < 10 && strcmp(image_list[random_index], last_displayed_image) == 0) {
+            random_index = esp_random() % total_image_count;
+            attempts++;
+        }
+
+        if (strcmp(image_list[random_index], last_displayed_image) == 0) {
+            ESP_LOGW(TAG, "Could not avoid repeating last image after 10 attempts");
+        } else {
+            ESP_LOGI(TAG, "Successfully avoided repeating last image");
+        }
+    }
+
+    // Display random image
+    ESP_LOGI(TAG, "Auto-rotate: Displaying random image %d/%d: %s", random_index + 1,
+             total_image_count, image_list[random_index]);
+    display_manager_show_image(image_list[random_index]);
+
+    // Store the displayed image filename in NVS
+    save_last_displayed_image(image_list[random_index]);
+
+    // Free image list
+    for (int i = 0; i < total_image_count; i++) {
+        free(image_list[i]);
+    }
+    free(image_list);
+}
+
 void display_manager_rotate_from_sdcard(void)
 {
     if (!config_manager_get_auto_rotate()) {
@@ -269,112 +444,15 @@ void display_manager_rotate_from_sdcard(void)
         ESP_LOGI(TAG, "After cleanup: %d enabled album(s)", album_count);
     }
 
-    // Count total images across all enabled albums
-    int total_image_count = 0;
-    for (int i = 0; i < album_count; i++) {
-        char album_path[256];
-        album_manager_get_album_path(enabled_albums[i], album_path, sizeof(album_path));
+    // Get rotation mode
+    sd_rotation_mode_t mode = config_manager_get_sd_rotation_mode();
 
-        DIR *dir = opendir(album_path);
-        if (!dir) {
-            ESP_LOGW(TAG, "Failed to open album: %s", enabled_albums[i]);
-            continue;
-        }
-
-        struct dirent *entry;
-        while ((entry = readdir(dir)) != NULL) {
-            if (entry->d_type == DT_REG) {
-                if (entry->d_name[0] == '.' && entry->d_name[1] == '_') {
-                    continue;
-                }
-                const char *ext = strrchr(entry->d_name, '.');
-                if (ext && (strcmp(ext, ".bmp") == 0 || strcmp(ext, ".BMP") == 0 ||
-                            strcmp(ext, ".png") == 0 || strcmp(ext, ".PNG") == 0)) {
-                    total_image_count++;
-                }
-            }
-        }
-        closedir(dir);
-    }
-
-    if (total_image_count == 0) {
-        ESP_LOGW(TAG, "No images found in enabled albums");
-        album_manager_free_album_list(enabled_albums, album_count);
-        return;
-    }
-
-    // Build image list with absolute paths from all enabled albums
-    char **image_list = malloc(total_image_count * sizeof(char *));
-    int idx = 0;
-
-    for (int i = 0; i < album_count; i++) {
-        char album_path[256];
-        album_manager_get_album_path(enabled_albums[i], album_path, sizeof(album_path));
-
-        DIR *dir = opendir(album_path);
-        if (!dir) {
-            continue;
-        }
-
-        struct dirent *entry;
-        while ((entry = readdir(dir)) != NULL && idx < total_image_count) {
-            if (entry->d_type == DT_REG) {
-                if (entry->d_name[0] == '.' && entry->d_name[1] == '_') {
-                    continue;
-                }
-
-                const char *ext = strrchr(entry->d_name, '.');
-                if (ext && (strcmp(ext, ".bmp") == 0 || strcmp(ext, ".BMP") == 0 ||
-                            strcmp(ext, ".png") == 0 || strcmp(ext, ".PNG") == 0)) {
-                    char *fullpath = malloc(512);
-                    snprintf(fullpath, 512, "%s/%s", album_path, entry->d_name);
-                    image_list[idx] = fullpath;
-                    idx++;
-                }
-            }
-        }
-        closedir(dir);
+    if (mode == SD_ROTATION_SEQUENTIAL) {
+        rotate_sequential(enabled_albums, album_count);
+    } else {
+        rotate_random(enabled_albums, album_count);
     }
 
     album_manager_free_album_list(enabled_albums, album_count);
-
-    // Load last displayed image if not already loaded
-    if (last_displayed_image[0] == '\0') {
-        load_last_displayed_image();
-    }
-
-    // Select random image, avoiding the last displayed image if possible
-    int random_index = esp_random() % total_image_count;
-
-    // If we have more than one image and the random selection matches the last image,
-    // try to pick a different one (up to 10 attempts)
-    if (total_image_count > 1 && last_displayed_image[0] != '\0') {
-        int attempts = 0;
-        while (attempts < 10 && strcmp(image_list[random_index], last_displayed_image) == 0) {
-            random_index = esp_random() % total_image_count;
-            attempts++;
-        }
-
-        if (strcmp(image_list[random_index], last_displayed_image) == 0) {
-            ESP_LOGW(TAG, "Could not avoid repeating last image after 10 attempts");
-        } else {
-            ESP_LOGI(TAG, "Successfully avoided repeating last image");
-        }
-    }
-
-    // Display random image
-    ESP_LOGI(TAG, "Auto-rotate: Displaying random image %d/%d: %s", random_index + 1,
-             total_image_count, image_list[random_index]);
-    display_manager_show_image(image_list[random_index]);
-
-    // Store the displayed image filename in NVS
-    save_last_displayed_image(image_list[random_index]);
-
-    // Free image list
-    for (int i = 0; i < total_image_count; i++) {
-        free(image_list[i]);
-    }
-    free(image_list);
-
     ESP_LOGI(TAG, "Auto-rotate complete");
 }

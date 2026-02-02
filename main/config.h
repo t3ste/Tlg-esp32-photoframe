@@ -8,6 +8,8 @@
 
 typedef enum { ROTATION_MODE_SDCARD = 0, ROTATION_MODE_URL = 1 } rotation_mode_t;
 
+typedef enum { SD_ROTATION_RANDOM = 0, SD_ROTATION_SEQUENTIAL = 1 } sd_rotation_mode_t;
+
 typedef enum {
     DISPLAY_ORIENTATION_LANDSCAPE = 0,
     DISPLAY_ORIENTATION_PORTRAIT = 1
@@ -68,6 +70,8 @@ typedef enum {
 #define NVS_ROTATE_INTERVAL_KEY "rotate_int"
 #define NVS_AUTO_ROTATE_KEY "auto_rotate"
 #define NVS_AUTO_ROTATE_ALIGNED_KEY "ar_align"
+#define NVS_SD_ROTATION_MODE_KEY "sd_rot_mode"
+#define NVS_LAST_INDEX_KEY "last_idx"
 #define NVS_DISPLAY_ROTATION_DEG_KEY "disp_rot_deg"
 #define NVS_DEEP_SLEEP_KEY "deep_sleep"
 #define NVS_ENABLED_ALBUMS_KEY "enabled_albums"

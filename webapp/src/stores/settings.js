@@ -27,6 +27,7 @@ export const useSettingsStore = defineStore("settings", () => {
     rotateHours: 1,
     rotateMinutes: 0,
     rotationMode: "sdcard",
+    sdRotationMode: "random",
     imageUrl: "https://loremflickr.com/800/480",
     saveDownloadedImages: true,
     accessToken: "",
@@ -156,6 +157,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.httpHeaderValue = data.http_header_value || "";
       deviceSettings.value.displayOrientation = data.display_orientation || "landscape";
       deviceSettings.value.rotationMode = data.rotation_mode || "sdcard";
+      deviceSettings.value.sdRotationMode = data.sd_rotation_mode || "random";
       deviceSettings.value.deviceName = data.device_name || "PhotoFrame";
 
       // Sleep schedule
@@ -222,6 +224,7 @@ export const useSettingsStore = defineStore("settings", () => {
       rotate_interval: rotateInterval,
       display_rotation_deg: deviceSettings.value.displayRotationDeg,
       rotation_mode: deviceSettings.value.rotationMode,
+      sd_rotation_mode: deviceSettings.value.sdRotationMode,
       image_url: deviceSettings.value.imageUrl,
       ha_url: deviceSettings.value.haUrl,
       deep_sleep_enabled: deviceSettings.value.deepSleepEnabled,

@@ -129,6 +129,12 @@ const rotationModeOptions = computed(() => {
   }
   return options;
 });
+
+const sdRotationModeOptions = [
+  { title: "Random - Shuffle images", value: "random" },
+  { title: "Sequential - In sequence", value: "sequential" },
+];
+
 const saving = ref(false);
 const saveSuccess = ref(false);
 
@@ -334,6 +340,26 @@ async function saveSettings() {
               class="mt-8 mb-4"
               :disabled="!settingsStore.deviceSettings.autoRotate"
             />
+
+            <v-expand-transition>
+              <v-card
+                v-if="settingsStore.deviceSettings.rotationMode === 'sdcard'"
+                variant="tonal"
+                class="mb-4"
+              >
+                <v-card-text>
+                  <v-select
+                    v-model="settingsStore.deviceSettings.sdRotationMode"
+                    :items="sdRotationModeOptions"
+                    item-title="title"
+                    item-value="value"
+                    label="SD Card Rotation Logic"
+                    variant="outlined"
+                    hide-details
+                  />
+                </v-card-text>
+              </v-card>
+            </v-expand-transition>
 
             <v-expand-transition>
               <v-card

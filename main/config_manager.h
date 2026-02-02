@@ -61,4 +61,10 @@ const char *config_manager_get_http_header_key(void);
 void config_manager_set_http_header_value(const char *value);
 const char *config_manager_get_http_header_value(void);
 
+void config_manager_set_sd_rotation_mode(sd_rotation_mode_t mode);
+sd_rotation_mode_t config_manager_get_sd_rotation_mode(void);
+
+void config_manager_set_last_index(int32_t index);
+int32_t config_manager_get_last_index(void);
+
 #endif
