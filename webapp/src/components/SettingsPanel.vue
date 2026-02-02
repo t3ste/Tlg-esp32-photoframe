@@ -164,6 +164,7 @@ function onPresetChange(preset) {
 }
 
 const saveMessage = ref("");
+const saveError = ref(false);
 
 async function saveSettings() {
   saving.value = true;
@@ -178,11 +179,18 @@ async function saveSettings() {
 
   if (deviceResult.success && processingSuccess) {
     saveSuccess.value = true;
+    saveError.value = false;
     saveMessage.value = deviceResult.message || "Settings saved!";
     setTimeout(() => (saveSuccess.value = false), 3000);
 
     // Refresh device time in case timezone changed
     await fetchDeviceTime();
+  } else {
+    // Show error message
+    saveError.value = true;
+    saveSuccess.value = false;
+    saveMessage.value = deviceResult.message || "Failed to save settings";
+    setTimeout(() => (saveError.value = false), 5000);
   }
 }
 </script>
@@ -215,6 +223,29 @@ async function saveSettings() {
                 variant="outlined"
                 hint="Used for mDNS hostname (e.g., 'Living Room Frame' → living-room-frame.local)"
                 persistent-hint
+              />
+            </v-col>
+          </v-row>
+
+          <v-row>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="settingsStore.deviceSettings.wifiSsid"
+                label="WiFi SSID"
+                variant="outlined"
+                hint="Network name to connect to"
+                persistent-hint
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="settingsStore.deviceSettings.wifiPassword"
+                label="WiFi Password"
+                type="password"
+                variant="outlined"
+                hint="Leave empty to keep current password"
+                persistent-hint
+                placeholder="••••••••"
               />
             </v-col>
           </v-row>
@@ -715,6 +746,10 @@ async function saveSettings() {
         <v-chip v-if="saveSuccess" color="success" variant="tonal">
           <v-icon icon="mdi-check" start />
           {{ saveMessage || "Settings saved!" }}
+        </v-chip>
+        <v-chip v-else-if="saveError" color="error" variant="tonal">
+          <v-icon icon="mdi-alert-circle" start />
+          {{ saveMessage || "Failed to save settings" }}
         </v-chip>
       </v-fade-transition>
       <v-btn color="primary" :loading="saving" @click="saveSettings">

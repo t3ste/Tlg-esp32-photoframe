@@ -23,6 +23,8 @@ export const useSettingsStore = defineStore("settings", () => {
     timezoneOffset: 0,
     displayOrientation: "landscape",
     displayRotationDeg: 180,
+    wifiSsid: "",
+    wifiPassword: "",
     // Auto Rotate
     autoRotate: true,
     rotateHours: 1,
@@ -160,6 +162,9 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.rotationMode = data.rotation_mode || "sdcard";
       deviceSettings.value.sdRotationMode = data.sd_rotation_mode || "random";
       deviceSettings.value.deviceName = data.device_name || "PhotoFrame";
+      deviceSettings.value.wifiSsid = data.wifi_ssid || "";
+      // Don't load password from server for security
+      deviceSettings.value.wifiPassword = "";
 
       // Sleep schedule
       deviceSettings.value.sleepScheduleEnabled = data.sleep_schedule_enabled || false;
@@ -239,7 +244,13 @@ export const useSettingsStore = defineStore("settings", () => {
       access_token: deviceSettings.value.accessToken,
       http_header_key: deviceSettings.value.httpHeaderKey,
       http_header_value: deviceSettings.value.httpHeaderValue,
+      wifi_ssid: deviceSettings.value.wifiSsid,
     };
+
+    // Only include password if it's been changed (not empty)
+    if (deviceSettings.value.wifiPassword && deviceSettings.value.wifiPassword.length > 0) {
+      currentConfig.wifi_password = deviceSettings.value.wifiPassword;
+    }
 
     // Compare with original config and only send changed fields
     const changedFields = {};
@@ -254,12 +265,85 @@ export const useSettingsStore = defineStore("settings", () => {
       return { success: true, message: "No changes to save" };
     }
 
+    // Check if WiFi credentials are being changed
+    const wifiChanging =
+      changedFields.wifi_ssid !== undefined || changedFields.wifi_password !== undefined;
+
+    // If WiFi is changing, expect connection reset and handle specially
+    if (wifiChanging) {
+      const targetSsid = changedFields.wifi_ssid || deviceSettings.value.wifiSsid;
+
+      try {
+        // Send the PATCH request (will likely fail with connection reset)
+        await fetch(`${API_BASE}/api/config`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(changedFields),
+        });
+      } catch (error) {
+        // Expected - connection will reset when WiFi switches
+        console.log("Connection reset during WiFi change (expected):", error.message);
+      }
+
+      // Wait for device to switch networks
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Retry logic to check if device is back online
+      const maxRetries = 10;
+      const retryDelay = 2000; // 2 seconds
+
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          const statusResponse = await fetch(`${API_BASE}/api/config`, {
+            method: "GET",
+            signal: AbortSignal.timeout(3000), // 3 second timeout
+          });
+
+          console.log(`Retry ${i + 1}: status=${statusResponse.status}, ok=${statusResponse.ok}`);
+
+          if (statusResponse.ok) {
+            const data = await statusResponse.json();
+            console.log(`Retry ${i + 1}: wifi_ssid="${data.wifi_ssid}", target="${targetSsid}"`);
+
+            // Check if WiFi SSID actually changed
+            if (data.wifi_ssid === targetSsid) {
+              // Success! WiFi changed to new network
+              console.log("WiFi change successful!");
+              await loadDeviceSettings();
+              return { success: true, message: "WiFi settings updated successfully" };
+            } else {
+              // Device came back but on old network (connection failed)
+              console.log("WiFi change failed - device reverted to old network");
+              await loadDeviceSettings();
+              return {
+                success: false,
+                message:
+                  "Failed to connect to new WiFi network. Device reverted to previous network.",
+              };
+            }
+          }
+        } catch (retryError) {
+          // Connection failed, retry
+          console.log(`Retry ${i + 1}/${maxRetries} failed:`, retryError.message);
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        }
+      }
+
+      // If we get here, device didn't come back online
+      return {
+        success: false,
+        message: "WiFi changed but device did not reconnect. Please check your network settings.",
+      };
+    }
+
+    // Normal save flow for non-WiFi changes
     try {
       const response = await fetch(`${API_BASE}/api/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(changedFields),
       });
+
       const data = await response.json();
 
       if (data.status === "success") {
@@ -267,7 +351,7 @@ export const useSettingsStore = defineStore("settings", () => {
         Object.assign(originalConfig, changedFields);
         return { success: true, message: "Settings saved successfully" };
       } else {
-        return { success: false, message: "Failed to save settings" };
+        return { success: false, message: data.message || "Failed to save settings" };
       }
     } catch (error) {
       console.error("Error saving config:", error);

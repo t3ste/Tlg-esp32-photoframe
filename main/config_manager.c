@@ -15,6 +15,8 @@ static char device_name[DEVICE_NAME_MAX_LEN] = {0};
 static char tz_string[TIMEZONE_MAX_LEN] = {0};
 static display_orientation_t display_orientation = DISPLAY_ORIENTATION_LANDSCAPE;
 static int display_rotation_deg = BOARD_HAL_DISPLAY_ROTATION_DEG;
+static char wifi_ssid[WIFI_SSID_MAX_LEN] = {0};
+static char wifi_password[WIFI_PASS_MAX_LEN] = {0};
 
 // Auto Rotate
 static bool auto_rotate_enabled = false;
@@ -87,6 +89,24 @@ esp_err_t config_manager_init(void)
             ESP_OK) {
             display_rotation_deg = stored_display_rotation_deg;
             ESP_LOGI(TAG, "Loaded display rotation from NVS: %d degrees", display_rotation_deg);
+        }
+
+        size_t wifi_ssid_len = WIFI_SSID_MAX_LEN;
+        if (nvs_get_str(nvs_handle, NVS_WIFI_SSID_KEY, wifi_ssid, &wifi_ssid_len) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded WiFi SSID from NVS: %s", wifi_ssid);
+        } else {
+            strncpy(wifi_ssid, DEFAULT_WIFI_SSID, WIFI_SSID_MAX_LEN - 1);
+            wifi_ssid[WIFI_SSID_MAX_LEN - 1] = '\0';
+            ESP_LOGI(TAG, "No WiFi SSID in NVS, using default: %s", wifi_ssid);
+        }
+
+        size_t wifi_pass_len = WIFI_PASS_MAX_LEN;
+        if (nvs_get_str(nvs_handle, NVS_WIFI_PASS_KEY, wifi_password, &wifi_pass_len) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded WiFi password from NVS (length: %zu)", wifi_pass_len);
+        } else {
+            strncpy(wifi_password, DEFAULT_WIFI_PASSWORD, WIFI_PASS_MAX_LEN - 1);
+            wifi_password[WIFI_PASS_MAX_LEN - 1] = '\0';
+            ESP_LOGI(TAG, "No WiFi password in NVS, using default");
         }
 
         // Auto Rotate
@@ -327,6 +347,54 @@ void config_manager_set_display_rotation_deg(int rotation_deg)
 int config_manager_get_display_rotation_deg(void)
 {
     return display_rotation_deg;
+}
+
+void config_manager_set_wifi_ssid(const char *ssid)
+{
+    if (ssid == NULL) {
+        return;
+    }
+
+    strncpy(wifi_ssid, ssid, WIFI_SSID_MAX_LEN - 1);
+    wifi_ssid[WIFI_SSID_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_WIFI_SSID_KEY, wifi_ssid);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "WiFi SSID set to: %s", wifi_ssid);
+}
+
+const char *config_manager_get_wifi_ssid(void)
+{
+    return wifi_ssid;
+}
+
+void config_manager_set_wifi_password(const char *password)
+{
+    if (password == NULL) {
+        return;
+    }
+
+    strncpy(wifi_password, password, WIFI_PASS_MAX_LEN - 1);
+    wifi_password[WIFI_PASS_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_WIFI_PASS_KEY, wifi_password);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "WiFi password set (length: %zu)", strlen(wifi_password));
+}
+
+const char *config_manager_get_wifi_password(void)
+{
+    return wifi_password;
 }
 // ============================================================================
 // Auto Rotate

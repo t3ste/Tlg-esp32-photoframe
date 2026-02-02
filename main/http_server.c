@@ -28,6 +28,7 @@
 #include "power_manager.h"
 #include "processing_settings.h"
 #include "utils.h"
+#include "wifi_manager.h"
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -1313,6 +1314,9 @@ static esp_err_t config_handler(httpd_req_t *req)
         const char *timezone = config_manager_get_timezone();
         cJSON_AddStringToObject(root, "timezone", timezone ? timezone : "UTC0");
 
+        const char *wifi_ssid = config_manager_get_wifi_ssid();
+        cJSON_AddStringToObject(root, "wifi_ssid", wifi_ssid ? wifi_ssid : "");
+
         cJSON_AddStringToObject(
             root, "display_orientation",
             config_manager_get_display_orientation() == DISPLAY_ORIENTATION_LANDSCAPE ? "landscape"
@@ -1405,6 +1409,62 @@ static esp_err_t config_handler(httpd_req_t *req)
         if (timezone_obj && cJSON_IsString(timezone_obj)) {
             const char *tz = cJSON_GetStringValue(timezone_obj);
             config_manager_set_timezone(tz);
+        }
+
+        cJSON *wifi_ssid_obj = cJSON_GetObjectItem(root, "wifi_ssid");
+        cJSON *wifi_password_obj = cJSON_GetObjectItem(root, "wifi_password");
+        if (wifi_ssid_obj && cJSON_IsString(wifi_ssid_obj)) {
+            const char *new_ssid = cJSON_GetStringValue(wifi_ssid_obj);
+            const char *new_password = NULL;
+            if (wifi_password_obj && cJSON_IsString(wifi_password_obj) &&
+                strlen(cJSON_GetStringValue(wifi_password_obj)) > 0) {
+                new_password = cJSON_GetStringValue(wifi_password_obj);
+            }
+
+            // Check if WiFi credentials actually changed
+            const char *current_ssid = config_manager_get_wifi_ssid();
+            if (strcmp(new_ssid, current_ssid) != 0 || new_password != NULL) {
+                // Use current password if no new password provided
+                if (new_password == NULL) {
+                    new_password = config_manager_get_wifi_password();
+                }
+
+                ESP_LOGI(TAG, "WiFi credentials changed, testing connection to: %s", new_ssid);
+
+                // Try connecting to new WiFi first
+                esp_err_t err = wifi_manager_connect(new_ssid, new_password);
+                if (err == ESP_OK) {
+                    // Connection successful, save credentials
+                    config_manager_set_wifi_ssid(new_ssid);
+                    if (wifi_password_obj && cJSON_IsString(wifi_password_obj) &&
+                        strlen(cJSON_GetStringValue(wifi_password_obj)) > 0) {
+                        config_manager_set_wifi_password(new_password);
+                    }
+                    ESP_LOGI(TAG, "Successfully connected and saved WiFi credentials");
+                } else {
+                    // Connection failed, revert to previous credentials
+                    ESP_LOGW(TAG,
+                             "Failed to connect to new WiFi, reverting to previous credentials");
+                    wifi_manager_connect(current_ssid, config_manager_get_wifi_password());
+
+                    // Return error response
+                    cJSON_Delete(root);
+                    cJSON *error_response = cJSON_CreateObject();
+                    cJSON_AddStringToObject(error_response, "status", "error");
+                    cJSON_AddStringToObject(
+                        error_response, "message",
+                        "Failed to connect to WiFi network. Please check SSID and password.");
+
+                    char *json_str = cJSON_Print(error_response);
+                    httpd_resp_set_type(req, "application/json");
+                    httpd_resp_set_status(req, "400 Bad Request");
+                    httpd_resp_sendstr(req, json_str);
+
+                    free(json_str);
+                    cJSON_Delete(error_response);
+                    return ESP_FAIL;
+                }
+            }
         }
 
         cJSON *display_orient_obj = cJSON_GetObjectItem(root, "display_orientation");
