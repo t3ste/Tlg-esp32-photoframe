@@ -544,6 +544,10 @@ void app_main(void)
             ESP_LOGI(TAG, "===========================================");
             ESP_LOGI(TAG, "No WiFi credentials found - Starting AP mode");
             ESP_LOGI(TAG, "===========================================");
+
+            // Show setup screen on e-paper
+            display_manager_show_setup_screen();
+
 #ifdef CONFIG_HAS_SDCARD
             ESP_LOGI(TAG, "Option 1: Place wifi.txt on SD card with:");
             ESP_LOGI(TAG, "  Line 1: WiFi SSID");

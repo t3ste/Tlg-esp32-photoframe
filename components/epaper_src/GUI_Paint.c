@@ -611,6 +611,120 @@ void Paint_DrawString_EN(UWORD Xstart, UWORD Ystart, const char* pString, sFONT*
 }
 
 /******************************************************************************
+function: Display characters with scaling
+parameter:
+    Xpoint           ：X coordinate
+    Ypoint           ：Y coordinate
+    Acsii_Char       ：To display the English characters
+    Font             ：A structure pointer that displays a character size
+    Color_Foreground : Select the foreground color
+    Color_Background : Select the background color
+    Scale            : Scaling factor (e.g., 2 for 2x size)
+******************************************************************************/
+void Paint_DrawChar_Scaled(UWORD Xpoint, UWORD Ypoint, const char Acsii_Char, sFONT* Font,
+                           UWORD Color_Foreground, UWORD Color_Background, UBYTE Scale,
+                           bool Transparent)
+{
+    UWORD Page, Column;
+
+    if (Xpoint > Paint.Width || Ypoint > Paint.Height) {
+        ESP_LOGI(TAG, "Paint_DrawChar_Scaled Input exceeds the normal display range");
+        return;
+    }
+
+    uint32_t Char_Offset =
+        (Acsii_Char - ' ') * Font->Height * (Font->Width / 8 + (Font->Width % 8 ? 1 : 0));
+    const unsigned char* ptr = &Font->table[Char_Offset];
+
+    for (Page = 0; Page < Font->Height; Page++) {
+        for (Column = 0; Column < Font->Width; Column++) {
+            // Determine if pixel should be drawn
+            if (Transparent) {
+                // Transparent background mode
+                if (*ptr & (0x80 >> (Column % 8))) {
+                    // Draw foreground pixel (scaled)
+                    for (UBYTE sy = 0; sy < Scale; sy++) {
+                        for (UBYTE sx = 0; sx < Scale; sx++) {
+                            Paint_SetPixel(Xpoint + Column * Scale + sx, Ypoint + Page * Scale + sy,
+                                           Color_Foreground);
+                        }
+                    }
+                }
+            } else {
+                // Opaque background mode
+                UWORD Color;
+                if (*ptr & (0x80 >> (Column % 8))) {
+                    Color = Color_Foreground;
+                } else {
+                    Color = Color_Background;
+                }
+
+                // Draw pixel (scaled)
+                for (UBYTE sy = 0; sy < Scale; sy++) {
+                    for (UBYTE sx = 0; sx < Scale; sx++) {
+                        Paint_SetPixel(Xpoint + Column * Scale + sx, Ypoint + Page * Scale + sy,
+                                       Color);
+                    }
+                }
+            }
+
+            // One pixel is 8 bits
+            if (Column % 8 == 7)
+                ptr++;
+        }  // Write a line
+        if (Font->Width % 8 != 0)
+            ptr++;
+    }  // Write all
+}
+
+/******************************************************************************
+function: Display the string with scaling
+parameter:
+    Xstart           ：X coordinate
+    Ystart           ：Y coordinate
+    pString          ：The first address of the English string to be displayed
+    Font             ：A structure pointer that displays a character size
+    Color_Foreground : Select the foreground color
+    Color_Background : Select the background color
+    Scale            : Scaling factor (e.g., 2 for 2x size)
+******************************************************************************/
+void Paint_DrawString_EN_Scaled(UWORD Xstart, UWORD Ystart, const char* pString, sFONT* Font,
+                                UWORD Color_Foreground, UWORD Color_Background, UBYTE Scale,
+                                bool Transparent)
+{
+    UWORD Xpoint = Xstart;
+    UWORD Ypoint = Ystart;
+
+    if (Xstart > Paint.Width || Ystart > Paint.Height) {
+        ESP_LOGI(TAG, "Paint_DrawString_EN_Scaled Input exceeds the normal display range");
+        return;
+    }
+
+    while (*pString != '\0') {
+        // if X direction filled , reposition to(Xstart,Ypoint),Ypoint is Y direction plus the
+        // Height of the character
+        if ((Xpoint + Font->Width * Scale) > Paint.Width) {
+            Xpoint = Xstart;
+            Ypoint += Font->Height * Scale;
+        }
+
+        // If the Y direction is full, reposition to(Xstart, Ystart)
+        if ((Ypoint + Font->Height * Scale) > Paint.Height) {
+            Xpoint = Xstart;
+            Ypoint = Ystart;
+        }
+        Paint_DrawChar_Scaled(Xpoint, Ypoint, *pString, Font, Color_Background, Color_Foreground,
+                              Scale, Transparent);
+
+        // The next character of the address
+        pString++;
+
+        // The next word of the abscissa increases the font width * scale
+        Xpoint += Font->Width * Scale;
+    }
+}
+
+/******************************************************************************
 function: Display the string
 parameter:
     Xstart  ：X coordinate
