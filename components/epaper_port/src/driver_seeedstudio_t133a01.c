@@ -218,11 +218,6 @@ void epaper_port_init(void)
     epd_init_sequence();
 }
 
-void epaper_port_clear(uint8_t *buffer, uint8_t color)
-{
-    // Not implemented for verify step, focus on init & display
-}
-
 // Convert 4-bit color to 8-bit byte for SPI (Seeed logic)
 // See COLOR_GET macro: maps 4-bit palette to 3-bit controller value?
 // COLOR_GET: 0xF->0, 0x0->1, 0x2->6, 0xB->2, 0xD->5, 0x6->3, else->1
@@ -246,6 +241,17 @@ static uint8_t color_get(uint8_t c)
     default:
         return 0x01;  // Default to White
     }
+}
+
+void epaper_port_clear(uint8_t *buffer, uint8_t color)
+{
+    uint8_t c = color_get(color);
+    // Packed: 4-bit per pixel, 2 pixels per byte.
+    // Logic: (p1 << 4) | p2.
+    uint8_t packed = (c << 4) | c;
+
+    uint32_t size = epaper_get_width() * epaper_get_height() / 2;
+    memset(buffer, packed, size);
 }
 
 void epaper_port_display(uint8_t *buffer)
@@ -336,39 +342,24 @@ void epaper_port_display(uint8_t *buffer)
 
     free(line_buf);
 
-    // Update Command
-    CS_L();
-    writecommanddata(R04_PON, NULL,
-                     0);  // Power ON (Wait, Seeed uses PON then DRF then POF in EPD_UPDATE)
-    // See EPD_UPDATE macro in T133A01_Defines.h
-    // writecommand(R04_PON); CHECK_BUSY();
-    // writecommanddata(R12_DRF, DRF_V, sizeof(DRF_V)); CHECK_BUSY();
-    // writecommanddata(R02_POF, POF_V, sizeof(POF_V)); CHECK_BUSY();
+    // Update Command: Verified against Seeed_GFX T133A01_Defines.h EPD_UPDATE
+    // Sequence uses CS1 (TFT_CS1) exclusively.
 
-    // Note: EPD_UPDATE macro uses TFT_CS1 logic:
-    // digitalWrite(TFT_CS1, LOW); writecommand(R04_PON); ...
-    // EPD_UPDATE macro uses CS1!
-    // So update sequence should target CS1?
-    // Let's check definition again (Step 1058).
-    // line 147: digitalWrite(TFT_CS1, LOW);
-    // line 148: writecommand(R04_PON);
-    CS_H();  // Ensure CS is high before CS1 logic
-
-    // Sequence using CS1
     gpio_set_level(EPD_CS1_PIN, 0);
     writecommanddata(R04_PON, NULL, 0);
     gpio_set_level(EPD_CS1_PIN, 1);
     wait_busy();
+    vTaskDelay(pdMS_TO_TICKS(30));  // 30ms delay
 
     gpio_set_level(EPD_CS1_PIN, 0);
     writecommanddata(R12_DRF, DRF_V, sizeof(DRF_V));
     gpio_set_level(EPD_CS1_PIN, 1);
     wait_busy();
+    vTaskDelay(pdMS_TO_TICKS(30));  // 30ms delay
 
     gpio_set_level(EPD_CS1_PIN, 0);
     writecommanddata(R02_POF, POF_V, sizeof(POF_V));
     gpio_set_level(EPD_CS1_PIN, 1);
     wait_busy();
-
-    ESP_LOGI(TAG, "Display Update Warning: Verify CS Usage in Phase 2/Update");
+    vTaskDelay(pdMS_TO_TICKS(30));  // 30ms delay
 }
