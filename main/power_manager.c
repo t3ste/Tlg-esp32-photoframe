@@ -243,6 +243,9 @@ esp_err_t power_manager_init(void)
         } else if (BOARD_HAL_ROTATE_KEY != GPIO_NUM_NC &&
                    (ext1_wakeup_pin_mask & (1ULL << BOARD_HAL_ROTATE_KEY))) {
             ESP_LOGI(TAG, "Wakeup caused by KEY button (GPIO %d)", BOARD_HAL_ROTATE_KEY);
+        } else if (BOARD_HAL_CLEAR_KEY != GPIO_NUM_NC &&
+                   (ext1_wakeup_pin_mask & (1ULL << BOARD_HAL_CLEAR_KEY))) {
+            ESP_LOGI(TAG, "Wakeup caused by CLEAR button (GPIO %d)", BOARD_HAL_CLEAR_KEY);
         } else {
             ESP_LOGI(TAG, "Wakeup caused by EXT1 (unknown GPIO: 0x%llx)", ext1_wakeup_pin_mask);
         }
@@ -258,6 +261,9 @@ esp_err_t power_manager_init(void)
     }
     if (BOARD_HAL_ROTATE_KEY != GPIO_NUM_NC) {
         pin_mask |= (1ULL << BOARD_HAL_ROTATE_KEY);
+    }
+    if (BOARD_HAL_CLEAR_KEY != GPIO_NUM_NC) {
+        pin_mask |= (1ULL << (BOARD_HAL_CLEAR_KEY < 0 ? 0 : BOARD_HAL_CLEAR_KEY));
     }
 
     if (pin_mask != 0) {
@@ -275,6 +281,9 @@ esp_err_t power_manager_init(void)
         }
         if (BOARD_HAL_ROTATE_KEY != GPIO_NUM_NC) {
             gpio_hold_en(BOARD_HAL_ROTATE_KEY);
+        }
+        if (BOARD_HAL_CLEAR_KEY != GPIO_NUM_NC) {
+            gpio_hold_en(BOARD_HAL_CLEAR_KEY);
         }
         gpio_deep_sleep_hold_en();
     }
@@ -337,6 +346,9 @@ void power_manager_enter_sleep(void)
     if (BOARD_HAL_ROTATE_KEY != GPIO_NUM_NC) {
         wakeup_mask |= (1ULL << BOARD_HAL_ROTATE_KEY);
     }
+    if (BOARD_HAL_CLEAR_KEY != GPIO_NUM_NC) {
+        wakeup_mask |= (1ULL << (BOARD_HAL_CLEAR_KEY < 0 ? 0 : BOARD_HAL_CLEAR_KEY));
+    }
 
     if (wakeup_mask != 0) {
         esp_sleep_enable_ext1_wakeup(wakeup_mask, ESP_EXT1_WAKEUP_ANY_LOW);
@@ -391,6 +403,15 @@ bool power_manager_is_key_button_wakeup(void)
     }
     return (last_wakeup_cause == ESP_SLEEP_WAKEUP_EXT1) &&
            (ext1_wakeup_pin_mask & (1ULL << BOARD_HAL_ROTATE_KEY));
+}
+
+bool power_manager_is_clear_button_wakeup(void)
+{
+    if (BOARD_HAL_CLEAR_KEY == GPIO_NUM_NC) {
+        return false;
+    }
+    return (last_wakeup_cause == ESP_SLEEP_WAKEUP_EXT1) &&
+           (ext1_wakeup_pin_mask & (1ULL << (BOARD_HAL_CLEAR_KEY < 0 ? 0 : BOARD_HAL_CLEAR_KEY)));
 }
 
 void power_manager_set_deep_sleep_enabled(bool enabled)

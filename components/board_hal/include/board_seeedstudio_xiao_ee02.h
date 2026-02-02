@@ -8,8 +8,9 @@
 #define BOARD_HAL_TYPE BOARD_TYPE_SEEEDSTUDIO_XIAO_EE02
 
 // Button Definitions
-#define BOARD_HAL_WAKEUP_KEY GPIO_NUM_3  // Button 2
+#define BOARD_HAL_WAKEUP_KEY GPIO_NUM_5  // Button 3
 #define BOARD_HAL_ROTATE_KEY GPIO_NUM_2  // Button 1
+#define BOARD_HAL_CLEAR_KEY GPIO_NUM_3   // Button 2
 
 // Display Configuration
 #define BOARD_HAL_DISPLAY_ROTATION_DEG 0

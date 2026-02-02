@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "GUI_BMPfile.h"
 #include "GUI_PNGfile.h"
@@ -182,6 +183,11 @@ esp_err_t display_manager_clear(void)
 
     epaper_port_clear(epd_image_buffer, EPD_7IN3E_WHITE);
     epaper_port_display(epd_image_buffer);
+
+    // Remove the current image link so API returns 404
+    unlink(CURRENT_IMAGE_LINK);
+    current_image[0] = '\0';
+    save_last_displayed_image("");
 
     xSemaphoreGive(display_mutex);
     return ESP_OK;

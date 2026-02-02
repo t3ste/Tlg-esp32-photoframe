@@ -240,6 +240,31 @@ static void button_task(void *arg)
             last_key_state = current_key_state;
         }
 
+        if (BOARD_HAL_CLEAR_KEY != GPIO_NUM_NC) {
+            bool current_clear_state = gpio_get_level(BOARD_HAL_CLEAR_KEY);
+            // Handle CLEAR button (active low assumed, similar to others?)
+            // Assuming standard button behavior: press = 0, release = 1
+            // But verify if it's the same. Usually buttons are pulled up.
+
+            // Static state for clear button
+            static bool last_clear_state = 1;
+            static uint32_t clear_press_time = 0;
+
+            if (current_clear_state == 0 && last_clear_state == 1) {
+                clear_press_time = xTaskGetTickCount();
+            } else if (current_clear_state == 1 && last_clear_state == 0) {
+                uint32_t duration = (xTaskGetTickCount() - clear_press_time) * portTICK_PERIOD_MS;
+
+                if (duration > 50 && duration < 3000) {
+                    ESP_LOGI(TAG, "Clear button pressed, clearing display");
+                    power_manager_reset_sleep_timer();
+                    display_manager_clear();
+                    ha_notify_update();
+                }
+            }
+            last_clear_state = current_clear_state;
+        }
+
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
@@ -461,9 +486,20 @@ void app_main(void)
     // Check wake-up source with priority: Timer > KEY > BOOT
     bool is_timer = power_manager_is_timer_wakeup();
     bool is_key = power_manager_is_key_button_wakeup();
+    bool is_clear = power_manager_is_clear_button_wakeup();
     bool is_boot = power_manager_is_boot_button_wakeup();
 
-    ESP_LOGI(TAG, "Wake-up detection: timer=%d, key=%d, boot=%d", is_timer, is_key, is_boot);
+    ESP_LOGI(TAG, "Wake-up detection: timer=%d, key=%d, clear=%d, boot=%d", is_timer, is_key,
+             is_clear, is_boot);
+
+    if (is_clear) {
+        ESP_LOGI(TAG, "CLEAR button wakeup detected - clearing display and sleeping");
+        board_hal_init();             // Ensure HAL is active
+        display_manager_init();       // Initialize display
+        display_manager_clear();      // Clear screen
+        power_manager_enter_sleep();  // Go back to sleep
+        // Won't reach here
+    }
 
     if (is_timer || is_key) {
         ESP_LOGI(TAG, "Entering deep sleep wake path (timer or key button)");
