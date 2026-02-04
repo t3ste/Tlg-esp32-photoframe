@@ -77,6 +77,9 @@ static esp_err_t sntp_sync_periodic_callback(void)
             }
         }
 
+        // Reset rotate timer
+        power_manager_reset_rotate_timer();
+
         return ESP_OK;
     } else {
         ESP_LOGW(TAG, "SNTP sync timeout, will retry next period");
