@@ -4,8 +4,11 @@ import subprocess
 import sys
 import os
 
-# Define BOARDS at a higher scope if it's meant to be a constant
-BOARDS = ["waveshare_photopainter_73", "seeedstudio_xiao_ee02", "seeedstudio_reterminal_e1002"]
+# Add scripts to sys.path to import boards
+sys.path.append(os.path.join(os.path.dirname(__file__), "scripts"))
+from boards import SUPPORTED_BOARDS
+
+BOARDS = list(SUPPORTED_BOARDS.keys())
 
 def main():
     parser = argparse.ArgumentParser(description="Build firmware for different boards")

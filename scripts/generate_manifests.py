@@ -17,6 +17,7 @@ from pathlib import Path
 
 # Import version detection functions from get_version module
 import get_version as version_module
+from boards import SUPPORTED_BOARDS
 
 
 def check_firmware_exists(firmware_path):
@@ -80,10 +81,7 @@ def copy_firmware_to_demo(build_dir, demo_dir, board):
 def generate_manifest(output_path, version, firmware_file, board, is_dev=False):
     """Generate a manifest.json file."""
 
-    board_display = {
-        "waveshare_photopainter_73": "Waveshare 7.3in 7-color",
-        "seeedstudio_xiao_ee02": "Seeed Studio XIAO EE02",
-    }.get(board, board)
+    board_display = SUPPORTED_BOARDS.get(board, board)
 
     manifest = {
         "name": f"ESP32 PhotoFrame {board_display}{' (Development)' if is_dev else ''}",
@@ -178,7 +176,7 @@ def main():
     parser.add_argument(
         "--board",
         required=True,
-        choices=["waveshare_photopainter_73", "seeedstudio_xiao_ee02"],
+        choices=list(SUPPORTED_BOARDS.keys()),
         help="Board type to build",
     )
 
