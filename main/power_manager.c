@@ -32,15 +32,6 @@ static esp_sleep_wakeup_cause_t last_wakeup_cause = ESP_SLEEP_WAKEUP_UNDEFINED;
 static int64_t next_rotation_time = 0;  // Use absolute time for rotation
 static uint64_t ext1_wakeup_pin_mask = 0;
 
-static int get_next_rotation_interval(void)
-{
-    int rotate_interval = config_manager_get_rotate_interval();
-    if (config_manager_get_auto_rotate_aligned()) {
-        return calculate_next_aligned_wakeup(rotate_interval);
-    }
-    return rotate_interval;
-}
-
 static void rotation_timer_task(void *arg)
 {
     while (1) {
@@ -69,7 +60,7 @@ static void rotation_timer_task(void *arg)
 
             if (next_rotation_time == 0) {
                 // Initialize next rotation time
-                int seconds_until_next = get_next_rotation_interval();
+                int seconds_until_next = get_seconds_until_next_wakeup();
 
                 next_rotation_time = now + (seconds_until_next * 1000000LL);
                 const char *reason =
@@ -88,7 +79,7 @@ static void rotation_timer_task(void *arg)
                 ha_notify_update();
 
                 // Schedule next rotation
-                int seconds_until_next = get_next_rotation_interval();
+                int seconds_until_next = get_seconds_until_next_wakeup();
 
                 next_rotation_time = now + (seconds_until_next * 1000000LL);
                 ESP_LOGI(TAG, "Next rotation scheduled in %d seconds (%s)", seconds_until_next,
@@ -325,7 +316,7 @@ void power_manager_enter_sleep(void)
     // Check if auto-rotate is enabled
     if (config_manager_get_auto_rotate()) {
         // Use timer-based sleep for auto-rotate
-        int wake_seconds = get_next_rotation_interval();
+        int wake_seconds = get_seconds_until_next_wakeup();
 
         ESP_LOGI(TAG, "Auto-rotate enabled, setting timer wake-up for %d seconds (%s)",
                  wake_seconds,
@@ -370,7 +361,7 @@ void power_manager_reset_sleep_timer(void)
 
 void power_manager_reset_rotate_timer(void)
 {
-    int seconds_until_next = get_next_rotation_interval();
+    int seconds_until_next = get_seconds_until_next_wakeup();
 
     next_rotation_time = esp_timer_get_time() + (seconds_until_next * 1000000LL);
     ESP_LOGI(TAG, "Rotation timer reset, next rotation in %d seconds (%s)", seconds_until_next,
