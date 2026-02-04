@@ -1,4 +1,6 @@
 set(srcs "")
+set(priv_reqs "sdcard" "pmic_driver_axp2101" "rtc_driver_pcf85063" "epaper_driver_spectra_e6" "sensor_driver_shtc3"
+    "epaper_driver_t133a01" "sensor_driver_sht40")
 
 if(CONFIG_BOARD_DRIVER_WAVESHARE_PHOTOPAINTER_73)
     list(APPEND srcs "src/driver_waveshare_photopainter_73.c")
@@ -11,6 +13,6 @@ endif()
 idf_component_register(
     SRCS "${srcs}"
     INCLUDE_DIRS "include"
-    REQUIRES esp_timer driver esp_adc esp_driver_gpio epaper_port
-    PRIV_REQUIRES axpPower shtc3_sensor sht40_sensor pcf85063_rtc sdcard
+    REQUIRES esp_timer driver esp_adc esp_driver_gpio epaper sensor
+    PRIV_REQUIRES ${priv_reqs}
 )

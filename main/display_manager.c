@@ -12,7 +12,7 @@
 #include "board_hal.h"
 #include "config.h"
 #include "config_manager.h"
-#include "epaper_port.h"
+#include "epaper.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -152,14 +152,14 @@ esp_err_t display_manager_show_image(const char *filename)
     }
 
     ESP_LOGI(TAG, "Starting e-paper display update (this takes ~30 seconds)");
-    ESP_LOGI(TAG, "Free heap before epaper_port_display: %lu bytes", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Free heap before epaper_display: %lu bytes", esp_get_free_heap_size());
 
-    // Yield to watchdog before long operation
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    ESP_LOGI(TAG, "Calling epaper_port_display...");
-    epaper_port_display(epd_image_buffer);
-    ESP_LOGI(TAG, "epaper_port_display returned successfully");
+    // 4. Update E-Paper Display
+    // This is a blocking call that takes ~25-30 seconds for 7-color e-paper
+    // It handles: Power On -> Send Data -> Refresh -> Power Off
+    ESP_LOGI(TAG, "Calling epaper_display...");
+    epaper_display(epd_image_buffer);
+    ESP_LOGI(TAG, "epaper_display returned successfully");
 
     ESP_LOGI(TAG, "E-paper display update complete");
     ESP_LOGI(TAG, "Free heap after display: %lu bytes", esp_get_free_heap_size());
@@ -181,8 +181,8 @@ esp_err_t display_manager_clear(void)
         return ESP_FAIL;
     }
 
-    epaper_port_clear(epd_image_buffer, EPD_7IN3E_WHITE);
-    epaper_port_display(epd_image_buffer);
+    epaper_clear(epd_image_buffer, EPD_7IN3E_WHITE);
+    epaper_display(epd_image_buffer);
 
     // Remove the current image link so API returns 404
     unlink(CURRENT_IMAGE_LINK);
@@ -209,7 +209,7 @@ esp_err_t display_manager_show_calibration(void)
     Paint_DrawCalibrationPattern();
 
     // Display the buffer
-    epaper_port_display(epd_image_buffer);
+    epaper_display(epd_image_buffer);
 
     xSemaphoreGive(display_mutex);
 
@@ -323,7 +323,7 @@ esp_err_t display_manager_show_setup_screen(void)
     }
 
     // Display the buffer
-    epaper_port_display(epd_image_buffer);
+    epaper_display(epd_image_buffer);
 
     xSemaphoreGive(display_mutex);
 

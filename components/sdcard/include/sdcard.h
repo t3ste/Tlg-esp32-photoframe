@@ -18,15 +18,15 @@ typedef struct {
     gpio_num_t d1_pin;
     gpio_num_t d2_pin;
     gpio_num_t d3_pin;
-} sdcard_sdio_config_t;
+} sdcard_config_t;
 
 /**
- * @brief Initialize SD card with SDIO interface
+ * @brief Initialize SD card
  *
- * @param config Pointer to SDIO configuration structure
+ * @param config Pointer to configuration structure
  * @return esp_err_t ESP_OK on success, error code otherwise
  */
-esp_err_t sdcard_init_sdio(const sdcard_sdio_config_t *config);
+esp_err_t sdcard_init(const sdcard_config_t *config);
 #endif
 
 #ifdef CONFIG_SDCARD_DRIVER_SPI
@@ -38,15 +38,15 @@ typedef struct {
     gpio_num_t mosi_pin;
     gpio_num_t miso_pin;
     gpio_num_t sclk_pin;
-} sdcard_spi_config_t;
+} sdcard_config_t;
 
 /**
- * @brief Initialize SD card with SPI interface
+ * @brief Initialize SD card
  *
- * @param config Pointer to SPI configuration structure
+ * @param config Pointer to configuration structure
  * @return esp_err_t ESP_OK on success, error code otherwise
  */
-esp_err_t sdcard_init_spi(const sdcard_spi_config_t *config);
+esp_err_t sdcard_init(const sdcard_config_t *config);
 #endif
 
 #ifdef __cplusplus

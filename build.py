@@ -70,6 +70,7 @@ def main():
         sys.exit(e.returncode)
     except FileNotFoundError:
         print("Error: 'idf.py' not found. Please ensure ESP-IDF is correctly installed and activated.")
+        print("Hint: Try adding ~/Work/esp/esp-idf/tools to your PATH.")
         sys.exit(1)
 
 if __name__ == "__main__":

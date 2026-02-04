@@ -2,7 +2,7 @@
 
 #include "board_hal.h"
 #include "driver/gpio.h"
-#include "epaper_port.h"
+#include "epaper.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -45,9 +45,7 @@ esp_err_t board_hal_init(void)
         .pin_cs1 = BOARD_HAL_EPD_CS1_PIN,
         .pin_enable = BOARD_HAL_EPD_ENABLE_PIN,
     };
-    epaper_port_init(&ep_cfg);
-
-    return ESP_OK;
+    epaper_init(&ep_cfg);
 
     // Initialize ADC for battery voltage
     adc_oneshot_unit_init_cfg_t init_config = {

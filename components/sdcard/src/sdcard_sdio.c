@@ -11,7 +11,7 @@ static const char *TAG = "sdcard_sdio";
 
 sdmmc_card_t *card_host = NULL;
 
-esp_err_t sdcard_init_sdio(const sdcard_sdio_config_t *config)
+esp_err_t sdcard_init(const sdcard_config_t *config)
 {
     if (!config) {
         ESP_LOGE(TAG, "Invalid configuration");

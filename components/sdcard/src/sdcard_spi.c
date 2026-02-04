@@ -12,7 +12,7 @@ static const char *TAG = "sdcard_spi";
 
 sdmmc_card_t *card_host = NULL;
 
-esp_err_t sdcard_init_spi(const sdcard_spi_config_t *config)
+esp_err_t sdcard_init(const sdcard_config_t *config)
 {
     if (!config) {
         ESP_LOGE(TAG, "Invalid configuration");

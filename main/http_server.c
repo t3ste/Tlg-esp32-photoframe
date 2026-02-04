@@ -15,7 +15,7 @@
 #include "config.h"
 #include "config_manager.h"
 #include "display_manager.h"
-#include "epaper_port.h"
+#include "epaper.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"

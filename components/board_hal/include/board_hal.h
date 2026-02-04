@@ -6,12 +6,15 @@
 #include <time.h>
 
 #include "driver/gpio.h"
-#include "epaper_port.h"
+#include "epaper.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define BOARD_HAL_DISPLAY_WIDTH epaper_get_width()
+#define BOARD_HAL_DISPLAY_HEIGHT epaper_get_height()
 
 typedef enum {
     BOARD_TYPE_WAVESHARE_PHOTOPAINTER,
