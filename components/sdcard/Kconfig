@@ -1,0 +1,24 @@
+config HAS_SDCARD
+    bool
+    default n
+    help
+        Automatically enabled when an SD card driver is selected.
+        This flag is used to conditionally compile SD card-related code.
+
+config SDCARD_DRIVER_SDIO
+    bool "SDIO SD Card Driver"
+    select HAS_SDCARD
+    help
+        Use SDIO interface for SD card (4-bit mode).
+        Typically used on boards with dedicated SDMMC pins.
+        
+        This is automatically selected by board drivers that use SDIO.
+
+config SDCARD_DRIVER_SPI
+    bool "SPI SD Card Driver"
+    select HAS_SDCARD
+    help
+        Use SPI interface for SD card.
+        More flexible pin assignment but slower than SDIO.
+        
+        This is automatically selected by board drivers that use SPI.

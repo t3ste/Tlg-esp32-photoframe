@@ -33,9 +33,6 @@
 
 #ifdef CONFIG_HAS_SDCARD
 #include "album_manager.h"
-#include "driver/sdmmc_host.h"
-#include "esp_vfs_fat.h"
-#include "sdmmc_cmd.h"
 #endif
 
 static const char *TAG = "main";
@@ -118,71 +115,16 @@ static bool connect_to_wifi_with_timeout(int timeout_seconds)
 }
 
 #ifdef CONFIG_HAS_SDCARD
-static esp_err_t init_sdcard(void)
+// SD card is initialized by board_hal_init()
+// This function only sets up the required directories
+static esp_err_t setup_sdcard_directories(void)
 {
-    ESP_LOGI(TAG, "Initializing SD card");
-
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = false, .max_files = 5, .allocation_unit_size = 16 * 1024 * 3};
-
-    sdmmc_card_t *card;
-    const char mount_point[] = SDCARD_MOUNT_POINT;
-
-    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
-
-    // Configure SD card pins for ESP32-S3 PhotoPainter
-    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
-    slot_config.width = 4;
-    slot_config.clk = GPIO_NUM_39;  // SDMMC_CLK
-    slot_config.cmd = GPIO_NUM_41;  // SDMMC_CMD
-    slot_config.d0 = GPIO_NUM_40;   // SDMMC_D0
-    slot_config.d1 = GPIO_NUM_1;    // SDMMC_D1
-    slot_config.d2 = GPIO_NUM_2;    // SDMMC_D2
-    slot_config.d3 = GPIO_NUM_38;   // SDMMC_D3
-
-    // Retry SD card initialization up to 5 times with delays
-    esp_err_t ret = ESP_FAIL;
-    const int retries = 3;
-    for (int retry = 0; retry < retries; retry++) {
-        if (retry > 0) {
-            ESP_LOGW(TAG, "SD card init failed, retrying... (attempt %d/%d)", retry + 1, retries);
-            vTaskDelay(pdMS_TO_TICKS(500));  // Wait 500ms before retry
-        }
-
-        ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
-
-        if (ret == ESP_OK) {
-            break;  // Success
-        }
-    }
-
-    if (ret != ESP_OK) {
-        if (ret == ESP_FAIL) {
-            ESP_LOGE(TAG, "Failed to mount filesystem after %d attempts", retries);
-        } else {
-            ESP_LOGE(TAG, "Failed to initialize SD card after %d attempts (%s)", retries,
-                     esp_err_to_name(ret));
-        }
-        return ret;
-    }
-
-    sdmmc_card_print_info(stdout, card);
-
-    // Poll sdcard status until it's ready
-    ESP_LOGI(TAG, "Waiting for SD card to be ready...");
-    while (sdmmc_get_status(card) != ESP_OK) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-    ESP_LOGI(TAG, "SD card ready");
-
+    // Create image directory if it doesn't exist
     struct stat st;
     if (stat(IMAGE_DIRECTORY, &st) != 0) {
         ESP_LOGI(TAG, "Creating image directory: %s", IMAGE_DIRECTORY);
         mkdir(IMAGE_DIRECTORY, 0775);
     }
-
-    ESP_LOGI(TAG, "SD card initialized successfully");
     return ESP_OK;
 }
 #endif
@@ -470,9 +412,9 @@ void app_main(void)
     ESP_ERROR_CHECK(ota_manager_init());
 
 #ifdef CONFIG_HAS_SDCARD
-    ret = init_sdcard();
+    ret = setup_sdcard_directories();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SD card initialization failed - triggering hard reset");
+        ESP_LOGE(TAG, "SD card directory setup failed - triggering hard reset");
         vTaskDelay(pdMS_TO_TICKS(1000));  // Give time for log to flush
         board_hal_shutdown();             // Hard power-off
         // Won't reach here

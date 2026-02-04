@@ -11,6 +11,10 @@
 #include "freertos/task.h"
 #include "soc/soc_caps.h"
 
+#ifdef CONFIG_HAS_SDCARD
+#include "sdcard.h"
+#endif
+
 static const char *TAG = "board_hal_reterminal_e1002";
 
 // Battery measurement constants
@@ -77,6 +81,24 @@ esp_err_t board_hal_init(void)
         .pin_enable = -1,
     };
     epaper_port_init(&ep_cfg);
+
+#ifdef CONFIG_HAS_SDCARD
+    // Initialize SD card (SPI interface for reTerminal E1002)
+    ESP_LOGI(TAG, "Initializing SD card (SPI)...");
+    sdcard_spi_config_t sd_config = {
+        .cs_pin = GPIO_NUM_14,
+        .mosi_pin = GPIO_NUM_9,
+        .miso_pin = GPIO_NUM_8,
+        .sclk_pin = GPIO_NUM_7,
+    };
+
+    esp_err_t sd_ret = sdcard_init_spi(&sd_config);
+    if (sd_ret == ESP_OK) {
+        ESP_LOGI(TAG, "SD card initialized successfully");
+    } else {
+        ESP_LOGW(TAG, "SD card initialization failed: %s", esp_err_to_name(sd_ret));
+    }
+#endif
 
     // Initialize Battery Enable Pin
     io_conf.pin_bit_mask = (1ULL << BOARD_HAL_BAT_EN_PIN);

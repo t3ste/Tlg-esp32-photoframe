@@ -8,6 +8,10 @@
 #include "pcf85063_rtc.h"
 #include "shtc3_sensor.h"
 
+#ifdef CONFIG_HAS_SDCARD
+#include "sdcard.h"
+#endif
+
 static const char *TAG = "board_hal_waveshare";
 
 esp_err_t board_hal_init(void)
@@ -40,6 +44,26 @@ esp_err_t board_hal_init(void)
         .pin_enable = -1,
     };
     epaper_port_init(&ep_cfg);
+
+#ifdef CONFIG_HAS_SDCARD
+    // Initialize SD card (SDIO interface for WaveShare)
+    ESP_LOGI(TAG, "Initializing SD card (SDIO)...");
+    sdcard_sdio_config_t sd_config = {
+        .clk_pin = GPIO_NUM_39,
+        .cmd_pin = GPIO_NUM_41,
+        .d0_pin = GPIO_NUM_40,
+        .d1_pin = GPIO_NUM_1,
+        .d2_pin = GPIO_NUM_2,
+        .d3_pin = GPIO_NUM_38,
+    };
+
+    esp_err_t sd_ret = sdcard_init_sdio(&sd_config);
+    if (sd_ret == ESP_OK) {
+        ESP_LOGI(TAG, "SD card initialized successfully");
+    } else {
+        ESP_LOGW(TAG, "SD card initialization failed: %s", esp_err_to_name(sd_ret));
+    }
+#endif
 
     return ESP_OK;
 }

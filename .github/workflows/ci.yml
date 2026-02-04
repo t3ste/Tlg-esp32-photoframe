@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        board: [waveshare_photopainter_73, seeedstudio_xiao_ee02]
+        board: [waveshare_photopainter_73, seeedstudio_xiao_ee02, seeedstudio_reterminal_e1002]
       fail-fast: false
     steps:
       - name: Checkout code
