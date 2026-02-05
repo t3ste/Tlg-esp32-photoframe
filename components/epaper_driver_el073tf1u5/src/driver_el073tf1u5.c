@@ -14,10 +14,9 @@ static epaper_config_t g_cfg;
 
 #define EPD_DC_PIN (g_cfg.pin_dc)
 #define EPD_CS_PIN (g_cfg.pin_cs)
-#define EPD_SCK_PIN (g_cfg.pin_sck)
-#define EPD_MOSI_PIN (g_cfg.pin_mosi)
 #define EPD_RST_PIN (g_cfg.pin_rst)
 #define EPD_BUSY_PIN (g_cfg.pin_busy)
+#define EPD_HOST (g_cfg.spi_host)
 
 #define epaper_rst_1 gpio_set_level(EPD_RST_PIN, 1)
 #define epaper_rst_0 gpio_set_level(EPD_RST_PIN, 0)
@@ -75,22 +74,12 @@ static void epaper_reset(void)
 static void epaper_spi_init(void)
 {
     esp_err_t ret;
-    spi_bus_config_t buscfg = {};
-    buscfg.miso_io_num = -1;
-    buscfg.mosi_io_num = EPD_MOSI_PIN;
-    buscfg.sclk_io_num = EPD_SCK_PIN;
-    buscfg.quadwp_io_num = -1;
-    buscfg.quadhd_io_num = -1;
-    buscfg.max_transfer_sz = epaper_get_width() * epaper_get_height();
     spi_device_interface_config_t devcfg = {};
-    devcfg.spics_io_num = -1;
-    devcfg.clock_speed_hz = 20 * 1000 * 1000;  // Clock out at 20 MHz
-    devcfg.mode = 0;                           // SPI mode 0
+    devcfg.clock_speed_hz = (g_cfg.spi_host == SPI3_HOST) ? 40 * 1000 * 1000 : 10 * 1000 * 1000;
+    devcfg.mode = 0;        // SPI mode 0
     devcfg.queue_size = 7;  // We want to be able to queue 7 transactions at a time
     devcfg.flags = SPI_DEVICE_HALFDUPLEX;
-    ret = spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    ESP_ERROR_CHECK(ret);
-    ret = spi_bus_add_device(SPI3_HOST, &devcfg, &spi);
+    ret = spi_bus_add_device(EPD_HOST, &devcfg, &spi);
     ESP_ERROR_CHECK(ret);
 }
 

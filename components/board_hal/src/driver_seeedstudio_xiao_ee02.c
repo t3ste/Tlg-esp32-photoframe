@@ -2,6 +2,7 @@
 
 #include "board_hal.h"
 #include "driver/gpio.h"
+#include "driver/spi_master.h"
 #include "epaper.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
@@ -33,15 +34,25 @@ esp_err_t board_hal_init(void)
 {
     ESP_LOGI(TAG, "Initializing XIAO EE02 Power HAL (BQ24070)");
 
+    // Initialize SPI bus
+    ESP_LOGI(TAG, "Initializing SPI bus...");
+    spi_bus_config_t bus_cfg = {
+        .mosi_io_num = BOARD_HAL_SPI_MOSI_PIN,
+        .miso_io_num = -1,
+        .sclk_io_num = BOARD_HAL_SPI_SCLK_PIN,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 1200 * 1600 / 2 + 100,  // Sufficient for 13.3" EPD
+    };
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO));
+
     // Initialize E-Paper Display Port
-    // Note: T133A01 driver uses CS1 and ENABLE
     epaper_config_t ep_cfg = {
+        .spi_host = SPI2_HOST,
         .pin_cs = BOARD_HAL_EPD_CS_PIN,
         .pin_dc = BOARD_HAL_EPD_DC_PIN,
         .pin_rst = BOARD_HAL_EPD_RST_PIN,
         .pin_busy = BOARD_HAL_EPD_BUSY_PIN,
-        .pin_sck = BOARD_HAL_EPD_SCK_PIN,
-        .pin_mosi = BOARD_HAL_EPD_MOSI_PIN,
         .pin_cs1 = BOARD_HAL_EPD_CS1_PIN,
         .pin_enable = BOARD_HAL_EPD_ENABLE_PIN,
     };

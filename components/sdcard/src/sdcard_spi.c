@@ -1,5 +1,4 @@
 #include "driver/sdspi_host.h"
-#include "driver/spi_common.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -25,32 +24,15 @@ esp_err_t sdcard_init(const sdcard_config_t *config)
         .allocation_unit_size = 16 * 1024 * 3,
     };
 
-    // Initialize SPI bus
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = config->mosi_pin,
-        .miso_io_num = config->miso_pin,
-        .sclk_io_num = config->sclk_pin,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000,
-    };
-
-    esp_err_t ret = spi_bus_initialize(SPI2_HOST, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
     // Configure SD card device on SPI
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.gpio_cs = config->cs_pin;
-    slot_config.host_id = SPI2_HOST;
+    slot_config.host_id = config->host_id;
 
-    ESP_LOGI(TAG, "Mounting SD card via SPI (CS=%d, MOSI=%d, MISO=%d, SCK=%d)", config->cs_pin,
-             config->mosi_pin, config->miso_pin, config->sclk_pin);
+    ESP_LOGI(TAG, "Mounting SD card via SPI (Host=%d, CS=%d)", config->host_id, config->cs_pin);
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    ret = esp_vfs_fat_sdspi_mount(SDlist, &host, &slot_config, &mount_config, &card_host);
+    esp_err_t ret = esp_vfs_fat_sdspi_mount(SDlist, &host, &slot_config, &mount_config, &card_host);
 
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {
@@ -58,7 +40,6 @@ esp_err_t sdcard_init(const sdcard_config_t *config)
         } else {
             ESP_LOGE(TAG, "Failed to initialize SD card (%s)", esp_err_to_name(ret));
         }
-        spi_bus_free(SPI2_HOST);
         return ret;
     }
 
@@ -68,6 +49,5 @@ esp_err_t sdcard_init(const sdcard_config_t *config)
         return ESP_OK;
     }
 
-    spi_bus_free(SPI2_HOST);
     return ESP_FAIL;
 }

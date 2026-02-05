@@ -16,13 +16,11 @@ static epaper_config_t g_cfg;
 #define EPD_DC_PIN (g_cfg.pin_dc)
 #define EPD_CS_PIN (g_cfg.pin_cs)
 #define EPD_CS1_PIN (g_cfg.pin_cs1)
-#define EPD_SCK_PIN (g_cfg.pin_sck)
-#define EPD_MOSI_PIN (g_cfg.pin_mosi)
 #define EPD_RST_PIN (g_cfg.pin_rst)
 #define EPD_BUSY_PIN (g_cfg.pin_busy)
 #define EPD_ENABLE_PIN (g_cfg.pin_enable)
 
-#define EPD_HOST SPI2_HOST
+#define EPD_HOST (g_cfg.spi_host)
 #define EPD_WIDTH 1200
 #define EPD_HEIGHT 1600
 
@@ -85,24 +83,13 @@ void epaper_enter_deepsleep(void) {}
 static void epd_spi_init(void)
 {
     esp_err_t ret;
-    spi_bus_config_t buscfg = {
-        .miso_io_num = -1,
-        .mosi_io_num = EPD_MOSI_PIN,
-        .sclk_io_num = EPD_SCK_PIN,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = EPD_WIDTH * EPD_HEIGHT / 2 + 100,  // Sufficient buffer
-    };
 
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = SPI_SPEED_HZ,
+        .clock_speed_hz = 10 * 1000 * 1000,
         .mode = 0,
-        .spics_io_num = -1,  // Manual CS control required for dual-CS logic
         .queue_size = 7,
+        .flags = SPI_DEVICE_HALFDUPLEX,
     };
-
-    ret = spi_bus_initialize(EPD_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    ESP_ERROR_CHECK(ret);
 
     ret = spi_bus_add_device(EPD_HOST, &devcfg, &spi);
     ESP_ERROR_CHECK(ret);

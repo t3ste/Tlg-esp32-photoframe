@@ -34,10 +34,8 @@ esp_err_t sdcard_init(const sdcard_config_t *config);
  * @brief SD card configuration for SPI interface
  */
 typedef struct {
+    int host_id;
     gpio_num_t cs_pin;
-    gpio_num_t mosi_pin;
-    gpio_num_t miso_pin;
-    gpio_num_t sclk_pin;
 } sdcard_config_t;
 
 /**

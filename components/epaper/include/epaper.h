@@ -23,12 +23,11 @@ extern "C" {
 
 // Configuration Struct
 typedef struct {
+    int spi_host;
     int pin_cs;
     int pin_dc;
     int pin_rst;
     int pin_busy;
-    int pin_sck;
-    int pin_mosi;
     int pin_cs1;     // For 13.3" Dual CS
     int pin_enable;  // Optional power enable
 } epaper_config_t;
