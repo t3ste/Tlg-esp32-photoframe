@@ -14,6 +14,7 @@
 #include "display_manager.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "image_processor.h"
 #include "processing_settings.h"
 #include "testable_utils.h"
@@ -609,4 +610,20 @@ void sanitize_hostname(const char *device_name, char *hostname, size_t max_len)
         strncpy(hostname, "photoframe", max_len - 1);
         hostname[max_len - 1] = '\0';
     }
+}
+
+const char *get_device_id(void)
+{
+    static char device_id[13];
+    static bool id_fetched = false;
+
+    if (!id_fetched) {
+        uint8_t mac[6];
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        snprintf(device_id, sizeof(device_id), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2],
+                 mac[3], mac[4], mac[5]);
+        id_fetched = true;
+    }
+
+    return device_id;
 }

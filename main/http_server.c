@@ -1311,6 +1311,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         // General
         const char *device_name = config_manager_get_device_name();
         cJSON_AddStringToObject(root, "device_name", device_name ? device_name : "PhotoFrame");
+        cJSON_AddStringToObject(root, "device_id", get_device_id());
 
         const char *timezone = config_manager_get_timezone();
         cJSON_AddStringToObject(root, "timezone", timezone ? timezone : "UTC0");
@@ -1878,6 +1879,7 @@ static esp_err_t system_info_handler(httpd_req_t *req)
     cJSON *response = cJSON_CreateObject();
 
     cJSON_AddStringToObject(response, "device_name", config_manager_get_device_name());
+    cJSON_AddStringToObject(response, "device_id", get_device_id());
     cJSON_AddNumberToObject(response, "width", BOARD_HAL_DISPLAY_WIDTH);
     cJSON_AddNumberToObject(response, "height", BOARD_HAL_DISPLAY_HEIGHT);
     cJSON_AddStringToObject(response, "board_name", BOARD_HAL_NAME);

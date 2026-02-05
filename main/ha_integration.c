@@ -46,6 +46,7 @@ static esp_err_t ha_send_notification(const char *state, const char *log_message
 
     const char *device_name = config_manager_get_device_name();
     cJSON_AddStringToObject(root, "device_name", device_name ? device_name : "ESP32-PhotoFrame");
+    cJSON_AddStringToObject(root, "device_id", get_device_id());
     cJSON_AddStringToObject(root, "state", state);
 
     char *json_str = cJSON_PrintUnformatted(root);

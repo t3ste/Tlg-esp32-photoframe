@@ -33,4 +33,9 @@ int get_seconds_until_next_wakeup(void);
 // hostname buffer must be at least max_len bytes
 void sanitize_hostname(const char *device_name, char *hostname, size_t max_len);
 
+// Get unique device ID (MAC address in hex)
+// Returns pointer to static buffer containing ID
+// Buffer is at least 13 bytes (12 chars + null)
+const char *get_device_id(void);
+
 #endif
