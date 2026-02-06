@@ -141,14 +141,10 @@ export async function createImageServer(
           baseOptions.displayHeight ||
           DEFAULT_DISPLAY_HEIGHT;
 
-        // X-Display-Orientation can be used to swap width/height if needed
+        // X-Display-Orientation indicates how the content should be oriented
+        // but we should NOT swap the physical display dimensions - the device
+        // sends its actual display size and expects the BMP to match those dimensions
         const orientation = req.headers["x-display-orientation"];
-        if (orientation === "portrait" && width > height) {
-          [width, height] = [height, width];
-        } else if (orientation === "landscape" && height > width) {
-          [width, height] = [height, width];
-        }
-
         if (!options.silent) {
           console.log(
             `Processing for display: ${width}x${height} (${orientation || "default"})`,
