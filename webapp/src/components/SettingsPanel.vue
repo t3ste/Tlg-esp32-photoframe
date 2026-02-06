@@ -537,8 +537,8 @@ async function performFactoryReset() {
                     />
                     <div
                       v-if="
-                        !settingsStore.deviceSettings.aiSettings.openaiApiKey &&
-                        !settingsStore.deviceSettings.aiSettings.googleApiKey
+                        !settingsStore.deviceSettings.aiCredentials.openaiApiKey &&
+                        !settingsStore.deviceSettings.aiCredentials.googleApiKey
                       "
                       class="text-caption text-warning mt-2"
                     >
@@ -849,7 +849,7 @@ async function performFactoryReset() {
               item-value="value"
               label="AI Provider"
               variant="outlined"
-              class="mb-4"
+              class="mt-2 mb-4"
             />
             <v-select
               v-model="settingsStore.deviceSettings.aiSettings.aiModel"
@@ -864,7 +864,7 @@ async function performFactoryReset() {
             <v-expand-transition>
               <div v-if="settingsStore.deviceSettings.aiSettings.aiProvider === 0">
                 <v-text-field
-                  v-model="settingsStore.deviceSettings.aiSettings.openaiApiKey"
+                  v-model="settingsStore.deviceSettings.aiCredentials.openaiApiKey"
                   label="OpenAI API Key"
                   variant="outlined"
                   type="password"
@@ -886,7 +886,7 @@ async function performFactoryReset() {
             <v-expand-transition>
               <div v-if="settingsStore.deviceSettings.aiSettings.aiProvider === 1">
                 <v-text-field
-                  v-model="settingsStore.deviceSettings.aiSettings.googleApiKey"
+                  v-model="settingsStore.deviceSettings.aiCredentials.googleApiKey"
                   label="Google Gemini API Key"
                   variant="outlined"
                   type="password"

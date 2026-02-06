@@ -48,15 +48,17 @@ static char http_header_key[HTTP_HEADER_KEY_MAX_LEN] = {0};
 static char http_header_value[HTTP_HEADER_VALUE_MAX_LEN] = {0};
 static bool save_downloaded_images = true;
 
-// Home Assistant
-static char ha_url[HA_URL_MAX_LEN] = {0};
-
-// AI Generation
-static char openai_api_key[AI_API_KEY_MAX_LEN] = {0};
-static char google_api_key[AI_API_KEY_MAX_LEN] = {0};
+// Auto Rotate - AI Gen
 static char ai_prompt[AI_PROMPT_MAX_LEN] = {0};
 static char ai_model[AI_MODEL_MAX_LEN] = {0};
 static ai_provider_t ai_provider = AI_PROVIDER_OPENAI;
+
+// Home Assistant
+static char ha_url[HA_URL_MAX_LEN] = {0};
+
+// AI Gen
+static char openai_api_key[AI_API_KEY_MAX_LEN] = {0};
+static char google_api_key[AI_API_KEY_MAX_LEN] = {0};
 
 esp_err_t config_manager_init(void)
 {

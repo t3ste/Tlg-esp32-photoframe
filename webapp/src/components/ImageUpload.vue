@@ -204,8 +204,8 @@ function showMessage(text, color = "info") {
 
 function openAiDialog() {
   const provider = settingsStore.deviceSettings.aiSettings.aiProvider;
-  const openaiKey = settingsStore.deviceSettings.aiSettings.openaiApiKey;
-  const googleKey = settingsStore.deviceSettings.aiSettings.googleApiKey;
+  const openaiKey = settingsStore.deviceSettings.aiCredentials.openaiApiKey;
+  const googleKey = settingsStore.deviceSettings.aiCredentials.googleApiKey;
 
   if (provider === 0 && !openaiKey) {
     showMessage("Please configure OpenAI API Key in Settings > AI Generation first.", "error");
@@ -233,8 +233,8 @@ async function generateAiImage() {
     const provider = aiProvider.value;
     const apiKey =
       provider === 0
-        ? settingsStore.deviceSettings.aiSettings.openaiApiKey
-        : settingsStore.deviceSettings.aiSettings.googleApiKey;
+        ? settingsStore.deviceSettings.aiCredentials.openaiApiKey
+        : settingsStore.deviceSettings.aiCredentials.googleApiKey;
 
     if (provider !== 0) {
       throw new Error("Frontend generation only supported for OpenAI currently.");

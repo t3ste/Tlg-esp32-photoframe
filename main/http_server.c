@@ -1515,7 +1515,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddBoolToObject(root, "save_downloaded_images",
                               config_manager_get_save_downloaded_images());
 
-        // Auto Rotate - AI
+        // Auto Rotate - AI Gen
         const char *ai_prompt = config_manager_get_ai_prompt();
         cJSON_AddStringToObject(root, "ai_prompt", ai_prompt ? ai_prompt : "");
         cJSON_AddNumberToObject(root, "ai_provider", config_manager_get_ai_provider());
@@ -1525,7 +1525,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         const char *ha_url = config_manager_get_ha_url();
         cJSON_AddStringToObject(root, "ha_url", ha_url ? ha_url : "");
 
-        // AI - Credentials
+        // AI Gen
         const char *openai_key = config_manager_get_openai_api_key();
         const char *google_key = config_manager_get_google_api_key();
         cJSON_AddStringToObject(root, "openai_api_key", openai_key ? openai_key : "");
@@ -1736,26 +1736,7 @@ static esp_err_t config_handler(httpd_req_t *req)
             config_manager_set_save_downloaded_images(save_dl);
         }
 
-        // Home Assistant
-        cJSON *ha_url_obj = cJSON_GetObjectItem(root, "ha_url");
-        if (ha_url_obj && cJSON_IsString(ha_url_obj)) {
-            const char *url = cJSON_GetStringValue(ha_url_obj);
-            config_manager_set_ha_url(url);
-        }
-
-        // AI
-        cJSON *openai_key_obj = cJSON_GetObjectItem(root, "openai_api_key");
-        if (openai_key_obj && cJSON_IsString(openai_key_obj)) {
-            const char *key = cJSON_GetStringValue(openai_key_obj);
-            config_manager_set_openai_api_key(key);
-        }
-
-        cJSON *google_key_obj = cJSON_GetObjectItem(root, "google_api_key");
-        if (google_key_obj && cJSON_IsString(google_key_obj)) {
-            const char *key = cJSON_GetStringValue(google_key_obj);
-            config_manager_set_google_api_key(key);
-        }
-
+        // Auto Rotate - AI Gen
         cJSON *ai_prompt_obj = cJSON_GetObjectItem(root, "ai_prompt");
         if (ai_prompt_obj && cJSON_IsString(ai_prompt_obj)) {
             const char *prompt = cJSON_GetStringValue(ai_prompt_obj);
@@ -1770,6 +1751,26 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON *ai_model_obj = cJSON_GetObjectItem(root, "ai_model");
         if (ai_model_obj && cJSON_IsString(ai_model_obj)) {
             config_manager_set_ai_model(cJSON_GetStringValue(ai_model_obj));
+        }
+
+        // Home Assistant
+        cJSON *ha_url_obj = cJSON_GetObjectItem(root, "ha_url");
+        if (ha_url_obj && cJSON_IsString(ha_url_obj)) {
+            const char *url = cJSON_GetStringValue(ha_url_obj);
+            config_manager_set_ha_url(url);
+        }
+
+        // AI Gen
+        cJSON *openai_key_obj = cJSON_GetObjectItem(root, "openai_api_key");
+        if (openai_key_obj && cJSON_IsString(openai_key_obj)) {
+            const char *key = cJSON_GetStringValue(openai_key_obj);
+            config_manager_set_openai_api_key(key);
+        }
+
+        cJSON *google_key_obj = cJSON_GetObjectItem(root, "google_api_key");
+        if (google_key_obj && cJSON_IsString(google_key_obj)) {
+            const char *key = cJSON_GetStringValue(google_key_obj);
+            config_manager_set_google_api_key(key);
         }
 
         // Other
