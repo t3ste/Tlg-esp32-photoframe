@@ -123,10 +123,11 @@ const rotationOptions = [
 ];
 
 const rotationModeOptions = computed(() => {
-  const options = [
-    { title: "URL - Fetch image from URL", value: "url" },
-    { title: "AI - Generate using AI", value: "ai" },
-  ];
+  const options = [{ title: "URL - Fetch image from URL", value: "url" }];
+  // Only show AI option if board supports it (has enough PSRAM)
+  if (appStore.systemInfo.has_ai_rotation) {
+    options.push({ title: "AI - Generate using AI", value: "ai" });
+  }
   if (appStore.systemInfo.sdcard_inserted) {
     options.unshift({ title: "SD Card - Rotate through images", value: "sdcard" });
   }

@@ -528,6 +528,7 @@ use_temp_path:
     return ESP_OK;
 }
 
+#ifndef CONFIG_DISABLE_AI_ROTATION
 static esp_err_t perform_ai_rotation(void)
 {
     const char *base_prompt = config_manager_get_ai_prompt();
@@ -563,6 +564,7 @@ static esp_err_t perform_ai_rotation(void)
     ESP_LOGE(TAG, "AI Generation timed out");
     return ESP_ERR_TIMEOUT;
 }
+#endif
 
 esp_err_t trigger_image_rotation(void)
 {
@@ -570,6 +572,14 @@ esp_err_t trigger_image_rotation(void)
     esp_err_t result = ESP_OK;
 
     if (rotation_mode == ROTATION_MODE_AI) {
+#ifdef CONFIG_DISABLE_AI_ROTATION
+        // AI rotation disabled for this board due to memory constraints
+        ESP_LOGW(TAG, "AI rotation mode disabled for this board, falling back");
+#ifdef CONFIG_HAS_SDCARD
+        display_manager_rotate_from_sdcard();
+#endif
+        result = ESP_FAIL;
+#else
         // AI Mode
         if (perform_ai_rotation() != ESP_OK) {
             result = ESP_FAIL;
@@ -582,7 +592,7 @@ esp_err_t trigger_image_rotation(void)
             display_manager_rotate_from_sdcard();
 #endif
         }
-
+#endif
     } else if (rotation_mode == ROTATION_MODE_URL) {
         // URL mode - fetch image from URL
         const char *image_url = config_manager_get_image_url();
