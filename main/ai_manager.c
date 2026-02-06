@@ -107,7 +107,6 @@ static void ai_task(void *pvParameters)
             esp_err_t err = generate_openai(current_prompt, current_model, last_image_path);
 
             if (err == ESP_OK) {
-                // Process image (Dither + Resize -> CURRENT_PNG_PATH)
                 ESP_LOGI(TAG, "Processing generated image...");
 
                 processing_settings_t settings;

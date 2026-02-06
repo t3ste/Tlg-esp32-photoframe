@@ -12,6 +12,9 @@
 #include "color_palette.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_task_wdt.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "jpeg_decoder.h"
 
 static const char *TAG = "image_processor";
@@ -62,6 +65,132 @@ static esp_err_t load_calibrated_palette(void)
     palette_measured[6] = (rgb_t){palette.green.r, palette.green.g, palette.green.b};
 
     return ESP_OK;
+}
+
+static void rgb_to_xyz(uint8_t r, uint8_t g, uint8_t b, float *x, float *y, float *z)
+{
+    float rf = r / 255.0f;
+    float gf = g / 255.0f;
+    float bf = b / 255.0f;
+
+    rf = rf > 0.04045f ? powf((rf + 0.055f) / 1.055f, 2.4f) : rf / 12.92f;
+    gf = gf > 0.04045f ? powf((gf + 0.055f) / 1.055f, 2.4f) : gf / 12.92f;
+    bf = bf > 0.04045f ? powf((bf + 0.055f) / 1.055f, 2.4f) : bf / 12.92f;
+
+    *x = (rf * 0.4124564f + gf * 0.3575761f + bf * 0.1804375f) * 100.0f;
+    *y = (rf * 0.2126729f + gf * 0.7151522f + bf * 0.0721750f) * 100.0f;
+    *z = (rf * 0.0193339f + gf * 0.1191920f + bf * 0.9503041f) * 100.0f;
+}
+
+static void xyz_to_lab(float x, float y, float z, float *L, float *a, float *b_val)
+{
+    x = x / 95.047f;
+    y = y / 100.0f;
+    z = z / 108.883f;
+
+    x = x > 0.008856f ? powf(x, 1.0f / 3.0f) : 7.787f * x + 16.0f / 116.0f;
+    y = y > 0.008856f ? powf(y, 1.0f / 3.0f) : 7.787f * y + 16.0f / 116.0f;
+    z = z > 0.008856f ? powf(z, 1.0f / 3.0f) : 7.787f * z + 16.0f / 116.0f;
+
+    *L = 116.0f * y - 16.0f;
+    *a = 500.0f * (x - y);
+    *b_val = 200.0f * (y - z);
+}
+
+static void rgb_to_lab(uint8_t r, uint8_t g, uint8_t b, float *L, float *a, float *b_val)
+{
+    float x, y, z;
+    rgb_to_xyz(r, g, b, &x, &y, &z);
+    xyz_to_lab(x, y, z, L, a, b_val);
+}
+
+static void lab_to_xyz(float L, float a, float b_val, float *x, float *y, float *z)
+{
+    float fy = (L + 16.0f) / 116.0f;
+    float fx = a / 500.0f + fy;
+    float fz = fy - b_val / 200.0f;
+
+    *x = fx > 0.206897f ? powf(fx, 3.0f) : (fx - 16.0f / 116.0f) / 7.787f;
+    *y = fy > 0.206897f ? powf(fy, 3.0f) : (fy - 16.0f / 116.0f) / 7.787f;
+    *z = fz > 0.206897f ? powf(fz, 3.0f) : (fz - 16.0f / 116.0f) / 7.787f;
+
+    *x *= 95.047f;
+    *y *= 100.0f;
+    *z *= 108.883f;
+}
+
+static void xyz_to_rgb(float x, float y, float z, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    x = x / 100.0f;
+    y = y / 100.0f;
+    z = z / 100.0f;
+
+    float rf = x * 3.2404542f + y * -1.5371385f + z * -0.4985314f;
+    float gf = x * -0.9692660f + y * 1.8760108f + z * 0.0415560f;
+    float bf = x * 0.0556434f + y * -0.2040259f + z * 1.0572252f;
+
+    rf = rf > 0.0031308f ? 1.055f * powf(rf, 1.0f / 2.4f) - 0.055f : 12.92f * rf;
+    gf = gf > 0.0031308f ? 1.055f * powf(gf, 1.0f / 2.4f) - 0.055f : 12.92f * gf;
+    bf = bf > 0.0031308f ? 1.055f * powf(bf, 1.0f / 2.4f) - 0.055f : 12.92f * bf;
+
+    int ri = (int) roundf(rf * 255.0f);
+    int gi = (int) roundf(gf * 255.0f);
+    int bi = (int) roundf(bf * 255.0f);
+
+    *r = (uint8_t) (ri < 0 ? 0 : (ri > 255 ? 255 : ri));
+    *g = (uint8_t) (gi < 0 ? 0 : (gi > 255 ? 255 : gi));
+    *b = (uint8_t) (bi < 0 ? 0 : (bi > 255 ? 255 : bi));
+}
+
+static void lab_to_rgb(float L, float a, float b_val, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    float x, y, z;
+    lab_to_xyz(L, a, b_val, &x, &y, &z);
+    xyz_to_rgb(x, y, z, r, g, b);
+}
+
+static void compress_dynamic_range(uint8_t *image, int width, int height,
+                                   const rgb_t *measured_palette)
+{
+    // Get the L* values for the display's black and white
+    float black_L, black_a, black_b;
+    float white_L, white_a, white_b;
+
+    rgb_to_lab(measured_palette[0].r, measured_palette[0].g, measured_palette[0].b, &black_L,
+               &black_a, &black_b);
+    rgb_to_lab(measured_palette[1].r, measured_palette[1].g, measured_palette[1].b, &white_L,
+               &white_a, &white_b);
+
+    ESP_LOGI(TAG, "CDR: Display black L*=%.1f, white L*=%.1f (range: %.1f)", black_L, white_L,
+             white_L - black_L);
+
+    // Compress each pixel's luminance to the display's range
+    // Process in chunks and yield periodically to avoid watchdog timeout
+    int total_pixels = width * height;
+    for (int i = 0; i < total_pixels; i++) {
+        int idx = i * 3;
+        uint8_t r = image[idx];
+        uint8_t g = image[idx + 1];
+        uint8_t b = image[idx + 2];
+
+        float L, a, b_val;
+        rgb_to_lab(r, g, b, &L, &a, &b_val);
+
+        // Compress L from [0, 100] to [black_L, white_L]
+        float compressed_L = black_L + (L / 100.0f) * (white_L - black_L);
+
+        uint8_t new_r, new_g, new_b;
+        lab_to_rgb(compressed_L, a, b_val, &new_r, &new_g, &new_b);
+
+        image[idx] = new_r;
+        image[idx + 1] = new_g;
+        image[idx + 2] = new_b;
+
+        // Delay every 2000 pixels to allow IDLE task to feed watchdog
+        if ((i % 2000) == 0) {
+            vTaskDelay(1);  // 1 tick delay allows IDLE task to run
+        }
+    }
 }
 
 static int find_closest_color(uint8_t r, uint8_t g, uint8_t b, const rgb_t *pal)
@@ -481,8 +610,10 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
                                          .out_scale = JPEG_IMAGE_SCALE_0};
         esp_jpeg_image_output_t outimg;
         esp_jpeg_get_image_info(&jpeg_cfg, &outimg);
+        int original_width = outimg.width;
+        int original_height = outimg.height;
 
-        // Scaling logic
+        // Scaling logic - scale down large images to save memory
         if (outimg.width > BOARD_HAL_DISPLAY_WIDTH * 4 ||
             outimg.height > BOARD_HAL_DISPLAY_HEIGHT * 4)
             jpeg_cfg.out_scale = JPEG_IMAGE_SCALE_1_4;
@@ -490,8 +621,13 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
                  outimg.height > BOARD_HAL_DISPLAY_HEIGHT * 2)
             jpeg_cfg.out_scale = JPEG_IMAGE_SCALE_1_2;
 
-        if (jpeg_cfg.out_scale != JPEG_IMAGE_SCALE_0)
+        if (jpeg_cfg.out_scale != JPEG_IMAGE_SCALE_0) {
             esp_jpeg_get_image_info(&jpeg_cfg, &outimg);
+            ESP_LOGI(TAG, "JPG scaled from %dx%d to %dx%d (scale: 1/%d)", original_width,
+                     original_height, outimg.width, outimg.height, 1 << jpeg_cfg.out_scale);
+        } else {
+            ESP_LOGI(TAG, "JPG size: %dx%d (no scaling needed)", outimg.width, outimg.height);
+        }
 
         rgb_buffer = (uint8_t *) heap_caps_malloc(outimg.output_len, MALLOC_CAP_SPIRAM);
         if (!rgb_buffer) {
@@ -620,6 +756,12 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
         final_image = final_resized;
         final_width = BOARD_HAL_DISPLAY_WIDTH;
         final_height = BOARD_HAL_DISPLAY_HEIGHT;
+    }
+
+    // Apply Compress Dynamic Range (CDR) - only when using measured palette
+    if (!use_stock_mode) {
+        ESP_LOGI(TAG, "Applying Compress Dynamic Range (CDR)");
+        compress_dynamic_range(final_image, final_width, final_height, palette_measured);
     }
 
     // Apply Dithering
