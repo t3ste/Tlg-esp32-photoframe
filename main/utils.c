@@ -253,16 +253,33 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
         unlink(temp_upload_path);
         return ESP_FAIL;
     } else if (upload_is_png || upload_is_jpeg) {
-        // Process everything (JPG or PNG) to dithered PNG
-        processing_settings_t settings;
-        if (processing_settings_load(&settings) != ESP_OK) {
-            processing_settings_get_defaults(&settings);
+        bool already_processed = false;
+        if (upload_is_png) {
+            already_processed = image_processor_is_processed(temp_upload_path);
         }
-        bool use_stock_mode = (strcmp(settings.processing_mode, "stock") == 0);
-        dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
 
-        err = image_processor_process(temp_upload_path, temp_png_path, use_stock_mode, algo);
-        final_path = temp_png_path;
+        if (already_processed) {
+            ESP_LOGI(TAG, "Image already processed, skipping processing");
+            if (rename(temp_upload_path, temp_png_path) != 0) {
+                ESP_LOGE(TAG, "Failed to rename processed image");
+                free(content_type);
+                free(thumbnail_url_buffer);
+                unlink(temp_upload_path);
+                return ESP_FAIL;
+            }
+            final_path = temp_png_path;
+        } else {
+            // Process everything (JPG or PNG) to dithered PNG
+            processing_settings_t settings;
+            if (processing_settings_load(&settings) != ESP_OK) {
+                processing_settings_get_defaults(&settings);
+            }
+            bool use_stock_mode = (strcmp(settings.processing_mode, "stock") == 0);
+            dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+
+            err = image_processor_process(temp_upload_path, temp_png_path, use_stock_mode, algo);
+            final_path = temp_png_path;
+        }
     } else {
         // Unknown format
         ESP_LOGE(TAG, "Unsupported image format: %s", content_type);

@@ -427,13 +427,40 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
         // Process the uploaded image
         if (upload_is_png) {
             unlink(temp_png_path);
-            if (rename(result.image_path, temp_png_path) != 0) {
-                ESP_LOGE(TAG, "Failed to move PNG");
+
+            bool already_processed = image_processor_is_processed(result.image_path);
+            if (already_processed) {
+                ESP_LOGI(TAG, "PNG is already processed, skipping processing");
+                if (rename(result.image_path, temp_png_path) != 0) {
+                    ESP_LOGE(TAG, "Failed to move PNG");
+                    unlink(result.image_path);
+                    if (result.has_thumbnail)
+                        unlink(result.thumbnail_path);
+                    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                        "Failed to process PNG");
+                    return ESP_FAIL;
+                }
+            } else {
+                ESP_LOGI(TAG, "PNG needs processing");
+                // Use default settings if not provided
+                processing_settings_t settings;
+                if (processing_settings_load(&settings) != ESP_OK) {
+                    processing_settings_get_defaults(&settings);
+                }
+                bool use_stock_mode = (strcmp(settings.processing_mode, "stock") == 0);
+                dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+
+                esp_err_t err =
+                    image_processor_process(result.image_path, temp_png_path, use_stock_mode, algo);
                 unlink(result.image_path);
-                if (result.has_thumbnail)
-                    unlink(result.thumbnail_path);
-                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process PNG");
-                return ESP_FAIL;
+                if (err != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to process PNG: %s", esp_err_to_name(err));
+                    if (result.has_thumbnail)
+                        unlink(result.thumbnail_path);
+                    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                        "Failed to process PNG");
+                    return ESP_FAIL;
+                }
             }
             display_path = temp_png_path;
         } else if (upload_is_bmp) {
@@ -570,6 +597,7 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to receive data");
             return ESP_FAIL;
         }
+
         fwrite(buf, 1, ret, fp);
         received += ret;
     }
@@ -578,6 +606,27 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
     fclose(fp);
 
     ESP_LOGI(TAG, "Image received successfully, processing...");
+
+    // Helper function to detect format
+    image_format_t detected_format = image_processor_detect_format(temp_upload_path);
+    if (detected_format == IMAGE_FORMAT_PNG) {
+        upload_is_png = true;
+        upload_is_bmp = false;
+        ESP_LOGI(TAG, "Detected PNG format from file");
+    } else if (detected_format == IMAGE_FORMAT_BMP) {
+        upload_is_bmp = true;
+        upload_is_png = false;
+        ESP_LOGI(TAG, "Detected BMP format from file");
+    } else if (detected_format == IMAGE_FORMAT_JPEG) {
+        upload_is_png = false;
+        upload_is_bmp = false;
+        ESP_LOGI(TAG, "Detected JPG format from file");
+    } else {
+        ESP_LOGE(TAG, "Unsupported image format or format detection failed");
+        unlink(temp_upload_path);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unsupported image format");
+        return ESP_FAIL;
+    }
 
     // Load processing settings to get dithering algorithm
     processing_settings_t proc_settings;
@@ -597,41 +646,53 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
         display_path = temp_bmp_path;
-    } else if (upload_is_png) {
-        // Save PNG directly - display_manager can handle PNG now
-        if (rename(temp_upload_path, temp_png_path) != 0) {
-            ESP_LOGE(TAG, "Failed to move uploaded PNG to temp location");
-            unlink(temp_upload_path);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process PNG");
-            return ESP_FAIL;
+    } else {
+        // PNG or JPG - unified processing logic
+        bool needs_processing = true;
+
+        if (upload_is_png) {
+            if (image_processor_is_processed(temp_upload_path)) {
+                needs_processing = false;
+            } else {
+                ESP_LOGI(TAG, "PNG needs processing");
+            }
+        }
+
+        if (!needs_processing) {
+            ESP_LOGI(TAG, "Image is already processed, skipping processing");
+            if (rename(temp_upload_path, temp_png_path) != 0) {
+                ESP_LOGE(TAG, "Failed to move uploaded PNG to temp location");
+                unlink(temp_upload_path);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to process PNG");
+                return ESP_FAIL;
+            }
+        } else {
+            // Needs processing (JPG or raw PNG)
+            bool use_stock_mode = (strcmp(proc_settings.processing_mode, "stock") == 0);
+            dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+            err = image_processor_process(temp_upload_path, temp_png_path, use_stock_mode, algo);
+            unlink(temp_upload_path);  // Remove original upload
+
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to process image: %s", esp_err_to_name(err));
+
+                // Provide specific error messages based on error type
+                if (err == ESP_ERR_INVALID_SIZE) {
+                    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                        "Image is too large (max: 6400x3840). Please resize your "
+                                        "image and try again.");
+                } else if (err == ESP_ERR_NO_MEM) {
+                    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                        "Image requires too much memory to process. Please use a "
+                                        "smaller image.");
+                } else {
+                    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                        "Failed to process image");
+                }
+                return ESP_FAIL;
+            }
         }
         display_path = temp_png_path;
-        ESP_LOGI(TAG, "PNG saved: %s", temp_png_path);
-    } else {
-        // Convert JPG to PNG using image processor
-        bool use_stock_mode = (strcmp(proc_settings.processing_mode, "stock") == 0);
-        dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
-        err = image_processor_process(temp_upload_path, temp_png_path, use_stock_mode, algo);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to process JPG: %s", esp_err_to_name(err));
-            unlink(temp_upload_path);
-
-            // Provide specific error messages based on error type
-            if (err == ESP_ERR_INVALID_SIZE) {
-                httpd_resp_send_err(
-                    req, HTTPD_400_BAD_REQUEST,
-                    "Image is too large (max: 6400x3840). Please resize your image and try again.");
-            } else if (err == ESP_ERR_NO_MEM) {
-                httpd_resp_send_err(
-                    req, HTTPD_400_BAD_REQUEST,
-                    "Image requires too much memory to process. Please use a smaller image.");
-            } else {
-                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                                    "Failed to process image");
-            }
-            return ESP_FAIL;
-        }
-        display_path = temp_bmp_path;
     }
 
     // Display the image (PNG or BMP) - display_manager handles both

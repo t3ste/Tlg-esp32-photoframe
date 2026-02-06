@@ -290,98 +290,6 @@ static uint8_t *resize_image(uint8_t *src, int src_w, int src_h, int dst_w, int 
     return dst;
 }
 
-static esp_err_t write_bmp_file(const char *filename, uint8_t *rgb_data, int width, int height)
-{
-    FILE *fp = fopen(filename, "wb");
-    if (!fp) {
-        ESP_LOGE(TAG, "Failed to open file for writing: %s", filename);
-        return ESP_FAIL;
-    }
-
-    int row_size = ((width * 3 + 3) / 4) * 4;
-    int image_size = row_size * height;
-    int file_size = 54 + image_size;
-
-    uint8_t bmp_header[54] = {'B',
-                              'M',
-                              file_size & 0xFF,
-                              (file_size >> 8) & 0xFF,
-                              (file_size >> 16) & 0xFF,
-                              (file_size >> 24) & 0xFF,
-                              0,
-                              0,
-                              0,
-                              0,
-                              54,
-                              0,
-                              0,
-                              0,
-                              40,
-                              0,
-                              0,
-                              0,
-                              width & 0xFF,
-                              (width >> 8) & 0xFF,
-                              (width >> 16) & 0xFF,
-                              (width >> 24) & 0xFF,
-                              height & 0xFF,
-                              (height >> 8) & 0xFF,
-                              (height >> 16) & 0xFF,
-                              (height >> 24) & 0xFF,
-                              1,
-                              0,
-                              24,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0,
-                              image_size & 0xFF,
-                              (image_size >> 8) & 0xFF,
-                              (image_size >> 16) & 0xFF,
-                              (image_size >> 24) & 0xFF,
-                              0x13,
-                              0x0B,
-                              0,
-                              0,
-                              0x13,
-                              0x0B,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0};
-
-    fwrite(bmp_header, 1, 54, fp);
-
-    uint8_t *row_buffer = (uint8_t *) malloc(row_size);
-    if (!row_buffer) {
-        fclose(fp);
-        return ESP_FAIL;
-    }
-
-    for (int y = height - 1; y >= 0; y--) {
-        memset(row_buffer, 0, row_size);
-        for (int x = 0; x < width; x++) {
-            int idx = (y * width + x) * 3;
-            row_buffer[x * 3] = rgb_data[idx + 2];
-            row_buffer[x * 3 + 1] = rgb_data[idx + 1];
-            row_buffer[x * 3 + 2] = rgb_data[idx];
-        }
-        fwrite(row_buffer, 1, row_size, fp);
-    }
-
-    free(row_buffer);
-    fclose(fp);
-
-    return ESP_OK;
-}
-
 static esp_err_t write_png_file(const char *filename, uint8_t *rgb_data, int width, int height)
 {
     FILE *fp = fopen(filename, "wb");
@@ -715,14 +623,8 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
                                  dither_algorithm);
 
     // Write Output
-    esp_err_t ret;
-    if (strstr(output_path, ".png") || strstr(output_path, ".PNG")) {
-        ESP_LOGI(TAG, "Writing PNG output");
-        ret = write_png_file(output_path, final_image, final_width, final_height);
-    } else {
-        ESP_LOGI(TAG, "Writing BMP output");
-        ret = write_bmp_file(output_path, final_image, final_width, final_height);
-    }
+    ESP_LOGI(TAG, "Writing PNG output");
+    esp_err_t ret = write_png_file(output_path, final_image, final_width, final_height);
 
     free(final_image);
     // Cleanup any lingering buffers (should be handled, but safe to check)
@@ -734,4 +636,147 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
         free(rotated);
 
     return ret;
+}
+
+bool image_processor_is_processed(const char *input_path)
+{
+    ESP_LOGD(TAG, "Checking if image is already processed: %s", input_path);
+
+    FILE *fp = fopen(input_path, "rb");
+    if (!fp) {
+        ESP_LOGE(TAG, "Failed to open input file: %s", input_path);
+        return false;
+    }
+
+    uint8_t sig[8];
+    size_t read = fread(sig, 1, 8, fp);
+    if (read != 8 || png_sig_cmp(sig, 0, 8) != 0) {
+        ESP_LOGD(TAG, "Not a PNG file");
+        fclose(fp);
+        return false;
+    }
+
+    png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png_ptr) {
+        fclose(fp);
+        return false;
+    }
+
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr) {
+        png_destroy_read_struct(&png_ptr, NULL, NULL);
+        fclose(fp);
+        return false;
+    }
+
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        ESP_LOGE(TAG, "PNG error during check");
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return false;
+    }
+
+    png_init_io(png_ptr, fp);
+    png_set_sig_bytes(png_ptr, 8);
+    png_read_info(png_ptr, info_ptr);
+
+    int width = png_get_image_width(png_ptr, info_ptr);
+    int height = png_get_image_height(png_ptr, info_ptr);
+
+    if (width != BOARD_HAL_DISPLAY_WIDTH || height != BOARD_HAL_DISPLAY_HEIGHT) {
+        ESP_LOGI(TAG, "Dimensions mismatch: %dx%d (expected %dx%d)", width, height,
+                 BOARD_HAL_DISPLAY_WIDTH, BOARD_HAL_DISPLAY_HEIGHT);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return false;
+    }
+
+    // Force RGB format
+    png_set_expand(png_ptr);
+    png_set_strip_alpha(png_ptr);
+    png_set_packing(png_ptr);
+    png_set_palette_to_rgb(png_ptr);
+    png_read_update_info(png_ptr, info_ptr);
+
+    if (png_get_channels(png_ptr, info_ptr) != 3) {
+        ESP_LOGI(TAG, "Not RGB format");
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return false;
+    }
+
+    // Check pixels row by row
+    png_bytep row = (png_bytep) malloc(png_get_rowbytes(png_ptr, info_ptr));
+    if (!row) {
+        ESP_LOGE(TAG, "Failed to allocate row buffer");
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return false;
+    }
+
+    bool valid = true;
+    for (int y = 0; y < height; y++) {
+        png_read_row(png_ptr, row, NULL);
+
+        // Check every pixel in the row
+        for (int x = 0; x < width; x++) {
+            uint8_t r = row[x * 3];
+            uint8_t g = row[x * 3 + 1];
+            uint8_t b = row[x * 3 + 2];
+
+            // Should be exactly one of the colors in the palette
+            bool color_match = false;
+            for (int i = 0; i < 7; i++) {
+                if (i == 4)
+                    continue;  // Skip reserved
+                if (r == palette[i].r && g == palette[i].g && b == palette[i].b) {
+                    color_match = true;
+                    break;
+                }
+            }
+
+            if (!color_match) {
+                ESP_LOGI(TAG, "Pixel (%d,%d) color (%d,%d,%d) not in palette", x, y, r, g, b);
+                valid = false;
+                break;
+            }
+        }
+        if (!valid)
+            break;
+    }
+
+    free(row);
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+    fclose(fp);
+
+    ESP_LOGI(TAG, "Image processing check: %s", valid ? "Passed" : "Failed");
+    return valid;
+}
+
+image_format_t image_processor_detect_format(const char *input_path)
+{
+    FILE *fp = fopen(input_path, "rb");
+    if (!fp) {
+        ESP_LOGE(TAG, "Failed to open file for format detection: %s", input_path);
+        return IMAGE_FORMAT_UNKNOWN;
+    }
+
+    uint8_t magic[8];
+    size_t read = fread(magic, 1, 8, fp);
+    fclose(fp);
+
+    if (read < 2) {
+        return IMAGE_FORMAT_UNKNOWN;
+    }
+
+    if (read >= 8 && magic[0] == 0x89 && magic[1] == 0x50 && magic[2] == 0x4E && magic[3] == 0x47 &&
+        magic[4] == 0x0D && magic[5] == 0x0A && magic[6] == 0x1A && magic[7] == 0x0A) {
+        return IMAGE_FORMAT_PNG;
+    } else if (magic[0] == 0x42 && magic[1] == 0x4D) {
+        return IMAGE_FORMAT_BMP;
+    } else if (magic[0] == 0xFF && magic[1] == 0xD8) {
+        return IMAGE_FORMAT_JPEG;
+    }
+
+    return IMAGE_FORMAT_UNKNOWN;
 }
