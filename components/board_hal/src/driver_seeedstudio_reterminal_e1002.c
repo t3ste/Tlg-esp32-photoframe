@@ -118,6 +118,9 @@ esp_err_t board_hal_init(void)
     gpio_set_level(BOARD_HAL_SD_PWR_PIN, 1);
     ESP_LOGI(TAG, "SD Card Power ON");
 
+    // Give SD card some time to power up and stabilize
+    vTaskDelay(pdMS_TO_TICKS(100));
+
     // Initialize SD card (SPI interface for reTerminal E1002)
     ESP_LOGI(TAG, "Initializing SD card (SPI)...");
     sdcard_config_t sd_cfg = {
