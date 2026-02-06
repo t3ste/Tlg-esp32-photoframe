@@ -56,33 +56,22 @@ jobs:
           idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.${{ matrix.board }}" \
                  -DFIRMWARE_VERSION='${{ steps.version.outputs.version }}' build
     
-    - name: Prepare firmware artifacts
+    - name: Install esptool
+      run: pip install esptool
+
+    - name: Prepare & merge firmware artifacts
       run: |
         mkdir -p firmware
-        # Create flash_download_tool config
-        cat > firmware/download.conf << EOF
-        0x0 firmware/bootloader.bin
-        0x8000 firmware/partition-table.bin
-        0x20000 firmware/esp32-photoframe.bin
-        EOF
-
-        # Copy binaries from build directory
-        cp build/bootloader/bootloader.bin firmware/
-        cp build/partition_table/partition-table.bin firmware/
+        
+        # Create merged firmware directly from build directory
+        esptool.py --chip esp32s3 merge-bin -o firmware/photoframe-firmware-${{ matrix.board }}-merged.bin \
+          --flash-mode dio --flash-freq 80m --flash-size 16MB \
+          0x0 build/bootloader/bootloader.bin \
+          0x8000 build/partition_table/partition-table.bin \
+          0x20000 build/esp32-photoframe.bin
 
         # Copy OTA binary with board name for release
         cp build/esp32-photoframe.bin firmware/esp32-photoframe-${{ matrix.board }}.bin
-    
-    - name: Install esptool
-      run: pip install esptool
-    
-    - name: Create merged firmware
-      run: |
-        esptool --chip esp32s3 merge-bin -o firmware/photoframe-firmware-${{ matrix.board }}-merged.bin \
-          --flash-mode dio --flash-freq 80m --flash-size 16MB \
-          0x0 firmware/bootloader.bin \
-          0x8000 firmware/partition-table.bin \
-          0x20000 firmware/esp32-photoframe-${{ matrix.board }}.bin
     
     - name: Upload firmware artifacts
       uses: actions/upload-artifact@v4
@@ -96,12 +85,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          firmware/photoframe-firmware-*-merged.bin
-          firmware/esp32-photoframe-*.bin
-          firmware/esp32-photoframe.bin
-          firmware/bootloader.bin
-          firmware/partition-table.bin
-          firmware/download.conf
+          firmware/photoframe-firmware-${{ matrix.board }}-merged.bin
+          firmware/esp32-photoframe-${{ matrix.board }}.bin
         body: |
           ## 🎉 What's New
 
@@ -117,6 +102,7 @@ jobs:
           Choose the appropriate merged binary for your board:
           - `photoframe-firmware-waveshare_photopainter_73-merged.bin`: For Waveshare 7.3" 7-color e-paper
           - `photoframe-firmware-seeedstudio_xiao_ee02-merged.bin`: For Seeed XIAO EE02
+          - `photoframe-firmware-seeedstudio_reterminal_e1002-merged.bin`: For Seeed XIAO EE02
 
           ```bash
           esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 photoframe-firmware-[board]-merged.bin
