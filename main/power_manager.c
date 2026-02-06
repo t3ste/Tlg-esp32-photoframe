@@ -28,7 +28,7 @@ static TaskHandle_t sleep_timer_task_handle = NULL;
 static TaskHandle_t rotation_timer_task_handle = NULL;
 static int64_t next_sleep_time = 0;     // Use absolute time for sleep timer
 static bool deep_sleep_enabled = true;  // Enabled by default, can be disabled for HA integration
-static esp_sleep_wakeup_cause_t last_wakeup_cause = ESP_SLEEP_WAKEUP_UNDEFINED;
+static wakeup_source_t wakeup_source = WAKEUP_SOURCE_NONE;
 static int64_t next_rotation_time = 0;  // Use absolute time for rotation
 static uint64_t ext1_wakeup_pin_mask = 0;
 
@@ -203,9 +203,9 @@ esp_err_t power_manager_init(void)
     uint32_t wakeup_causes = esp_sleep_get_wakeup_causes();
     ext1_wakeup_pin_mask = 0;
 
-    // Convert bitmap to single cause for backward compatibility
+    // Determine wakeup source
     if (wakeup_causes & (1 << ESP_SLEEP_WAKEUP_TIMER)) {
-        last_wakeup_cause = ESP_SLEEP_WAKEUP_TIMER;
+        wakeup_source = WAKEUP_SOURCE_TIMER;
         ESP_LOGI(TAG, "Wakeup caused by timer (auto-rotate)");
 
         // Check time drift and force NTP sync if needed
@@ -224,24 +224,27 @@ esp_err_t power_manager_init(void)
             expected_wakeup_time = 0;  // Reset after checking
         }
     } else if (wakeup_causes & (1 << ESP_SLEEP_WAKEUP_EXT1)) {
-        last_wakeup_cause = ESP_SLEEP_WAKEUP_EXT1;
         // ESP32-S3 only supports EXT1, check which GPIO triggered it
         ext1_wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
 
         if (BOARD_HAL_WAKEUP_KEY != GPIO_NUM_NC &&
             (ext1_wakeup_pin_mask & (1ULL << BOARD_HAL_WAKEUP_KEY))) {
+            wakeup_source = WAKEUP_SOURCE_BOOT_BUTTON;
             ESP_LOGI(TAG, "Wakeup caused by BOOT button (GPIO %d)", BOARD_HAL_WAKEUP_KEY);
         } else if (BOARD_HAL_ROTATE_KEY != GPIO_NUM_NC &&
                    (ext1_wakeup_pin_mask & (1ULL << BOARD_HAL_ROTATE_KEY))) {
-            ESP_LOGI(TAG, "Wakeup caused by KEY button (GPIO %d)", BOARD_HAL_ROTATE_KEY);
+            wakeup_source = WAKEUP_SOURCE_ROTATE_BUTTON;
+            ESP_LOGI(TAG, "Wakeup caused by ROTATE button (GPIO %d)", BOARD_HAL_ROTATE_KEY);
         } else if (BOARD_HAL_CLEAR_KEY != GPIO_NUM_NC &&
                    (ext1_wakeup_pin_mask & (1ULL << BOARD_HAL_CLEAR_KEY))) {
+            wakeup_source = WAKEUP_SOURCE_CLEAR_BUTTON;
             ESP_LOGI(TAG, "Wakeup caused by CLEAR button (GPIO %d)", BOARD_HAL_CLEAR_KEY);
         } else {
+            wakeup_source = WAKEUP_SOURCE_EXT1_UNKNOWN;
             ESP_LOGI(TAG, "Wakeup caused by EXT1 (unknown GPIO: 0x%llx)", ext1_wakeup_pin_mask);
         }
     } else {
-        last_wakeup_cause = ESP_SLEEP_WAKEUP_UNDEFINED;
+        wakeup_source = WAKEUP_SOURCE_NONE;
         ESP_LOGI(TAG, "Not a deep sleep wakeup");
     }
 
@@ -292,7 +295,13 @@ esp_err_t power_manager_init(void)
     gpio_set_level(LED_RED_GPIO, deep_sleep_enabled ? 0 : 1);  // active-low
     gpio_set_level(LED_GREEN_GPIO, 1);                         // Turn off green LED (active-low)
 
-    xTaskCreate(sleep_timer_task, "sleep_timer", 4096, NULL, 5, &sleep_timer_task_handle);
+    // Skip auto-sleep timer if woken by ROTATE button or timer (image generation can take >120s)
+    if (wakeup_source == WAKEUP_SOURCE_ROTATE_BUTTON ||
+        wakeup_source == WAKEUP_SOURCE_CLEAR_BUTTON || wakeup_source == WAKEUP_SOURCE_TIMER) {
+        ESP_LOGI(TAG, "Woken by ROTATE button, KEY button or timer, disabling auto-sleep timer");
+    } else {
+        xTaskCreate(sleep_timer_task, "sleep_timer", 4096, NULL, 5, &sleep_timer_task_handle);
+    }
     xTaskCreate(rotation_timer_task, "rotation_timer", 16384, NULL, 5, &rotation_timer_task_handle);
 
     power_manager_enable_auto_light_sleep();
@@ -368,41 +377,9 @@ void power_manager_reset_rotate_timer(void)
              config_manager_get_auto_rotate_aligned() ? "clock-aligned" : "interval");
 }
 
-bool power_manager_is_timer_wakeup(void)
+wakeup_source_t power_manager_get_wakeup_source(void)
 {
-    return last_wakeup_cause == ESP_SLEEP_WAKEUP_TIMER;
-}
-
-bool power_manager_is_ext1_wakeup(void)
-{
-    return last_wakeup_cause == ESP_SLEEP_WAKEUP_EXT1;
-}
-
-bool power_manager_is_boot_button_wakeup(void)
-{
-    if (BOARD_HAL_WAKEUP_KEY == GPIO_NUM_NC) {
-        return false;
-    }
-    return (last_wakeup_cause == ESP_SLEEP_WAKEUP_EXT1) &&
-           (ext1_wakeup_pin_mask & (1ULL << BOARD_HAL_WAKEUP_KEY));
-}
-
-bool power_manager_is_key_button_wakeup(void)
-{
-    if (BOARD_HAL_ROTATE_KEY == GPIO_NUM_NC) {
-        return false;
-    }
-    return (last_wakeup_cause == ESP_SLEEP_WAKEUP_EXT1) &&
-           (ext1_wakeup_pin_mask & (1ULL << BOARD_HAL_ROTATE_KEY));
-}
-
-bool power_manager_is_clear_button_wakeup(void)
-{
-    if (BOARD_HAL_CLEAR_KEY == GPIO_NUM_NC) {
-        return false;
-    }
-    return (last_wakeup_cause == ESP_SLEEP_WAKEUP_EXT1) &&
-           (ext1_wakeup_pin_mask & (1ULL << (BOARD_HAL_CLEAR_KEY < 0 ? 0 : BOARD_HAL_CLEAR_KEY)));
+    return wakeup_source;
 }
 
 void power_manager_set_deep_sleep_enabled(bool enabled)

@@ -415,31 +415,35 @@ void app_main(void)
     ESP_LOGI(TAG, "SD Card support disabled (No-SDCard Mode)");
 #endif
 
-    // Check wake-up source with priority: Timer > KEY > BOOT
-    bool is_timer = power_manager_is_timer_wakeup();
-    bool is_key = power_manager_is_key_button_wakeup();
-    bool is_clear = power_manager_is_clear_button_wakeup();
-    bool is_boot = power_manager_is_boot_button_wakeup();
+    // Check wake-up source
+    wakeup_source_t wakeup_src = power_manager_get_wakeup_source();
+    ESP_LOGI(TAG, "Wake-up source: %d", wakeup_src);
 
-    ESP_LOGI(TAG, "Wake-up detection: timer=%d, key=%d, clear=%d, boot=%d", is_timer, is_key,
-             is_clear, is_boot);
-
-    if (is_clear) {
+    switch (wakeup_src) {
+    case WAKEUP_SOURCE_CLEAR_BUTTON:
         ESP_LOGI(TAG, "CLEAR button wakeup detected - clearing display and sleeping");
         board_hal_init();             // Ensure HAL is active
         display_manager_init();       // Initialize display
         display_manager_clear();      // Clear screen
         power_manager_enter_sleep();  // Go back to sleep
         // Won't reach here
-    }
+        break;
 
-    if (is_timer || is_key) {
-        ESP_LOGI(TAG, "Entering deep sleep wake path (timer or key button)");
+    case WAKEUP_SOURCE_TIMER:
+    case WAKEUP_SOURCE_ROTATE_BUTTON:
+        ESP_LOGI(TAG, "Entering deep sleep wake path (timer or rotate button)");
         deep_sleep_wake_main();
         // Won't reach here after sleep
-    } else if (is_boot) {
+        break;
+
+    case WAKEUP_SOURCE_BOOT_BUTTON:
         ESP_LOGI(TAG, "BOOT button wakeup detected - starting WiFi and HTTP server");
         // Continue with normal initialization
+        break;
+
+    default:
+        // Cold boot or other wakeup - continue with normal initialization
+        break;
     }
 
     ESP_ERROR_CHECK(wifi_manager_init());
