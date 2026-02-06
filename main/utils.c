@@ -541,18 +541,18 @@ static esp_err_t perform_ai_rotation(void)
 
     ESP_LOGI(TAG, "AI rotation mode - generating with prompt: %s", prompt);
 
-    if (ai_manager_generate(prompt) != ESP_OK) {
+    if (ai_manager_generate_and_display(prompt) != ESP_OK) {
         return ESP_FAIL;
     }
 
     // Wait for completion (max 180 seconds)
+    // Note: ai_manager already displays the image, we just wait for completion
     int timeout = 180;
     while (timeout > 0) {
         ai_generation_status_t status = ai_manager_get_status();
         if (status == AI_STATUS_COMPLETE) {
-            const char *path = ai_manager_get_last_image_path();
-            ESP_LOGI(TAG, "AI Generation complete, displaying: %s", path);
-            return display_manager_show_image(path);
+            ESP_LOGI(TAG, "AI Generation complete");
+            return ESP_OK;
         } else if (status == AI_STATUS_ERROR) {
             ESP_LOGE(TAG, "AI Generation failed: %s", ai_manager_get_last_error());
             return ESP_FAIL;

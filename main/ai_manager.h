@@ -25,7 +25,7 @@ esp_err_t ai_manager_init(void);
  * generation)
  * @return ESP_OK if started, ESP_FAIL if already busy or error
  */
-esp_err_t ai_manager_generate(const char *prompt_override);
+esp_err_t ai_manager_generate_and_display(const char *prompt_override);
 
 /**
  * @brief Get current generation status

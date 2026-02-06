@@ -63,7 +63,7 @@ esp_err_t ai_manager_init(void)
     return ESP_OK;
 }
 
-esp_err_t ai_manager_generate(const char *prompt_override)
+esp_err_t ai_manager_generate_and_display(const char *prompt_override)
 {
     if (current_status != AI_STATUS_IDLE && current_status != AI_STATUS_COMPLETE &&
         current_status != AI_STATUS_ERROR) {
