@@ -69,7 +69,7 @@ function loadImage(file) {
   });
 }
 
-async function uploadImage() {
+async function uploadImage(mode = "upload") {
   if (!selectedFile.value || !sourceCanvas.value || !imageProcessor) return;
 
   uploading.value = true;
@@ -131,10 +131,13 @@ async function uploadImage() {
     formData.append("image", pngBlob, pngFilename);
     formData.append("thumbnail", thumbnailBlob, thumbFilename);
 
-    // Send album as URL query parameter
-    const uploadUrl = canSaveToAlbum.value
-      ? `/api/upload?album=${encodeURIComponent(appStore.selectedAlbum)}`
-      : "/api/display-image";
+    // Determine upload URL based on mode and capability
+    // If mode is 'display' or SD card not available, use display-image endpoint
+    const isDirectDisplay = mode === "display" || !canSaveToAlbum.value;
+
+    const uploadUrl = isDirectDisplay
+      ? "/api/display-image"
+      : `/api/upload?album=${encodeURIComponent(appStore.selectedAlbum)}`;
 
     const response = await fetch(uploadUrl, {
       method: "POST",
@@ -142,10 +145,15 @@ async function uploadImage() {
     });
 
     if (response.ok) {
-      if (canSaveToAlbum.value) {
+      if (!isDirectDisplay && canSaveToAlbum.value) {
         await appStore.loadImages(appStore.selectedAlbum);
       }
-      resetUpload();
+
+      // Only reset if we are uploading or if we are in no-sdcard mode
+      // If we are in display mode with sdcard, keep the UI open for adjustments
+      if (!(canSaveToAlbum.value && mode === "display")) {
+        resetUpload();
+      }
     }
   } catch (error) {
     console.error("Upload failed:", error);
@@ -224,7 +232,17 @@ function resetUpload() {
         style="max-width: 200px"
         class="mr-2"
       />
-      <v-btn color="primary" :loading="uploading" @click="uploadImage">
+      <v-btn
+        v-if="canSaveToAlbum"
+        color="secondary"
+        class="mr-2"
+        :loading="uploading"
+        @click="uploadImage('display')"
+      >
+        <v-icon icon="mdi-monitor" start />
+        Display
+      </v-btn>
+      <v-btn color="primary" :loading="uploading" @click="uploadImage('upload')">
         <v-icon :icon="canSaveToAlbum ? 'mdi-upload' : 'mdi-monitor'" start />
         {{ canSaveToAlbum ? "Upload" : "Display" }}
       </v-btn>
