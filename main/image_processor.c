@@ -419,6 +419,7 @@ static uint8_t *resize_image(uint8_t *src, int src_w, int src_h, int dst_w, int 
     return dst;
 }
 
+// Write PNG directly to file (efficient for file-based processing)
 static esp_err_t write_png_file(const char *filename, uint8_t *rgb_data, int width, int height)
 {
     FILE *fp = fopen(filename, "wb");
@@ -451,212 +452,30 @@ static esp_err_t write_png_file(const char *filename, uint8_t *rgb_data, int wid
 
     png_init_io(png_ptr, fp);
 
-    // RGB format, 8 bit depth
     png_set_IHDR(png_ptr, info_ptr, width, height, 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
                  PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
 
     png_write_info(png_ptr, info_ptr);
 
-    // Write row by row
-    png_bytep row = (png_bytep) malloc(3 * width * sizeof(png_byte));
-    if (!row) {
-        ESP_LOGE(TAG, "Failed to allocate PNG row buffer");
-        png_destroy_write_struct(&png_ptr, &info_ptr);
-        fclose(fp);
-        return ESP_ERR_NO_MEM;
-    }
-
     for (int y = 0; y < height; y++) {
-        // Copy RGB data to row buffer
-        memcpy(row, &rgb_data[y * width * 3], width * 3);
-        png_write_row(png_ptr, row);
+        png_write_row(png_ptr, (png_bytep) &rgb_data[y * width * 3]);
     }
 
     png_write_end(png_ptr, NULL);
-
-    free(row);
     png_destroy_write_struct(&png_ptr, &info_ptr);
     fclose(fp);
 
     return ESP_OK;
 }
 
-esp_err_t image_processor_process(const char *input_path, const char *output_path,
-                                  dither_algorithm_t dither_algorithm)
+// Core processing function that takes decoded RGB buffer and processes it
+// Returns processed RGB buffer (caller must free) and dimensions
+static esp_err_t process_rgb_buffer_core(uint8_t *rgb_buffer, int width, int height,
+                                         dither_algorithm_t dither_algorithm, uint8_t **out_buffer,
+                                         int *out_width, int *out_height)
 {
-    const char *algo_names[] = {"floyd-steinberg", "stucki", "burkes", "sierra"};
-    ESP_LOGI(TAG, "Processing %s -> %s (dither: %s)", input_path, output_path,
-             algo_names[dither_algorithm]);
-    ESP_LOGI(TAG, "Opening input file: %s", input_path);
+    ESP_LOGI(TAG, "Processing RGB buffer: %dx%d", width, height);
 
-    FILE *fp = fopen(input_path, "rb");
-    if (!fp) {
-        ESP_LOGE(TAG, "Failed to open input file: %s", input_path);
-        return ESP_FAIL;
-    }
-
-    uint8_t sig[8];
-    size_t read = fread(sig, 1, 8, fp);
-    fclose(fp);
-
-    if (read != 8) {
-        ESP_LOGE(TAG, "Failed to read file signature");
-        return ESP_FAIL;
-    }
-
-    image_format_t image_format = image_processor_detect_format(input_path);
-    uint8_t *rgb_buffer = NULL;
-    int width = 0, height = 0;
-
-    if (image_format == IMAGE_FORMAT_PNG) {
-        ESP_LOGI(TAG, "Detected PNG input");
-
-        fp = fopen(input_path, "rb");
-        if (!fp) {
-            ESP_LOGE(TAG, "Failed to open input file: %s", input_path);
-            return ESP_FAIL;
-        }
-
-        png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-        if (!png_ptr) {
-            ESP_LOGE(TAG, "Failed to create PNG read struct");
-            fclose(fp);
-            return ESP_FAIL;
-        }
-
-        png_infop info_ptr = png_create_info_struct(png_ptr);
-        if (!info_ptr) {
-            ESP_LOGE(TAG, "Failed to create PNG info struct");
-            png_destroy_read_struct(&png_ptr, NULL, NULL);
-            fclose(fp);
-            return ESP_FAIL;
-        }
-
-        if (setjmp(png_jmpbuf(png_ptr))) {
-            ESP_LOGE(TAG, "setjmp failed for PNG decoding");
-            png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
-            fclose(fp);
-            return ESP_FAIL;
-        }
-
-        png_init_io(png_ptr, fp);
-        png_read_png(png_ptr, info_ptr,
-                     PNG_TRANSFORM_STRIP_16 | PNG_TRANSFORM_PACKING | PNG_TRANSFORM_EXPAND |
-                         PNG_TRANSFORM_STRIP_ALPHA,
-                     NULL);
-
-        width = png_get_image_width(png_ptr, info_ptr);
-        height = png_get_image_height(png_ptr, info_ptr);
-        ESP_LOGI(TAG, "PNG Image info: %dx%d", width, height);
-
-        // Allocate buffer
-        size_t rgb_size = width * height * 3;
-
-        // Check for memory limits
-        if (rgb_size > 6 * 1024 * 1024) {  // 6MB limit
-            ESP_LOGE(TAG, "PNG image too large for memory: %zu bytes (limit 6MB)", rgb_size);
-            png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
-            fclose(fp);
-            return ESP_ERR_NO_MEM;
-        }
-
-        rgb_buffer = (uint8_t *) heap_caps_malloc(rgb_size, MALLOC_CAP_SPIRAM);
-        if (!rgb_buffer) {
-            ESP_LOGE(TAG, "Failed to allocate PNG RGB buffer of %zu bytes", rgb_size);
-            png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
-            fclose(fp);
-            return ESP_ERR_NO_MEM;
-        }
-
-        png_bytep *row_pointers = png_get_rows(png_ptr, info_ptr);
-
-        // Copy to linear buffer (handling potential 3/4 channel issues if any, but we requested
-        // STRIP_ALPHA)
-        int channels = png_get_channels(png_ptr, info_ptr);
-        if (channels != 3) {
-            ESP_LOGE(TAG, "Unsupported channel count: %d", channels);
-            free(rgb_buffer);
-            png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
-            fclose(fp);
-            return ESP_FAIL;
-        }
-
-        for (int y = 0; y < height; y++) {
-            memcpy(rgb_buffer + y * width * 3, row_pointers[y], width * 3);
-        }
-
-        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
-        fclose(fp);
-    } else if (image_format == IMAGE_FORMAT_JPG) {
-        ESP_LOGI(TAG, "Detected JPG input");
-
-        fp = fopen(input_path, "rb");
-        fseek(fp, 0, SEEK_END);
-        long jpg_size = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
-
-        uint8_t *jpg_buffer = (uint8_t *) heap_caps_malloc(jpg_size, MALLOC_CAP_SPIRAM);
-        if (!jpg_buffer) {
-            ESP_LOGE(TAG, "Failed to allocate JPG buffer of %ld bytes", jpg_size);
-            fclose(fp);
-            return ESP_FAIL;
-        }
-        fread(jpg_buffer, 1, jpg_size, fp);
-        fclose(fp);
-
-        esp_jpeg_image_cfg_t jpeg_cfg = {.indata = jpg_buffer,
-                                         .indata_size = jpg_size,
-                                         .out_format = JPEG_IMAGE_FORMAT_RGB888,
-                                         .out_scale = JPEG_IMAGE_SCALE_0};
-        esp_jpeg_image_output_t outimg;
-        esp_jpeg_get_image_info(&jpeg_cfg, &outimg);
-        int original_width = outimg.width;
-        int original_height = outimg.height;
-
-        // Scaling logic - scale down large images to save memory
-        if (outimg.width > BOARD_HAL_DISPLAY_WIDTH * 4 ||
-            outimg.height > BOARD_HAL_DISPLAY_HEIGHT * 4)
-            jpeg_cfg.out_scale = JPEG_IMAGE_SCALE_1_4;
-        else if (outimg.width > BOARD_HAL_DISPLAY_WIDTH * 2 ||
-                 outimg.height > BOARD_HAL_DISPLAY_HEIGHT * 2)
-            jpeg_cfg.out_scale = JPEG_IMAGE_SCALE_1_2;
-
-        if (jpeg_cfg.out_scale != JPEG_IMAGE_SCALE_0) {
-            esp_jpeg_get_image_info(&jpeg_cfg, &outimg);
-            ESP_LOGI(TAG, "JPG scaled from %dx%d to %dx%d (scale: 1/%d)", original_width,
-                     original_height, outimg.width, outimg.height, 1 << jpeg_cfg.out_scale);
-        } else {
-            ESP_LOGI(TAG, "JPG size: %dx%d (no scaling needed)", outimg.width, outimg.height);
-        }
-
-        rgb_buffer = (uint8_t *) heap_caps_malloc(outimg.output_len, MALLOC_CAP_SPIRAM);
-        if (!rgb_buffer) {
-            ESP_LOGE(TAG, "Failed to allocate JPG RGB buffer of %u bytes", outimg.output_len);
-            free(jpg_buffer);
-            return ESP_FAIL;
-        }
-
-        jpeg_cfg.outbuf = rgb_buffer;
-        jpeg_cfg.outbuf_size = outimg.output_len;
-        esp_err_t decode_err = esp_jpeg_decode(&jpeg_cfg, &outimg);
-        if (decode_err != ESP_OK) {
-            ESP_LOGE(TAG, "JPG decoding failed: %s", esp_err_to_name(decode_err));
-            free(rgb_buffer);
-            free(jpg_buffer);
-            return ESP_FAIL;
-        }
-
-        width = outimg.width;
-        height = outimg.height;
-        free(jpg_buffer);
-    } else {
-        ESP_LOGE(TAG, "Unsupported image format: %d", image_format);
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "Decoded image: %dx%d", width, height);
-
-    // Processing Logic (Resize -> Rotate -> Dither)
     uint8_t *resized = NULL;
     uint8_t *rotated = NULL;
     uint8_t *final_image = rgb_buffer;
@@ -682,11 +501,10 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
         resized = resize_image(final_image, final_width, final_height, target_width, target_height);
         if (!resized) {
             ESP_LOGE(TAG, "Failed to resize image to %dx%d", target_width, target_height);
-            free(rgb_buffer);
             return ESP_FAIL;
         }
-        free(rgb_buffer);
-        rgb_buffer = NULL;
+        if (final_image != rgb_buffer)
+            heap_caps_free(final_image);
         final_image = resized;
         final_width = target_width;
         final_height = target_height;
@@ -699,10 +517,8 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
         rotated = (uint8_t *) heap_caps_malloc(rotated_size, MALLOC_CAP_SPIRAM);
         if (!rotated) {
             ESP_LOGE(TAG, "Failed to allocate rotation buffer of %zu bytes", rotated_size);
-            if (resized)
-                free(resized);
-            else if (rgb_buffer)
-                free(rgb_buffer);
+            if (final_image != rgb_buffer)
+                heap_caps_free(final_image);
             return ESP_FAIL;
         }
 
@@ -717,12 +533,8 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
                 rotated[dst_idx + 2] = final_image[src_idx + 2];
             }
         }
-        if (resized)
-            free(resized);
-        else if (rgb_buffer)
-            free(rgb_buffer);
-        rgb_buffer = NULL;
-        resized = NULL;
+        if (final_image != rgb_buffer)
+            heap_caps_free(final_image);
         final_image = rotated;
         int temp = final_width;
         final_width = final_height;
@@ -736,23 +548,12 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
         if (!final_resized) {
             ESP_LOGE(TAG, "Failed to final resize image to %dx%d", BOARD_HAL_DISPLAY_WIDTH,
                      BOARD_HAL_DISPLAY_HEIGHT);
-            free(final_image);
-            if (final_image == rotated)
-                rotated = NULL;
-            if (final_image == resized)
-                resized = NULL;
-            if (final_image == rgb_buffer)
-                rgb_buffer = NULL;
+            if (final_image != rgb_buffer)
+                heap_caps_free(final_image);
             return ESP_FAIL;
         }
-        free(final_image);
-        if (final_image == rotated)
-            rotated = NULL;
-        if (final_image == resized)
-            resized = NULL;
-        if (final_image == rgb_buffer)
-            rgb_buffer = NULL;
-
+        if (final_image != rgb_buffer)
+            heap_caps_free(final_image);
         final_image = final_resized;
         final_width = BOARD_HAL_DISPLAY_WIDTH;
         final_height = BOARD_HAL_DISPLAY_HEIGHT;
@@ -766,20 +567,314 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
     apply_error_diffusion_dither(final_image, final_width, final_height, palette_measured,
                                  dither_algorithm);
 
-    // Write Output
-    ESP_LOGI(TAG, "Writing PNG output");
-    esp_err_t ret = write_png_file(output_path, final_image, final_width, final_height);
+    *out_buffer = final_image;
+    *out_width = final_width;
+    *out_height = final_height;
+    return ESP_OK;
+}
 
-    free(final_image);
-    // Cleanup any lingering buffers (should be handled, but safe to check)
-    if (rgb_buffer && rgb_buffer != final_image)
-        free(rgb_buffer);
-    if (resized && resized != final_image)
-        free(resized);
-    if (rotated && rotated != final_image)
-        free(rotated);
+// Decode JPG from buffer to RGB
+static esp_err_t decode_jpg_buffer(const uint8_t *jpg_data, size_t jpg_size, uint8_t **rgb_buffer,
+                                   int *width, int *height)
+{
+    esp_jpeg_image_cfg_t jpeg_cfg = {.indata = (uint8_t *) jpg_data,
+                                     .indata_size = jpg_size,
+                                     .out_format = JPEG_IMAGE_FORMAT_RGB888,
+                                     .out_scale = JPEG_IMAGE_SCALE_0};
+    esp_jpeg_image_output_t outimg;
+    esp_jpeg_get_image_info(&jpeg_cfg, &outimg);
+    int original_width = outimg.width;
+    int original_height = outimg.height;
 
-    return ret;
+    // Scaling logic - scale down large images to save memory
+    if (outimg.width > BOARD_HAL_DISPLAY_WIDTH * 4 || outimg.height > BOARD_HAL_DISPLAY_HEIGHT * 4)
+        jpeg_cfg.out_scale = JPEG_IMAGE_SCALE_1_4;
+    else if (outimg.width > BOARD_HAL_DISPLAY_WIDTH * 2 ||
+             outimg.height > BOARD_HAL_DISPLAY_HEIGHT * 2)
+        jpeg_cfg.out_scale = JPEG_IMAGE_SCALE_1_2;
+
+    if (jpeg_cfg.out_scale != JPEG_IMAGE_SCALE_0) {
+        esp_jpeg_get_image_info(&jpeg_cfg, &outimg);
+        ESP_LOGI(TAG, "JPG scaled from %dx%d to %dx%d (scale: 1/%d)", original_width,
+                 original_height, outimg.width, outimg.height, 1 << jpeg_cfg.out_scale);
+    } else {
+        ESP_LOGI(TAG, "JPG size: %dx%d (no scaling needed)", outimg.width, outimg.height);
+    }
+
+    *rgb_buffer = (uint8_t *) heap_caps_malloc(outimg.output_len, MALLOC_CAP_SPIRAM);
+    if (!*rgb_buffer) {
+        ESP_LOGE(TAG, "Failed to allocate JPG RGB buffer of %u bytes", outimg.output_len);
+        return ESP_ERR_NO_MEM;
+    }
+
+    jpeg_cfg.outbuf = *rgb_buffer;
+    jpeg_cfg.outbuf_size = outimg.output_len;
+    esp_err_t decode_err = esp_jpeg_decode(&jpeg_cfg, &outimg);
+    if (decode_err != ESP_OK) {
+        ESP_LOGE(TAG, "JPG decoding failed: %s", esp_err_to_name(decode_err));
+        heap_caps_free(*rgb_buffer);
+        *rgb_buffer = NULL;
+        return ESP_FAIL;
+    }
+
+    *width = outimg.width;
+    *height = outimg.height;
+    return ESP_OK;
+}
+
+// PNG memory read callback structure
+typedef struct {
+    const uint8_t *data;
+    size_t size;
+    size_t offset;
+} png_mem_read_t;
+
+static void png_mem_read_callback(png_structp png_ptr, png_bytep data, png_size_t length)
+{
+    png_mem_read_t *mem = (png_mem_read_t *) png_get_io_ptr(png_ptr);
+    if (mem->offset + length > mem->size) {
+        png_error(png_ptr, "Read past end of buffer");
+        return;
+    }
+    memcpy(data, mem->data + mem->offset, length);
+    mem->offset += length;
+}
+
+// Decode PNG from buffer to RGB
+static esp_err_t decode_png_buffer(const uint8_t *png_data, size_t png_size, uint8_t **rgb_buffer,
+                                   int *width, int *height)
+{
+    png_mem_read_t mem = {.data = png_data, .size = png_size, .offset = 0};
+
+    png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png_ptr) {
+        ESP_LOGE(TAG, "Failed to create PNG read struct");
+        return ESP_FAIL;
+    }
+
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr) {
+        ESP_LOGE(TAG, "Failed to create PNG info struct");
+        png_destroy_read_struct(&png_ptr, NULL, NULL);
+        return ESP_FAIL;
+    }
+
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        ESP_LOGE(TAG, "PNG decoding error");
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        return ESP_FAIL;
+    }
+
+    png_set_read_fn(png_ptr, &mem, png_mem_read_callback);
+    png_read_png(png_ptr, info_ptr,
+                 PNG_TRANSFORM_STRIP_16 | PNG_TRANSFORM_PACKING | PNG_TRANSFORM_EXPAND |
+                     PNG_TRANSFORM_STRIP_ALPHA,
+                 NULL);
+
+    *width = png_get_image_width(png_ptr, info_ptr);
+    *height = png_get_image_height(png_ptr, info_ptr);
+    ESP_LOGI(TAG, "PNG Image info: %dx%d", *width, *height);
+
+    size_t rgb_size = (*width) * (*height) * 3;
+    if (rgb_size > 6 * 1024 * 1024) {
+        ESP_LOGE(TAG, "PNG image too large for memory: %zu bytes (limit 6MB)", rgb_size);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        return ESP_ERR_NO_MEM;
+    }
+
+    *rgb_buffer = (uint8_t *) heap_caps_malloc(rgb_size, MALLOC_CAP_SPIRAM);
+    if (!*rgb_buffer) {
+        ESP_LOGE(TAG, "Failed to allocate PNG RGB buffer of %zu bytes", rgb_size);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        return ESP_ERR_NO_MEM;
+    }
+
+    png_bytep *row_pointers = png_get_rows(png_ptr, info_ptr);
+    int channels = png_get_channels(png_ptr, info_ptr);
+    if (channels != 3) {
+        ESP_LOGE(TAG, "Unsupported channel count: %d", channels);
+        heap_caps_free(*rgb_buffer);
+        *rgb_buffer = NULL;
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        return ESP_FAIL;
+    }
+
+    for (int y = 0; y < *height; y++) {
+        memcpy(*rgb_buffer + y * (*width) * 3, row_pointers[y], (*width) * 3);
+    }
+
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+    return ESP_OK;
+}
+
+image_format_t image_processor_detect_format_buffer(const uint8_t *data, size_t size)
+{
+    if (size < 8) {
+        return IMAGE_FORMAT_UNKNOWN;
+    }
+
+    if (data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 &&
+        data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A) {
+        return IMAGE_FORMAT_PNG;
+    } else if (data[0] == 0x42 && data[1] == 0x4D) {
+        return IMAGE_FORMAT_BMP;
+    } else if (data[0] == 0xFF && data[1] == 0xD8) {
+        return IMAGE_FORMAT_JPG;
+    }
+
+    return IMAGE_FORMAT_UNKNOWN;
+}
+
+esp_err_t image_processor_process_to_rgb(const uint8_t *input_data, size_t input_size,
+                                         image_format_t format, dither_algorithm_t dither_algorithm,
+                                         image_process_rgb_result_t *result)
+{
+    if (!input_data || input_size == 0 || !result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const char *algo_names[] = {"floyd-steinberg", "stucki", "burkes", "sierra"};
+    ESP_LOGI(TAG, "Processing buffer to RGB (%zu bytes, format: %d, dither: %s)", input_size,
+             format, algo_names[dither_algorithm]);
+
+    memset(result, 0, sizeof(*result));
+
+    // Decode input to RGB
+    uint8_t *rgb_buffer = NULL;
+    int width = 0, height = 0;
+    esp_err_t err;
+
+    if (format == IMAGE_FORMAT_JPG) {
+        err = decode_jpg_buffer(input_data, input_size, &rgb_buffer, &width, &height);
+    } else if (format == IMAGE_FORMAT_PNG) {
+        err = decode_png_buffer(input_data, input_size, &rgb_buffer, &width, &height);
+    } else {
+        ESP_LOGE(TAG, "Unsupported image format for buffer processing: %d", format);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Decoded image: %dx%d", width, height);
+
+    // Process RGB buffer
+    uint8_t *processed_buffer = NULL;
+    int processed_width = 0, processed_height = 0;
+    err = process_rgb_buffer_core(rgb_buffer, width, height, dither_algorithm, &processed_buffer,
+                                  &processed_width, &processed_height);
+
+    // Free original RGB buffer if it wasn't reused
+    if (rgb_buffer != processed_buffer) {
+        heap_caps_free(rgb_buffer);
+    }
+
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    // Return the processed RGB buffer directly (no PNG encoding)
+    result->rgb_data = processed_buffer;
+    result->rgb_size = processed_width * processed_height * 3;
+    result->width = processed_width;
+    result->height = processed_height;
+
+    ESP_LOGI(TAG, "Processed to RGB buffer: %dx%d (%zu bytes)", processed_width, processed_height,
+             result->rgb_size);
+    return ESP_OK;
+}
+
+esp_err_t image_processor_process(const char *input_path, const char *output_path,
+                                  dither_algorithm_t dither_algorithm)
+{
+    const char *algo_names[] = {"floyd-steinberg", "stucki", "burkes", "sierra"};
+    ESP_LOGI(TAG, "Processing %s -> %s (dither: %s)", input_path, output_path,
+             algo_names[dither_algorithm]);
+
+    // Detect format first
+    image_format_t format = image_processor_detect_format(input_path);
+    if (format == IMAGE_FORMAT_UNKNOWN || format == IMAGE_FORMAT_BMP) {
+        ESP_LOGE(TAG, "Unsupported image format for processing");
+        return ESP_FAIL;
+    }
+
+    // Read entire file into buffer
+    FILE *fp = fopen(input_path, "rb");
+    if (!fp) {
+        ESP_LOGE(TAG, "Failed to open input file: %s", input_path);
+        return ESP_FAIL;
+    }
+
+    fseek(fp, 0, SEEK_END);
+    long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    uint8_t *file_buffer = heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
+    if (!file_buffer) {
+        ESP_LOGE(TAG, "Failed to allocate file buffer of %ld bytes", file_size);
+        fclose(fp);
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t read_bytes = fread(file_buffer, 1, file_size, fp);
+    fclose(fp);
+
+    if (read_bytes != file_size) {
+        ESP_LOGE(TAG, "Failed to read entire file");
+        heap_caps_free(file_buffer);
+        return ESP_FAIL;
+    }
+
+    // Decode to RGB buffer
+    uint8_t *rgb_buffer = NULL;
+    int width = 0, height = 0;
+    esp_err_t err;
+
+    if (format == IMAGE_FORMAT_JPG) {
+        err = decode_jpg_buffer(file_buffer, file_size, &rgb_buffer, &width, &height);
+    } else if (format == IMAGE_FORMAT_PNG) {
+        err = decode_png_buffer(file_buffer, file_size, &rgb_buffer, &width, &height);
+    } else {
+        heap_caps_free(file_buffer);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    // Free input file buffer immediately after decoding
+    heap_caps_free(file_buffer);
+
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Decoded image: %dx%d", width, height);
+
+    // Process RGB buffer
+    uint8_t *processed_buffer = NULL;
+    int processed_width = 0, processed_height = 0;
+    err = process_rgb_buffer_core(rgb_buffer, width, height, dither_algorithm, &processed_buffer,
+                                  &processed_width, &processed_height);
+
+    // Free original RGB buffer if it wasn't reused
+    if (rgb_buffer != processed_buffer) {
+        heap_caps_free(rgb_buffer);
+    }
+
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    // Write directly to file using png_init_io (no intermediate buffer)
+    ESP_LOGI(TAG, "Writing PNG output to %s", output_path);
+    err = write_png_file(output_path, processed_buffer, processed_width, processed_height);
+
+    heap_caps_free(processed_buffer);
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Successfully wrote PNG to %s", output_path);
+    }
+
+    return err;
 }
 
 bool image_processor_is_processed(const char *input_path)
@@ -892,6 +987,60 @@ bool image_processor_is_processed(const char *input_path)
     free(row);
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     fclose(fp);
+    return valid;
+}
+
+bool image_processor_is_processed_buffer(const uint8_t *data, size_t size)
+{
+    if (!data || size < 8) {
+        return false;
+    }
+
+    // Check PNG signature
+    if (!(data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 &&
+          data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A)) {
+        return false;
+    }
+
+    // Decode PNG from buffer to check dimensions and palette
+    uint8_t *rgb_buffer = NULL;
+    int width = 0, height = 0;
+
+    if (decode_png_buffer(data, size, &rgb_buffer, &width, &height) != ESP_OK) {
+        return false;
+    }
+
+    // Check dimensions
+    if (width != BOARD_HAL_DISPLAY_WIDTH || height != BOARD_HAL_DISPLAY_HEIGHT) {
+        ESP_LOGI(TAG, "Buffer dimensions mismatch: %dx%d (expected %dx%d)", width, height,
+                 BOARD_HAL_DISPLAY_WIDTH, BOARD_HAL_DISPLAY_HEIGHT);
+        heap_caps_free(rgb_buffer);
+        return false;
+    }
+
+    // Check if all pixels are in palette
+    bool valid = true;
+    for (int i = 0; i < width * height && valid; i++) {
+        uint8_t r = rgb_buffer[i * 3];
+        uint8_t g = rgb_buffer[i * 3 + 1];
+        uint8_t b = rgb_buffer[i * 3 + 2];
+
+        bool color_match = false;
+        for (int j = 0; j < 7; j++) {
+            if (j == 4)
+                continue;
+            if (r == palette[j].r && g == palette[j].g && b == palette[j].b) {
+                color_match = true;
+                break;
+            }
+        }
+
+        if (!color_match) {
+            valid = false;
+        }
+    }
+
+    heap_caps_free(rgb_buffer);
     return valid;
 }
 

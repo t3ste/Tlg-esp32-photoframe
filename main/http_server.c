@@ -654,6 +654,9 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
         } else {
             // Needs processing (JPG or raw PNG)
             dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+
+#ifdef CONFIG_HAS_SDCARD
+            // SD card system: process to file
             err = image_processor_process(temp_upload_path, temp_png_path, algo);
 
             if (err != ESP_OK) {
@@ -688,6 +691,91 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             } else {
                 unlink(temp_upload_path);
             }
+#else
+            // SD-card-less system: read file to buffer, process to RGB, display directly
+            FILE *fp = fopen(temp_upload_path, "rb");
+            if (!fp) {
+                ESP_LOGE(TAG, "Failed to open uploaded file");
+                unlink(temp_upload_path);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                    "Failed to process image");
+                return ESP_FAIL;
+            }
+
+            fseek(fp, 0, SEEK_END);
+            long file_size = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+
+            uint8_t *file_buffer = heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
+            if (!file_buffer) {
+                ESP_LOGE(TAG, "Failed to allocate buffer for image");
+                fclose(fp);
+                unlink(temp_upload_path);
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                    "Image requires too much memory to process");
+                return ESP_FAIL;
+            }
+
+            fread(file_buffer, 1, file_size, fp);
+            fclose(fp);
+
+            // For JPEG: save as thumbnail; for PNG: delete original
+            if (image_format == IMAGE_FORMAT_JPG) {
+                unlink(temp_jpg_path);
+                if (rename(temp_upload_path, temp_jpg_path) != 0) {
+                    ESP_LOGW(TAG, "Failed to save original JPEG as thumbnail");
+                    unlink(temp_upload_path);
+                } else {
+                    ESP_LOGI(TAG, "Using original JPEG as thumbnail: %s", temp_jpg_path);
+                }
+            } else {
+                unlink(temp_upload_path);
+            }
+
+            // Process to RGB buffer
+            image_process_rgb_result_t result;
+            err =
+                image_processor_process_to_rgb(file_buffer, file_size, image_format, algo, &result);
+            heap_caps_free(file_buffer);
+
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to process image: %s", esp_err_to_name(err));
+                if (err == ESP_ERR_INVALID_SIZE) {
+                    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                        "Image is too large. Please resize and try again.");
+                } else if (err == ESP_ERR_NO_MEM) {
+                    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                        "Image requires too much memory to process.");
+                } else {
+                    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                        "Failed to process image");
+                }
+                return ESP_FAIL;
+            }
+
+            // Display directly from RGB buffer
+            err = display_manager_show_rgb_buffer(result.rgb_data, result.width, result.height);
+            heap_caps_free(result.rgb_data);
+
+            if (err != ESP_OK) {
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                    "Failed to display image");
+                return ESP_FAIL;
+            }
+
+            ha_notify_update();
+            ESP_LOGI(TAG, "Image displayed from buffer");
+
+            cJSON *response = cJSON_CreateObject();
+            cJSON_AddStringToObject(response, "status", "success");
+            cJSON_AddStringToObject(response, "message", "Image displayed successfully");
+            char *json_str = cJSON_Print(response);
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_sendstr(req, json_str);
+            free(json_str);
+            cJSON_Delete(response);
+            return ESP_OK;
+#endif
         }
         display_path = temp_png_path;
     }

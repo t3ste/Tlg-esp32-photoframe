@@ -20,6 +20,7 @@
 #ifdef CONFIG_HAS_SDCARD
 #include "sdcard.h"
 #endif
+#include "display_manager.h"
 #include "wifi_manager.h"
 
 static const char *TAG = "ai_manager";
@@ -38,8 +39,10 @@ static TaskHandle_t ai_task_handle = NULL;
 static SemaphoreHandle_t generation_trigger = NULL;
 
 static void ai_task(void *pvParameters);
-static esp_err_t generate_openai(const char *prompt, const char *model, const char *dest_path);
-static esp_err_t download_image(const char *url, const char *dest_path);
+static esp_err_t generate_openai_request(const char *prompt, const char *model,
+                                         char **response_out);
+static esp_err_t download_image_to_buffer(const char *url, uint8_t **out_buffer, size_t *out_size);
+static esp_err_t decode_b64_to_buffer(const char *b64_str, uint8_t **out_buffer, size_t *out_size);
 
 esp_err_t ai_manager_init(void)
 {
@@ -91,110 +94,9 @@ esp_err_t ai_manager_generate(const char *prompt_override)
     return ESP_OK;
 }
 
-static void ai_task(void *pvParameters)
-{
-    while (1) {
-        if (xSemaphoreTake(generation_trigger, portMAX_DELAY) == pdTRUE) {
-            ESP_LOGI(TAG, "Starting AI generation with prompt: %s", current_prompt);
-            current_status = AI_STATUS_GENERATING;
-            last_error[0] = '\0';
-
-            // Construct destination path
-            snprintf(last_image_path, sizeof(last_image_path), "%s/ai_generated.jpg",
-                     TEMP_MOUNT_POINT);
-
-            // Always use OpenAI for now
-            esp_err_t err = generate_openai(current_prompt, current_model, last_image_path);
-
-            if (err == ESP_OK) {
-                ESP_LOGI(TAG, "Processing generated image...");
-
-                processing_settings_t settings;
-                if (processing_settings_load(&settings) != ESP_OK) {
-                    processing_settings_get_defaults(&settings);
-                }
-                dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
-
-                err = image_processor_process(last_image_path, CURRENT_PNG_PATH, algo);
-
-                if (err == ESP_OK) {
-                    ESP_LOGI(TAG, "Image processed successfully");
-
-#ifdef CONFIG_HAS_SDCARD
-                    // Save the processed image to downloads if enabled
-                    if (config_manager_get_save_downloaded_images() && sdcard_is_mounted()) {
-                        char dest_path[256];
-                        time_t now;
-                        time(&now);
-                        struct tm timeinfo;
-                        localtime_r(&now, &timeinfo);
-
-                        // Create directory if needed
-                        struct stat st;
-                        if (stat(DOWNLOAD_DIRECTORY, &st) != 0)
-                            mkdir(DOWNLOAD_DIRECTORY, 0755);
-
-                        snprintf(dest_path, sizeof(dest_path),
-                                 DOWNLOAD_DIRECTORY "/ai_%04d%02d%02d_%02d%02d%02d.png",
-                                 timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
-                                 timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-
-                        // Move the processed image to the permanent location
-                        if (rename(CURRENT_PNG_PATH, dest_path) == 0) {
-                            ESP_LOGI(TAG, "Saved processed AI image to: %s", dest_path);
-                            strncpy(last_image_path, dest_path, sizeof(last_image_path) - 1);
-                        } else {
-                            ESP_LOGE(TAG, "Failed to save processed AI image to Downloads");
-                            strncpy(last_image_path, CURRENT_PNG_PATH, sizeof(last_image_path) - 1);
-                        }
-                    } else {
-                        strncpy(last_image_path, CURRENT_PNG_PATH, sizeof(last_image_path) - 1);
-                    }
-#else
-                    strncpy(last_image_path, CURRENT_PNG_PATH, sizeof(last_image_path) - 1);
-#endif
-                    current_status = AI_STATUS_COMPLETE;
-                } else {
-                    ESP_LOGE(TAG, "Image processing failed");
-                    snprintf(last_error, sizeof(last_error), "Processing failed");
-                    current_status = AI_STATUS_ERROR;
-                }
-            } else {
-                ESP_LOGE(TAG, "Generation failed");
-                if (last_error[0] == '\0') {
-                    snprintf(last_error, sizeof(last_error), "Process failed");
-                }
-                current_status = AI_STATUS_ERROR;
-            }
-        }
-    }
-}
-
-static esp_err_t decode_and_save_b64(const char *b64_str, const char *dest_path)
-{
-    size_t b64_len = strlen(b64_str);
-    size_t decoded_len = 0;
-    unsigned char *decoded_data = malloc(b64_len);
-    if (!decoded_data)
-        return ESP_ERR_NO_MEM;
-
-    esp_err_t err = ESP_FAIL;
-    if (mbedtls_base64_decode(decoded_data, b64_len, &decoded_len, (const unsigned char *) b64_str,
-                              b64_len) == 0) {
-        FILE *fp = fopen(dest_path, "wb");
-        if (fp) {
-            if (fwrite(decoded_data, 1, decoded_len, fp) == decoded_len) {
-                err = ESP_OK;
-                ESP_LOGI(TAG, "Saved %zu bytes to %s", decoded_len, dest_path);
-            }
-            fclose(fp);
-        }
-    }
-    free(decoded_data);
-    return err;
-}
-
-static esp_err_t parse_openai_response(const char *json_buf, const char *dest_path)
+// Helper to parse OpenAI response and get image data
+static esp_err_t parse_openai_json_to_image(const char *json_buf, uint8_t **out_buffer,
+                                            size_t *out_size)
 {
     cJSON *resp_json = cJSON_Parse(json_buf);
     if (!resp_json)
@@ -210,10 +112,10 @@ static esp_err_t parse_openai_response(const char *json_buf, const char *dest_pa
 
         if (cJSON_IsString(url) && url->valuestring) {
             current_status = AI_STATUS_DOWNLOADING;
-            err = download_image(url->valuestring, dest_path);
+            err = download_image_to_buffer(url->valuestring, out_buffer, out_size);
         } else if (cJSON_IsString(b64) && b64->valuestring) {
             current_status = AI_STATUS_DOWNLOADING;
-            err = decode_and_save_b64(b64->valuestring, dest_path);
+            err = decode_b64_to_buffer(b64->valuestring, out_buffer, out_size);
         }
     }
 
@@ -221,8 +123,221 @@ static esp_err_t parse_openai_response(const char *json_buf, const char *dest_pa
     return err;
 }
 
-static esp_err_t generate_openai(const char *prompt, const char *model, const char *dest_path)
+static void ai_task(void *pvParameters)
 {
+    while (1) {
+        if (xSemaphoreTake(generation_trigger, portMAX_DELAY) == pdTRUE) {
+            ESP_LOGI(TAG, "Starting AI generation with prompt: %s", current_prompt);
+            current_status = AI_STATUS_GENERATING;
+            last_error[0] = '\0';
+
+            // Make OpenAI API request
+            char *json_response = NULL;
+            esp_err_t err = generate_openai_request(current_prompt, current_model, &json_response);
+
+            if (err != ESP_OK || !json_response) {
+                ESP_LOGE(TAG, "Generation failed");
+                if (last_error[0] == '\0') {
+                    snprintf(last_error, sizeof(last_error), "API request failed");
+                }
+                current_status = AI_STATUS_ERROR;
+                continue;
+            }
+
+            // Parse response and get image data
+            uint8_t *image_buffer = NULL;
+            size_t image_size = 0;
+            err = parse_openai_json_to_image(json_response, &image_buffer, &image_size);
+            heap_caps_free(json_response);
+
+            if (err != ESP_OK || !image_buffer) {
+                ESP_LOGE(TAG, "Failed to get image from response");
+                if (last_error[0] == '\0') {
+                    snprintf(last_error, sizeof(last_error), "Failed to download image");
+                }
+                current_status = AI_STATUS_ERROR;
+                continue;
+            }
+
+            ESP_LOGI(TAG, "Got image data: %zu bytes, processing...", image_size);
+
+            processing_settings_t settings;
+            if (processing_settings_load(&settings) != ESP_OK) {
+                processing_settings_get_defaults(&settings);
+            }
+            dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+
+            // Save thumbnail for /api/current_image
+            FILE *thumb_fp = fopen(CURRENT_JPG_PATH, "wb");
+            if (thumb_fp) {
+                fwrite(image_buffer, 1, image_size, thumb_fp);
+                fclose(thumb_fp);
+                ESP_LOGI(TAG, "Saved thumbnail: %s", CURRENT_JPG_PATH);
+            }
+
+#ifdef CONFIG_HAS_SDCARD
+            // SD card: use file-based processing, save processed PNG
+            char output_path[256];
+            bool save_to_downloads =
+                config_manager_get_save_downloaded_images() && sdcard_is_mounted();
+
+            if (save_to_downloads) {
+                time_t now;
+                time(&now);
+                struct tm timeinfo;
+                localtime_r(&now, &timeinfo);
+
+                struct stat st;
+                if (stat(DOWNLOAD_DIRECTORY, &st) != 0)
+                    mkdir(DOWNLOAD_DIRECTORY, 0755);
+
+                snprintf(output_path, sizeof(output_path),
+                         DOWNLOAD_DIRECTORY "/ai_%04d%02d%02d_%02d%02d%02d.png",
+                         timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                         timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+            } else {
+                strncpy(output_path, CURRENT_PNG_PATH, sizeof(output_path) - 1);
+            }
+
+            err = image_processor_process(CURRENT_JPG_PATH, output_path, algo);
+            heap_caps_free(image_buffer);
+
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Image processing failed");
+                snprintf(last_error, sizeof(last_error), "Processing failed");
+                current_status = AI_STATUS_ERROR;
+                continue;
+            }
+
+            ESP_LOGI(TAG, "Image processed to: %s", output_path);
+
+            err = display_manager_show_image(output_path);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "Image displayed successfully");
+                strncpy(last_image_path, output_path, sizeof(last_image_path) - 1);
+                current_status = AI_STATUS_COMPLETE;
+            } else {
+                ESP_LOGE(TAG, "Failed to display image");
+                snprintf(last_error, sizeof(last_error), "Display failed");
+                current_status = AI_STATUS_ERROR;
+            }
+#else
+            // SD-card-less: process to RGB buffer and display directly
+            image_process_rgb_result_t result;
+            err = image_processor_process_to_rgb(image_buffer, image_size, IMAGE_FORMAT_JPG, algo,
+                                                 &result);
+            heap_caps_free(image_buffer);
+
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Image processing failed");
+                snprintf(last_error, sizeof(last_error), "Processing failed");
+                current_status = AI_STATUS_ERROR;
+                continue;
+            }
+
+            ESP_LOGI(TAG, "Image processed to RGB: %dx%d", result.width, result.height);
+
+            err = display_manager_show_rgb_buffer(result.rgb_data, result.width, result.height);
+            heap_caps_free(result.rgb_data);
+
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "Image displayed successfully");
+                strncpy(last_image_path, CURRENT_JPG_PATH, sizeof(last_image_path) - 1);
+                current_status = AI_STATUS_COMPLETE;
+            } else {
+                ESP_LOGE(TAG, "Failed to display image");
+                snprintf(last_error, sizeof(last_error), "Display failed");
+                current_status = AI_STATUS_ERROR;
+            }
+#endif
+        }
+    }
+}
+
+// Decode base64 to buffer (used for both SD card and SD-card-less systems)
+static esp_err_t decode_b64_to_buffer(const char *b64_str, uint8_t **out_buffer, size_t *out_size)
+{
+    size_t b64_len = strlen(b64_str);
+    size_t decoded_len = 0;
+
+    // Allocate buffer for decoded data (base64 decodes to ~75% of input size)
+    uint8_t *decoded_data = heap_caps_malloc(b64_len, MALLOC_CAP_SPIRAM);
+    if (!decoded_data)
+        return ESP_ERR_NO_MEM;
+
+    if (mbedtls_base64_decode(decoded_data, b64_len, &decoded_len, (const unsigned char *) b64_str,
+                              b64_len) != 0) {
+        heap_caps_free(decoded_data);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Decoded %zu bytes from base64", decoded_len);
+    *out_buffer = decoded_data;
+    *out_size = decoded_len;
+    return ESP_OK;
+}
+
+static esp_err_t download_image_to_buffer(const char *url, uint8_t **out_buffer, size_t *out_size)
+{
+    esp_http_client_config_t config = {
+        .url = url,
+        .skip_cert_common_name_check = true,
+        .timeout_ms = 60000,
+        .buffer_size = 16384,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client)
+        return ESP_FAIL;
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK || esp_http_client_fetch_headers(client) < 0) {
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+
+    int content_length = esp_http_client_get_content_length(client);
+    if (content_length <= 0) {
+        ESP_LOGE(TAG, "Invalid content length");
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+
+    uint8_t *buffer = heap_caps_malloc(content_length, MALLOC_CAP_SPIRAM);
+    if (!buffer) {
+        ESP_LOGE(TAG, "Failed to allocate %d bytes for download", content_length);
+        esp_http_client_cleanup(client);
+        return ESP_ERR_NO_MEM;
+    }
+
+    int total_read = 0;
+    while (total_read < content_length) {
+        int read_len =
+            esp_http_client_read(client, (char *) buffer + total_read, content_length - total_read);
+        if (read_len <= 0)
+            break;
+        total_read += read_len;
+    }
+
+    esp_http_client_cleanup(client);
+
+    if (total_read != content_length) {
+        ESP_LOGE(TAG, "Download incomplete: %d/%d bytes", total_read, content_length);
+        heap_caps_free(buffer);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Downloaded %d bytes to buffer", total_read);
+    *out_buffer = buffer;
+    *out_size = total_read;
+    return ESP_OK;
+}
+
+// Shared function to make OpenAI API request and get JSON response
+// Returns allocated response buffer that caller must free with heap_caps_free
+static esp_err_t generate_openai_request(const char *prompt, const char *model, char **response_out)
+{
+    *response_out = NULL;
     const char *api_key = config_manager_get_openai_api_key();
     if (!api_key || strlen(api_key) == 0) {
         snprintf(last_error, sizeof(last_error), "API Key missing");
@@ -296,9 +411,11 @@ static esp_err_t generate_openai(const char *prompt, const char *model, const ch
         }
         response_buf[total_read] = '\0';
         if (total_read > 0) {
-            ret = parse_openai_response(response_buf, dest_path);
+            *response_out = response_buf;
+            ret = ESP_OK;
+        } else {
+            heap_caps_free(response_buf);
         }
-        heap_caps_free(response_buf);
     }
 
 cleanup:
@@ -308,55 +425,6 @@ cleanup:
         free(json_str);
     esp_http_client_cleanup(client);
     return ret;
-}
-
-static esp_err_t download_image(const char *url, const char *dest_path)
-{
-    esp_http_client_config_t config = {
-        .url = url,
-        .skip_cert_common_name_check = true,
-        .timeout_ms = 60000,
-        .buffer_size = 16384,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client)
-        return ESP_FAIL;
-
-    FILE *fp = fopen(dest_path, "wb");
-    if (!fp) {
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
-    }
-
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK || esp_http_client_fetch_headers(client) < 0) {
-        err = ESP_FAIL;
-        goto cleanup;
-    }
-
-    int content_length = esp_http_client_get_content_length(client);
-    char *buffer = malloc(content_length);
-    if (!buffer) {
-        err = ESP_ERR_NO_MEM;
-        goto cleanup;
-    }
-
-    int total_read = 0;
-    while (1) {
-        int read_len = esp_http_client_read(client, buffer, 4096);
-        if (read_len <= 0)
-            break;
-        fwrite(buffer, 1, read_len, fp);
-        total_read += read_len;
-    }
-    free(buffer);
-    ESP_LOGI(TAG, "Downloaded %d bytes", total_read);
-
-cleanup:
-    fclose(fp);
-    esp_http_client_cleanup(client);
-    return err;
 }
 
 ai_generation_status_t ai_manager_get_status(void)

@@ -343,12 +343,73 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
             }
             dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
 
+#ifdef CONFIG_HAS_SDCARD
+            // SD card system: process to file
             err = image_processor_process(temp_upload_path, temp_png_path, algo);
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to process image: %s", esp_err_to_name(err));
                 unlink(temp_upload_path);
                 return err;
             }
+#else
+            // SD-card-less system: read file to buffer, process to RGB, display directly
+            FILE *fp = fopen(temp_upload_path, "rb");
+            if (!fp) {
+                ESP_LOGE(TAG, "Failed to open uploaded file");
+                unlink(temp_upload_path);
+                return ESP_FAIL;
+            }
+
+            fseek(fp, 0, SEEK_END);
+            long file_size = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+
+            uint8_t *file_buffer = heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
+            if (!file_buffer) {
+                ESP_LOGE(TAG, "Failed to allocate buffer for image");
+                fclose(fp);
+                unlink(temp_upload_path);
+                return ESP_ERR_NO_MEM;
+            }
+
+            fread(file_buffer, 1, file_size, fp);
+            fclose(fp);
+
+            // For JPEG: save as thumbnail
+            if (image_format == IMAGE_FORMAT_JPG && !thumbnail_downloaded) {
+                unlink(temp_jpg_path);
+                if (rename(temp_upload_path, temp_jpg_path) == 0) {
+                    ESP_LOGI(TAG, "Using original JPEG as thumbnail: %s", temp_jpg_path);
+                } else {
+                    unlink(temp_upload_path);
+                }
+            } else {
+                unlink(temp_upload_path);
+            }
+
+            // Process to RGB buffer
+            image_process_rgb_result_t result;
+            err =
+                image_processor_process_to_rgb(file_buffer, file_size, image_format, algo, &result);
+            heap_caps_free(file_buffer);
+
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to process image: %s", esp_err_to_name(err));
+                return err;
+            }
+
+            // Display directly from RGB buffer
+            err = display_manager_show_rgb_buffer(result.rgb_data, result.width, result.height);
+            heap_caps_free(result.rgb_data);
+
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to display image");
+                return err;
+            }
+
+            ESP_LOGI(TAG, "Image displayed from buffer");
+            return ESP_OK;
+#endif
         }
         final_path = temp_png_path;
 

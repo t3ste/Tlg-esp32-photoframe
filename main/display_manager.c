@@ -8,6 +8,7 @@
 #include "GUI_BMPfile.h"
 #include "GUI_PNGfile.h"
 #include "GUI_Paint.h"
+#include "GUI_RawBuffer.h"
 #include "album_manager.h"
 #include "board_hal.h"
 #include "config.h"
@@ -175,6 +176,49 @@ esp_err_t display_manager_show_image(const char *filename)
     xSemaphoreGive(display_mutex);
 
     ESP_LOGI(TAG, "Image displayed successfully");
+    return ESP_OK;
+}
+
+esp_err_t display_manager_show_rgb_buffer(const uint8_t *rgb_buffer, int width, int height)
+{
+    if (!rgb_buffer || width <= 0 || height <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (xSemaphoreTake(display_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to acquire display mutex");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Displaying RGB buffer: %dx%d", width, height);
+    ESP_LOGI(TAG, "Free heap before display: %lu bytes", esp_get_free_heap_size());
+
+    ESP_LOGI(TAG, "Clearing display buffer");
+    Paint_Clear(EPD_7IN3E_WHITE);
+
+    ESP_LOGI(TAG, "Painting RGB buffer to display");
+    if (GUI_DisplayRGBBuffer_6Color(rgb_buffer, width, height, 0, 0) != 0) {
+        ESP_LOGE(TAG, "Failed to paint RGB buffer");
+        xSemaphoreGive(display_mutex);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Starting e-paper display update (this takes ~30 seconds)");
+    ESP_LOGI(TAG, "Free heap before epaper_display: %lu bytes", esp_get_free_heap_size());
+
+    ESP_LOGI(TAG, "Calling epaper_display...");
+    epaper_display(epd_image_buffer);
+    ESP_LOGI(TAG, "epaper_display returned successfully");
+
+    ESP_LOGI(TAG, "E-paper display update complete");
+    ESP_LOGI(TAG, "Free heap after display: %lu bytes", esp_get_free_heap_size());
+
+    // Clear current_image since we displayed from buffer, not file
+    current_image[0] = '\0';
+
+    xSemaphoreGive(display_mutex);
+
+    ESP_LOGI(TAG, "RGB buffer displayed successfully");
     return ESP_OK;
 }
 
