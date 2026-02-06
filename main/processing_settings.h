@@ -16,7 +16,6 @@ typedef struct {
     float highlight_compress;
     float midpoint;
     char color_method[8];       // "rgb" or "lab"
-    char processing_mode[16];   // "enhanced" or "stock"
     char dither_algorithm[20];  // "floyd-steinberg", "stucki", "burkes", "sierra"
     bool compress_dynamic_range;
 } processing_settings_t;

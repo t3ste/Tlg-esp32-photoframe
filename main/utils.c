@@ -341,10 +341,9 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
             if (processing_settings_load(&settings) != ESP_OK) {
                 processing_settings_get_defaults(&settings);
             }
-            bool use_stock_mode = (strcmp(settings.processing_mode, "stock") == 0);
             dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
 
-            err = image_processor_process(temp_upload_path, temp_png_path, use_stock_mode, algo);
+            err = image_processor_process(temp_upload_path, temp_png_path, algo);
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to process image: %s", esp_err_to_name(err));
                 unlink(temp_upload_path);

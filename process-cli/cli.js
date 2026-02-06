@@ -60,7 +60,7 @@ async function fetchDeviceSettings(host) {
                 console.log(`  contrast=${settings.contrast}`);
               }
               console.log(
-                `  processing_mode=${settings.processingMode}, dither_algorithm=${settings.ditherAlgorithm || "floyd-steinberg"}`,
+                `  dither_algorithm=${settings.ditherAlgorithm || "floyd-steinberg"}`,
               );
               resolve(settings);
             } catch (error) {

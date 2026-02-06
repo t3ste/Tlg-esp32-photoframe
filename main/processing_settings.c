@@ -19,7 +19,6 @@ static const char *TAG = "processing_settings";
 #define NVS_PROC_HIGHLIGHT_KEY "proc_high"
 #define NVS_PROC_MIDPOINT_KEY "proc_mid"
 #define NVS_PROC_COLOR_METHOD_KEY "proc_col"
-#define NVS_PROC_MODE_KEY "proc_mode"
 #define NVS_PROC_COMPRESS_DR_KEY "proc_cdr"
 #define NVS_PROC_DITHER_ALGO_KEY "proc_dith"
 
@@ -34,7 +33,6 @@ void processing_settings_get_defaults(processing_settings_t *settings)
     settings->highlight_compress = 0.0f;
     settings->midpoint = 0.5f;
     strncpy(settings->color_method, "rgb", sizeof(settings->color_method) - 1);
-    strncpy(settings->processing_mode, "enhanced", sizeof(settings->processing_mode) - 1);
     strncpy(settings->dither_algorithm, "floyd-steinberg", sizeof(settings->dither_algorithm) - 1);
     settings->compress_dynamic_range = true;
 }
@@ -92,7 +90,6 @@ esp_err_t processing_settings_save(const processing_settings_t *settings)
     nvs_set_u32(nvs_handle, NVS_PROC_HIGHLIGHT_KEY, high_bits);
     nvs_set_u32(nvs_handle, NVS_PROC_MIDPOINT_KEY, mid_bits);
     nvs_set_str(nvs_handle, NVS_PROC_COLOR_METHOD_KEY, settings->color_method);
-    nvs_set_str(nvs_handle, NVS_PROC_MODE_KEY, settings->processing_mode);
     nvs_set_u8(nvs_handle, NVS_PROC_COMPRESS_DR_KEY, settings->compress_dynamic_range ? 1 : 0);
     nvs_set_str(nvs_handle, NVS_PROC_DITHER_ALGO_KEY, settings->dither_algorithm);
 
@@ -152,9 +149,6 @@ esp_err_t processing_settings_load(processing_settings_t *settings)
     len = sizeof(settings->color_method);
     nvs_get_str(nvs_handle, NVS_PROC_COLOR_METHOD_KEY, settings->color_method, &len);
 
-    len = sizeof(settings->processing_mode);
-    nvs_get_str(nvs_handle, NVS_PROC_MODE_KEY, settings->processing_mode, &len);
-
     uint8_t compress_dr = 0;
     if (nvs_get_u8(nvs_handle, NVS_PROC_COMPRESS_DR_KEY, &compress_dr) == ESP_OK) {
         settings->compress_dynamic_range = (compress_dr != 0);
@@ -184,7 +178,6 @@ char *processing_settings_to_json(const processing_settings_t *settings)
     cJSON_AddNumberToObject(json, "highlightCompress", settings->highlight_compress);
     cJSON_AddNumberToObject(json, "midpoint", settings->midpoint);
     cJSON_AddStringToObject(json, "colorMethod", settings->color_method);
-    cJSON_AddStringToObject(json, "processingMode", settings->processing_mode);
     cJSON_AddStringToObject(json, "ditherAlgorithm", settings->dither_algorithm);
     cJSON_AddBoolToObject(json, "compressDynamicRange", settings->compress_dynamic_range);
 

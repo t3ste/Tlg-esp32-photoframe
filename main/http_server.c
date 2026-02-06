@@ -435,11 +435,9 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
                 if (processing_settings_load(&settings) != ESP_OK) {
                     processing_settings_get_defaults(&settings);
                 }
-                bool use_stock_mode = (strcmp(settings.processing_mode, "stock") == 0);
                 dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
 
-                esp_err_t err =
-                    image_processor_process(result.image_path, temp_png_path, use_stock_mode, algo);
+                esp_err_t err = image_processor_process(result.image_path, temp_png_path, algo);
                 unlink(result.image_path);
                 if (err != ESP_OK) {
                     ESP_LOGE(TAG, "Failed to process PNG: %s", esp_err_to_name(err));
@@ -468,10 +466,9 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             if (processing_settings_load(&settings) != ESP_OK) {
                 processing_settings_get_defaults(&settings);
             }
-            bool use_stock_mode = (strcmp(settings.processing_mode, "stock") == 0);
             dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
 
-            err = image_processor_process(result.image_path, temp_png_path, use_stock_mode, algo);
+            err = image_processor_process(result.image_path, temp_png_path, algo);
             unlink(result.image_path);
             if (err != ESP_OK) {
                 if (result.has_thumbnail)
@@ -656,9 +653,8 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             }
         } else {
             // Needs processing (JPG or raw PNG)
-            bool use_stock_mode = (strcmp(proc_settings.processing_mode, "stock") == 0);
             dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
-            err = image_processor_process(temp_upload_path, temp_png_path, use_stock_mode, algo);
+            err = image_processor_process(temp_upload_path, temp_png_path, algo);
 
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to process image: %s", esp_err_to_name(err));
@@ -2290,10 +2286,6 @@ static esp_err_t processing_settings_handler(httpd_req_t *req)
         if ((item = cJSON_GetObjectItem(json, "colorMethod")) && cJSON_IsString(item)) {
             strncpy(settings.color_method, item->valuestring, sizeof(settings.color_method) - 1);
         }
-        if ((item = cJSON_GetObjectItem(json, "processingMode")) && cJSON_IsString(item)) {
-            strncpy(settings.processing_mode, item->valuestring,
-                    sizeof(settings.processing_mode) - 1);
-        }
         cJSON *compress_dr = cJSON_GetObjectItem(json, "compressDynamicRange");
         if (compress_dr && cJSON_IsBool(compress_dr)) {
             settings.compress_dynamic_range = cJSON_IsTrue(compress_dr);
@@ -2339,7 +2331,6 @@ static esp_err_t processing_settings_handler(httpd_req_t *req)
         cJSON_AddNumberToObject(response, "highlightCompress", settings.highlight_compress);
         cJSON_AddNumberToObject(response, "midpoint", settings.midpoint);
         cJSON_AddStringToObject(response, "colorMethod", settings.color_method);
-        cJSON_AddStringToObject(response, "processingMode", settings.processing_mode);
         cJSON_AddStringToObject(response, "ditherAlgorithm", settings.dither_algorithm);
 
         char *json_str = cJSON_Print(response);

@@ -168,11 +168,10 @@ Upload a JPEG image (automatically converted to BMP with dithering).
 - Content-Type: `multipart/form-data`
 - Fields (sent in this order):
   - `album`: Album name to upload to (e.g., `Vacation`, `Default`)
-  - `processingMode`: Processing mode - `enhanced` (default) or `stock`
   - `image`: Full-size JPEG (800×480 or 480×800)
   - `thumbnail`: Thumbnail JPEG (200×120 or 120×200)
 
-**Note:** Text fields (`album`, `processingMode`) must be sent **before** file fields for proper parsing.
+**Note:** Text fields (`album`) must be sent **before** file fields for proper parsing.
 
 **Processing:**
 1. Client-side creates two images:

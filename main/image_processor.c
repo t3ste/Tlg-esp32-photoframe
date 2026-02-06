@@ -482,11 +482,11 @@ static esp_err_t write_png_file(const char *filename, uint8_t *rgb_data, int wid
 }
 
 esp_err_t image_processor_process(const char *input_path, const char *output_path,
-                                  bool use_stock_mode, dither_algorithm_t dither_algorithm)
+                                  dither_algorithm_t dither_algorithm)
 {
     const char *algo_names[] = {"floyd-steinberg", "stucki", "burkes", "sierra"};
-    ESP_LOGI(TAG, "Processing %s -> %s (mode: %s, dither: %s)", input_path, output_path,
-             use_stock_mode ? "stock" : "enhanced", algo_names[dither_algorithm]);
+    ESP_LOGI(TAG, "Processing %s -> %s (dither: %s)", input_path, output_path,
+             algo_names[dither_algorithm]);
     ESP_LOGI(TAG, "Opening input file: %s", input_path);
 
     FILE *fp = fopen(input_path, "rb");
@@ -758,15 +758,12 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
         final_height = BOARD_HAL_DISPLAY_HEIGHT;
     }
 
-    // Apply Compress Dynamic Range (CDR) - only when using measured palette
-    if (!use_stock_mode) {
-        ESP_LOGI(TAG, "Applying Compress Dynamic Range (CDR)");
-        compress_dynamic_range(final_image, final_width, final_height, palette_measured);
-    }
+    // Apply Compress Dynamic Range (CDR)
+    ESP_LOGI(TAG, "Applying Compress Dynamic Range (CDR)");
+    compress_dynamic_range(final_image, final_width, final_height, palette_measured);
 
-    // Apply Dithering
-    const rgb_t *dither_palette = use_stock_mode ? palette : palette_measured;
-    apply_error_diffusion_dither(final_image, final_width, final_height, dither_palette,
+    // Apply Dithering (always use measured palette)
+    apply_error_diffusion_dither(final_image, final_width, final_height, palette_measured,
                                  dither_algorithm);
 
     // Write Output

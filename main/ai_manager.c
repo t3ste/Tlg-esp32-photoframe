@@ -113,11 +113,9 @@ static void ai_task(void *pvParameters)
                 if (processing_settings_load(&settings) != ESP_OK) {
                     processing_settings_get_defaults(&settings);
                 }
-                bool use_stock_mode = (strcmp(settings.processing_mode, "stock") == 0);
                 dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
 
-                err = image_processor_process(last_image_path, CURRENT_PNG_PATH, use_stock_mode,
-                                              algo);
+                err = image_processor_process(last_image_path, CURRENT_PNG_PATH, algo);
 
                 if (err == ESP_OK) {
                     ESP_LOGI(TAG, "Image processed successfully");
