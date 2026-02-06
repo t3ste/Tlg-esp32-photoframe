@@ -42,6 +42,7 @@ esp_err_t board_hal_init(void)
         ESP_LOGW(TAG, "SHTC3 sensor initialization failed (sensor may not be present)");
     }
 
+#ifdef CONFIG_HAS_SDCARD
     // Initialize SD Card (SDIO)
     sdcard_config_t sd_cfg = {
         .clk_pin = BOARD_HAL_SD_CLK_PIN,
@@ -54,8 +55,9 @@ esp_err_t board_hal_init(void)
     if (sdcard_init(&sd_cfg) == ESP_OK) {
         ESP_LOGI(TAG, "SD Card initialized");
     } else {
-        ESP_LOGE(TAG, "Failed to initialize SD Card");
+        ESP_LOGW(TAG, "SD Card not initialized (optional)");
     }
+#endif
 
     // Initialize SPI bus
     ESP_LOGI(TAG, "Initializing SPI bus...");

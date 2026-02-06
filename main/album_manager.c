@@ -9,11 +9,19 @@
 #include "esp_log.h"
 #include "nvs.h"
 
+#ifdef CONFIG_HAS_SDCARD
+#include "sdcard.h"
+
 static const char *TAG = "album_manager";
 static char enabled_albums_str[512] = "";
 
 esp_err_t album_manager_init(void)
 {
+    if (!sdcard_is_mounted()) {
+        ESP_LOGI(TAG, "SD card not mounted - skipping album manager initialization");
+        return ESP_OK;
+    }
+
     nvs_handle_t nvs_handle;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle) == ESP_OK) {
         size_t len = sizeof(enabled_albums_str);
@@ -24,6 +32,13 @@ esp_err_t album_manager_init(void)
             snprintf(enabled_albums_str, sizeof(enabled_albums_str), "%s", DEFAULT_ALBUM_NAME);
         }
         nvs_close(nvs_handle);
+    }
+
+    // Ensure image directory exists
+    struct stat st;
+    if (stat(IMAGE_DIRECTORY, &st) != 0) {
+        ESP_LOGI(TAG, "Creating image directory: %s", IMAGE_DIRECTORY);
+        mkdir(IMAGE_DIRECTORY, 0775);
     }
 
     esp_err_t ret = album_manager_ensure_default_album();
@@ -351,3 +366,5 @@ bool album_manager_album_exists(const char *album_name)
     struct stat st;
     return (stat(album_path, &st) == 0 && S_ISDIR(st.st_mode));
 }
+
+#endif /* CONFIG_HAS_SDCARD */

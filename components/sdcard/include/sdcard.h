@@ -1,7 +1,10 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include "driver/gpio.h"
 #include "esp_err.h"
+#include "sdkconfig.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,16 +23,7 @@ typedef struct {
     gpio_num_t d3_pin;
 } sdcard_config_t;
 
-/**
- * @brief Initialize SD card
- *
- * @param config Pointer to configuration structure
- * @return esp_err_t ESP_OK on success, error code otherwise
- */
-esp_err_t sdcard_init(const sdcard_config_t *config);
-#endif
-
-#ifdef CONFIG_SDCARD_DRIVER_SPI
+#elif CONFIG_SDCARD_DRIVER_SPI
 /**
  * @brief SD card configuration for SPI interface
  */
@@ -37,6 +31,7 @@ typedef struct {
     int host_id;
     gpio_num_t cs_pin;
 } sdcard_config_t;
+#endif
 
 /**
  * @brief Initialize SD card
@@ -45,7 +40,13 @@ typedef struct {
  * @return esp_err_t ESP_OK on success, error code otherwise
  */
 esp_err_t sdcard_init(const sdcard_config_t *config);
-#endif
+
+/**
+ * @brief Check if SD card is mounted
+ *
+ * @return true if mounted, false otherwise
+ */
+bool sdcard_is_mounted(void);
 
 #ifdef __cplusplus
 }

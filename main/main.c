@@ -15,7 +15,6 @@
 #include "esp_log.h"
 #include "esp_sntp.h"
 #include "esp_system.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_integration.h"
 #include "http_server.h"
@@ -33,6 +32,7 @@
 
 #ifdef CONFIG_HAS_SDCARD
 #include "album_manager.h"
+#include "sdcard.h"
 #endif
 
 static const char *TAG = "main";
@@ -116,21 +116,6 @@ static bool connect_to_wifi_with_timeout(int timeout_seconds)
         return false;
     }
 }
-
-#ifdef CONFIG_HAS_SDCARD
-// SD card is initialized by board_hal_init()
-// This function only sets up the required directories
-static esp_err_t setup_sdcard_directories(void)
-{
-    // Create image directory if it doesn't exist
-    struct stat st;
-    if (stat(IMAGE_DIRECTORY, &st) != 0) {
-        ESP_LOGI(TAG, "Creating image directory: %s", IMAGE_DIRECTORY);
-        mkdir(IMAGE_DIRECTORY, 0775);
-    }
-    return ESP_OK;
-}
-#endif
 
 static void button_task(void *arg)
 {
@@ -326,6 +311,13 @@ void app_main(void)
     // Initialize RAM filesystem for temporary images
     ESP_LOGI(TAG, "Mounting RAM filesystem...");
     ESP_ERROR_CHECK(memfs_mount(TEMP_MOUNT_POINT, 10));
+#else
+    if (!sdcard_is_mounted()) {
+        ESP_LOGW(TAG, "SD Card not mounted, mounting MemFS at %s for temporary storage",
+                 TEMP_MOUNT_POINT);
+        // Mount MemFS at same path to allow temporary operations (upload/display)
+        ESP_ERROR_CHECK(memfs_mount(TEMP_MOUNT_POINT, 10));
+    }
 #endif
 
     // Initialize external RTC (via HAL)
@@ -415,14 +407,6 @@ void app_main(void)
     ESP_ERROR_CHECK(ota_manager_init());
 
 #ifdef CONFIG_HAS_SDCARD
-    ret = setup_sdcard_directories();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SD card directory setup failed - triggering hard reset");
-        vTaskDelay(pdMS_TO_TICKS(1000));  // Give time for log to flush
-        board_hal_shutdown();             // Hard power-off
-        // Won't reach here
-    }
-
     ESP_ERROR_CHECK(album_manager_init());
 #else
     ESP_LOGI(TAG, "SD Card support disabled (No-SDCard Mode)");

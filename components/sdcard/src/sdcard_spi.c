@@ -37,6 +37,11 @@ esp_err_t sdcard_init(const sdcard_config_t *config)
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {
             ESP_LOGE(TAG, "Failed to mount filesystem");
+        } else if (ret == ESP_ERR_TIMEOUT || ret == ESP_ERR_NOT_FOUND || ret == 0x107) {
+            ESP_LOGW(
+                TAG,
+                "SD card not detected or initialization failed (%s). Continuing in No-SDCard mode.",
+                esp_err_to_name(ret));
         } else {
             ESP_LOGE(TAG, "Failed to initialize SD card (%s)", esp_err_to_name(ret));
         }
@@ -50,4 +55,9 @@ esp_err_t sdcard_init(const sdcard_config_t *config)
     }
 
     return ESP_FAIL;
+}
+
+bool sdcard_is_mounted(void)
+{
+    return card_host != NULL;
 }

@@ -15,7 +15,9 @@
 #include "lwip/sys.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-
+#ifdef CONFIG_HAS_SDCARD
+#include "sdcard.h"
+#endif
 static const char *TAG = "wifi_manager";
 
 #define WIFI_CONNECTED_BIT BIT0
@@ -213,8 +215,13 @@ EventGroupHandle_t wifi_manager_get_event_group(void)
     return s_wifi_event_group;
 }
 
+#ifdef CONFIG_HAS_SDCARD
 esp_err_t wifi_manager_load_credentials_from_sdcard(char *ssid, char *password)
 {
+    if (!sdcard_is_mounted()) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
     const char *wifi_file = "/sdcard/wifi.txt";
     FILE *fp = fopen(wifi_file, "r");
 
@@ -288,3 +295,4 @@ esp_err_t wifi_manager_load_credentials_from_sdcard(char *ssid, char *password)
 
     return ESP_OK;
 }
+#endif

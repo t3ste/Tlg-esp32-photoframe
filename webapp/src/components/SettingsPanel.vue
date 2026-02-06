@@ -124,7 +124,7 @@ const rotationOptions = [
 
 const rotationModeOptions = computed(() => {
   const options = [{ title: "URL - Fetch image from URL", value: "url" }];
-  if (appStore.systemInfo.has_sdcard) {
+  if (appStore.systemInfo.sdcard_inserted) {
     options.unshift({ title: "SD Card - Rotate through images", value: "sdcard" });
   }
   return options;
@@ -447,7 +447,7 @@ async function performFactoryReset() {
                     />
 
                     <v-checkbox
-                      v-if="appStore.systemInfo.has_sdcard"
+                      v-if="appStore.systemInfo.sdcard_inserted"
                       v-model="settingsStore.deviceSettings.saveDownloadedImages"
                       label="Save downloaded images to Downloads album"
                       color="primary"

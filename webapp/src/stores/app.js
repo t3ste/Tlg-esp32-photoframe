@@ -16,6 +16,7 @@ export const useAppStore = defineStore("app", () => {
     width: 800,
     height: 480,
     has_sdcard: false,
+    sdcard_inserted: false,
     version: "v1.0",
     project_name: "PhotoFrame",
     compile_time: "",
@@ -66,7 +67,7 @@ export const useAppStore = defineStore("app", () => {
   async function loadAlbums() {
     loading.value.albums = true;
     try {
-      if (!systemInfo.value.has_sdcard) {
+      if (!systemInfo.value.sdcard_inserted) {
         albums.value = [{ name: "Default", enabled: true, image_count: 0 }];
         return;
       }
@@ -87,7 +88,7 @@ export const useAppStore = defineStore("app", () => {
   async function loadImages(albumName) {
     loading.value.images = true;
     try {
-      if (!systemInfo.value.has_sdcard) {
+      if (!systemInfo.value.sdcard_inserted) {
         images.value = [];
         return;
       }

@@ -28,6 +28,9 @@
 #include "periodic_tasks.h"
 #include "power_manager.h"
 #include "processing_settings.h"
+#ifdef CONFIG_HAS_SDCARD
+#include "sdcard.h"
+#endif
 #include "utils.h"
 #include "wifi_manager.h"
 
@@ -929,6 +932,10 @@ static esp_err_t delete_image_handler(httpd_req_t *req)
         httpd_resp_sendstr(req, "System is still initializing");
         return ESP_FAIL;
     }
+    if (!sdcard_is_mounted()) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "SD card not inserted");
+        return ESP_FAIL;
+    }
 
     char buf[256];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
@@ -1611,6 +1618,11 @@ static esp_err_t albums_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
+    if (!sdcard_is_mounted()) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "SD card not inserted");
+        return ESP_FAIL;
+    }
+
     if (req->method == HTTP_GET) {
         char **albums = NULL;
         int count = 0;
@@ -1686,6 +1698,10 @@ static esp_err_t album_delete_handler(httpd_req_t *req)
         httpd_resp_sendstr(req, "System not ready");
         return ESP_OK;
     }
+    if (!sdcard_is_mounted()) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "SD card not inserted");
+        return ESP_FAIL;
+    }
 
     // Use query parameter since ESP-IDF httpd doesn't support wildcard URIs
     char query[256];
@@ -1727,6 +1743,10 @@ static esp_err_t album_enabled_handler(httpd_req_t *req)
         httpd_resp_set_status(req, HTTPD_503);
         httpd_resp_sendstr(req, "System not ready");
         return ESP_OK;
+    }
+    if (!sdcard_is_mounted()) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "SD card not inserted");
+        return ESP_FAIL;
     }
 
     // Get album name from query parameter
@@ -1796,6 +1816,10 @@ static esp_err_t album_images_handler(httpd_req_t *req)
         httpd_resp_set_status(req, HTTPD_503);
         httpd_resp_sendstr(req, "System not ready");
         return ESP_OK;
+    }
+    if (!sdcard_is_mounted()) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "SD card not inserted");
+        return ESP_FAIL;
     }
 
     char query[256];
@@ -1885,8 +1909,10 @@ static esp_err_t system_info_handler(httpd_req_t *req)
     cJSON_AddStringToObject(response, "board_name", BOARD_HAL_NAME);
 #ifdef CONFIG_HAS_SDCARD
     cJSON_AddBoolToObject(response, "has_sdcard", true);
+    cJSON_AddBoolToObject(response, "sdcard_inserted", sdcard_is_mounted());
 #else
     cJSON_AddBoolToObject(response, "has_sdcard", false);
+    cJSON_AddBoolToObject(response, "sdcard_inserted", false);
 #endif
     cJSON_AddStringToObject(response, "version", app_desc->version);
     cJSON_AddStringToObject(response, "project_name", app_desc->project_name);

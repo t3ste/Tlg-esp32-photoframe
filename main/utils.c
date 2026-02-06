@@ -17,6 +17,9 @@
 #include "esp_mac.h"
 #include "image_processor.h"
 #include "processing_settings.h"
+#ifdef CONFIG_HAS_SDCARD
+#include "sdcard.h"
+#endif
 #include "testable_utils.h"
 
 static const char *TAG = "utils";
@@ -353,6 +356,11 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_bmp_path, s
     // Check if we should save downloaded images
     bool save_images = config_manager_get_save_downloaded_images();
 
+    if (save_images && !sdcard_is_mounted()) {
+        ESP_LOGI(TAG, "SD card not mounted, skipping save to Downloads");
+        save_images = false;
+    }
+
     if (save_images) {
         // Save to Downloads album
         char downloads_path[256];
@@ -522,10 +530,12 @@ esp_err_t trigger_image_rotation(void)
 #endif
             result = ESP_FAIL;
         }
+#ifdef CONFIG_HAS_SDCARD
     } else {
         // SD card mode - rotate through albums
         display_manager_rotate_from_sdcard();
         result = ESP_OK;
+#endif
     }
 
     return result;

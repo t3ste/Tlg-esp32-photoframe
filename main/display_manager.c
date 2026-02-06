@@ -20,6 +20,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "nvs.h"
+#ifdef CONFIG_HAS_SDCARD
+#include "sdcard.h"
+#endif
 
 static const char *TAG = "display_manager";
 #define NVS_LAST_IMAGE_KEY "last_image"
@@ -348,6 +351,7 @@ const char *display_manager_get_current_image(void)
     return current_image;
 }
 
+#ifdef CONFIG_HAS_SDCARD
 static void rotate_sequential(char **enabled_albums, int album_count)
 {
     ESP_LOGI(TAG, "Sequential rotation mode");
@@ -531,6 +535,11 @@ void display_manager_rotate_from_sdcard(void)
         ESP_LOGI(TAG, "Rotating from SD card");
     }
 
+    if (!sdcard_is_mounted()) {
+        ESP_LOGI(TAG, "SD card not mounted - skipping auto-rotate");
+        return;
+    }
+
     // Get enabled albums
     char **enabled_albums = NULL;
     int album_count = 0;
@@ -576,3 +585,4 @@ void display_manager_rotate_from_sdcard(void)
     album_manager_free_album_list(enabled_albums, album_count);
     ESP_LOGI(TAG, "Auto-rotate complete");
 }
+#endif

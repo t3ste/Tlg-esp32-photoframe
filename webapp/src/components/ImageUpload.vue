@@ -16,11 +16,16 @@ const processedResult = ref(null);
 const sourceCanvas = ref(null);
 
 // Display dimensions
+// Display dimensions
 // Display dimensions from store
 const displayWidth = computed(() => appStore.systemInfo.width);
 const displayHeight = computed(() => appStore.systemInfo.height);
 const THUMBNAIL_WIDTH = 400;
 const THUMBNAIL_HEIGHT = 240;
+
+const canSaveToAlbum = computed(() => {
+  return appStore.systemInfo.has_sdcard && appStore.systemInfo.sdcard_inserted;
+});
 
 // Image processor library
 let imageProcessor = null;
@@ -127,8 +132,7 @@ async function uploadImage() {
     formData.append("thumbnail", thumbnailBlob, thumbFilename);
 
     // Send album as URL query parameter
-    const hasSdCard = appStore.systemInfo.has_sdcard;
-    const uploadUrl = hasSdCard
+    const uploadUrl = canSaveToAlbum.value
       ? `/api/upload?album=${encodeURIComponent(appStore.selectedAlbum)}`
       : "/api/display-image";
 
@@ -138,7 +142,7 @@ async function uploadImage() {
     });
 
     if (response.ok) {
-      if (hasSdCard) {
+      if (canSaveToAlbum.value) {
         await appStore.loadImages(appStore.selectedAlbum);
       }
       resetUpload();
@@ -210,7 +214,7 @@ function resetUpload() {
       <v-btn variant="text" @click="resetUpload"> Cancel </v-btn>
       <v-spacer />
       <v-select
-        v-if="appStore.systemInfo.has_sdcard"
+        v-if="canSaveToAlbum"
         v-model="appStore.selectedAlbum"
         :items="appStore.sortedAlbums.map((a) => a.name)"
         label="Album"
@@ -221,8 +225,8 @@ function resetUpload() {
         class="mr-2"
       />
       <v-btn color="primary" :loading="uploading" @click="uploadImage">
-        <v-icon :icon="appStore.systemInfo.has_sdcard ? 'mdi-upload' : 'mdi-monitor'" start />
-        {{ appStore.systemInfo.has_sdcard ? "Upload" : "Display" }}
+        <v-icon :icon="canSaveToAlbum ? 'mdi-upload' : 'mdi-monitor'" start />
+        {{ canSaveToAlbum ? "Upload" : "Display" }}
       </v-btn>
     </v-card-actions>
 
