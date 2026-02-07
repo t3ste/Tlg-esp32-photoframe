@@ -124,10 +124,6 @@ const rotationOptions = [
 
 const rotationModeOptions = computed(() => {
   const options = [{ title: "URL - Fetch image from URL", value: "url" }];
-  // Only show AI option if board supports it (has enough PSRAM)
-  if (appStore.systemInfo.has_ai_rotation) {
-    options.push({ title: "AI - Generate using AI", value: "ai" });
-  }
   if (appStore.systemInfo.sdcard_inserted) {
     options.unshift({ title: "SD Card - Rotate through images", value: "sdcard" });
   }
@@ -155,14 +151,6 @@ const toneModeOptions = [
 const colorMethodOptions = [
   { title: "Simple RGB", value: "rgb" },
   { title: "LAB Color Space", value: "lab" },
-];
-
-const aiProviderOptions = [{ title: "OpenAI", value: 0 }];
-
-const aiModelOptions = [
-  { title: "GPT Image 1.5", value: "gpt-image-1.5" },
-  { title: "GPT Image 1", value: "gpt-image-1" },
-  { title: "GPT Image 1 Mini", value: "gpt-image-1-mini" },
 ];
 
 const ditherOptions = getDitherOptions();
@@ -497,67 +485,6 @@ async function performFactoryReset() {
                   </v-card-text>
                 </v-card>
               </v-expand-transition>
-
-              <v-expand-transition>
-                <v-card
-                  v-if="settingsStore.deviceSettings.rotationMode === 'ai'"
-                  variant="tonal"
-                  class="mb-4"
-                >
-                  <v-card-text>
-                    <v-alert
-                      type="warning"
-                      variant="tonal"
-                      density="compact"
-                      class="mb-4"
-                      icon="mdi-battery-alert"
-                    >
-                      AI generation takes longer and consumes more battery power than other methods.
-                    </v-alert>
-
-                    <v-select
-                      v-model="settingsStore.deviceSettings.aiSettings.aiProvider"
-                      :items="aiProviderOptions"
-                      item-title="title"
-                      item-value="value"
-                      label="AI Provider"
-                      variant="outlined"
-                      class="mb-4"
-                      hide-details
-                    />
-                    <v-select
-                      v-model="settingsStore.deviceSettings.aiSettings.aiModel"
-                      :items="aiModelOptions"
-                      item-title="title"
-                      item-value="value"
-                      label="AI Model"
-                      variant="outlined"
-                      class="mb-4"
-                      hide-details
-                    />
-                    <v-textarea
-                      v-model="settingsStore.deviceSettings.aiSettings.aiPrompt"
-                      label="Default Prompt"
-                      variant="outlined"
-                      rows="3"
-                      hide-details="auto"
-                      class="mb-2"
-                      hint="Describe the image you want to generate. Use {random} for random seed."
-                      persistent-hint
-                    />
-                    <div
-                      v-if="
-                        !settingsStore.deviceSettings.aiCredentials.openaiApiKey &&
-                        !settingsStore.deviceSettings.aiCredentials.googleApiKey
-                      "
-                      class="text-caption text-warning mt-2"
-                    >
-                      <v-icon icon="mdi-alert" size="small" class="mr-1" />
-                      Please configure API keys in the <strong>AI Generation</strong> tab.
-                    </div>
-                  </v-card-text>
-                </v-card>
-              </v-expand-transition>
             </div>
 
             <v-divider class="my-4" />
@@ -852,57 +779,45 @@ async function performFactoryReset() {
 
           <!-- AI Generation Tab -->
           <v-tabs-window-item value="ai">
-            <v-select
-              v-model="settingsStore.deviceSettings.aiSettings.aiProvider"
-              :items="aiProviderOptions"
-              item-title="title"
-              item-value="value"
-              label="AI Provider"
+            <v-alert type="info" variant="tonal" density="compact" class="mt-2 mb-4">
+              API keys are used for client-side AI image generation when uploading images.
+            </v-alert>
+
+            <v-text-field
+              v-model="settingsStore.deviceSettings.aiCredentials.openaiApiKey"
+              label="OpenAI API Key"
               variant="outlined"
-              class="mt-2 mb-4"
+              type="password"
+              hint="sk-..."
+              persistent-hint
+              class="mb-2"
             />
+            <div class="text-caption text-grey ml-2 mb-4">
+              Get your API key at
+              <a
+                href="https://platform.openai.com/api-keys"
+                target="_blank"
+                class="text-primary text-decoration-none"
+                >platform.openai.com</a
+              >
+            </div>
 
-            <v-expand-transition>
-              <div v-if="settingsStore.deviceSettings.aiSettings.aiProvider === 0">
-                <v-text-field
-                  v-model="settingsStore.deviceSettings.aiCredentials.openaiApiKey"
-                  label="OpenAI API Key"
-                  variant="outlined"
-                  type="password"
-                  hint="sk-..."
-                  persistent-hint
-                />
-                <div class="text-caption text-grey ml-2 mb-4">
-                  Get your API key at
-                  <a
-                    href="https://platform.openai.com/api-keys"
-                    target="_blank"
-                    class="text-primary text-decoration-none"
-                    >platform.openai.com</a
-                  >
-                </div>
-              </div>
-            </v-expand-transition>
-
-            <v-expand-transition>
-              <div v-if="settingsStore.deviceSettings.aiSettings.aiProvider === 1">
-                <v-text-field
-                  v-model="settingsStore.deviceSettings.aiCredentials.googleApiKey"
-                  label="Google Gemini API Key"
-                  variant="outlined"
-                  type="password"
-                />
-                <div class="text-caption text-grey ml-2 mb-4">
-                  Get your API key at
-                  <a
-                    href="https://aistudio.google.com/app/apikey"
-                    target="_blank"
-                    class="text-primary text-decoration-none"
-                    >aistudio.google.com</a
-                  >
-                </div>
-              </div>
-            </v-expand-transition>
+            <v-text-field
+              v-model="settingsStore.deviceSettings.aiCredentials.googleApiKey"
+              label="Google Gemini API Key"
+              variant="outlined"
+              type="password"
+              class="mb-2"
+            />
+            <div class="text-caption text-grey ml-2 mb-4">
+              Get your API key at
+              <a
+                href="https://aistudio.google.com/app/apikey"
+                target="_blank"
+                class="text-primary text-decoration-none"
+                >aistudio.google.com</a
+              >
+            </div>
           </v-tabs-window-item>
 
           <!-- Calibration Tab -->

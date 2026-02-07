@@ -26,8 +26,7 @@ static const char *TAG = "power_manager";
 
 static TaskHandle_t sleep_timer_task_handle = NULL;
 static TaskHandle_t rotation_timer_task_handle = NULL;
-static int64_t next_sleep_time = 0;     // Use absolute time for sleep timer
-static bool deep_sleep_enabled = true;  // Enabled by default, can be disabled for HA integration
+static int64_t next_sleep_time = 0;  // Use absolute time for sleep timer
 static wakeup_source_t wakeup_source = WAKEUP_SOURCE_NONE;
 static int64_t next_rotation_time = 0;  // Use absolute time for rotation
 static uint64_t ext1_wakeup_pin_mask = 0;
@@ -40,7 +39,8 @@ static void rotation_timer_task(void *arg)
         // Run active rotation when:
         // 1. USB is connected (device stays awake), OR
         // 2. Deep sleep is disabled (device stays awake on battery)
-        bool should_use_active_rotation = board_hal_is_usb_connected() || !deep_sleep_enabled;
+        bool should_use_active_rotation =
+            board_hal_is_usb_connected() || !config_manager_get_deep_sleep_enabled();
 
         if (!should_use_active_rotation) {
             // Device will auto-sleep after 120 seconds, no need to reset timer
@@ -109,7 +109,7 @@ static void sleep_timer_task(void *arg)
 #endif
 
         // Handle auto-sleep timer when on battery (only if deep sleep is enabled)
-        if (deep_sleep_enabled) {
+        if (config_manager_get_deep_sleep_enabled()) {
             int64_t now = esp_timer_get_time();
 
             if (next_sleep_time == 0) {
@@ -189,14 +189,7 @@ static void power_manager_disable_auto_light_sleep(void)
 
 esp_err_t power_manager_init(void)
 {
-    // Load deep sleep enabled setting from NVS
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle) == ESP_OK) {
-        uint8_t enabled = 1;  // Default to enabled
-        nvs_get_u8(nvs_handle, NVS_DEEP_SLEEP_KEY, &enabled);
-        deep_sleep_enabled = (enabled != 0);
-        nvs_close(nvs_handle);
-    }
+    bool deep_sleep_enabled = config_manager_get_deep_sleep_enabled();
     ESP_LOGI(TAG, "Deep sleep %s", deep_sleep_enabled ? "enabled" : "disabled");
 
     // Get wakeup causes bitmap (new API in ESP-IDF v6.0)
@@ -384,23 +377,9 @@ wakeup_source_t power_manager_get_wakeup_source(void)
 
 void power_manager_set_deep_sleep_enabled(bool enabled)
 {
-    deep_sleep_enabled = enabled;
-
-    // Save to NVS
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_DEEP_SLEEP_KEY, enabled ? 1 : 0);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    // Save to NVS via config_manager
+    config_manager_set_deep_sleep_enabled(enabled);
 
     // Update RED LED state: on when deep sleep enabled, off when disabled (to save battery)
     gpio_set_level(LED_RED_GPIO, enabled ? 0 : 1);  // active-low
-
-    ESP_LOGI(TAG, "Deep sleep %s", enabled ? "enabled" : "disabled");
-}
-
-bool power_manager_get_deep_sleep_enabled(void)
-{
-    return deep_sleep_enabled;
 }

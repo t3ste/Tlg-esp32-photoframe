@@ -6,7 +6,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "ai_manager.h"
 #include "board_hal.h"
 #include "cJSON.h"
 #include "color_palette.h"
@@ -16,7 +15,6 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_random.h"
 #include "image_processor.h"
 #include "processing_settings.h"
 #ifdef CONFIG_HAS_SDCARD
@@ -528,72 +526,12 @@ use_temp_path:
     return ESP_OK;
 }
 
-#ifndef CONFIG_DISABLE_AI_ROTATION
-static esp_err_t perform_ai_rotation(void)
-{
-    const char *base_prompt = config_manager_get_ai_prompt();
-    char prompt[AI_PROMPT_MAX_LEN];
-
-    // Add random seed to prompt to ensure variation
-    uint32_t seed = esp_random();
-    snprintf(prompt, sizeof(prompt), "%s, seed: %lu",
-             base_prompt ? base_prompt : "A random artistic image", (unsigned long) seed);
-
-    ESP_LOGI(TAG, "AI rotation mode - generating with prompt: %s", prompt);
-
-    if (ai_manager_generate_and_display(prompt) != ESP_OK) {
-        return ESP_FAIL;
-    }
-
-    // Wait for completion (max 180 seconds)
-    // Note: ai_manager already displays the image, we just wait for completion
-    int timeout = 180;
-    while (timeout > 0) {
-        ai_generation_status_t status = ai_manager_get_status();
-        if (status == AI_STATUS_COMPLETE) {
-            ESP_LOGI(TAG, "AI Generation complete");
-            return ESP_OK;
-        } else if (status == AI_STATUS_ERROR) {
-            ESP_LOGE(TAG, "AI Generation failed: %s", ai_manager_get_last_error());
-            return ESP_FAIL;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        timeout--;
-    }
-
-    ESP_LOGE(TAG, "AI Generation timed out");
-    return ESP_ERR_TIMEOUT;
-}
-#endif
-
 esp_err_t trigger_image_rotation(void)
 {
     rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
     esp_err_t result = ESP_OK;
 
-    if (rotation_mode == ROTATION_MODE_AI) {
-#ifdef CONFIG_DISABLE_AI_ROTATION
-        // AI rotation disabled for this board due to memory constraints
-        ESP_LOGW(TAG, "AI rotation mode disabled for this board, falling back");
-#ifdef CONFIG_HAS_SDCARD
-        display_manager_rotate_from_sdcard();
-#endif
-        result = ESP_FAIL;
-#else
-        // AI Mode
-        if (perform_ai_rotation() != ESP_OK) {
-            result = ESP_FAIL;
-        }
-
-        if (result != ESP_OK) {
-            // Fallback to SD card
-#ifdef CONFIG_HAS_SDCARD
-            ESP_LOGW(TAG, "Falling back to SD card rotation");
-            display_manager_rotate_from_sdcard();
-#endif
-        }
-#endif
-    } else if (rotation_mode == ROTATION_MODE_URL) {
+    if (rotation_mode == ROTATION_MODE_URL) {
         // URL mode - fetch image from URL
         const char *image_url = config_manager_get_image_url();
         ESP_LOGI(TAG, "URL rotation mode - downloading from: %s", image_url);

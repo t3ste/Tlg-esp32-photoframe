@@ -1,5 +1,4 @@
 set(SOURCES 
-    "ai_manager.c"
     "album_manager.c"
     "color_palette.c"
     "config_manager.c"
@@ -54,5 +53,4 @@ idf_component_register(
     REQUIRES ""
     PRIV_REQUIRES ${PRIV_REQUIRES} 
     EMBED_FILES "webapp/index.html" "webapp/favicon.svg" "webapp/assets/index.css" "webapp/assets/index.js" "webapp/assets/index2.js" "webapp/assets/exif-reader.js" "webapp/assets/browser.js" "webapp/assets/__vite-browser-external.js" "resources/measurement_sample.jpg"
-    EMBED_TXTFILES "certs/openai_root.pem"
 )

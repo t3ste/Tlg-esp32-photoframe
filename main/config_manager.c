@@ -48,17 +48,15 @@ static char http_header_key[HTTP_HEADER_KEY_MAX_LEN] = {0};
 static char http_header_value[HTTP_HEADER_VALUE_MAX_LEN] = {0};
 static bool save_downloaded_images = true;
 
-// Auto Rotate - AI Gen
-static char ai_prompt[AI_PROMPT_MAX_LEN] = {0};
-static char ai_model[AI_MODEL_MAX_LEN] = {0};
-static ai_provider_t ai_provider = AI_PROVIDER_OPENAI;
-
 // Home Assistant
 static char ha_url[HA_URL_MAX_LEN] = {0};
 
-// AI Gen
+// AI API Keys
 static char openai_api_key[AI_API_KEY_MAX_LEN] = {0};
 static char google_api_key[AI_API_KEY_MAX_LEN] = {0};
+
+// Power
+static bool deep_sleep_enabled = true;  // Enabled by default
 
 esp_err_t config_manager_init(void)
 {
@@ -232,7 +230,7 @@ esp_err_t config_manager_init(void)
             ESP_LOGI(TAG, "No HA URL in NVS, using default (empty)");
         }
 
-        // AI Generation
+        // AI API Keys
         size_t openai_key_len = AI_API_KEY_MAX_LEN;
         if (nvs_get_str(nvs_handle, NVS_OPENAI_API_KEY_KEY, openai_api_key, &openai_key_len) ==
             ESP_OK) {
@@ -245,25 +243,12 @@ esp_err_t config_manager_init(void)
             ESP_LOGI(TAG, "Loaded Google API Key from NVS");
         }
 
-        size_t ai_prompt_len = AI_PROMPT_MAX_LEN;
-        if (nvs_get_str(nvs_handle, NVS_AI_PROMPT_KEY, ai_prompt, &ai_prompt_len) == ESP_OK) {
-            ESP_LOGI(TAG, "Loaded AI prompt from NVS");
-        }
-
-        uint8_t stored_provider = AI_PROVIDER_OPENAI;
-        if (nvs_get_u8(nvs_handle, NVS_AI_PROVIDER_KEY, &stored_provider) == ESP_OK) {
-            ai_provider = (ai_provider_t) stored_provider;
-            ESP_LOGI(TAG, "Loaded AI provider from NVS: %s",
-                     ai_provider == AI_PROVIDER_OPENAI ? "OpenAI" : "Google");
-        }
-
-        size_t ai_model_len = AI_MODEL_MAX_LEN;
-        if (nvs_get_str(nvs_handle, NVS_AI_MODEL_KEY, ai_model, &ai_model_len) == ESP_OK) {
-            ESP_LOGI(TAG, "Loaded AI model from NVS: %s", ai_model);
-        } else {
-            strncpy(ai_model, DEFAULT_AI_MODEL, AI_MODEL_MAX_LEN - 1);
-            ai_model[AI_MODEL_MAX_LEN - 1] = '\0';
-            ESP_LOGI(TAG, "No AI model in NVS, using default: %s", ai_model);
+        // Power
+        uint8_t deep_sleep_val = 1;  // Default to enabled
+        if (nvs_get_u8(nvs_handle, NVS_DEEP_SLEEP_KEY, &deep_sleep_val) == ESP_OK) {
+            deep_sleep_enabled = (deep_sleep_val != 0);
+            ESP_LOGI(TAG, "Loaded deep sleep setting from NVS: %s",
+                     deep_sleep_enabled ? "enabled" : "disabled");
         }
 
         nvs_close(nvs_handle);
@@ -842,72 +827,21 @@ const char *config_manager_get_google_api_key(void)
     return google_api_key;
 }
 
-void config_manager_set_ai_prompt(const char *prompt)
+void config_manager_set_deep_sleep_enabled(bool enabled)
 {
-    if (prompt == NULL) {
-        return;
-    }
-
-    strncpy(ai_prompt, prompt, AI_PROMPT_MAX_LEN - 1);
-    ai_prompt[AI_PROMPT_MAX_LEN - 1] = '\0';
+    deep_sleep_enabled = enabled;
 
     nvs_handle_t nvs_handle;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_str(nvs_handle, NVS_AI_PROMPT_KEY, ai_prompt);
+        nvs_set_u8(nvs_handle, NVS_DEEP_SLEEP_KEY, enabled ? 1 : 0);
         nvs_commit(nvs_handle);
         nvs_close(nvs_handle);
     }
 
-    ESP_LOGI(TAG, "AI prompt set: %s", ai_prompt);
+    ESP_LOGI(TAG, "Deep sleep %s", enabled ? "enabled" : "disabled");
 }
 
-const char *config_manager_get_ai_prompt(void)
+bool config_manager_get_deep_sleep_enabled(void)
 {
-    return ai_prompt;
-}
-
-void config_manager_set_ai_provider(ai_provider_t provider)
-{
-    ai_provider = provider;
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_AI_PROVIDER_KEY, (uint8_t) provider);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
-
-    ESP_LOGI(TAG, "AI provider set to: %s", provider == AI_PROVIDER_OPENAI ? "OpenAI" : "Google");
-}
-
-ai_provider_t config_manager_get_ai_provider(void)
-{
-    return ai_provider;
-}
-
-void config_manager_set_ai_model(const char *model)
-{
-    if (model == NULL) {
-        return;
-    }
-
-    strncpy(ai_model, model, AI_MODEL_MAX_LEN - 1);
-    ai_model[AI_MODEL_MAX_LEN - 1] = '\0';
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_str(nvs_handle, NVS_AI_MODEL_KEY, ai_model);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
-
-    ESP_LOGI(TAG, "AI model set to: %s", ai_model);
-}
-
-const char *config_manager_get_ai_model(void)
-{
-    if (ai_model[0] == '\0') {
-        return DEFAULT_AI_MODEL;
-    }
-    return ai_model;
+    return deep_sleep_enabled;
 }

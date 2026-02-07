@@ -1488,8 +1488,6 @@ static esp_err_t config_handler(httpd_req_t *req)
         rotation_mode_t rm = config_manager_get_rotation_mode();
         if (rm == ROTATION_MODE_URL)
             rotation_mode_str = "url";
-        else if (rm == ROTATION_MODE_AI)
-            rotation_mode_str = "ai";
         cJSON_AddStringToObject(root, "rotation_mode", rotation_mode_str);
 
         // Auto Rotate - SDCARD
@@ -1515,24 +1513,18 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddBoolToObject(root, "save_downloaded_images",
                               config_manager_get_save_downloaded_images());
 
-        // Auto Rotate - AI Gen
-        const char *ai_prompt = config_manager_get_ai_prompt();
-        cJSON_AddStringToObject(root, "ai_prompt", ai_prompt ? ai_prompt : "");
-        cJSON_AddNumberToObject(root, "ai_provider", config_manager_get_ai_provider());
-        cJSON_AddStringToObject(root, "ai_model", config_manager_get_ai_model());
-
         // Home Assistant
         const char *ha_url = config_manager_get_ha_url();
         cJSON_AddStringToObject(root, "ha_url", ha_url ? ha_url : "");
 
-        // AI Gen
+        // AI API Keys
         const char *openai_key = config_manager_get_openai_api_key();
         const char *google_key = config_manager_get_google_api_key();
         cJSON_AddStringToObject(root, "openai_api_key", openai_key ? openai_key : "");
         cJSON_AddStringToObject(root, "google_api_key", google_key ? google_key : "");
 
         // Other
-        cJSON_AddBoolToObject(root, "deep_sleep_enabled", power_manager_get_deep_sleep_enabled());
+        cJSON_AddBoolToObject(root, "deep_sleep_enabled", config_manager_get_deep_sleep_enabled());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -1691,8 +1683,6 @@ static esp_err_t config_handler(httpd_req_t *req)
             rotation_mode_t mode = ROTATION_MODE_SDCARD;
             if (strcmp(mode_str, "url") == 0)
                 mode = ROTATION_MODE_URL;
-            else if (strcmp(mode_str, "ai") == 0)
-                mode = ROTATION_MODE_AI;
             config_manager_set_rotation_mode(mode);
         }
 
@@ -1736,23 +1726,6 @@ static esp_err_t config_handler(httpd_req_t *req)
             config_manager_set_save_downloaded_images(save_dl);
         }
 
-        // Auto Rotate - AI Gen
-        cJSON *ai_prompt_obj = cJSON_GetObjectItem(root, "ai_prompt");
-        if (ai_prompt_obj && cJSON_IsString(ai_prompt_obj)) {
-            const char *prompt = cJSON_GetStringValue(ai_prompt_obj);
-            config_manager_set_ai_prompt(prompt);
-        }
-
-        cJSON *ai_provider_obj = cJSON_GetObjectItem(root, "ai_provider");
-        if (ai_provider_obj && cJSON_IsNumber(ai_provider_obj)) {
-            config_manager_set_ai_provider((ai_provider_t) ai_provider_obj->valueint);
-        }
-
-        cJSON *ai_model_obj = cJSON_GetObjectItem(root, "ai_model");
-        if (ai_model_obj && cJSON_IsString(ai_model_obj)) {
-            config_manager_set_ai_model(cJSON_GetStringValue(ai_model_obj));
-        }
-
         // Home Assistant
         cJSON *ha_url_obj = cJSON_GetObjectItem(root, "ha_url");
         if (ha_url_obj && cJSON_IsString(ha_url_obj)) {
@@ -1760,7 +1733,7 @@ static esp_err_t config_handler(httpd_req_t *req)
             config_manager_set_ha_url(url);
         }
 
-        // AI Gen
+        // AI API Keys
         cJSON *openai_key_obj = cJSON_GetObjectItem(root, "openai_api_key");
         if (openai_key_obj && cJSON_IsString(openai_key_obj)) {
             const char *key = cJSON_GetStringValue(openai_key_obj);
@@ -1773,7 +1746,7 @@ static esp_err_t config_handler(httpd_req_t *req)
             config_manager_set_google_api_key(key);
         }
 
-        // Other
+        // Power
         cJSON *deep_sleep_obj = cJSON_GetObjectItem(root, "deep_sleep_enabled");
         if (deep_sleep_obj && cJSON_IsBool(deep_sleep_obj)) {
             power_manager_set_deep_sleep_enabled(cJSON_IsTrue(deep_sleep_obj));

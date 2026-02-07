@@ -21,6 +21,5 @@ void power_manager_reset_sleep_timer(void);
 void power_manager_reset_rotate_timer(void);
 wakeup_source_t power_manager_get_wakeup_source(void);
 void power_manager_set_deep_sleep_enabled(bool enabled);
-bool power_manager_get_deep_sleep_enabled(void);
 
 #endif
