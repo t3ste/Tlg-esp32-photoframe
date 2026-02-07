@@ -274,7 +274,8 @@ async function generateAiImage() {
 
     const res = await fetch(src);
     const blob = await res.blob();
-    const file = new File([blob], "ai-generated.jpg", { type: "image/jpeg" });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = new File([blob], `ai-generated-${timestamp}.jpg`, { type: "image/jpeg" });
 
     showAiDialog.value = false;
     await processFile(file);
