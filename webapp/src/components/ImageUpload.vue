@@ -201,10 +201,16 @@ const aiModelOptions = computed(() => {
 });
 
 const aiProvider = ref(0);
-const aiProviderOptions = [
-  { title: "OpenAI", value: 0 },
-  { title: "Google Gemini", value: 1 },
-];
+const aiProviderOptions = computed(() => {
+  const options = [];
+  if (settingsStore.deviceSettings.aiCredentials.openaiApiKey) {
+    options.push({ title: "OpenAI", value: 0 });
+  }
+  if (settingsStore.deviceSettings.aiCredentials.googleApiKey) {
+    options.push({ title: "Google Gemini", value: 1 });
+  }
+  return options;
+});
 
 // Reset model to first option when provider changes
 watch(aiProvider, (newProvider) => {
