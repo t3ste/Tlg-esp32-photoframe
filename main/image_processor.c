@@ -67,128 +67,107 @@ static esp_err_t load_calibrated_palette(void)
     return ESP_OK;
 }
 
-static void rgb_to_xyz(uint8_t r, uint8_t g, uint8_t b, float *x, float *y, float *z)
+// Precomputed LUTs for sRGB <-> linear conversion
+#define LINEAR_TO_SRGB_SIZE 4096
+static float srgb_to_linear_lut[256];
+static uint8_t linear_to_srgb_lut[LINEAR_TO_SRGB_SIZE];
+static bool luts_initialized = false;
+
+static void init_gamma_luts(void)
 {
-    float rf = r / 255.0f;
-    float gf = g / 255.0f;
-    float bf = b / 255.0f;
+    if (luts_initialized) {
+        return;
+    }
 
-    rf = rf > 0.04045f ? powf((rf + 0.055f) / 1.055f, 2.4f) : rf / 12.92f;
-    gf = gf > 0.04045f ? powf((gf + 0.055f) / 1.055f, 2.4f) : gf / 12.92f;
-    bf = bf > 0.04045f ? powf((bf + 0.055f) / 1.055f, 2.4f) : bf / 12.92f;
+    // sRGB byte -> linear float
+    for (int i = 0; i < 256; i++) {
+        float s = i / 255.0f;
+        srgb_to_linear_lut[i] = s > 0.04045f ? powf((s + 0.055f) / 1.055f, 2.4f) : s / 12.92f;
+    }
 
-    *x = (rf * 0.4124564f + gf * 0.3575761f + bf * 0.1804375f) * 100.0f;
-    *y = (rf * 0.2126729f + gf * 0.7151522f + bf * 0.0721750f) * 100.0f;
-    *z = (rf * 0.0193339f + gf * 0.1191920f + bf * 0.9503041f) * 100.0f;
+    // linear float (scaled to 0..4095) -> sRGB byte
+    for (int i = 0; i < LINEAR_TO_SRGB_SIZE; i++) {
+        float lin = (float) i / (LINEAR_TO_SRGB_SIZE - 1);
+        float s = lin > 0.0031308f ? 1.055f * powf(lin, 1.0f / 2.4f) - 0.055f : 12.92f * lin;
+        int v = (int) roundf(s * 255.0f);
+        linear_to_srgb_lut[i] = (uint8_t) (v < 0 ? 0 : (v > 255 ? 255 : v));
+    }
+
+    luts_initialized = true;
 }
 
-static void xyz_to_lab(float x, float y, float z, float *L, float *a, float *b_val)
+static inline float srgb_to_linear(uint8_t v)
 {
-    x = x / 95.047f;
-    y = y / 100.0f;
-    z = z / 108.883f;
-
-    x = x > 0.008856f ? powf(x, 1.0f / 3.0f) : 7.787f * x + 16.0f / 116.0f;
-    y = y > 0.008856f ? powf(y, 1.0f / 3.0f) : 7.787f * y + 16.0f / 116.0f;
-    z = z > 0.008856f ? powf(z, 1.0f / 3.0f) : 7.787f * z + 16.0f / 116.0f;
-
-    *L = 116.0f * y - 16.0f;
-    *a = 500.0f * (x - y);
-    *b_val = 200.0f * (y - z);
+    return srgb_to_linear_lut[v];
 }
 
-static void rgb_to_lab(uint8_t r, uint8_t g, uint8_t b, float *L, float *a, float *b_val)
+static inline uint8_t linear_to_srgb(float lin)
 {
-    float x, y, z;
-    rgb_to_xyz(r, g, b, &x, &y, &z);
-    xyz_to_lab(x, y, z, L, a, b_val);
+    if (lin <= 0.0f)
+        return 0;
+    if (lin >= 1.0f)
+        return 255;
+    int idx = (int) (lin * (LINEAR_TO_SRGB_SIZE - 1) + 0.5f);
+    return linear_to_srgb_lut[idx];
 }
 
-static void lab_to_xyz(float L, float a, float b_val, float *x, float *y, float *z)
+static void fast_compress_dynamic_range(uint8_t *image, int width, int height,
+                                        const rgb_t *measured_palette)
 {
-    float fy = (L + 16.0f) / 116.0f;
-    float fx = a / 500.0f + fy;
-    float fz = fy - b_val / 200.0f;
+    init_gamma_luts();
 
-    *x = fx > 0.206897f ? powf(fx, 3.0f) : (fx - 16.0f / 116.0f) / 7.787f;
-    *y = fy > 0.206897f ? powf(fy, 3.0f) : (fy - 16.0f / 116.0f) / 7.787f;
-    *z = fz > 0.206897f ? powf(fz, 3.0f) : (fz - 16.0f / 116.0f) / 7.787f;
+    // Compute display black/white luminance in linear space
+    float black_Y = 0.2126729f * srgb_to_linear(measured_palette[0].r) +
+                    0.7151522f * srgb_to_linear(measured_palette[0].g) +
+                    0.0721750f * srgb_to_linear(measured_palette[0].b);
+    float white_Y = 0.2126729f * srgb_to_linear(measured_palette[1].r) +
+                    0.7151522f * srgb_to_linear(measured_palette[1].g) +
+                    0.0721750f * srgb_to_linear(measured_palette[1].b);
 
-    *x *= 95.047f;
-    *y *= 100.0f;
-    *z *= 108.883f;
-}
+    float range = white_Y - black_Y;
 
-static void xyz_to_rgb(float x, float y, float z, uint8_t *r, uint8_t *g, uint8_t *b)
-{
-    x = x / 100.0f;
-    y = y / 100.0f;
-    z = z / 100.0f;
+    ESP_LOGI(TAG, "Fast CDR: Display black Y=%.4f, white Y=%.4f (range: %.4f)", black_Y, white_Y,
+             range);
 
-    float rf = x * 3.2404542f + y * -1.5371385f + z * -0.4985314f;
-    float gf = x * -0.9692660f + y * 1.8760108f + z * 0.0415560f;
-    float bf = x * 0.0556434f + y * -0.2040259f + z * 1.0572252f;
-
-    rf = rf > 0.0031308f ? 1.055f * powf(rf, 1.0f / 2.4f) - 0.055f : 12.92f * rf;
-    gf = gf > 0.0031308f ? 1.055f * powf(gf, 1.0f / 2.4f) - 0.055f : 12.92f * gf;
-    bf = bf > 0.0031308f ? 1.055f * powf(bf, 1.0f / 2.4f) - 0.055f : 12.92f * bf;
-
-    int ri = (int) roundf(rf * 255.0f);
-    int gi = (int) roundf(gf * 255.0f);
-    int bi = (int) roundf(bf * 255.0f);
-
-    *r = (uint8_t) (ri < 0 ? 0 : (ri > 255 ? 255 : ri));
-    *g = (uint8_t) (gi < 0 ? 0 : (gi > 255 ? 255 : gi));
-    *b = (uint8_t) (bi < 0 ? 0 : (bi > 255 ? 255 : bi));
-}
-
-static void lab_to_rgb(float L, float a, float b_val, uint8_t *r, uint8_t *g, uint8_t *b)
-{
-    float x, y, z;
-    lab_to_xyz(L, a, b_val, &x, &y, &z);
-    xyz_to_rgb(x, y, z, r, g, b);
-}
-
-static void compress_dynamic_range(uint8_t *image, int width, int height,
-                                   const rgb_t *measured_palette)
-{
-    // Get the L* values for the display's black and white
-    float black_L, black_a, black_b;
-    float white_L, white_a, white_b;
-
-    rgb_to_lab(measured_palette[0].r, measured_palette[0].g, measured_palette[0].b, &black_L,
-               &black_a, &black_b);
-    rgb_to_lab(measured_palette[1].r, measured_palette[1].g, measured_palette[1].b, &white_L,
-               &white_a, &white_b);
-
-    ESP_LOGI(TAG, "CDR: Display black L*=%.1f, white L*=%.1f (range: %.1f)", black_L, white_L,
-             white_L - black_L);
-
-    // Compress each pixel's luminance to the display's range
-    // Process in chunks and yield periodically to avoid watchdog timeout
     int total_pixels = width * height;
     for (int i = 0; i < total_pixels; i++) {
         int idx = i * 3;
-        uint8_t r = image[idx];
-        uint8_t g = image[idx + 1];
-        uint8_t b = image[idx + 2];
 
-        float L, a, b_val;
-        rgb_to_lab(r, g, b, &L, &a, &b_val);
+        float lr = srgb_to_linear(image[idx]);
+        float lg = srgb_to_linear(image[idx + 1]);
+        float lb = srgb_to_linear(image[idx + 2]);
 
-        // Compress L from [0, 100] to [black_L, white_L]
-        float compressed_L = black_L + (L / 100.0f) * (white_L - black_L);
+        // Original luminance
+        float Y = 0.2126729f * lr + 0.7151522f * lg + 0.0721750f * lb;
 
-        uint8_t new_r, new_g, new_b;
-        lab_to_rgb(compressed_L, a, b_val, &new_r, &new_g, &new_b);
+        // Compressed luminance mapped to [black_Y, white_Y]
+        float compressed_Y = black_Y + Y * range;
 
-        image[idx] = new_r;
-        image[idx + 1] = new_g;
-        image[idx + 2] = new_b;
+        // Scale RGB channels proportionally
+        float scale;
+        if (Y > 1e-6f) {
+            scale = compressed_Y / Y;
+        } else {
+            // Near-black pixel: just set to display black level
+            scale = 0.0f;
+            lr = black_Y;
+            lg = black_Y;
+            lb = black_Y;
+        }
+
+        if (scale != 0.0f) {
+            lr *= scale;
+            lg *= scale;
+            lb *= scale;
+        }
+
+        image[idx] = linear_to_srgb(lr);
+        image[idx + 1] = linear_to_srgb(lg);
+        image[idx + 2] = linear_to_srgb(lb);
 
         // Delay every 2000 pixels to allow IDLE task to feed watchdog
         if ((i % 2000) == 0) {
-            vTaskDelay(1);  // 1 tick delay allows IDLE task to run
+            vTaskDelay(1);
         }
     }
 }
@@ -559,9 +538,9 @@ static esp_err_t process_rgb_buffer_core(uint8_t *rgb_buffer, int width, int hei
         final_height = BOARD_HAL_DISPLAY_HEIGHT;
     }
 
-    // Apply Compress Dynamic Range (CDR)
-    ESP_LOGI(TAG, "Applying Compress Dynamic Range (CDR)");
-    compress_dynamic_range(final_image, final_width, final_height, palette_measured);
+    // Apply fast Compress Dynamic Range (fast CDR)
+    ESP_LOGI(TAG, "Applying fast Compress Dynamic Range (fast CDR)");
+    fast_compress_dynamic_range(final_image, final_width, final_height, palette_measured);
 
     // Apply Dithering (always use measured palette)
     apply_error_diffusion_dither(final_image, final_width, final_height, palette_measured,
