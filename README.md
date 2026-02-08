@@ -10,7 +10,7 @@ A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently 
 
 - 🎨 **Superior Image Quality**: Measured color palette with automatic calibration produces significantly better results than stock firmware
 - 🔋 **Smart Power Management**: Deep sleep mode for weeks of battery life, or always-on for Home Assistant
-- 📁 **Flexible Image Sources**: SD card rotation, URL-based fetching (weather, news, random images from image server) or **AI generated images**
+- 📁 **Flexible Image Sources**: SD card rotation, URL-based fetching (weather, news, random images from image server)
 - 🌐 **Modern Web Interface**: Drag-and-drop uploads, gallery view, real-time battery status
 - 🔌 **RESTful API**: Full programmatic control ([API docs](docs/API.md))
 - 🖼️ **Image Server**: [Companion server](https://github.com/aitjcize/esp32-photoframe-server) with Google Photos, Synology DS Photos, and Telegram Bot support
@@ -86,21 +86,15 @@ The measured palette accounts for the fact that e-paper displays show darker, mo
 
 Configure via web interface **Settings** section.
 
-## AI Features 🤖
+## AI Image Generation 🤖
 
-The PhotoFrame now supports on-device AI image generation, powered by OpenAI (DALL-E) or Google Gemini.
+The web interface supports client-side AI image generation using OpenAI (GPT Image, DALL-E) or Google Gemini.
 
-### AI Image Generation
-- **Generate on Demand**: Create custom artwork directly from the web interface using text prompts.
-- **Multiple Models**: Supports Open AI image models.
-- **Seamless Integration**: Generated images are automatically processed, dithered, and displayed on the e-paper screen.
+- **Generate on Demand**: Create custom artwork directly from the web interface using text prompts
+- **Multiple Providers**: OpenAI and Google Gemini supported
+- **Client-Side Processing**: AI generation runs in your browser, then uploads to the device
 
-### AI Rotation Mode
-- **Infinite Art**: Set a prompt (e.g., "A watercolor painting of a mountain landscape at sunset") and the frame will generate a *new, unique* variation of that prompt for every rotation.
-- **Dynamic Prompts**: Use `{random}` in your prompt to inject random seeds or variations (if supported by the prompt structure, though mainly the model does the variety).
-
-> [!WARNING]
-> **Power Consumption Notice**: AI generation requires keeping the WiFi and processor active for significantly longer (60-90 seconds) than simply reading a file from the SD card. Expect reduced battery life when using AI Rotation Mode compared to SD Card rotation or URL rotation.
+Configure your API keys in **Settings > AI Generation**.
 
 
 ## Supported Hardware
