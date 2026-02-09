@@ -12,7 +12,7 @@ menu "Board Configuration"
             select SDCARD_DRIVER_SDIO
             select SENSOR_DRIVER_SHTC3
             select RTC_DRIVER_PCF85063
-            select EP_DRIVER_EL073TF1U5
+            select EP_DRIVER_ED2208_GCA
             help
                 Driver for WaveShare PhotoPainter 7.3in (Spectra 6) board.
                 Includes AXP2101 PMIC initialization and SHTC3 sensor sleep management.
@@ -33,7 +33,7 @@ menu "Board Configuration"
             bool "Seeed reTerminal E1002 (Spectra E6)"
             select SDCARD_DRIVER_SPI
             select SENSOR_DRIVER_SHT40
-            select EP_DRIVER_EL073TF1U5
+            select EP_DRIVER_ED2208_GCA
             help
                 Driver for Seeed reTerminal E1002 with 7.3" Spectra E6 display.
                 Includes battery monitoring and deep sleep support.

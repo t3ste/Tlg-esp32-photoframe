@@ -1,6 +1,6 @@
 set(srcs "")
-if(CONFIG_EP_DRIVER_EL073TF1U5)
-    list(APPEND srcs "src/driver_el073tf1u5.c")
+if(CONFIG_EP_DRIVER_ED2208_GCA)
+    list(APPEND srcs "src/driver_ed2208_gca.c")
 endif()
 
 idf_component_register(

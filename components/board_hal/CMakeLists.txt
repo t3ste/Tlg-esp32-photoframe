@@ -1,7 +1,7 @@
 set(SRCS "")
 
 set(PRIV_REQS
-    epaper_driver_el073tf1u5
+    epaper_driver_ed2208_gca
     epaper_driver_el133uf1
     esp_driver_i2c
     esp_driver_spi

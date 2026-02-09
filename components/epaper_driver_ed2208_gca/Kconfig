@@ -1,0 +1,4 @@
+config EP_DRIVER_ED2208_GCA
+    bool "E-Ink ED2208-GCA (Spectra 6 800x480)"
+    help
+        Driver for 7.3 inch Spectra 6 E-Paper displays (Waveshare PhotoPainter, Seeed reTerminal E1002).

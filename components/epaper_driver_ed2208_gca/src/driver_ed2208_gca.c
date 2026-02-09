@@ -9,7 +9,6 @@
 #include "freertos/FreeRTOS.h"
 
 // Local config
-// Local config
 static epaper_config_t g_cfg;
 
 #define EPD_DC_PIN (g_cfg.pin_dc)
@@ -29,7 +28,7 @@ static epaper_config_t g_cfg;
 static spi_device_handle_t spi;
 static void spi_send_byte(uint8_t cmd);
 
-static const char *TAG = "epaper_el073tf1u5";
+static const char *TAG = "epaper_ed2208_gca";
 
 static void epaper_gpio_init(void)
 {
@@ -46,7 +45,7 @@ static void epaper_gpio_init(void)
     gpio_conf.mode = GPIO_MODE_INPUT;
     gpio_conf.pin_bit_mask = ((uint64_t) 0x01 << EPD_BUSY_PIN);
     gpio_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    gpio_conf.pull_up_en = GPIO_PULLDOWN_ENABLE;
+    gpio_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_config(&gpio_conf));
 
     epaper_rst_1;
@@ -166,19 +165,12 @@ static void epaper_TurnOnDisplay(void)
     epaper_SendCommand(0x04);  // POWER_ON
     epaper_readbusyh();
 
-    // Second setting
-    epaper_SendCommand(0x06);
-    epaper_SendData(0x6F);
-    epaper_SendData(0x1F);
-    epaper_SendData(0x17);
-    epaper_SendData(0x49);
-
     epaper_SendCommand(0x12);  // DISPLAY_REFRESH
     epaper_SendData(0x00);
     epaper_readbusyh();
 
     epaper_SendCommand(0x02);  // POWER_OFF
-    epaper_SendData(0X00);
+    epaper_SendData(0x00);
     epaper_readbusyh();
 }
 
@@ -194,7 +186,8 @@ void epaper_init(const epaper_config_t *cfg)
     epaper_readbusyh();
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    epaper_SendCommand(0xAA);  // CMDH
+    // CMDH - Command Header (unlock command access)
+    epaper_SendCommand(0xAA);
     epaper_SendData(0x49);
     epaper_SendData(0x55);
     epaper_SendData(0x20);
@@ -202,61 +195,104 @@ void epaper_init(const epaper_config_t *cfg)
     epaper_SendData(0x09);
     epaper_SendData(0x18);
 
-    epaper_SendCommand(0x01);  //
+    // PWRR (0x01) - Power Setting Register
+    epaper_SendCommand(0x01);
     epaper_SendData(0x3F);
+    epaper_SendData(0x00);
+    epaper_SendData(0x32);
+    epaper_SendData(0x2A);
+    epaper_SendData(0x0E);
+    epaper_SendData(0x2A);
 
+    // PSR (0x00) - Panel Setting
     epaper_SendCommand(0x00);
     epaper_SendData(0x5F);
     epaper_SendData(0x69);
 
+    // POFS (0x03) - Power OFF Sequence Setting
     epaper_SendCommand(0x03);
     epaper_SendData(0x00);
     epaper_SendData(0x54);
     epaper_SendData(0x00);
     epaper_SendData(0x44);
 
+    // BTST1 (0x05) - Booster Soft Start 1
     epaper_SendCommand(0x05);
     epaper_SendData(0x40);
     epaper_SendData(0x1F);
     epaper_SendData(0x1F);
     epaper_SendData(0x2C);
 
+    // BTST2 (0x06) - Booster Soft Start 2
     epaper_SendCommand(0x06);
     epaper_SendData(0x6F);
     epaper_SendData(0x1F);
-    epaper_SendData(0x17);
-    epaper_SendData(0x49);
+    epaper_SendData(0x16);
+    epaper_SendData(0x25);
 
+    // BTST3 (0x08) - Booster Soft Start 3
     epaper_SendCommand(0x08);
     epaper_SendData(0x6F);
     epaper_SendData(0x1F);
     epaper_SendData(0x1F);
     epaper_SendData(0x22);
 
-    epaper_SendCommand(0x30);
-    epaper_SendData(0x03);
+    // IPC (0x13) - Internal Power Control
+    epaper_SendCommand(0x13);
+    epaper_SendData(0x00);
+    epaper_SendData(0x04);
 
+    // PLL (0x30) - PLL Control
+    epaper_SendCommand(0x30);
+    epaper_SendData(0x02);
+
+    // TSE (0x41) - Temperature Sensor Enable
+    epaper_SendCommand(0x41);
+    epaper_SendData(0x00);
+
+    // CDI (0x50) - VCOM and Data Interval Setting
     epaper_SendCommand(0x50);
     epaper_SendData(0x3F);
 
+    // TCON (0x60) - TCON Setting
     epaper_SendCommand(0x60);
     epaper_SendData(0x02);
     epaper_SendData(0x00);
 
+    // TRES (0x61) - Resolution Setting (800 x 480)
     epaper_SendCommand(0x61);
     epaper_SendData(0x03);
     epaper_SendData(0x20);
     epaper_SendData(0x01);
     epaper_SendData(0xE0);
 
+    // VDCS (0x82) - VCOM DC Setting
+    epaper_SendCommand(0x82);
+    epaper_SendData(0x1E);
+
+    // T_VDCS (0x84) - Temperature VCOM DC Setting
     epaper_SendCommand(0x84);
     epaper_SendData(0x01);
 
+    // AGID (0x86)
+    epaper_SendCommand(0x86);
+    epaper_SendData(0x00);
+
+    // PWS (0xE3) - Power Width Setting
     epaper_SendCommand(0xE3);
     epaper_SendData(0x2F);
 
-    epaper_SendCommand(0x04);  // PWR on
-    epaper_readbusyh();        // waiting for the electronic paper IC to release the idle signal
+    // CCSET (0xE0) - Color Control Setting
+    epaper_SendCommand(0xE0);
+    epaper_SendData(0x00);
+
+    // TSSET (0xE6) - Temperature Sensor Setting
+    epaper_SendCommand(0xE6);
+    epaper_SendData(0x00);
+
+    // PON (0x04) - Power ON
+    epaper_SendCommand(0x04);
+    epaper_readbusyh();
 }
 
 static void spi_send_byte(uint8_t cmd)
