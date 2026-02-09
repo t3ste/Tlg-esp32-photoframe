@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -8,136 +7,64 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 
-// Local config
-static epaper_config_t g_cfg;
-
-#define EPD_DC_PIN (g_cfg.pin_dc)
-#define EPD_CS_PIN (g_cfg.pin_cs)
-#define EPD_RST_PIN (g_cfg.pin_rst)
-#define EPD_BUSY_PIN (g_cfg.pin_busy)
-#define EPD_HOST (g_cfg.spi_host)
-
-#define epaper_rst_1 gpio_set_level(EPD_RST_PIN, 1)
-#define epaper_rst_0 gpio_set_level(EPD_RST_PIN, 0)
-#define epaper_cs_1 gpio_set_level(EPD_CS_PIN, 1)
-#define epaper_cs_0 gpio_set_level(EPD_CS_PIN, 0)
-#define epaper_dc_1 gpio_set_level(EPD_DC_PIN, 1)
-#define epaper_dc_0 gpio_set_level(EPD_DC_PIN, 0)
-#define ReadBusy gpio_get_level(EPD_BUSY_PIN)
-
-static spi_device_handle_t spi;
-static void spi_send_byte(uint8_t cmd);
-
 static const char *TAG = "epaper_ed2208_gca";
 
-static void epaper_gpio_init(void)
+static epaper_config_t g_cfg;
+static spi_device_handle_t spi;
+
+#define EPD_WIDTH 800
+#define EPD_HEIGHT 480
+// Packed pixel buffer size: 2 pixels per byte (4-bit color depth)
+#define EPD_BUF_SIZE (EPD_WIDTH / 2 * EPD_HEIGHT)
+
+// --- Low-level helpers ---
+
+static void spi_send_byte(uint8_t data)
 {
-    gpio_config_t gpio_conf = {};
-    gpio_conf.intr_type = GPIO_INTR_DISABLE;
-    gpio_conf.mode = GPIO_MODE_OUTPUT;
-    gpio_conf.pin_bit_mask = ((uint64_t) 0x01 << EPD_RST_PIN) | ((uint64_t) 0x01 << EPD_DC_PIN) |
-                             ((uint64_t) 0x01 << EPD_CS_PIN);
-    gpio_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    gpio_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_config(&gpio_conf));
-
-    gpio_conf.intr_type = GPIO_INTR_DISABLE;
-    gpio_conf.mode = GPIO_MODE_INPUT;
-    gpio_conf.pin_bit_mask = ((uint64_t) 0x01 << EPD_BUSY_PIN);
-    gpio_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    gpio_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_config(&gpio_conf));
-
-    epaper_rst_1;
+    spi_transaction_t t = {};
+    t.length = 8;
+    t.tx_buffer = &data;
+    esp_err_t ret = spi_device_polling_transmit(spi, &t);
+    assert(ret == ESP_OK);
 }
 
-uint16_t epaper_get_width(void)
+static void send_command(uint8_t cmd)
 {
-    return 800;
-}
-uint16_t epaper_get_height(void)
-{
-    return 480;
-}
-
-static void epaper_reset(void)
-{
-    epaper_rst_1;
-    vTaskDelay(pdMS_TO_TICKS(50));
-    epaper_rst_0;
-    vTaskDelay(pdMS_TO_TICKS(20));
-    epaper_rst_1;
-    vTaskDelay(pdMS_TO_TICKS(50));
+    gpio_set_level(g_cfg.pin_dc, 0);  // DC low = command
+    gpio_set_level(g_cfg.pin_cs, 0);
+    spi_send_byte(cmd);
+    gpio_set_level(g_cfg.pin_cs, 1);
 }
 
-static void epaper_spi_init(void)
+static void send_data(uint8_t data)
 {
-    esp_err_t ret;
-    spi_device_interface_config_t devcfg = {};
-    devcfg.clock_speed_hz = (g_cfg.spi_host == SPI3_HOST) ? 40 * 1000 * 1000 : 10 * 1000 * 1000;
-    devcfg.mode = 0;        // SPI mode 0
-    devcfg.queue_size = 7;  // We want to be able to queue 7 transactions at a time
-    devcfg.flags = SPI_DEVICE_HALFDUPLEX;
-    ret = spi_bus_add_device(EPD_HOST, &devcfg, &spi);
-    ESP_ERROR_CHECK(ret);
+    gpio_set_level(g_cfg.pin_dc, 1);  // DC high = data
+    gpio_set_level(g_cfg.pin_cs, 0);
+    spi_send_byte(data);
+    gpio_set_level(g_cfg.pin_cs, 1);
 }
 
-static void epaper_readbusyh(void)
+static void send_buffer(uint8_t *data, int len)
 {
-    int wait_count = 0;
-    while (1) {
-        if (ReadBusy) {
-            return;
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-        wait_count++;
-        if (wait_count >
-            4000) {  // 40 seconds timeout (e-paper can be slow, especially for full refresh)
-            ESP_LOGW(TAG, "Display busy timeout after 40s");
-            return;
-        }
-    }
-}
+    gpio_set_level(g_cfg.pin_dc, 1);  // DC high = data
+    gpio_set_level(g_cfg.pin_cs, 0);  // Hold CS low for entire transfer
 
-static void epaper_SendCommand(uint8_t Reg)
-{
-    epaper_dc_0;
-    epaper_cs_0;
-    spi_send_byte(Reg);
-    epaper_cs_1;
-}
+    spi_transaction_t t = {};
+    int chunks = len / 5000;
+    int remainder = len % 5000;
+    uint8_t *ptr = data;
 
-void epaper_SendData(uint8_t Data)
-{
-    epaper_dc_1;
-    epaper_cs_0;
-    spi_send_byte(Data);
-    epaper_cs_1;
-}
-
-void epaper_Sendbuffera(uint8_t *Data, int len)
-{
-    epaper_dc_1;
-    epaper_cs_0;
-    esp_err_t ret;
-    spi_transaction_t t;
-    memset(&t, 0, sizeof(t));
-    int len_scl = len / 5000;  // 每次发送5000
-    int len_dcl = len % 5000;
-    uint8_t *ptr = Data;
-
-    ESP_LOGI(TAG, "Sending %d bytes in %d chunks of 5000 + %d remainder", len, len_scl, len_dcl);
+    ESP_LOGI(TAG, "Sending %d bytes in %d chunks of 5000 + %d remainder", len, chunks, remainder);
 
     int chunk = 0;
-    while (len_scl) {
+    while (chunks--) {
         t.length = 8 * 5000;
         t.tx_buffer = ptr;
-        ret = spi_device_polling_transmit(spi, &t);  // Transmit!
+        esp_err_t ret = spi_device_polling_transmit(spi, &t);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "SPI transmit failed at chunk %d: %s", chunk, esp_err_to_name(ret));
         }
-        assert(ret == ESP_OK);  // Should have had no issues
-        len_scl--;
+        assert(ret == ESP_OK);
         ptr += 5000;
         chunk++;
 
@@ -147,206 +74,255 @@ void epaper_Sendbuffera(uint8_t *Data, int len)
         }
     }
 
-    ESP_LOGI(TAG, "Sending final chunk of %d bytes", len_dcl);
-    t.length = 8 * len_dcl;
-    t.tx_buffer = ptr;
-    ret = spi_device_polling_transmit(spi, &t);  // Transmit!
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SPI transmit failed at final chunk: %s", esp_err_to_name(ret));
+    if (remainder > 0) {
+        t.length = 8 * remainder;
+        t.tx_buffer = ptr;
+        esp_err_t ret = spi_device_polling_transmit(spi, &t);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "SPI transmit failed at final chunk: %s", esp_err_to_name(ret));
+        }
+        assert(ret == ESP_OK);
     }
-    assert(ret == ESP_OK);  // Should have had no issues.
-    epaper_cs_1;
 
+    gpio_set_level(g_cfg.pin_cs, 1);
     ESP_LOGI(TAG, "Buffer send complete");
 }
 
-static void epaper_TurnOnDisplay(void)
+static void wait_busy(void)
 {
-    epaper_SendCommand(0x04);  // POWER_ON
-    epaper_readbusyh();
+    int wait_count = 0;
+    while (!gpio_get_level(g_cfg.pin_busy)) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        if (++wait_count > 4000) {  // 40s timeout
+            ESP_LOGW(TAG, "Display busy timeout after 40s");
+            return;
+        }
+    }
+}
 
-    epaper_SendCommand(0x12);  // DISPLAY_REFRESH
-    epaper_SendData(0x00);
-    epaper_readbusyh();
+// --- Hardware setup ---
 
-    epaper_SendCommand(0x02);  // POWER_OFF
-    epaper_SendData(0x00);
-    epaper_readbusyh();
+static void gpio_init(void)
+{
+    gpio_config_t out_conf = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << g_cfg.pin_rst) | (1ULL << g_cfg.pin_dc) | (1ULL << g_cfg.pin_cs),
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_config(&out_conf));
+
+    gpio_config_t in_conf = {
+        .mode = GPIO_MODE_INPUT,
+        .pin_bit_mask = (1ULL << g_cfg.pin_busy),
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_config(&in_conf));
+
+    gpio_set_level(g_cfg.pin_rst, 1);
+}
+
+static void spi_add_device(void)
+{
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = (g_cfg.spi_host == SPI3_HOST) ? 40 * 1000 * 1000 : 10 * 1000 * 1000,
+        .mode = 0,
+        .spics_io_num = -1,  // CS is manually controlled
+        .queue_size = 7,
+        .flags = SPI_DEVICE_HALFDUPLEX,
+    };
+    ESP_ERROR_CHECK(spi_bus_add_device(g_cfg.spi_host, &devcfg, &spi));
+}
+
+static void hw_reset(void)
+{
+    gpio_set_level(g_cfg.pin_rst, 1);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    gpio_set_level(g_cfg.pin_rst, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level(g_cfg.pin_rst, 1);
+    vTaskDelay(pdMS_TO_TICKS(50));
+}
+
+// --- Display operations ---
+
+static void turn_on_display(void)
+{
+    send_command(0x04);  // POWER_ON
+    wait_busy();
+
+    send_command(0x12);  // DISPLAY_REFRESH
+    send_data(0x00);
+    wait_busy();
+
+    send_command(0x02);  // POWER_OFF
+    send_data(0x00);
+    wait_busy();
+}
+
+// --- Public API ---
+
+uint16_t epaper_get_width(void)
+{
+    return EPD_WIDTH;
+}
+
+uint16_t epaper_get_height(void)
+{
+    return EPD_HEIGHT;
 }
 
 void epaper_init(const epaper_config_t *cfg)
 {
     g_cfg = *cfg;
 
-    ESP_LOGI(TAG, "Initializing Spectra 6 E-Paper Driver");
+    ESP_LOGI(TAG, "Initializing ED2208-GCA (Spectra 6) E-Paper Driver");
 
-    epaper_spi_init();   // spi init
-    epaper_gpio_init();  // ws gpio init
-    epaper_reset();      // reset
-    epaper_readbusyh();
+    spi_add_device();
+    gpio_init();
+    hw_reset();
+    wait_busy();
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    // CMDH - Command Header (unlock command access)
-    epaper_SendCommand(0xAA);
-    epaper_SendData(0x49);
-    epaper_SendData(0x55);
-    epaper_SendData(0x20);
-    epaper_SendData(0x08);
-    epaper_SendData(0x09);
-    epaper_SendData(0x18);
+    // CMDH (0xAA) - Command Header (unlock command access)
+    send_command(0xAA);
+    send_data(0x49);
+    send_data(0x55);
+    send_data(0x20);
+    send_data(0x08);
+    send_data(0x09);
+    send_data(0x18);
 
     // PWRR (0x01) - Power Setting Register
-    epaper_SendCommand(0x01);
-    epaper_SendData(0x3F);
-    epaper_SendData(0x00);
-    epaper_SendData(0x32);
-    epaper_SendData(0x2A);
-    epaper_SendData(0x0E);
-    epaper_SendData(0x2A);
+    send_command(0x01);
+    send_data(0x3F);
+    send_data(0x00);
+    send_data(0x32);
+    send_data(0x2A);
+    send_data(0x0E);
+    send_data(0x2A);
 
     // PSR (0x00) - Panel Setting
-    epaper_SendCommand(0x00);
-    epaper_SendData(0x5F);
-    epaper_SendData(0x69);
+    send_command(0x00);
+    send_data(0x5F);
+    send_data(0x69);
 
     // POFS (0x03) - Power OFF Sequence Setting
-    epaper_SendCommand(0x03);
-    epaper_SendData(0x00);
-    epaper_SendData(0x54);
-    epaper_SendData(0x00);
-    epaper_SendData(0x44);
+    send_command(0x03);
+    send_data(0x00);
+    send_data(0x54);
+    send_data(0x00);
+    send_data(0x44);
 
     // BTST1 (0x05) - Booster Soft Start 1
-    epaper_SendCommand(0x05);
-    epaper_SendData(0x40);
-    epaper_SendData(0x1F);
-    epaper_SendData(0x1F);
-    epaper_SendData(0x2C);
+    send_command(0x05);
+    send_data(0x40);
+    send_data(0x1F);
+    send_data(0x1F);
+    send_data(0x2C);
 
     // BTST2 (0x06) - Booster Soft Start 2
-    epaper_SendCommand(0x06);
-    epaper_SendData(0x6F);
-    epaper_SendData(0x1F);
-    epaper_SendData(0x16);
-    epaper_SendData(0x25);
+    send_command(0x06);
+    send_data(0x6F);
+    send_data(0x1F);
+    send_data(0x16);
+    send_data(0x25);
 
     // BTST3 (0x08) - Booster Soft Start 3
-    epaper_SendCommand(0x08);
-    epaper_SendData(0x6F);
-    epaper_SendData(0x1F);
-    epaper_SendData(0x1F);
-    epaper_SendData(0x22);
+    send_command(0x08);
+    send_data(0x6F);
+    send_data(0x1F);
+    send_data(0x1F);
+    send_data(0x22);
 
     // IPC (0x13) - Internal Power Control
-    epaper_SendCommand(0x13);
-    epaper_SendData(0x00);
-    epaper_SendData(0x04);
+    send_command(0x13);
+    send_data(0x00);
+    send_data(0x04);
 
     // PLL (0x30) - PLL Control
-    epaper_SendCommand(0x30);
-    epaper_SendData(0x02);
+    send_command(0x30);
+    send_data(0x02);
 
     // TSE (0x41) - Temperature Sensor Enable
-    epaper_SendCommand(0x41);
-    epaper_SendData(0x00);
+    send_command(0x41);
+    send_data(0x00);
 
     // CDI (0x50) - VCOM and Data Interval Setting
-    epaper_SendCommand(0x50);
-    epaper_SendData(0x3F);
+    send_command(0x50);
+    send_data(0x3F);
 
     // TCON (0x60) - TCON Setting
-    epaper_SendCommand(0x60);
-    epaper_SendData(0x02);
-    epaper_SendData(0x00);
+    send_command(0x60);
+    send_data(0x02);
+    send_data(0x00);
 
     // TRES (0x61) - Resolution Setting (800 x 480)
-    epaper_SendCommand(0x61);
-    epaper_SendData(0x03);
-    epaper_SendData(0x20);
-    epaper_SendData(0x01);
-    epaper_SendData(0xE0);
+    send_command(0x61);
+    send_data(0x03);
+    send_data(0x20);
+    send_data(0x01);
+    send_data(0xE0);
 
     // VDCS (0x82) - VCOM DC Setting
-    epaper_SendCommand(0x82);
-    epaper_SendData(0x1E);
+    send_command(0x82);
+    send_data(0x1E);
 
     // T_VDCS (0x84) - Temperature VCOM DC Setting
-    epaper_SendCommand(0x84);
-    epaper_SendData(0x01);
+    send_command(0x84);
+    send_data(0x01);
 
     // AGID (0x86)
-    epaper_SendCommand(0x86);
-    epaper_SendData(0x00);
+    send_command(0x86);
+    send_data(0x00);
 
     // PWS (0xE3) - Power Width Setting
-    epaper_SendCommand(0xE3);
-    epaper_SendData(0x2F);
+    send_command(0xE3);
+    send_data(0x2F);
 
     // CCSET (0xE0) - Color Control Setting
-    epaper_SendCommand(0xE0);
-    epaper_SendData(0x00);
+    send_command(0xE0);
+    send_data(0x00);
 
     // TSSET (0xE6) - Temperature Sensor Setting
-    epaper_SendCommand(0xE6);
-    epaper_SendData(0x00);
+    send_command(0xE6);
+    send_data(0x00);
 
     // PON (0x04) - Power ON
-    epaper_SendCommand(0x04);
-    epaper_readbusyh();
+    send_command(0x04);
+    wait_busy();
 }
 
-static void spi_send_byte(uint8_t cmd)
+void epaper_clear(uint8_t *image, uint8_t color)
 {
-    esp_err_t ret;
-    spi_transaction_t t;
-    memset(&t, 0, sizeof(t));
-    t.length = 8;
-    t.tx_buffer = &cmd;
-    ret = spi_device_polling_transmit(spi, &t);  // Transmit!
-    assert(ret == ESP_OK);                       // Should have had no issues.
+    uint8_t packed = (color << 4) | color;
+    memset(image, packed, EPD_BUF_SIZE);
+
+    send_command(0x10);
+    send_buffer(image, EPD_BUF_SIZE);
+    turn_on_display();
 }
 
-void epaper_clear(uint8_t *Image, uint8_t color)
+void epaper_display(uint8_t *image)
 {
-    uint16_t Width, Height;
-    uint16_t lcd_width = epaper_get_width();
-    Width = (lcd_width % 2 == 0) ? (lcd_width / 2) : (lcd_width / 2 + 1);
-    Height = epaper_get_height();
+    ESP_LOGI(TAG, "Starting display update: %d bytes", EPD_BUF_SIZE);
 
-    epaper_SendCommand(0x10);
-    for (int j = 0; j < Height * Width; j++) {
-        Image[j] = (color << 4) | color;
-    }
-    epaper_Sendbuffera(Image, Height * Width);
-    epaper_TurnOnDisplay();
-}
+    send_command(0x10);
+    send_buffer(image, EPD_BUF_SIZE);
+    turn_on_display();
 
-void epaper_display(uint8_t *Image)
-{
-    uint16_t Width, Height;
-    uint16_t lcd_width = epaper_get_width();
-    Width = (lcd_width % 2 == 0) ? (lcd_width / 2) : (lcd_width / 2 + 1);
-    Height = epaper_get_height();
-
-    ESP_LOGI(TAG, "Starting display update: %d x %d = %d bytes", Width, Height, Height * Width);
-
-    epaper_SendCommand(0x10);
-    ESP_LOGI(TAG, "Sent command 0x10, sending buffer...");
-    epaper_Sendbuffera(Image, Height * Width);
-    ESP_LOGI(TAG, "Buffer sent, turning on display...");
-    epaper_TurnOnDisplay();
     ESP_LOGI(TAG, "Display update complete");
 }
 
 void epaper_enter_deepsleep(void)
 {
-    ESP_LOGI(TAG, "Requesting deep sleep");
-    // Power OFF
-    epaper_SendCommand(0x02);
-    epaper_SendData(0x00);
-    epaper_readbusyh();
+    ESP_LOGI(TAG, "Entering deep sleep");
 
-    // Deep Sleep Command (0x07 + 0xA5 is common)
-    epaper_SendCommand(0x07);
-    epaper_SendData(0xA5);
+    // Power OFF
+    send_command(0x02);
+    send_data(0x00);
+    wait_busy();
+
+    // Deep Sleep
+    send_command(0x07);
+    send_data(0xA5);
 }
