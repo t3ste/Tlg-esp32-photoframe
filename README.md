@@ -111,6 +111,7 @@ Configure your API keys in **Settings > AI Generation**.
 
 ### Known Issues / Work in Progress 🚧
 
+- **PhotoPainter Restarts**: All existing Waveshare PhotoPainter boards on the market use the AXP2101 power management IC, which causes unexplained restarts when connected to both Type-C and a lithium battery simultaneously. **Workaround:** use either USB power only or battery only. Using both at the same time may cause frequent firmware restarts due to unstable power supply. Waveshare has confirmed this issue and future boards will ship with TG28 as a replacement, which will not have this problem. See [waveshareteam/ESP32-S3-PhotoPainter#5](https://github.com/waveshareteam/ESP32-S3-PhotoPainter/issues/5#issuecomment-3876269519) for details.
 - **XIAO EE02 Charging**: Battery charging functionality for the Seeed Studio XIAO EE02 board is currently **WIP** and not yet supported. Please power via USB-C or use an external charger for now.
 
 ## Installation
