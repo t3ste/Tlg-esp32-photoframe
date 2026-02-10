@@ -154,7 +154,7 @@ jobs:
 
         # Get the latest published release tag (not draft)
         # This avoids race conditions when tag push and main push happen simultaneously
-        STABLE_TAG=$(gh release view --latest --json tagName -q '.tagName' 2>/dev/null || echo "")
+        STABLE_TAG=$(gh release view --json tagName -q '.tagName' 2>/dev/null || echo "")
         echo "Latest published release: ${STABLE_TAG:-none}"
 
         BOARDS="waveshare_photopainter_73 seeedstudio_xiao_ee02 seeedstudio_reterminal_e1002"
