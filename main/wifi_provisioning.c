@@ -46,10 +46,16 @@ extern const uint8_t vite_browser_external_js_end[] asm("_binary___vite_browser_
 extern const uint8_t favicon_svg_start[] asm("_binary_favicon_svg_start");
 extern const uint8_t favicon_svg_end[] asm("_binary_favicon_svg_end");
 
-static esp_err_t provision_index_handler(httpd_req_t *req)
+static esp_err_t provision_keep_alive_handler(httpd_req_t *req)
 {
     power_manager_reset_sleep_timer();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"status\":\"ok\"}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
 
+static esp_err_t provision_index_handler(httpd_req_t *req)
+{
     // If accessing root, redirect to /provision
     if (strcmp(req->uri, "/") == 0) {
         httpd_resp_set_status(req, "302 Found");
@@ -66,7 +72,6 @@ static esp_err_t provision_index_handler(httpd_req_t *req)
 
 static esp_err_t provision_css_handler(httpd_req_t *req)
 {
-    power_manager_reset_sleep_timer();
     const size_t index_css_size = (index_css_end - index_css_start);
     httpd_resp_set_type(req, "text/css");
     httpd_resp_send(req, (const char *) index_css_start, index_css_size);
@@ -75,7 +80,6 @@ static esp_err_t provision_css_handler(httpd_req_t *req)
 
 static esp_err_t provision_js_handler(httpd_req_t *req)
 {
-    power_manager_reset_sleep_timer();
     const size_t index_js_size = (index_js_end - index_js_start);
     httpd_resp_set_type(req, "application/javascript");
     httpd_resp_send(req, (const char *) index_js_start, index_js_size);
@@ -84,7 +88,6 @@ static esp_err_t provision_js_handler(httpd_req_t *req)
 
 static esp_err_t provision_js2_handler(httpd_req_t *req)
 {
-    power_manager_reset_sleep_timer();
     const size_t index2_js_size = (index2_js_end - index2_js_start);
     httpd_resp_set_type(req, "application/javascript");
     httpd_resp_send(req, (const char *) index2_js_start, index2_js_size);
@@ -93,7 +96,6 @@ static esp_err_t provision_js2_handler(httpd_req_t *req)
 
 static esp_err_t provision_exif_js_handler(httpd_req_t *req)
 {
-    power_manager_reset_sleep_timer();
     const size_t exif_reader_js_size = (exif_reader_js_end - exif_reader_js_start);
     httpd_resp_set_type(req, "application/javascript");
     httpd_resp_send(req, (const char *) exif_reader_js_start, exif_reader_js_size);
@@ -102,7 +104,6 @@ static esp_err_t provision_exif_js_handler(httpd_req_t *req)
 
 static esp_err_t provision_browser_js_handler(httpd_req_t *req)
 {
-    power_manager_reset_sleep_timer();
     const size_t browser_js_size = (browser_js_end - browser_js_start);
     httpd_resp_set_type(req, "application/javascript");
     httpd_resp_send(req, (const char *) browser_js_start, browser_js_size);
@@ -111,7 +112,6 @@ static esp_err_t provision_browser_js_handler(httpd_req_t *req)
 
 static esp_err_t provision_vite_js_handler(httpd_req_t *req)
 {
-    power_manager_reset_sleep_timer();
     const size_t vite_js_size = (vite_browser_external_js_end - vite_browser_external_js_start);
     httpd_resp_set_type(req, "application/javascript");
     httpd_resp_send(req, (const char *) vite_browser_external_js_start, vite_js_size);
@@ -120,7 +120,6 @@ static esp_err_t provision_vite_js_handler(httpd_req_t *req)
 
 static esp_err_t provision_favicon_handler(httpd_req_t *req)
 {
-    power_manager_reset_sleep_timer();
     const size_t favicon_svg_size = (favicon_svg_end - favicon_svg_start);
     httpd_resp_set_type(req, "image/svg+xml");
     httpd_resp_send(req, (const char *) favicon_svg_start, favicon_svg_size);
@@ -130,8 +129,6 @@ static esp_err_t provision_favicon_handler(httpd_req_t *req)
 // Handler for captive portal detection URLs
 static esp_err_t captive_portal_handler(httpd_req_t *req)
 {
-    power_manager_reset_sleep_timer();
-
     ESP_LOGI(TAG, "Captive portal detection request: %s", req->uri);
 
     // Redirect to /provision route
@@ -148,8 +145,6 @@ static esp_err_t captive_portal_handler(httpd_req_t *req)
 // Error handler for 404 - acts as catch-all
 static esp_err_t captive_portal_error_handler(httpd_req_t *req, httpd_err_code_t err)
 {
-    power_manager_reset_sleep_timer();
-
     ESP_LOGI(TAG, "404 catch-all request: %s", req->uri);
 
     // Redirect to /provision route
@@ -188,8 +183,6 @@ static const char *auth_mode_str(wifi_auth_mode_t authmode)
 
 static esp_err_t provision_scan_handler(httpd_req_t *req)
 {
-    power_manager_reset_sleep_timer();
-
     ESP_LOGI(TAG, "WiFi scan requested");
 
 #define MAX_SCAN_RESULTS 20
@@ -290,8 +283,6 @@ static esp_err_t provision_scan_handler(httpd_req_t *req)
 
 static esp_err_t provision_save_handler(httpd_req_t *req)
 {
-    power_manager_reset_sleep_timer();
-
     char buf[512];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
@@ -588,6 +579,13 @@ esp_err_t wifi_provisioning_start_ap(void)
                                 .handler = provision_scan_handler,
                                 .user_ctx = NULL};
         httpd_register_uri_handler(provisioning_server, &scan_uri);
+
+        // Keep-alive handler
+        httpd_uri_t keep_alive_uri = {.uri = "/api/keep_alive",
+                                      .method = HTTP_GET,
+                                      .handler = provision_keep_alive_handler,
+                                      .user_ctx = NULL};
+        httpd_register_uri_handler(provisioning_server, &keep_alive_uri);
 
         // iOS captive portal detection
         httpd_uri_t ios_captive = {.uri = "/hotspot-detect.html",

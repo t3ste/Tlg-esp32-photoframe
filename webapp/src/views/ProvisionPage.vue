@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 
 // Inline SVG icon paths (works offline during provisioning)
 const ICON_PATHS = {
@@ -57,8 +57,20 @@ async function scanNetworks() {
   }
 }
 
+let keepAliveInterval = null;
+
 onMounted(() => {
   scanNetworks();
+  keepAliveInterval = setInterval(() => {
+    fetch("/api/keep_alive").catch(() => {});
+  }, 60000);
+});
+
+onUnmounted(() => {
+  if (keepAliveInterval) {
+    clearInterval(keepAliveInterval);
+    keepAliveInterval = null;
+  }
 });
 
 async function submitForm() {
