@@ -1,5 +1,22 @@
 <script setup>
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
+
+// Inline SVG icon paths (works offline during provisioning)
+const ICON_PATHS = {
+  wifiStrength1:
+    "M12 3C7.79 3 3.7 4.41.38 7C4.41 12.06 7.89 16.37 12 21.5c4.08-5.08 8.24-10.26 11.65-14.5C20.32 4.41 16.22 3 12 3m0 2c3.07 0 6.09.86 8.71 2.45l-5.1 6.36A8.4 8.4 0 0 0 12 13c-1.25 0-2.5.28-3.61.8L3.27 7.44C5.91 5.85 8.93 5 12 5",
+  wifiStrength2:
+    "M12 3C7.79 3 3.7 4.41.38 7C4.41 12.06 7.89 16.37 12 21.5c4.08-5.08 8.24-10.26 11.65-14.5C20.32 4.41 16.22 3 12 3m0 2c3.07 0 6.09.86 8.71 2.45l-3.21 3.98C16.26 10.74 14.37 10 12 10c-2.38 0-4.26.75-5.5 1.43L3.27 7.44C5.91 5.85 8.93 5 12 5",
+  wifiStrength3:
+    "M12 3C7.79 3 3.7 4.41.38 7C4.41 12.06 7.89 16.37 12 21.5c4.08-5.08 8.24-10.26 11.65-14.5C20.32 4.41 16.22 3 12 3m0 2c3.07 0 6.09.86 8.71 2.45l-1.94 2.43C17.26 9 14.88 8 12 8C9 8 6.68 9 5.21 9.84l-1.94-2.4C5.91 5.85 8.93 5 12 5",
+  wifiStrength4:
+    "M12 3C7.79 3 3.7 4.41.38 7C4.41 12.06 7.89 16.37 12 21.5c4.08-5.08 8.24-10.26 11.65-14.5C20.32 4.41 16.22 3 12 3",
+  refresh:
+    "M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 0 0-8 8a8 8 0 0 0 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18a6 6 0 0 1-6-6a6 6 0 0 1 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z",
+  eye: "M12 9a3 3 0 0 0-3 3a3 3 0 0 0 3 3a3 3 0 0 0 3-3a3 3 0 0 0-3-3m0 8a5 5 0 0 1-5-5a5 5 0 0 1 5-5a5 5 0 0 1 5 5a5 5 0 0 1-5 5m0-12.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5",
+  eyeOff:
+    "M11.83 9L15 12.16V12a3 3 0 0 0-3-3zm-4.3.8l1.55 1.55c-.05.21-.08.42-.08.65a3 3 0 0 0 3 3c.22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53a5 5 0 0 1-5-5c0-.79.2-1.53.53-2.2M2 4.27l2.28 2.28l.45.45C3.08 8.3 1.78 10 1 12c1.73 4.39 6 7.5 11 7.5c1.55 0 3.03-.3 4.38-.84l.43.42L19.73 22L21 20.73L3.27 3M12 7a5 5 0 0 1 5 5c0 .64-.13 1.26-.36 1.82l2.93 2.93c1.5-1.25 2.7-2.89 3.43-4.75c-1.73-4.39-6-7.5-11-7.5c-1.4 0-2.74.25-4 .7l2.17 2.15C10.74 7.13 11.35 7 12 7",
+};
 
 const ssid = ref("");
 const password = ref("");
@@ -8,6 +25,41 @@ const showPassword = ref(false);
 const loading = ref(false);
 const status = ref(null); // 'success' | 'error' | 'info' | null
 const statusMessage = ref("");
+
+const networks = ref([]);
+const scanning = ref(false);
+
+function signalIcon(rssi) {
+  if (rssi >= -50) return ICON_PATHS.wifiStrength4;
+  if (rssi >= -60) return ICON_PATHS.wifiStrength3;
+  if (rssi >= -70) return ICON_PATHS.wifiStrength2;
+  return ICON_PATHS.wifiStrength1;
+}
+
+async function scanNetworks() {
+  scanning.value = true;
+  try {
+    const response = await fetch("/api/wifi/scan");
+    if (response.ok) {
+      const data = await response.json();
+      networks.value = data.map((n) => ({
+        title: n.ssid,
+        subtitle: `${n.rssi} dBm · ${n.auth}`,
+        value: n.ssid,
+        rssi: n.rssi,
+        iconPath: signalIcon(n.rssi),
+      }));
+    }
+  } catch (e) {
+    console.error("WiFi scan failed:", e);
+  } finally {
+    scanning.value = false;
+  }
+}
+
+onMounted(() => {
+  scanNetworks();
+});
 
 async function submitForm() {
   loading.value = true;
@@ -66,14 +118,50 @@ async function submitForm() {
         <v-card-subtitle class="mb-2"> Connect your PhotoFrame to WiFi </v-card-subtitle>
 
         <v-form @submit.prevent="submitForm">
-          <v-text-field
+          <v-combobox
             v-model="ssid"
+            :items="networks"
+            item-title="title"
+            item-value="value"
             label="WiFi Network Name (SSID)"
             variant="outlined"
             required
             :disabled="loading"
+            :loading="scanning"
             class="mb-2"
-          />
+            placeholder="Select or type a network name"
+            @update:model-value="
+              (val) => {
+                if (val && typeof val === 'object') ssid = val.value;
+              }
+            "
+          >
+            <template #item="{ item, props: itemProps }">
+              <v-list-item v-bind="itemProps">
+                <template #prepend>
+                  <svg viewBox="0 0 24 24" class="wifi-icon mr-2">
+                    <path :d="item.raw.iconPath" fill="currentColor" />
+                  </svg>
+                </template>
+                <template #append>
+                  <span class="text-caption text-medium-emphasis">{{ item.raw.subtitle }}</span>
+                </template>
+              </v-list-item>
+            </template>
+            <template #append>
+              <v-btn
+                variant="text"
+                size="small"
+                :loading="scanning"
+                :disabled="loading"
+                @click.stop="scanNetworks"
+              >
+                <svg viewBox="0 0 24 24" class="btn-icon">
+                  <path :d="ICON_PATHS.refresh" fill="currentColor" />
+                </svg>
+              </v-btn>
+            </template>
+          </v-combobox>
 
           <v-text-field
             v-model="password"
@@ -85,11 +173,13 @@ async function submitForm() {
             class="mb-2"
           >
             <template #append-inner>
-              <span
-                style="cursor: pointer; user-select: none"
-                @click="showPassword = !showPassword"
-              >
-                {{ showPassword ? "🙈" : "👁️" }}
+              <span class="password-toggle" @click="showPassword = !showPassword">
+                <svg viewBox="0 0 24 24" class="btn-icon">
+                  <path
+                    :d="showPassword ? ICON_PATHS.eyeOff : ICON_PATHS.eye"
+                    fill="currentColor"
+                  />
+                </svg>
               </span>
             </template>
           </v-text-field>
@@ -130,5 +220,27 @@ async function submitForm() {
   width: 100%;
   max-width: 380px;
   padding: 20px;
+}
+
+.wifi-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.btn-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.password-toggle {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  opacity: 0.6;
+}
+
+.password-toggle:hover {
+  opacity: 1;
 }
 </style>

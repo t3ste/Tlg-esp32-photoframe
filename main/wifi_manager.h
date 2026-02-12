@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "esp_err.h"
+#include "esp_wifi.h"
 #include "esp_wifi_types.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -20,5 +21,6 @@ esp_err_t wifi_manager_save_credentials(const char *ssid, const char *password);
 esp_err_t wifi_manager_load_credentials(char *ssid, char *password);
 esp_err_t wifi_manager_load_credentials_from_sdcard(char *ssid, char *password);
 EventGroupHandle_t wifi_manager_get_event_group(void);
+int wifi_manager_scan(wifi_ap_record_t *results, int max_results);
 
 #endif

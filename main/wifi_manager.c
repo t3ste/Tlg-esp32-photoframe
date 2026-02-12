@@ -216,6 +216,72 @@ EventGroupHandle_t wifi_manager_get_event_group(void)
     return s_wifi_event_group;
 }
 
+int wifi_manager_scan(wifi_ap_record_t *results, int max_results)
+{
+    if (!results || max_results <= 0) {
+        return 0;
+    }
+
+    // Save current WiFi mode
+    wifi_mode_t original_mode;
+    esp_err_t err = esp_wifi_get_mode(&original_mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get WiFi mode: %s", esp_err_to_name(err));
+        return 0;
+    }
+
+    // Switch to APSTA mode if currently in AP-only mode
+    if (original_mode == WIFI_MODE_AP) {
+        err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set APSTA mode: %s", esp_err_to_name(err));
+            return 0;
+        }
+    }
+
+    // Start blocking scan on all channels
+    wifi_scan_config_t scan_config = {0};
+    err = esp_wifi_scan_start(&scan_config, true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "WiFi scan failed: %s", esp_err_to_name(err));
+        if (original_mode == WIFI_MODE_AP) {
+            esp_wifi_set_mode(original_mode);
+        }
+        return 0;
+    }
+
+    // Get number of APs found
+    uint16_t ap_count = 0;
+    esp_wifi_scan_get_ap_num(&ap_count);
+
+    if (ap_count == 0) {
+        ESP_LOGI(TAG, "No APs found");
+        if (original_mode == WIFI_MODE_AP) {
+            esp_wifi_set_mode(original_mode);
+        }
+        return 0;
+    }
+
+    // Limit to max_results
+    uint16_t fetch_count = (ap_count > (uint16_t) max_results) ? (uint16_t) max_results : ap_count;
+    err = esp_wifi_scan_get_ap_records(&fetch_count, results);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get scan results: %s", esp_err_to_name(err));
+        if (original_mode == WIFI_MODE_AP) {
+            esp_wifi_set_mode(original_mode);
+        }
+        return 0;
+    }
+
+    // Restore original WiFi mode
+    if (original_mode == WIFI_MODE_AP) {
+        esp_wifi_set_mode(original_mode);
+    }
+
+    ESP_LOGI(TAG, "WiFi scan found %d APs (returning %d)", ap_count, fetch_count);
+    return (int) fetch_count;
+}
+
 #ifdef CONFIG_HAS_SDCARD
 esp_err_t wifi_manager_load_credentials_from_sdcard(char *ssid, char *password)
 {
