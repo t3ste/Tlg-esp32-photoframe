@@ -1463,6 +1463,9 @@ static esp_err_t config_handler(httpd_req_t *req)
         const char *timezone = config_manager_get_timezone();
         cJSON_AddStringToObject(root, "timezone", timezone ? timezone : "UTC0");
 
+        const char *ntp_server = config_manager_get_ntp_server();
+        cJSON_AddStringToObject(root, "ntp_server", ntp_server ? ntp_server : DEFAULT_NTP_SERVER);
+
         const char *wifi_ssid = config_manager_get_wifi_ssid();
         cJSON_AddStringToObject(root, "wifi_ssid", wifi_ssid ? wifi_ssid : "");
 
@@ -1566,6 +1569,17 @@ static esp_err_t config_handler(httpd_req_t *req)
         if (timezone_obj && cJSON_IsString(timezone_obj)) {
             const char *tz = cJSON_GetStringValue(timezone_obj);
             config_manager_set_timezone(tz);
+            // Apply timezone immediately
+            setenv("TZ", tz, 1);
+            tzset();
+        }
+
+        cJSON *ntp_server_obj = cJSON_GetObjectItem(root, "ntp_server");
+        if (ntp_server_obj && cJSON_IsString(ntp_server_obj)) {
+            config_manager_set_ntp_server(cJSON_GetStringValue(ntp_server_obj));
+            // Re-sync SNTP with the new server
+            periodic_tasks_force_run(SNTP_TASK_NAME);
+            periodic_tasks_check_and_run();
         }
 
         cJSON *wifi_ssid_obj = cJSON_GetObjectItem(root, "wifi_ssid");

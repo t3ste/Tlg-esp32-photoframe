@@ -25,6 +25,7 @@ typedef enum {
 #define HA_URL_MAX_LEN 256
 #define ROTATION_MODE_MAX_LEN 16
 #define TIMEZONE_MAX_LEN 64
+#define NTP_SERVER_MAX_LEN 128
 #define ACCESS_TOKEN_MAX_LEN 512
 #define HTTP_HEADER_KEY_MAX_LEN 64
 #define HTTP_HEADER_VALUE_MAX_LEN 512
@@ -35,6 +36,7 @@ typedef enum {
 #define DEFAULT_IMAGE_URL "https://loremflickr.com/800/480"
 #define DEFAULT_HA_URL ""
 #define DEFAULT_TIMEZONE "UTC0"
+#define DEFAULT_NTP_SERVER "pool.ntp.org"
 
 #define SDCARD_MOUNT_POINT "/sdcard"
 #define IMAGE_DIRECTORY SDCARD_MOUNT_POINT "/images"
@@ -72,6 +74,7 @@ typedef enum {
 #define NVS_NAMESPACE "photoframe"
 #define NVS_DEVICE_NAME_KEY "device_name"
 #define NVS_TIMEZONE_KEY "timezone"
+#define NVS_NTP_SERVER_KEY "ntp_server"
 #define NVS_DISPLAY_ORIENTATION_KEY "disp_orient"
 #define NVS_DISPLAY_ROTATION_DEG_KEY "disp_rot_deg"
 

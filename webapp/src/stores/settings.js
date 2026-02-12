@@ -21,6 +21,7 @@ export const useSettingsStore = defineStore("settings", () => {
     // General
     deviceName: "PhotoFrame",
     timezoneOffset: 0,
+    ntpServer: "pool.ntp.org",
     displayOrientation: "landscape",
     displayRotationDeg: 180,
     wifiSsid: "",
@@ -170,6 +171,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.rotationMode = data.rotation_mode || "sdcard";
       deviceSettings.value.sdRotationMode = data.sd_rotation_mode || "random";
       deviceSettings.value.deviceName = data.device_name || "PhotoFrame";
+      deviceSettings.value.ntpServer = data.ntp_server || "pool.ntp.org";
       deviceSettings.value.wifiSsid = data.wifi_ssid || "";
       // Don't load password from server for security
       deviceSettings.value.wifiPassword = "";
@@ -252,6 +254,7 @@ export const useSettingsStore = defineStore("settings", () => {
       sleep_schedule_start: sleepScheduleStart,
       sleep_schedule_end: sleepScheduleEnd,
       device_name: deviceSettings.value.deviceName,
+      ntp_server: deviceSettings.value.ntpServer,
       timezone: timezone,
       access_token: deviceSettings.value.accessToken,
       http_header_key: deviceSettings.value.httpHeaderKey,

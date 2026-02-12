@@ -13,6 +13,7 @@ static const char *TAG = "config_manager";
 // General
 static char device_name[DEVICE_NAME_MAX_LEN] = {0};
 static char tz_string[TIMEZONE_MAX_LEN] = {0};
+static char ntp_server[NTP_SERVER_MAX_LEN] = {0};
 static display_orientation_t display_orientation = DISPLAY_ORIENTATION_LANDSCAPE;
 static int display_rotation_deg = BOARD_HAL_DISPLAY_ROTATION_DEG;
 static char wifi_ssid[WIFI_SSID_MAX_LEN] = {0};
@@ -81,6 +82,15 @@ esp_err_t config_manager_init(void)
             strncpy(tz_string, DEFAULT_TIMEZONE, TIMEZONE_MAX_LEN - 1);
             tz_string[TIMEZONE_MAX_LEN - 1] = '\0';
             ESP_LOGI(TAG, "No timezone in NVS, using default: %s", tz_string);
+        }
+
+        size_t ntp_server_len = NTP_SERVER_MAX_LEN;
+        if (nvs_get_str(nvs_handle, NVS_NTP_SERVER_KEY, ntp_server, &ntp_server_len) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded NTP server from NVS: %s", ntp_server);
+        } else {
+            strncpy(ntp_server, DEFAULT_NTP_SERVER, NTP_SERVER_MAX_LEN - 1);
+            ntp_server[NTP_SERVER_MAX_LEN - 1] = '\0';
+            ESP_LOGI(TAG, "No NTP server in NVS, using default: %s", ntp_server);
         }
 
         uint8_t stored_orientation = DISPLAY_ORIENTATION_LANDSCAPE;
@@ -324,10 +334,6 @@ void config_manager_set_timezone(const char *tz)
         nvs_close(nvs_handle);
     }
 
-    // Apply timezone immediately
-    setenv("TZ", tz_string, 1);
-    tzset();
-
     ESP_LOGI(TAG, "Timezone set to: %s", tz_string);
 }
 const char *config_manager_get_timezone(void)
@@ -336,6 +342,33 @@ const char *config_manager_get_timezone(void)
         return "UTC0";
     }
     return tz_string;
+}
+
+void config_manager_set_ntp_server(const char *server)
+{
+    if (server == NULL) {
+        return;
+    }
+
+    strncpy(ntp_server, server, NTP_SERVER_MAX_LEN - 1);
+    ntp_server[NTP_SERVER_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_NTP_SERVER_KEY, ntp_server);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "NTP server set to: %s", ntp_server);
+}
+
+const char *config_manager_get_ntp_server(void)
+{
+    if (ntp_server[0] == '\0') {
+        return DEFAULT_NTP_SERVER;
+    }
+    return ntp_server;
 }
 
 void config_manager_set_display_orientation(display_orientation_t orientation)

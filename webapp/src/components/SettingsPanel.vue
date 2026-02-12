@@ -334,6 +334,17 @@ async function performFactoryReset() {
                 />
               </v-col>
             </v-row>
+            <v-row>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.ntpServer"
+                  label="NTP Server"
+                  variant="outlined"
+                  hint="e.g., pool.ntp.org, cn.pool.ntp.org"
+                  persistent-hint
+                />
+              </v-col>
+            </v-row>
 
             <!-- Factory Reset Section -->
             <v-divider class="my-6" />
