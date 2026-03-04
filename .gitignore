@@ -1,6 +1,7 @@
 build/
 sdkconfig
 sdkconfig.old
+partitions.csv
 *.pyc
 .DS_Store
 dependencies.lock

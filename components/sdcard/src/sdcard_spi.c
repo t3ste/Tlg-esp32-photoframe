@@ -7,8 +7,6 @@
 
 static const char *TAG = "sdcard_spi";
 
-#define SDlist "/sdcard"
-
 sdmmc_card_t *card_host = NULL;
 
 esp_err_t sdcard_init(const sdcard_config_t *config)
@@ -32,7 +30,8 @@ esp_err_t sdcard_init(const sdcard_config_t *config)
     ESP_LOGI(TAG, "Mounting SD card via SPI (Host=%d, CS=%d)", config->host_id, config->cs_pin);
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    esp_err_t ret = esp_vfs_fat_sdspi_mount(SDlist, &host, &slot_config, &mount_config, &card_host);
+    esp_err_t ret = esp_vfs_fat_sdspi_mount(config->mount_point, &host, &slot_config, &mount_config,
+                                            &card_host);
 
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {

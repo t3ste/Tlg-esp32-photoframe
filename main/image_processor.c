@@ -57,12 +57,12 @@ static esp_err_t load_calibrated_palette(void)
     }
 
     // Update palette_measured array with loaded values (stored or defaults)
-    palette_measured[0] = (rgb_t) {palette.black.r, palette.black.g, palette.black.b};
-    palette_measured[1] = (rgb_t) {palette.white.r, palette.white.g, palette.white.b};
-    palette_measured[2] = (rgb_t) {palette.yellow.r, palette.yellow.g, palette.yellow.b};
-    palette_measured[3] = (rgb_t) {palette.red.r, palette.red.g, palette.red.b};
-    palette_measured[5] = (rgb_t) {palette.blue.r, palette.blue.g, palette.blue.b};
-    palette_measured[6] = (rgb_t) {palette.green.r, palette.green.g, palette.green.b};
+    palette_measured[0] = (rgb_t){palette.black.r, palette.black.g, palette.black.b};
+    palette_measured[1] = (rgb_t){palette.white.r, palette.white.g, palette.white.b};
+    palette_measured[2] = (rgb_t){palette.yellow.r, palette.yellow.g, palette.yellow.b};
+    palette_measured[3] = (rgb_t){palette.red.r, palette.red.g, palette.red.b};
+    palette_measured[5] = (rgb_t){palette.blue.r, palette.blue.g, palette.blue.b};
+    palette_measured[6] = (rgb_t){palette.green.r, palette.green.g, palette.green.b};
 
     return ESP_OK;
 }

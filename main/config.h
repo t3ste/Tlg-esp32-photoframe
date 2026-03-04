@@ -38,27 +38,21 @@ typedef enum {
 #define DEFAULT_TIMEZONE "UTC0"
 #define DEFAULT_NTP_SERVER "pool.ntp.org"
 
-#define SDCARD_MOUNT_POINT "/sdcard"
 #define DEFAULT_ALBUM_NAME "Default"
 
 #include "board_hal.h"
 
-#ifdef CONFIG_HAS_SDCARD
-#define TEMP_MOUNT_POINT "/sdcard"
-#else
-// Temporary storage mount point for devices without SD card
-#define TEMP_MOUNT_POINT "/storage"
-#endif
+#define FS_MOUNT_POINT "/storage"
 
-#define IMAGE_DIRECTORY TEMP_MOUNT_POINT "/images"
+#define IMAGE_DIRECTORY FS_MOUNT_POINT "/images"
 #define DOWNLOAD_DIRECTORY IMAGE_DIRECTORY "/Downloads"
 
-#define CURRENT_UPLOAD_PATH TEMP_MOUNT_POINT "/.current.tmp"
-#define CURRENT_JPG_PATH TEMP_MOUNT_POINT "/.current.jpg"
-#define CURRENT_BMP_PATH TEMP_MOUNT_POINT "/.current.bmp"
-#define CURRENT_PNG_PATH TEMP_MOUNT_POINT "/.current.png"
-#define CURRENT_IMAGE_LINK TEMP_MOUNT_POINT "/.current.lnk"
-#define CURRENT_CALIBRATION_PATH TEMP_MOUNT_POINT "/.calibration.png"
+#define CURRENT_UPLOAD_PATH FS_MOUNT_POINT "/.current.tmp"
+#define CURRENT_JPG_PATH FS_MOUNT_POINT "/.current.jpg"
+#define CURRENT_BMP_PATH FS_MOUNT_POINT "/.current.bmp"
+#define CURRENT_PNG_PATH FS_MOUNT_POINT "/.current.png"
+#define CURRENT_IMAGE_LINK FS_MOUNT_POINT "/.current.lnk"
+#define CURRENT_CALIBRATION_PATH FS_MOUNT_POINT "/.calibration.png"
 
 #ifdef DEBUG_DEEP_SLEEP_WAKE
 #define AUTO_SLEEP_TIMEOUT_SEC 60

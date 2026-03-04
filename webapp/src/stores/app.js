@@ -17,6 +17,7 @@ export const useAppStore = defineStore("app", () => {
     height: 480,
     has_sdcard: false,
     sdcard_inserted: false,
+    has_flash_storage: false,
     storage_total: 0,
     storage_used: 0,
     version: "v1.0",
@@ -69,7 +70,7 @@ export const useAppStore = defineStore("app", () => {
   async function loadAlbums() {
     loading.value.albums = true;
     try {
-      if (!systemInfo.value.sdcard_inserted) {
+      if (!systemInfo.value.sdcard_inserted && !systemInfo.value.has_flash_storage) {
         albums.value = [{ name: "Default", enabled: true, image_count: 0 }];
         return;
       }
@@ -90,7 +91,7 @@ export const useAppStore = defineStore("app", () => {
   async function loadImages(albumName) {
     loading.value.images = true;
     try {
-      if (!systemInfo.value.sdcard_inserted) {
+      if (!systemInfo.value.sdcard_inserted && !systemInfo.value.has_flash_storage) {
         images.value = [];
         return;
       }

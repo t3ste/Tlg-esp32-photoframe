@@ -14,6 +14,7 @@ extern "C" {
  * @brief SD card configuration
  */
 typedef struct {
+    const char *mount_point;
 #ifdef CONFIG_SDCARD_DRIVER_SPI
     int host_id;
     gpio_num_t cs_pin;

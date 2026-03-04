@@ -7,8 +7,6 @@
 
 static const char *TAG = "sdcard_sdio";
 
-#define SDlist "/sdcard"
-
 sdmmc_card_t *card_host = NULL;
 
 esp_err_t sdcard_init(const sdcard_config_t *config)
@@ -40,7 +38,8 @@ esp_err_t sdcard_init(const sdcard_config_t *config)
              config->clk_pin, config->cmd_pin, config->d0_pin, config->d1_pin, config->d2_pin,
              config->d3_pin);
 
-    esp_err_t ret = esp_vfs_fat_sdmmc_mount(SDlist, &host, &slot_config, &mount_config, &card_host);
+    esp_err_t ret = esp_vfs_fat_sdmmc_mount(config->mount_point, &host, &slot_config, &mount_config,
+                                            &card_host);
 
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {

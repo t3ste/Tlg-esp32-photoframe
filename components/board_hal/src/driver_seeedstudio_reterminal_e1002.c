@@ -125,6 +125,7 @@ esp_err_t board_hal_init(void)
     // Initialize SD card (SPI interface for reTerminal E1002)
     ESP_LOGI(TAG, "Initializing SD card (SPI)...");
     sdcard_config_t sd_cfg = {
+        .mount_point = "/storage",  // Must match FS_MOUNT_POINT in config.h
         .host_id = SPI2_HOST,
         .cs_pin = BOARD_HAL_SD_CS_PIN,
     };

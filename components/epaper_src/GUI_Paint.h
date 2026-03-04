@@ -70,9 +70,10 @@
 #ifndef __GUI_PAINT_H
 #define __GUI_PAINT_H
 
+#include <stdbool.h>
+
 #include "../Fonts/fonts.h"
 #include "DEV_Config.h"
-#include <stdbool.h>
 /**
  * Image attributes
  **/

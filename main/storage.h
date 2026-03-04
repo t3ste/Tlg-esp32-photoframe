@@ -3,10 +3,12 @@
 #include <esp_err.h>
 #include <stdbool.h>
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Partition label used for the LittleFS internal flash storage
+#define LITTLEFS_PARTITION_LABEL "storage"
 
 // Storage backend types
 typedef enum {
@@ -32,27 +34,11 @@ esp_err_t storage_init(void);
 storage_type_t storage_get_type(void);
 
 /**
- * @brief Check if SD card is present and mounted
- *
- * @return true if SD card is available, false otherwise
- */
-bool storage_has_sdcard(void);
-
-/**
  * @brief Check if any persistent storage (SD or Flash) is available
  *
  * @return true if persistent storage is available, false otherwise
  */
 bool storage_has_persistent_storage(void);
-
-/**
- * @brief Check if the system can process images to files
- *        Currently, this is only practical on systems with an SD card
- *        due to internal flash fragmentation/wear issues.
- *
- * @return true if processing to file is supported
- */
-bool storage_can_process_to_file(void);
 
 /**
  * @brief Read WiFi credentials from "wifi.txt" file on root storage (if available)

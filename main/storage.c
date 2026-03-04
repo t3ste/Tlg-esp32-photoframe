@@ -28,8 +28,8 @@ static esp_err_t mount_littlefs(void)
     ESP_LOGI(TAG, "Initializing LittleFS");
 
     esp_vfs_littlefs_conf_t conf = {
-        .base_path = TEMP_MOUNT_POINT,
-        .partition_label = "storage",
+        .base_path = FS_MOUNT_POINT,
+        .partition_label = LITTLEFS_PARTITION_LABEL,
         .format_if_mount_failed = true,
         .dont_mount = false,
     };
@@ -85,8 +85,8 @@ esp_err_t storage_init(void)
 #endif
 
     // Final fallback to MemFS
-    ESP_LOGW(TAG, "No persistent storage available, mounting MemFS at %s", TEMP_MOUNT_POINT);
-    ret = memfs_mount(TEMP_MOUNT_POINT, 10);
+    ESP_LOGW(TAG, "No persistent storage available, mounting MemFS at %s", FS_MOUNT_POINT);
+    ret = memfs_mount(FS_MOUNT_POINT, 10);
     if (ret == ESP_OK) {
         current_storage_type = STORAGE_TYPE_MEMFS;
     } else {
@@ -101,30 +101,10 @@ storage_type_t storage_get_type(void)
     return current_storage_type;
 }
 
-bool storage_has_sdcard(void)
-{
-#ifdef CONFIG_HAS_SDCARD
-    return sdcard_is_mounted();
-#else
-    return false;
-#endif
-}
-
 bool storage_has_persistent_storage(void)
 {
     return current_storage_type == STORAGE_TYPE_SDCARD ||
            current_storage_type == STORAGE_TYPE_LITTLEFS;
-}
-
-bool storage_can_process_to_file(void)
-{
-#ifdef CONFIG_HAS_SDCARD
-    // Only SD cards are generally large and durable enough for consistent
-    // temporary image processing files. Internal flash should use RAM buffers.
-    return true;
-#else
-    return false;
-#endif
 }
 
 esp_err_t storage_read_wifi_credentials(char *ssid, char *password)
@@ -135,7 +115,7 @@ esp_err_t storage_read_wifi_credentials(char *ssid, char *password)
     }
 
     // Try multiple possible locations, starting with the safest (config folder)
-    const char *paths[] = {"/sdcard/config/wifi.txt", "/sdcard/wifi.txt", NULL};
+    const char *paths[] = {FS_MOUNT_POINT "/config/wifi.txt", FS_MOUNT_POINT "/wifi.txt", NULL};
 
     FILE *f = NULL;
     for (int i = 0; paths[i] != NULL; i++) {

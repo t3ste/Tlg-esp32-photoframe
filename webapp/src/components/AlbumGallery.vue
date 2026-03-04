@@ -130,51 +130,57 @@ function getThumbnailUrl(image) {
         <span v-if="displayLoading" class="text-body-2 text-grey"> Updating display... </span>
       </div>
 
-      <v-row v-if="appStore.currentAlbumImages.length > 0">
-        <v-col
-          v-for="image in appStore.currentAlbumImages"
-          :key="image.filename"
-          cols="6"
-          sm="4"
-          md="3"
-          lg="2"
-        >
-          <v-card variant="outlined" class="image-card">
-            <v-img
-              :src="getThumbnailUrl(image)"
-              :alt="image.filename"
-              aspect-ratio="1"
-              contain
-              class="cursor-pointer bg-grey-lighten-3"
-              @click="confirmDisplayImage(image)"
-            >
-              <template #placeholder>
-                <div class="d-flex align-center justify-center fill-height">
-                  <v-progress-circular indeterminate color="grey-lighten-4" />
-                </div>
-              </template>
-            </v-img>
-            <v-card-actions class="pa-1">
-              <span class="text-caption text-truncate flex-grow-1 px-1">
-                {{ image.filename }}
-              </span>
-              <v-btn
-                icon
-                size="x-small"
-                variant="text"
-                color="error"
-                @click="confirmDeleteImage(image)"
-              >
-                <v-icon size="small"> mdi-delete </v-icon>
-              </v-btn>
-            </v-card-actions>
-          </v-card>
-        </v-col>
-      </v-row>
+      <div v-if="appStore.loading.images" class="d-flex justify-center align-center py-12">
+        <v-progress-circular indeterminate color="primary" />
+      </div>
 
-      <v-alert v-else type="info" variant="tonal" class="mt-4">
-        No images in this album. Upload images to get started.
-      </v-alert>
+      <template v-else>
+        <v-row v-if="appStore.currentAlbumImages.length > 0">
+          <v-col
+            v-for="image in appStore.currentAlbumImages"
+            :key="image.filename"
+            cols="6"
+            sm="4"
+            md="3"
+            lg="2"
+          >
+            <v-card variant="outlined" class="image-card">
+              <v-img
+                :src="getThumbnailUrl(image)"
+                :alt="image.filename"
+                aspect-ratio="1"
+                contain
+                class="cursor-pointer bg-grey-lighten-3"
+                @click="confirmDisplayImage(image)"
+              >
+                <template #placeholder>
+                  <div class="d-flex align-center justify-center fill-height">
+                    <v-progress-circular indeterminate color="grey-lighten-4" />
+                  </div>
+                </template>
+              </v-img>
+              <v-card-actions class="pa-1">
+                <span class="text-caption text-truncate flex-grow-1 px-1">
+                  {{ image.filename }}
+                </span>
+                <v-btn
+                  icon
+                  size="x-small"
+                  variant="text"
+                  color="error"
+                  @click="confirmDeleteImage(image)"
+                >
+                  <v-icon size="small"> mdi-delete </v-icon>
+                </v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <v-alert v-else type="info" variant="tonal" class="mt-4">
+          No images in this album. Upload images to get started.
+        </v-alert>
+      </template>
     </v-card-text>
   </v-card>
 

@@ -247,7 +247,7 @@ static esp_err_t parse_multipart_upload(httpd_req_t *req, const char *base_dir,
                             name_len, sizeof(result->original_filename) - 1)] = '\0';
 
                         if (require_png) {
-                            // Check PNG or GZIP extension for image field
+                            // Check PNG extension for image field
                             char *ext = strrchr(result->original_filename, '.');
                             if (!ext || strcasecmp(ext, ".png") != 0) {
                                 if (fp)
@@ -387,9 +387,7 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
     if (is_multipart) {
         // Handle multipart upload with optional thumbnail using shared helper
         multipart_result_t result;
-        const char *temp_dir = TEMP_MOUNT_POINT;
-
-        esp_err_t err = parse_multipart_upload(req, temp_dir, ".current_upload.tmp",
+        esp_err_t err = parse_multipart_upload(req, FS_MOUNT_POINT, ".current_upload.tmp",
                                                ".current_thumb.tmp", &result, false);
         if (err != ESP_OK) {
             return ESP_FAIL;
@@ -659,7 +657,7 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             // Needs processing (JPG or raw PNG)
             dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
 
-            if (storage_can_process_to_file()) {
+            if (storage_has_persistent_storage()) {
                 // Persistent storage system: process to file
                 err = image_processor_process(temp_upload_path, temp_png_path, algo);
 
@@ -1070,11 +1068,7 @@ static esp_err_t delete_image_handler(httpd_req_t *req)
         httpd_resp_sendstr(req, "System is still initializing");
         return ESP_FAIL;
     }
-    extern bool g_littlefs_mounted;
-    bool storage_mounted = g_littlefs_mounted;
-    storage_mounted = true;
-
-    if (!storage_mounted) {
+    if (!storage_has_persistent_storage()) {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Storage not found");
         return ESP_FAIL;
     }
@@ -2085,32 +2079,33 @@ static esp_err_t system_info_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(response, "height", BOARD_HAL_DISPLAY_HEIGHT);
     cJSON_AddStringToObject(response, "board_name", BOARD_HAL_NAME);
 
-    bool has_storage = storage_has_persistent_storage();
-    bool storage_mounted = storage_has_persistent_storage();
-    uint32_t storage_total = 0;
-    uint32_t storage_used = 0;
+    storage_type_t storage_type = storage_get_type();
+    bool sdcard_inserted = (storage_type == STORAGE_TYPE_SDCARD);
+    bool has_flash_storage = (storage_type == STORAGE_TYPE_LITTLEFS);
+    uint64_t storage_total = 0;
+    uint64_t storage_used = 0;
 
-    if (storage_mounted) {
-        if (storage_get_type() == STORAGE_TYPE_SDCARD) {
-            uint64_t t = 0, f = 0;
-            if (esp_vfs_fat_info("/sdcard", &t, &f) == ESP_OK) {
-                storage_total = (uint32_t) t;
-                storage_used = (uint32_t) (t - f);
-            }
-        } else if (storage_get_type() == STORAGE_TYPE_LITTLEFS) {
-            size_t t = 0, u = 0;
-            if (esp_littlefs_info("storage", &t, &u) == ESP_OK) {
-                storage_total = t;
-                storage_used = u;
-            }
+    if (sdcard_inserted) {
+        uint64_t t = 0, f = 0;
+        if (esp_vfs_fat_info(FS_MOUNT_POINT, &t, &f) == ESP_OK) {
+            storage_total = t;
+            storage_used = t - f;
+        }
+    } else if (has_flash_storage) {
+        size_t t = 0, u = 0;
+        if (esp_littlefs_info(LITTLEFS_PARTITION_LABEL, &t, &u) == ESP_OK) {
+            storage_total = t;
+            storage_used = u;
         }
     }
 
-    // The frontend checks has_sdcard and sdcard_inserted.
-    // By setting these to true if LittleFS is mounted, we effectively "spoof"
-    // the SD card so the UI allows uploads and album creation.
-    cJSON_AddBoolToObject(response, "has_sdcard", has_storage);
-    cJSON_AddBoolToObject(response, "sdcard_inserted", storage_mounted);
+#ifdef CONFIG_HAS_SDCARD
+    cJSON_AddBoolToObject(response, "has_sdcard", true);
+#else
+    cJSON_AddBoolToObject(response, "has_sdcard", false);
+#endif
+    cJSON_AddBoolToObject(response, "sdcard_inserted", sdcard_inserted);
+    cJSON_AddBoolToObject(response, "has_flash_storage", has_flash_storage);
 
     // Pass along new storage properties
     cJSON_AddNumberToObject(response, "storage_total", storage_total);

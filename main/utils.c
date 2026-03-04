@@ -339,7 +339,7 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
             }
             dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
 
-            if (storage_can_process_to_file()) {
+            if (storage_has_persistent_storage()) {
                 // Persistent storage system: process to file
                 err = image_processor_process(temp_upload_path, temp_png_path, algo);
                 if (err != ESP_OK) {

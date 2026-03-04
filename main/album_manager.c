@@ -10,7 +10,6 @@
 #include "nvs.h"
 #include "storage.h"
 
-
 static const char *TAG = "album_manager";
 static char enabled_albums_str[512] = "";
 

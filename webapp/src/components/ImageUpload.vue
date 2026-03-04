@@ -24,7 +24,25 @@ const THUMBNAIL_WIDTH = 400;
 const THUMBNAIL_HEIGHT = 240;
 
 const canSaveToAlbum = computed(() => {
-  return appStore.systemInfo.has_sdcard && appStore.systemInfo.sdcard_inserted;
+  return appStore.systemInfo.sdcard_inserted || appStore.systemInfo.has_flash_storage;
+});
+
+const formatStorageBytes = (bytes) => {
+  if (!bytes) return "0 MB";
+  return (bytes / 1024 / 1024).toFixed(1) + " MB";
+};
+const storageUsedMBString = computed(() => formatStorageBytes(appStore.systemInfo.storage_used));
+const storageTotalMBString = computed(() => formatStorageBytes(appStore.systemInfo.storage_total));
+const storageUsedPercent = computed(() => {
+  const total = appStore.systemInfo.storage_total || 1;
+  const used = appStore.systemInfo.storage_used || 0;
+  return Math.round((used / total) * 100);
+});
+const storageColor = computed(() => {
+  const pct = storageUsedPercent.value;
+  if (pct > 90) return "error";
+  if (pct > 75) return "warning";
+  return "success";
 });
 
 // Image processor library
@@ -392,6 +410,20 @@ async function generateAiImage() {
     <v-card-title class="d-flex align-center">
       <v-icon icon="mdi-upload" class="mr-2" />
       Upload Image
+      <v-spacer />
+      <template v-if="canSaveToAlbum && appStore.systemInfo.storage_total > 0">
+        <v-icon
+          :icon="appStore.systemInfo.sdcard_inserted ? 'mdi-sd' : 'mdi-database'"
+          size="small"
+          class="mr-1"
+        />
+        <span class="text-body-2 text-medium-emphasis mr-2">
+          {{ storageUsedMBString }} / {{ storageTotalMBString }}
+        </span>
+        <v-chip size="x-small" :color="storageColor" variant="flat" class="text-white">
+          {{ storageUsedPercent }}%
+        </v-chip>
+      </template>
     </v-card-title>
 
     <v-card-text>

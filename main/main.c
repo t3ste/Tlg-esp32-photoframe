@@ -21,10 +21,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#ifdef CONFIG_USE_INTERNAL_FLASH_STORAGE
-#include "esp_littlefs.h"
-#endif
-
 // External RTC support
 #ifdef CONFIG_EXT_RTC_ENABLED
 #include "ext_rtc.h"

@@ -24,7 +24,6 @@
 #include "nvs.h"
 #include "storage.h"
 
-
 static const char *TAG = "display_manager";
 #define NVS_LAST_IMAGE_KEY "last_image"
 
@@ -425,7 +424,7 @@ static void rotate_sequential(char **enabled_albums, int album_count)
                             strcmp(ext, ".png") == 0 || strcmp(ext, ".PNG") == 0)) {
                     char fullpath[512];
                     snprintf(fullpath, sizeof(fullpath), "%s/%s", album_path, entry->d_name);
-                    ESP_LOGI(TAG, "  Found image [%ld]: %s", (long) current_idx, fullpath);
+                    ESP_LOGD(TAG, "  Found image [%ld]: %s", (long) current_idx, fullpath);
 
                     // Keep track of the very first image in case we need to wrap
                     if (first_image[0] == '\0') {
@@ -598,9 +597,9 @@ void display_manager_rotate_from_sdcard(void)
         return;
     }
 
-    ESP_LOGI(TAG, "Collecting images from %d enabled album(s)", album_count);
+    ESP_LOGD(TAG, "Collecting images from %d enabled album(s)", album_count);
     for (int i = 0; i < album_count; i++) {
-        ESP_LOGI(TAG, "  Enabled album[%d]: %s", i, enabled_albums[i]);
+        ESP_LOGD(TAG, "  Enabled album[%d]: %s", i, enabled_albums[i]);
     }
 
     // Check for stale albums (removed from SD card) and disable them

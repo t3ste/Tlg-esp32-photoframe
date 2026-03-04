@@ -60,7 +60,8 @@ esp_err_t board_hal_init(void)
 
     adc_oneshot_chan_cfg_t config = {
         .bitwidth = ADC_BITWIDTH_DEFAULT,
-        .atten = ADC_ATTEN_DB_12,  // 11dB or 12dB for full range (up to ~3.3V)
+        .atten =
+            ADC_ATTEN_DB_12,  // Full range up to ~3.3V (renamed from ADC_ATTEN_DB_11 in IDF 5.x)
     };
     ret = adc_oneshot_config_channel(adc_handle, VBAT_ADC_CHANNEL, &config);
     if (ret != ESP_OK) {
@@ -87,6 +88,8 @@ esp_err_t board_hal_prepare_for_sleep(void)
 
 bool board_hal_is_battery_connected(void)
 {
+    // TODO: Detect battery presence via ADC voltage threshold or a dedicated GPIO.
+    // Currently always returns false (assumes no battery monitoring).
     return false;
 }
 
@@ -97,6 +100,8 @@ int board_hal_get_battery_voltage(void)
 
     int adc_raw;
     if (adc_oneshot_read(adc_handle, VBAT_ADC_CHANNEL, &adc_raw) == ESP_OK) {
+        // TODO: Use esp_adc_cal / adc_cali for calibrated readings; raw conversion
+        // can be off by 5-15% due to non-linear ADC response on ESP32-S3.
         float voltage_mv = (float) adc_raw * (3300.0f / 4095.0f) * VBAT_VOLTAGE_DIVIDER;
         return (int) voltage_mv;
     }
@@ -121,12 +126,14 @@ int board_hal_get_battery_percent(void)
 
 bool board_hal_is_charging(void)
 {
+    // TODO: Read BQ24070 charging status from its CHRG GPIO pin.
     return false;
 }
 
 bool board_hal_is_usb_connected(void)
 {
-    // For now returning true ensures logic doesn't aggressively sleep if debugging.
+    // TODO: Detect USB presence via BQ24070 PG (power-good) pin or VBUS sensing.
+    // Hardcoded to true to prevent aggressive sleep during development.
     return true;
 }
 

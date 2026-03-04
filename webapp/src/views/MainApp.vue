@@ -35,7 +35,11 @@ onMounted(async () => {
     <v-main class="bg-grey-lighten-4">
       <v-container class="py-6" style="max-width: 1200px">
         <v-alert
-          v-if="appStore.systemInfo.has_sdcard && !appStore.systemInfo.sdcard_inserted"
+          v-if="
+            appStore.systemInfo.has_sdcard &&
+            !appStore.systemInfo.sdcard_inserted &&
+            !appStore.systemInfo.has_flash_storage
+          "
           type="info"
           variant="tonal"
           class="mb-6"
@@ -43,7 +47,9 @@ onMounted(async () => {
           text="This device supports an SD card. To upload images and create multiple albums, please insert one and restart the device."
         ></v-alert>
 
-        <AlbumGallery v-if="appStore.systemInfo.sdcard_inserted" />
+        <AlbumGallery
+          v-if="appStore.systemInfo.sdcard_inserted || appStore.systemInfo.has_flash_storage"
+        />
 
         <ImageUpload class="mt-6" />
 
