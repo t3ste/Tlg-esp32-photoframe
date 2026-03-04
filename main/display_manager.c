@@ -2,6 +2,7 @@
 
 #include <dirent.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -21,9 +22,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "nvs.h"
-#ifdef CONFIG_HAS_SDCARD
-#include "sdcard.h"
-#endif
+#include "storage.h"
+
 
 static const char *TAG = "display_manager";
 #define NVS_LAST_IMAGE_KEY "last_image"
@@ -395,7 +395,6 @@ const char *display_manager_get_current_image(void)
     return current_image;
 }
 
-#ifdef CONFIG_HAS_SDCARD
 static void rotate_sequential(char **enabled_albums, int album_count)
 {
     ESP_LOGI(TAG, "Sequential rotation mode");
@@ -426,6 +425,7 @@ static void rotate_sequential(char **enabled_albums, int album_count)
                             strcmp(ext, ".png") == 0 || strcmp(ext, ".PNG") == 0)) {
                     char fullpath[512];
                     snprintf(fullpath, sizeof(fullpath), "%s/%s", album_path, entry->d_name);
+                    ESP_LOGI(TAG, "  Found image [%ld]: %s", (long) current_idx, fullpath);
 
                     // Keep track of the very first image in case we need to wrap
                     if (first_image[0] == '\0') {
@@ -447,6 +447,11 @@ static void rotate_sequential(char **enabled_albums, int album_count)
         }
         closedir(dir);
     }
+
+    ESP_LOGI(
+        TAG,
+        "Sequential rotation finished traversal. current_idx=%ld, target_idx=%ld, found_target=%d",
+        (long) current_idx, (long) target_idx, found_target);
 
     // If we reached here, we didn't find the target index (or the list has changed and is
     // shorter) Wrap around to the first image
@@ -576,11 +581,11 @@ void display_manager_rotate_from_sdcard(void)
     if (!config_manager_get_auto_rotate()) {
         ESP_LOGI(TAG, "Manual rotation triggered (auto-rotate is disabled)");
     } else {
-        ESP_LOGI(TAG, "Rotating from SD card");
+        ESP_LOGI(TAG, "Rotating from storage");
     }
 
-    if (!sdcard_is_mounted()) {
-        ESP_LOGI(TAG, "SD card not mounted - skipping auto-rotate");
+    if (!storage_has_persistent_storage()) {
+        ESP_LOGI(TAG, "Storage not mounted - skipping rotation");
         return;
     }
 
@@ -594,6 +599,9 @@ void display_manager_rotate_from_sdcard(void)
     }
 
     ESP_LOGI(TAG, "Collecting images from %d enabled album(s)", album_count);
+    for (int i = 0; i < album_count; i++) {
+        ESP_LOGI(TAG, "  Enabled album[%d]: %s", i, enabled_albums[i]);
+    }
 
     // Check for stale albums (removed from SD card) and disable them
     bool found_stale_albums = false;
@@ -627,6 +635,5 @@ void display_manager_rotate_from_sdcard(void)
     }
 
     album_manager_free_album_list(enabled_albums, album_count);
-    ESP_LOGI(TAG, "Auto-rotate complete");
+    ESP_LOGI(TAG, "Rotation complete");
 }
-#endif

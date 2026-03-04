@@ -148,6 +148,9 @@ async function uploadImage(mode = "upload") {
     });
 
     if (response.ok) {
+      // Reload system info to update storage numbers whether in display or album mode
+      await appStore.loadSystemInfo();
+
       if (!isDirectDisplay && canSaveToAlbum.value) {
         await appStore.loadImages(appStore.selectedAlbum);
       }
