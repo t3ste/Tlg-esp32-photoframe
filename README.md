@@ -105,12 +105,12 @@ Configure your API keys in **Settings > AI Generation**.
 - **Features**: 7.3" 7-color e-paper, integrated ESP32-S3, SD card slot
 
 ### Seeed Studio XIAO EE02
-- **Product**: [Seeed Studio XIAO EE02](https://www.seeedstudio.com/XIAO-ePaper-Display-Board-ESP32-S3-EE02-p-6639.html)
+- **Product**: [Seeed Studio XIAO EE02](https://www.seeedstudio.com/XIAO-ePaper-DIY-Kit-EE02-for-13-3-Spectratm-6-E-Ink.html)
 - **Board Name**: `seeedstudio_xiao_ee02`
 - **Configuration**: Setup using Seeed Studio XIAO EE02 + dedicated 13.3" ePaper display
 
 ### Seeed Studio XIAO EE04
-- **Product**: [Seeed Studio XIAO EE04](https://www.seeedstudio.com/7-3inch-Six-Color-eInk-ePaper-Display-with-800x480-Pixels-p-6567.html)
+- **Product**: [Seeed Studio XIAO EE04](https://www.seeedstudio.com/XIAO-ePaper-EE04-DIY-Bundle-Kit.html)
 - **Board Name**: `seeedstudio_xiao_ee04`
 - **Configuration**: Setup using Seeed Studio XIAO EE04 + dedicated 7.3" 6-color ePaper display
 
