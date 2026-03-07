@@ -1486,7 +1486,7 @@ static esp_err_t config_handler(httpd_req_t *req)
                                 config_manager_get_sleep_schedule_start());
         cJSON_AddNumberToObject(root, "sleep_schedule_end",
                                 config_manager_get_sleep_schedule_end());
-        const char *rotation_mode_str = "sdcard";
+        const char *rotation_mode_str = "storage";
         rotation_mode_t rm = config_manager_get_rotation_mode();
         if (rm == ROTATION_MODE_URL)
             rotation_mode_str = "url";
@@ -1693,9 +1693,12 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON *rotation_mode_obj = cJSON_GetObjectItem(root, "rotation_mode");
         if (rotation_mode_obj && cJSON_IsString(rotation_mode_obj)) {
             const char *mode_str = cJSON_GetStringValue(rotation_mode_obj);
-            rotation_mode_t mode = ROTATION_MODE_SDCARD;
+            rotation_mode_t mode = ROTATION_MODE_STORAGE;
             if (strcmp(mode_str, "url") == 0)
                 mode = ROTATION_MODE_URL;
+            // Backwards compatibility: accept "sdcard" as alias for "storage"
+            if (strcmp(mode_str, "sdcard") == 0)
+                mode = ROTATION_MODE_STORAGE;
             config_manager_set_rotation_mode(mode);
         }
 

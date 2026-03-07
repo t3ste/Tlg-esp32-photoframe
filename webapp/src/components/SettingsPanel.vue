@@ -128,7 +128,7 @@ const rotationModeOptions = computed(() => {
     const label = appStore.systemInfo.sdcard_inserted
       ? "SD Card - Rotate through images"
       : "Storage - Rotate through images";
-    options.unshift({ title: label, value: "sdcard" });
+    options.unshift({ title: label, value: "storage" });
   }
   return options;
 });
@@ -428,7 +428,7 @@ async function performFactoryReset() {
 
               <v-expand-transition>
                 <v-card
-                  v-if="settingsStore.deviceSettings.rotationMode === 'sdcard'"
+                  v-if="settingsStore.deviceSettings.rotationMode === 'storage'"
                   variant="tonal"
                   class="mb-4"
                 >

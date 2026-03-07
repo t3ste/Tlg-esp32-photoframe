@@ -34,7 +34,7 @@ export const useSettingsStore = defineStore("settings", () => {
     sleepScheduleEnabled: false,
     sleepScheduleStart: "23:00",
     sleepScheduleEnd: "07:00",
-    rotationMode: "sdcard",
+    rotationMode: "storage",
     // Auto Rotate - SDCARD
     sdRotationMode: "random",
     // Auto Rotate - URL
@@ -168,7 +168,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.httpHeaderKey = data.http_header_key || "";
       deviceSettings.value.httpHeaderValue = data.http_header_value || "";
       deviceSettings.value.displayOrientation = data.display_orientation || "landscape";
-      deviceSettings.value.rotationMode = data.rotation_mode || "sdcard";
+      deviceSettings.value.rotationMode = data.rotation_mode || "storage";
       deviceSettings.value.sdRotationMode = data.sd_rotation_mode || "random";
       deviceSettings.value.deviceName = data.device_name || "PhotoFrame";
       deviceSettings.value.ntpServer = data.ntp_server || "pool.ntp.org";

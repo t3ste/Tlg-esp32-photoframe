@@ -575,7 +575,7 @@ static void rotate_random(char **enabled_albums, int album_count)
     free(image_list);
 }
 
-void display_manager_rotate_from_sdcard(void)
+void display_manager_rotate_from_storage(void)
 {
     if (!config_manager_get_auto_rotate()) {
         ESP_LOGI(TAG, "Manual rotation triggered (auto-rotate is disabled)");

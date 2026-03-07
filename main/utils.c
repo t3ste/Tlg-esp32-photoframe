@@ -539,12 +539,12 @@ esp_err_t trigger_image_rotation(void)
             result = ESP_OK;
         } else {
             ESP_LOGE(TAG, "Failed to download image from URL, falling back to local rotation");
-            display_manager_rotate_from_sdcard();
+            display_manager_rotate_from_storage();
             result = ESP_FAIL;
         }
     } else {
         // Local storage mode - rotate through albums
-        display_manager_rotate_from_sdcard();
+        display_manager_rotate_from_storage();
         result = ESP_OK;
     }
 
