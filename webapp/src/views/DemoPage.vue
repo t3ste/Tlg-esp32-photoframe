@@ -390,15 +390,14 @@ function newImage() {
 
                     <v-divider class="mb-4" />
 
-                    <div class="text-subtitle-1 mb-2 mt-4">Select Board:</div>
-                    <v-radio-group v-model="selectedBoard" class="mb-4">
-                      <v-radio
-                        v-for="board in boardOptions"
-                        :key="board.value"
-                        :label="board.label"
-                        :value="board.value"
-                      />
-                    </v-radio-group>
+                    <v-select
+                      v-model="selectedBoard"
+                      :items="boardOptions"
+                      item-title="label"
+                      item-value="value"
+                      label="Select Board"
+                      class="mb-4 mt-4"
+                    />
 
                     <div class="d-flex justify-center">
                       <esp-web-install-button
