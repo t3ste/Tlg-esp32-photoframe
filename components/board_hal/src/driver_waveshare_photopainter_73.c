@@ -6,6 +6,7 @@
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 #include "pcf85063.h"
 #include "sensor.h"
 
@@ -30,6 +31,31 @@ esp_err_t board_hal_init(void)
         .glitch_ignore_cnt = 7,
         .flags.enable_internal_pullup = true,
     };
+    // Manually recover I2C bus before initializing the master driver.
+    // If the ESP32 entered deep sleep mid-I2C-transaction, a slave may still
+    // be holding SDA low. Toggle SCL 9+ times to clock out any stuck data,
+    // then send a STOP condition (SDA low->high while SCL is high).
+    gpio_set_direction(BOARD_HAL_I2C_SCL_PIN, GPIO_MODE_OUTPUT_OD);
+    gpio_set_direction(BOARD_HAL_I2C_SDA_PIN, GPIO_MODE_OUTPUT_OD);
+    gpio_set_pull_mode(BOARD_HAL_I2C_SCL_PIN, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(BOARD_HAL_I2C_SDA_PIN, GPIO_PULLUP_ONLY);
+    for (int i = 0; i < 9; i++) {
+        gpio_set_level(BOARD_HAL_I2C_SCL_PIN, 0);
+        esp_rom_delay_us(5);
+        gpio_set_level(BOARD_HAL_I2C_SCL_PIN, 1);
+        esp_rom_delay_us(5);
+    }
+    // STOP condition
+    gpio_set_level(BOARD_HAL_I2C_SDA_PIN, 0);
+    esp_rom_delay_us(5);
+    gpio_set_level(BOARD_HAL_I2C_SCL_PIN, 1);
+    esp_rom_delay_us(5);
+    gpio_set_level(BOARD_HAL_I2C_SDA_PIN, 1);
+    esp_rom_delay_us(5);
+    // Release GPIOs so I2C driver can take over
+    gpio_reset_pin(BOARD_HAL_I2C_SCL_PIN);
+    gpio_reset_pin(BOARD_HAL_I2C_SDA_PIN);
+
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_config, &i2c_bus));
     axp2101_init(i2c_bus);
     axp2101_cmd_init();
