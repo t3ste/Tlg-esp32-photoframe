@@ -1348,7 +1348,8 @@ static esp_err_t format_storage_handler(httpd_req_t *req)
     }
 
     if (storage_get_type() != STORAGE_TYPE_LITTLEFS) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Format only supported for internal flash storage");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                            "Format only supported for internal flash storage");
         return ESP_FAIL;
     }
 
@@ -2851,9 +2852,9 @@ esp_err_t http_server_init(void)
         httpd_register_uri_handler(server, &keep_alive_uri);
 
         httpd_uri_t format_storage_uri = {.uri = "/api/format-storage",
-                                           .method = HTTP_POST,
-                                           .handler = format_storage_handler,
-                                           .user_ctx = NULL};
+                                          .method = HTTP_POST,
+                                          .handler = format_storage_handler,
+                                          .user_ctx = NULL};
         httpd_register_uri_handler(server, &format_storage_uri);
 
         httpd_uri_t display_image_direct_uri = {.uri = "/api/display-image",

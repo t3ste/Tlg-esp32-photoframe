@@ -425,7 +425,10 @@ async function performFactoryReset() {
 
               <v-expand-transition>
                 <v-card
-                  v-if="settingsStore.deviceSettings.autoRotate && settingsStore.deviceSettings.rotationMode === 'storage'"
+                  v-if="
+                    settingsStore.deviceSettings.autoRotate &&
+                    settingsStore.deviceSettings.rotationMode === 'storage'
+                  "
                   variant="tonal"
                   class="mb-4"
                 >
@@ -445,7 +448,10 @@ async function performFactoryReset() {
 
               <v-expand-transition>
                 <v-card
-                  v-if="settingsStore.deviceSettings.autoRotate && settingsStore.deviceSettings.rotationMode === 'url'"
+                  v-if="
+                    settingsStore.deviceSettings.autoRotate &&
+                    settingsStore.deviceSettings.rotationMode === 'url'
+                  "
                   variant="tonal"
                   class="mb-4"
                 >
