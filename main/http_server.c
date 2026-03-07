@@ -1329,6 +1329,40 @@ static esp_err_t sleep_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t format_storage_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    if (storage_get_type() != STORAGE_TYPE_LITTLEFS) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Format only supported for internal flash storage");
+        return ESP_FAIL;
+    }
+
+    esp_err_t ret = storage_format();
+    cJSON *response = cJSON_CreateObject();
+
+    if (ret == ESP_OK) {
+        cJSON_AddStringToObject(response, "status", "success");
+        cJSON_AddStringToObject(response, "message", "Storage formatted successfully");
+    } else {
+        cJSON_AddStringToObject(response, "status", "error");
+        cJSON_AddStringToObject(response, "message", "Failed to format storage");
+    }
+
+    char *json_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(response);
+
+    return ret == ESP_OK ? ESP_OK : ESP_FAIL;
+}
+
 static esp_err_t rotate_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -2805,6 +2839,12 @@ esp_err_t http_server_init(void)
                                       .handler = keep_alive_handler,
                                       .user_ctx = NULL};
         httpd_register_uri_handler(server, &keep_alive_uri);
+
+        httpd_uri_t format_storage_uri = {.uri = "/api/format-storage",
+                                           .method = HTTP_POST,
+                                           .handler = format_storage_handler,
+                                           .user_ctx = NULL};
+        httpd_register_uri_handler(server, &format_storage_uri);
 
         httpd_uri_t display_image_direct_uri = {.uri = "/api/display-image",
                                                 .method = HTTP_POST,

@@ -238,6 +238,28 @@ watch(aiProvider, (newProvider) => {
   aiModel.value = newProvider === 0 ? "gpt-image-1.5" : "gemini-2.5-flash-image";
 });
 
+const showFormatConfirm = ref(false);
+const formatting = ref(false);
+
+async function formatStorage() {
+  formatting.value = true;
+  try {
+    const response = await fetch("/api/format-storage", { method: "POST" });
+    if (response.ok) {
+      showMessage("Storage formatted successfully", "success");
+      await appStore.loadSystemInfo();
+      await appStore.loadImages(appStore.selectedAlbum);
+    } else {
+      showMessage("Failed to format storage", "error");
+    }
+  } catch (error) {
+    showMessage(`Format failed: ${error.message}`, "error");
+  } finally {
+    formatting.value = false;
+    showFormatConfirm.value = false;
+  }
+}
+
 const snackbar = ref(false);
 const snackbarText = ref("");
 const snackbarColor = ref("info");
@@ -423,6 +445,15 @@ async function generateAiImage() {
         <v-chip size="x-small" :color="storageColor" variant="flat" class="text-white">
           {{ storageUsedPercent }}%
         </v-chip>
+        <v-btn
+          v-if="appStore.systemInfo.has_flash_storage && !appStore.systemInfo.sdcard_inserted"
+          icon="mdi-delete-sweep"
+          size="x-small"
+          variant="text"
+          class="ml-1"
+          title="Format storage"
+          @click="showFormatConfirm = true"
+        />
       </template>
     </v-card-title>
 
@@ -541,6 +572,20 @@ async function generateAiImage() {
           <v-spacer />
           <v-btn variant="text" @click="showAiDialog = false">Cancel</v-btn>
           <v-btn color="primary" :loading="generatingAi" @click="generateAiImage"> Generate </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+    <!-- Format Storage Confirmation Dialog -->
+    <v-dialog v-model="showFormatConfirm" max-width="400">
+      <v-card>
+        <v-card-title>Format Storage</v-card-title>
+        <v-card-text>
+          This will erase all images on internal storage. This action cannot be undone.
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="showFormatConfirm = false">Cancel</v-btn>
+          <v-btn color="error" :loading="formatting" @click="formatStorage">Format</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

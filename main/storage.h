@@ -49,6 +49,13 @@ bool storage_has_persistent_storage(void);
  */
 esp_err_t storage_read_wifi_credentials(char *ssid, char *password);
 
+/**
+ * @brief Format the internal flash storage (LittleFS only)
+ *
+ * @return esp_err_t ESP_OK on success
+ */
+esp_err_t storage_format(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -16,6 +16,9 @@
 #include "esp_littlefs.h"
 #endif
 
+#include <sys/stat.h>
+
+#include "album_manager.h"
 #include "memfs.h"
 #include "utils.h"
 
@@ -105,6 +108,44 @@ bool storage_has_persistent_storage(void)
 {
     return current_storage_type == STORAGE_TYPE_SDCARD ||
            current_storage_type == STORAGE_TYPE_LITTLEFS;
+}
+
+esp_err_t storage_format(void)
+{
+#ifdef CONFIG_USE_INTERNAL_FLASH_STORAGE
+    if (current_storage_type != STORAGE_TYPE_LITTLEFS) {
+        ESP_LOGE(TAG, "Format only supported for LittleFS storage");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    ESP_LOGW(TAG, "Formatting LittleFS partition...");
+
+    // Unmount, format, and remount
+    esp_vfs_littlefs_unregister(LITTLEFS_PARTITION_LABEL);
+    esp_err_t ret = esp_littlefs_format(LITTLEFS_PARTITION_LABEL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to format LittleFS: %s", esp_err_to_name(ret));
+        // Try to remount anyway
+        mount_littlefs();
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "LittleFS formatted successfully, remounting...");
+    ret = mount_littlefs();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to remount LittleFS after format");
+        return ret;
+    }
+
+    // Recreate the images directory after format
+    mkdir(IMAGE_DIRECTORY, 0775);
+    album_manager_ensure_default_album();
+
+    ESP_LOGI(TAG, "Storage format complete");
+    return ESP_OK;
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 esp_err_t storage_read_wifi_credentials(char *ssid, char *password)
