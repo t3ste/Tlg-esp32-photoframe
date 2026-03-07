@@ -536,6 +536,14 @@ esp_err_t trigger_image_rotation(void)
             ESP_OK) {
             ESP_LOGI(TAG, "Successfully downloaded and saved image, displaying...");
             display_manager_show_image(saved_bmp_path);
+
+            // Delete rendered temp image after display to save storage space,
+            // but only if it wasn't saved to the Downloads album.
+            if (!config_manager_get_save_downloaded_images()) {
+                unlink(CURRENT_BMP_PATH);
+                unlink(CURRENT_PNG_PATH);
+            }
+
             result = ESP_OK;
         } else {
             ESP_LOGE(TAG, "Failed to download image from URL, falling back to local rotation");

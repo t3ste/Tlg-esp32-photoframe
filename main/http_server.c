@@ -501,6 +501,11 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
 
+        // Delete rendered temp image after display to save storage space.
+        // Keep the thumbnail (.current.jpg) for the web UI.
+        unlink(temp_bmp_path);
+        unlink(temp_png_path);
+
         ha_notify_update();
 
         cJSON *response = cJSON_CreateObject();
@@ -792,6 +797,11 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to display image");
         return ESP_FAIL;
     }
+
+    // Delete rendered temp image after display to save storage space.
+    // Keep the thumbnail (.current.jpg) for the web UI.
+    unlink(temp_bmp_path);
+    unlink(temp_png_path);
 
     ha_notify_update();
 
