@@ -17,10 +17,15 @@ jobs:
     strategy:
       matrix:
         board: [waveshare_photopainter_73, seeedstudio_xiao_ee02, seeedstudio_reterminal_e1002, seeedstudio_xiao_ee04]
-        flash_size: [16MB]
         include:
+          - board: waveshare_photopainter_73
+            flash_size: 16MB
+          - board: seeedstudio_xiao_ee02
+            flash_size: 16MB
           - board: seeedstudio_reterminal_e1002
             flash_size: 32MB
+          - board: seeedstudio_xiao_ee04
+            flash_size: 16MB
       fail-fast: false
     
     steps:
