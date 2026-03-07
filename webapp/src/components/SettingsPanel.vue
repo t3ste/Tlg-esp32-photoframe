@@ -125,10 +125,7 @@ const rotationOptions = [
 const rotationModeOptions = computed(() => {
   const options = [{ title: "URL - Fetch image from URL", value: "url" }];
   if (appStore.systemInfo.sdcard_inserted || appStore.systemInfo.has_flash_storage) {
-    const label = appStore.systemInfo.sdcard_inserted
-      ? "SD Card - Rotate through images"
-      : "Storage - Rotate through images";
-    options.unshift({ title: label, value: "storage" });
+    options.unshift({ title: "Storage - Rotate through images", value: "storage" });
   }
   return options;
 });
@@ -428,7 +425,7 @@ async function performFactoryReset() {
 
               <v-expand-transition>
                 <v-card
-                  v-if="settingsStore.deviceSettings.rotationMode === 'storage'"
+                  v-if="settingsStore.deviceSettings.autoRotate && settingsStore.deviceSettings.rotationMode === 'storage'"
                   variant="tonal"
                   class="mb-4"
                 >
@@ -438,7 +435,7 @@ async function performFactoryReset() {
                       :items="sdRotationModeOptions"
                       item-title="title"
                       item-value="value"
-                      label="SD Card Rotation Logic"
+                      label="Storage Rotation Logic"
                       variant="outlined"
                       hide-details
                     />
@@ -448,7 +445,7 @@ async function performFactoryReset() {
 
               <v-expand-transition>
                 <v-card
-                  v-if="settingsStore.deviceSettings.rotationMode === 'url'"
+                  v-if="settingsStore.deviceSettings.autoRotate && settingsStore.deviceSettings.rotationMode === 'url'"
                   variant="tonal"
                   class="mb-4"
                 >
