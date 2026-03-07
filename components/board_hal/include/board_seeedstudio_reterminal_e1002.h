@@ -27,9 +27,17 @@
 #define BOARD_HAL_SD_PWR_PIN GPIO_NUM_16
 #define BOARD_HAL_SD_CS_PIN GPIO_NUM_14
 
+// I2C Pins
+#define BOARD_HAL_I2C_SDA_PIN GPIO_NUM_19
+#define BOARD_HAL_I2C_SCL_PIN GPIO_NUM_20
+
 // Power Management
 #define BOARD_HAL_BAT_ADC_PIN ADC_CHANNEL_0  // GPIO 1
 #define BOARD_HAL_BAT_EN_PIN GPIO_NUM_21
+
+// Onboard LED (active-low)
+#define BOARD_HAL_LED_PIN GPIO_NUM_6
+#define BOARD_HAL_LED_INVERTED true
 
 // Display Configuration
 #define BOARD_HAL_DISPLAY_ROTATION_DEG 0

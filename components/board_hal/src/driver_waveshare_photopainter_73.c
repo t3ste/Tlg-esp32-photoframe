@@ -2,6 +2,7 @@
 
 #include "axp2101.h"
 #include "board_hal.h"
+#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
@@ -18,19 +19,18 @@ static i2c_master_bus_handle_t i2c_bus = NULL;
 
 esp_err_t board_hal_init(void)
 {
-    // Initialize I2C bus
-    ESP_LOGI(TAG, "Initializing I2C bus...");
+    ESP_LOGI(TAG, "Initializing WaveShare PhotoPainter Board HAL");
+
+    // --- I2C bus ---
     i2c_master_bus_config_t i2c_bus_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .i2c_port = 0,
-        .scl_io_num = 48,
-        .sda_io_num = 47,
+        .scl_io_num = BOARD_HAL_I2C_SCL_PIN,
+        .sda_io_num = BOARD_HAL_I2C_SDA_PIN,
         .glitch_ignore_cnt = 7,
         .flags.enable_internal_pullup = true,
     };
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_config, &i2c_bus));
-
-    ESP_LOGI(TAG, "Initializing WaveShare PhotoPainter Power HAL");
     axp2101_init(i2c_bus);
     axp2101_cmd_init();
 
@@ -83,6 +83,15 @@ esp_err_t board_hal_init(void)
         .pin_enable = -1,
     };
     epaper_init(&ep_cfg);
+
+    // Initialize onboard LEDs (active-low)
+    gpio_config_t led_conf = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << BOARD_HAL_LED_RED_PIN) | (1ULL << BOARD_HAL_LED_GREEN_PIN),
+    };
+    gpio_config(&led_conf);
+    board_hal_led_set(BOARD_HAL_LED_POWER, false);
+    board_hal_led_set(BOARD_HAL_LED_ACTIVITY, false);
 
     return ESP_OK;
 }
@@ -173,4 +182,18 @@ esp_err_t board_hal_rtc_set_time(time_t t)
 bool board_hal_rtc_is_available(void)
 {
     return pcf85063_is_available();
+}
+
+void board_hal_led_set(board_hal_led_t led, bool on)
+{
+    // Waveshare LEDs are active-low
+    int level = on ? 0 : 1;
+    switch (led) {
+    case BOARD_HAL_LED_POWER:
+        gpio_set_level(BOARD_HAL_LED_RED_PIN, level);
+        break;
+    case BOARD_HAL_LED_ACTIVITY:
+        gpio_set_level(BOARD_HAL_LED_GREEN_PIN, level);
+        break;
+    }
 }

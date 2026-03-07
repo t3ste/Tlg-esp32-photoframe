@@ -127,9 +127,9 @@ static void sleep_timer_task(void *arg)
             if (remaining_sec > 0) {
                 // Visual indicator: blink GREEN LED every 10 seconds
                 if ((now - last_blink_time) >= 10000000LL) {
-                    gpio_set_level(LED_GREEN_GPIO, 0);  // Turn on (active-low)
+                    board_hal_led_set(BOARD_HAL_LED_ACTIVITY, true);
                     vTaskDelay(pdMS_TO_TICKS(200));
-                    gpio_set_level(LED_GREEN_GPIO, 1);  // Turn off
+                    board_hal_led_set(BOARD_HAL_LED_ACTIVITY, false);
                     last_blink_time = now;
                 }
 
@@ -275,18 +275,10 @@ esp_err_t power_manager_init(void)
         gpio_deep_sleep_hold_en();
     }
 
-    // Configure LED GPIOs as output and turn them off
-    gpio_config_t led_conf = {.intr_type = GPIO_INTR_DISABLE,
-                              .mode = GPIO_MODE_OUTPUT,
-                              .pin_bit_mask = (1ULL << LED_RED_GPIO) | (1ULL << LED_GREEN_GPIO),
-                              .pull_down_en = GPIO_PULLDOWN_DISABLE,
-                              .pull_up_en = GPIO_PULLUP_DISABLE};
-    gpio_config(&led_conf);
-
-    // Turn on red LED only if deep sleep is enabled (to indicate battery mode)
-    // If deep sleep is disabled, keep LED off to save battery
-    gpio_set_level(LED_RED_GPIO, deep_sleep_enabled ? 0 : 1);  // active-low
-    gpio_set_level(LED_GREEN_GPIO, 1);                         // Turn off green LED (active-low)
+    // LEDs are initialized by board_hal_init(), just set initial state
+    // Power LED on when deep sleep is enabled (to indicate battery mode)
+    board_hal_led_set(BOARD_HAL_LED_POWER, deep_sleep_enabled);
+    board_hal_led_set(BOARD_HAL_LED_ACTIVITY, false);
 
     // Skip auto-sleep timer if woken by ROTATE button or timer (image generation can take >120s)
     if (wakeup_source == WAKEUP_SOURCE_ROTATE_BUTTON ||
@@ -311,9 +303,9 @@ void power_manager_enter_sleep(void)
 
     ha_notify_offline();
 
-    // Turn off LEDs before sleep to save power (active-low)
-    gpio_set_level(LED_RED_GPIO, 1);
-    gpio_set_level(LED_GREEN_GPIO, 1);
+    // Turn off LEDs before sleep
+    board_hal_led_set(BOARD_HAL_LED_POWER, false);
+    board_hal_led_set(BOARD_HAL_LED_ACTIVITY, false);
 
     // Check if auto-rotate is enabled
     if (config_manager_get_auto_rotate()) {
@@ -380,6 +372,6 @@ void power_manager_set_deep_sleep_enabled(bool enabled)
     // Save to NVS via config_manager
     config_manager_set_deep_sleep_enabled(enabled);
 
-    // Update RED LED state: on when deep sleep enabled, off when disabled (to save battery)
-    gpio_set_level(LED_RED_GPIO, enabled ? 0 : 1);  // active-low
+    // Update power LED: on when deep sleep enabled, off when disabled
+    board_hal_led_set(BOARD_HAL_LED_POWER, enabled);
 }

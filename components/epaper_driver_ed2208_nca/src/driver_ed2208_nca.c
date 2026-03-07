@@ -7,11 +7,19 @@
 #include <freertos/task.h>
 #include <string.h>
 
+#ifdef CONFIG_PM_ENABLE
+#include <esp_pm.h>
+#endif
+
 #include "epaper.h"
 
 static const char *TAG = "epaper_ed2208_nca";
 
 static epaper_config_t g_cfg;
+
+#ifdef CONFIG_PM_ENABLE
+static esp_pm_lock_handle_t pm_lock = NULL;
+#endif
 
 #define EPD_DC_PIN (g_cfg.pin_dc)
 #define EPD_CS_PIN (g_cfg.pin_cs)
@@ -229,6 +237,13 @@ void epaper_init(const epaper_config_t *cfg)
     ESP_LOGI(TAG, "Initializing XIAO EE02 E-Paper Driver");
     epd_spi_init();
 
+#ifdef CONFIG_PM_ENABLE
+    esp_err_t ret = esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "epd_update", &pm_lock);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create PM lock: %s", esp_err_to_name(ret));
+    }
+#endif
+
     // EPD_WAKEUP calls EPD_INIT
     epd_reset();
     epd_init_sequence();
@@ -270,6 +285,12 @@ void epaper_clear(uint8_t *buffer, uint8_t color)
 
 void epaper_display(uint8_t *buffer)
 {
+#ifdef CONFIG_PM_ENABLE
+    if (pm_lock) {
+        esp_pm_lock_acquire(pm_lock);
+    }
+#endif
+
     ESP_LOGI(TAG, "Display Update");
 
     // 1. CCSET
@@ -356,12 +377,30 @@ void epaper_display(uint8_t *buffer)
     gpio_set_level(EPD_CS1_PIN, 1);
     wait_busy();
     vTaskDelay(pdMS_TO_TICKS(30));
+
+#ifdef CONFIG_PM_ENABLE
+    if (pm_lock) {
+        esp_pm_lock_release(pm_lock);
+    }
+#endif
 }
 
 void epaper_enter_deepsleep(void)
 {
+#ifdef CONFIG_PM_ENABLE
+    if (pm_lock) {
+        esp_pm_lock_acquire(pm_lock);
+    }
+#endif
+
     static const uint8_t sleep_v[] = {0xA5};
     writecommanddata(0x07, sleep_v, sizeof(sleep_v));
     vTaskDelay(pdMS_TO_TICKS(1));
     wait_busy();
+
+#ifdef CONFIG_PM_ENABLE
+    if (pm_lock) {
+        esp_pm_lock_release(pm_lock);
+    }
+#endif
 }

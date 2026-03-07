@@ -308,10 +308,10 @@ void app_main(void)
     ESP_LOGI(TAG, "Free heap: %lu bytes, Largest free block: %lu bytes", esp_get_free_heap_size(),
              heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
-    // Initialize Power HAL (wraps PMIC/Charger specific logic and Sensors)
-    ESP_LOGI(TAG, "Initializing Power HAL...");
+    // Initialize Board HAL
+    ESP_LOGI(TAG, "Initializing Board HAL...");
     ESP_ERROR_CHECK(board_hal_init());
-    ESP_LOGI(TAG, "Power HAL initialized");
+    ESP_LOGI(TAG, "Board HAL initialized");
 
     // Initialize the storage subsystem (handles SD, LittleFS, MemFS fallbacks)
     ESP_LOGI(TAG, "Initializing storage subsystem...");

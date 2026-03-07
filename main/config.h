@@ -15,9 +15,6 @@ typedef enum {
     DISPLAY_ORIENTATION_PORTRAIT = 1
 } display_orientation_t;
 
-#define LED_RED_GPIO GPIO_NUM_45
-#define LED_GREEN_GPIO GPIO_NUM_42
-
 #define DEVICE_NAME_MAX_LEN 64
 #define WIFI_SSID_MAX_LEN 32
 #define WIFI_PASS_MAX_LEN 64

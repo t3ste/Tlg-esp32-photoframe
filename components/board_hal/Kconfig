@@ -1,7 +1,7 @@
 menu "Board Configuration"
 
     choice BOARD_TYPE
-        prompt "Power Management Driver"
+        prompt "Board Driver"
         default BOARD_DRIVER_WAVESHARE_PHOTOPAINTER_73
         help
             Select the power management driver to use.
@@ -44,6 +44,7 @@ menu "Board Configuration"
             bool "Seeed reTerminal E1002 (Spectra E6)"
             select SDCARD_DRIVER_SPI
             select SENSOR_DRIVER_SHT40
+            select RTC_DRIVER_PCF8563
             select EP_DRIVER_ED2208_GCA
             help
                 Driver for Seeed reTerminal E1002 with 7.3" Spectra E6 display.

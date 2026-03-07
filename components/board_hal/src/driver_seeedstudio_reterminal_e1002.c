@@ -1,6 +1,3 @@
-#include <esp_timer.h>
-#include <string.h>
-
 #include "board_hal.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -11,8 +8,8 @@
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "pcf8563.h"
 #include "sensor.h"
-#include "soc/soc_caps.h"
 
 #ifdef CONFIG_HAS_SDCARD
 #include "sdcard.h"
@@ -22,13 +19,9 @@ static const char *TAG = "board_hal_reterminal_e1002";
 
 static i2c_master_bus_handle_t i2c_bus = NULL;
 
-// I2C Pins for reTerminal E1002 (TP_INT=3, TP_RST=4, SDA=5, SCL=6)
-#define BOARD_HAL_I2C_SDA_PIN 5
-#define BOARD_HAL_I2C_SCL_PIN 6
-
 // Battery measurement constants
 #define VBAT_ADC_CHANNEL BOARD_HAL_BAT_ADC_PIN
-// Divider ratio needs verify. Typical Seeed is 2.0 (100k/100k) or similar.
+// Voltage divider ratio: 2.0 (100k/100k resistor divider)
 #define VBAT_VOLTAGE_DIVIDER 2.0f
 
 static adc_oneshot_unit_handle_t adc_handle = NULL;
@@ -39,13 +32,9 @@ static void board_hal_battery_adc_init(void)
         return;
 
     adc_oneshot_unit_init_cfg_t init_config = {
-        .unit_id = ADC_UNIT_1,  // GPIOs 1-10 are typically ADC1 on S3, but check channel mapping
+        .unit_id = ADC_UNIT_1,  // GPIO 1 = ADC1 Channel 0
         .clk_src = ADC_DIGI_CLK_SRC_DEFAULT,
     };
-    // GPIO 1 on S3 is ADC1 Channel 0.
-    if (BOARD_HAL_BAT_ADC_PIN >= ADC_CHANNEL_0 && BOARD_HAL_BAT_ADC_PIN <= ADC_CHANNEL_9) {
-        init_config.unit_id = ADC_UNIT_1;  // Simple assumption, verify if needed
-    }
 
     esp_err_t ret = adc_oneshot_new_unit(&init_config, &adc_handle);
     if (ret != ESP_OK) {
@@ -65,8 +54,9 @@ static void board_hal_battery_adc_init(void)
 
 esp_err_t board_hal_init(void)
 {
-    ESP_LOGI(TAG, "Initializing reTerminal E1002 Power HAL");
+    ESP_LOGI(TAG, "Initializing reTerminal E1002 Board HAL");
 
+    // --- SPI bus ---
     ESP_LOGI(TAG, "Initializing SPI bus...");
 
     // Pull CS pins HIGH early to prevent interference on the shared bus
@@ -85,15 +75,13 @@ esp_err_t board_hal_init(void)
         .sclk_io_num = BOARD_HAL_SPI_SCLK_PIN,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = 1200 * 825 / 2 + 100,  // Sufficient for 7.3" EPD
+        .max_transfer_sz = 4092,
+        .flags = SPICOMMON_BUSFLAG_MASTER | SPICOMMON_BUSFLAG_SCLK,
     };
-
-    // Enable internal pull-up on MISO (shared bus requirement)
-    gpio_set_pull_mode(BOARD_HAL_SPI_MISO_PIN, GPIO_PULLUP_ONLY);
 
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO));
 
-    // Initialize E-Paper Display Port
+    // --- E-Paper Display ---
     epaper_config_t ep_cfg = {
         .spi_host = SPI2_HOST,
         .pin_cs = BOARD_HAL_EPD_CS_PIN,
@@ -105,27 +93,22 @@ esp_err_t board_hal_init(void)
     };
     epaper_init(&ep_cfg);
 
-    gpio_config_t io_conf = {0};
-
+    // --- SD Card ---
 #ifdef CONFIG_HAS_SDCARD
-    // Initialize SD Card Power (Turn ON)
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = (1ULL << BOARD_HAL_SD_PWR_PIN);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
+    gpio_config_t sd_pwr_cfg = {
+        .pin_bit_mask = (1ULL << BOARD_HAL_SD_PWR_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&sd_pwr_cfg);
     gpio_set_level(BOARD_HAL_SD_PWR_PIN, 1);
     ESP_LOGI(TAG, "SD Card Power ON");
 
-    // Give SD card time to power up and stabilize.
-    // Some cards need up to 500ms after power-on before they respond.
+    // Give SD card time to power up and stabilize
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    // Initialize SD card (SPI interface for reTerminal E1002)
     ESP_LOGI(TAG, "Initializing SD card (SPI)...");
     sdcard_config_t sd_cfg = {
-        .mount_point = "/storage",  // Must match FS_MOUNT_POINT in config.h
+        .mount_point = "/storage",
         .host_id = SPI2_HOST,
         .cs_pin = BOARD_HAL_SD_CS_PIN,
     };
@@ -138,19 +121,25 @@ esp_err_t board_hal_init(void)
     }
 #endif
 
-    // Initialize Battery Enable Pin
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = (1ULL << BOARD_HAL_BAT_EN_PIN);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
+    // --- Battery ADC ---
+    gpio_config_t bat_en_cfg = {
+        .pin_bit_mask = (1ULL << BOARD_HAL_BAT_EN_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&bat_en_cfg);
     gpio_set_level(BOARD_HAL_BAT_EN_PIN, 0);  // Disable measurement by default
 
-    // Initialize ADC handle
     board_hal_battery_adc_init();
 
-    // Initialize I2C Bus
+    // --- Onboard LED (GPIO6, active-low) ---
+    gpio_config_t led_cfg = {
+        .pin_bit_mask = (1ULL << BOARD_HAL_LED_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&led_cfg);
+    board_hal_led_set(BOARD_HAL_LED_ACTIVITY, false);
+
+    // --- I2C bus ---
     i2c_master_bus_config_t i2c_bus_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .i2c_port = 0,
@@ -161,9 +150,14 @@ esp_err_t board_hal_init(void)
     };
     esp_err_t i2c_ret = i2c_new_master_bus(&i2c_bus_config, &i2c_bus);
     if (i2c_ret == ESP_OK) {
-        // Initialize SHT40 Sensor
+        // Initialize SHT40 temperature/humidity sensor
         if (sensor_init(i2c_bus) == ESP_OK) {
             ESP_LOGI(TAG, "SHT40 sensor initialized");
+        }
+
+        // Initialize PCF8563T RTC
+        if (pcf8563_init(i2c_bus) == ESP_OK) {
+            ESP_LOGI(TAG, "PCF8563T RTC initialized");
         }
     } else {
         ESP_LOGE(TAG, "Failed to initialize I2C bus: %s", esp_err_to_name(i2c_ret));
@@ -176,11 +170,16 @@ esp_err_t board_hal_prepare_for_sleep(void)
 {
     ESP_LOGI(TAG, "Preparing reTerminal E1002 for sleep");
 
+    // Turn off LED
+    board_hal_led_set(BOARD_HAL_LED_ACTIVITY, false);
+
     // Put display to deep sleep
     epaper_enter_deepsleep();
 
     // Turn off SD Power
+#ifdef CONFIG_HAS_SDCARD
     gpio_set_level(BOARD_HAL_SD_PWR_PIN, 0);
+#endif
 
     // Disable Battery Measurement
     gpio_set_level(BOARD_HAL_BAT_EN_PIN, 0);
@@ -236,12 +235,29 @@ int board_hal_get_battery_percent(void)
     if (voltage < 0)
         return -1;
 
-    // Simple Linear: 3.3V (0%) to 4.2V (100%)
-    if (voltage >= 4200)
+    // Calibrated voltage-to-percent mapping (LiPo discharge curve)
+    static const struct {
+        int mv;
+        int pct;
+    } cal[] = {
+        {4150, 100}, {3960, 90}, {3910, 80}, {3850, 70}, {3800, 60}, {3750, 50},
+        {3680, 40},  {3580, 30}, {3490, 20}, {3410, 10}, {3300, 5},  {3270, 0},
+    };
+
+    if (voltage >= cal[0].mv)
         return 100;
-    if (voltage <= 3300)
+    if (voltage <= cal[sizeof(cal) / sizeof(cal[0]) - 1].mv)
         return 0;
-    return (voltage - 3300) * 100 / (4200 - 3300);
+
+    // Linear interpolation between calibration points
+    for (int i = 0; i < (int) (sizeof(cal) / sizeof(cal[0])) - 1; i++) {
+        if (voltage >= cal[i + 1].mv) {
+            int dv = cal[i].mv - cal[i + 1].mv;
+            int dp = cal[i].pct - cal[i + 1].pct;
+            return cal[i + 1].pct + (voltage - cal[i + 1].mv) * dp / dv;
+        }
+    }
+    return 0;
 }
 
 bool board_hal_is_charging(void)
@@ -263,20 +279,31 @@ void board_hal_shutdown(void)
 
 esp_err_t board_hal_rtc_init(void)
 {
-    return ESP_ERR_NOT_SUPPORTED;
+    return pcf8563_is_available() ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
+
 esp_err_t board_hal_rtc_get_time(time_t *t)
 {
-    return ESP_ERR_NOT_SUPPORTED;
+    return pcf8563_read_time(t);
 }
+
 esp_err_t board_hal_rtc_set_time(time_t t)
 {
-    return ESP_ERR_NOT_SUPPORTED;
+    return pcf8563_write_time(t);
 }
+
 bool board_hal_rtc_is_available(void)
 {
-    return false;
+    return pcf8563_is_available();
 }
+
+void board_hal_led_set(board_hal_led_t led, bool on)
+{
+    // reTerminal E1002 has a single LED — use it for both status and activity
+    (void) led;
+    gpio_set_level(BOARD_HAL_LED_PIN, BOARD_HAL_LED_INVERTED ? !on : on);
+}
+
 esp_err_t board_hal_get_temperature(float *t)
 {
     if (!t)
@@ -287,6 +314,7 @@ esp_err_t board_hal_get_temperature(float *t)
     float h_dummy;
     return sensor_read(t, &h_dummy);
 }
+
 esp_err_t board_hal_get_humidity(float *h)
 {
     if (!h)

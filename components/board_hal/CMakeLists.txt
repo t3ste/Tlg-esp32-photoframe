@@ -7,6 +7,7 @@ set(PRIV_REQS
     esp_driver_spi
     pmic_driver_axp2101
     rtc_driver_pcf85063
+    rtc_driver_pcf8563
     sdcard
     sensor_driver_sht40
     sensor_driver_shtc3

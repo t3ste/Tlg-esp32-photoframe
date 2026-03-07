@@ -1,5 +1,3 @@
-#include <esp_timer.h>
-
 #include "board_hal.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -7,7 +5,6 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
-#include "soc/soc_caps.h"
 
 static const char *TAG = "board_hal_ee04";
 
@@ -21,7 +18,7 @@ static adc_oneshot_unit_handle_t adc_handle = NULL;
 
 esp_err_t board_hal_init(void)
 {
-    ESP_LOGI(TAG, "Initializing XIAO EE04 Power HAL (BQ24070)");
+    ESP_LOGI(TAG, "Initializing XIAO EE04 Board HAL");
 
     // Initialize SPI bus
     ESP_LOGI(TAG, "Initializing SPI bus...");
@@ -172,4 +169,11 @@ esp_err_t board_hal_get_temperature(float *t)
 esp_err_t board_hal_get_humidity(float *h)
 {
     return ESP_ERR_NOT_SUPPORTED;
+}
+
+void board_hal_led_set(board_hal_led_t led, bool on)
+{
+    // No onboard LED on XIAO EE04
+    (void) led;
+    (void) on;
 }

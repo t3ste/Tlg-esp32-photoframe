@@ -38,7 +38,7 @@ typedef enum {
 #endif
 
 /**
- * @brief Initialize the power management HAL
+ * @brief Initialize the Board HAL
  *
  * @return esp_err_t ESP_OK on success
  */
@@ -141,6 +141,19 @@ esp_err_t board_hal_rtc_set_time(time_t t);
  * @return true if available
  */
 bool board_hal_rtc_is_available(void);
+
+typedef enum {
+    BOARD_HAL_LED_POWER,     // Power/status indicator (red on waveshare, no-op if not present)
+    BOARD_HAL_LED_ACTIVITY,  // Activity indicator (green on waveshare, single LED on reterminal)
+} board_hal_led_t;
+
+/**
+ * @brief Set an onboard LED state
+ *
+ * @param led Which LED to control
+ * @param on true to turn LED on, false to turn off
+ */
+void board_hal_led_set(board_hal_led_t led, bool on);
 
 #ifdef __cplusplus
 }

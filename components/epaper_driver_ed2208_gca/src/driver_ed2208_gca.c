@@ -7,103 +7,163 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 
+#ifdef CONFIG_PM_ENABLE
+#include "esp_pm.h"
+#endif
+
 static const char *TAG = "epaper_ed2208_gca";
 
 static epaper_config_t g_cfg;
 static spi_device_handle_t spi;
+
+#ifdef CONFIG_PM_ENABLE
+static esp_pm_lock_handle_t pm_lock = NULL;
+#endif
 
 #define EPD_WIDTH 800
 #define EPD_HEIGHT 480
 // Packed pixel buffer size: 2 pixels per byte (4-bit color depth)
 #define EPD_BUF_SIZE (EPD_WIDTH / 2 * EPD_HEIGHT)
 
-// --- Low-level helpers ---
+// SPI max transfer size per transaction
+#define SPI_MAX_CHUNK 4092
+// Data transfer chunk size (per CS window)
+#define DATA_CHUNK_SIZE 128
 
-static void spi_send_byte(uint8_t data)
+// --- Low-level SPI helpers ---
+
+static void spi_begin(void)
 {
-    spi_transaction_t t = {};
-    t.length = 8;
-    t.tx_buffer = &data;
-    esp_err_t ret = spi_device_polling_transmit(spi, &t);
+    esp_err_t ret = spi_device_acquire_bus(spi, portMAX_DELAY);
     assert(ret == ESP_OK);
 }
 
-static void send_command(uint8_t cmd)
+static void spi_end(void)
+{
+    spi_device_release_bus(spi);
+}
+
+static void spi_write(const uint8_t *data, size_t len)
+{
+    spi_transaction_t t = {};
+    t.rxlength = 0;
+    while (len > 0) {
+        size_t chunk = (len > SPI_MAX_CHUNK) ? SPI_MAX_CHUNK : len;
+        t.length = chunk * 8;
+        t.tx_buffer = data;
+        esp_err_t ret = spi_device_polling_start(spi, &t, portMAX_DELAY);
+        if (ret == ESP_OK) {
+            ret = spi_device_polling_end(spi, portMAX_DELAY);
+        }
+        assert(ret == ESP_OK);
+        data += chunk;
+        len -= chunk;
+    }
+}
+
+// --- Display protocol helpers ---
+
+// Send a command with optional data bytes in a single CS window.
+// CS stays LOW for the entire command+data sequence.
+static void cmd_data(uint8_t cmd, const uint8_t *data, size_t len)
 {
     gpio_set_level(g_cfg.pin_dc, 0);  // DC low = command
-    gpio_set_level(g_cfg.pin_cs, 0);
-    spi_send_byte(cmd);
-    gpio_set_level(g_cfg.pin_cs, 1);
+    spi_begin();
+    gpio_set_level(g_cfg.pin_cs, 0);  // CS low
+
+    // Send command byte via SPI command register
+    spi_transaction_ext_t cmd_t = {
+        .command_bits = 8,
+        .base =
+            {
+                .flags = SPI_TRANS_VARIABLE_CMD,
+                .cmd = cmd,
+            },
+    };
+    esp_err_t ret = spi_device_polling_start(spi, &cmd_t.base, portMAX_DELAY);
+    if (ret == ESP_OK) {
+        spi_device_polling_end(spi, portMAX_DELAY);
+    }
+    assert(ret == ESP_OK);
+
+    if (len > 0) {
+        gpio_set_level(g_cfg.pin_dc, 1);  // DC high = data
+        // Copy to stack buffer to avoid PSRAM DMA issues
+        uint8_t buf[16];
+        assert(len <= sizeof(buf));
+        memcpy(buf, data, len);
+        spi_write(buf, len);
+    }
+
+    gpio_set_level(g_cfg.pin_cs, 1);  // CS high
+    spi_end();
 }
 
-static void send_data(uint8_t data)
+// Send a standalone command (no data bytes)
+static void send_command(uint8_t cmd)
 {
-    gpio_set_level(g_cfg.pin_dc, 1);  // DC high = data
-    gpio_set_level(g_cfg.pin_cs, 0);
-    spi_send_byte(data);
-    gpio_set_level(g_cfg.pin_cs, 1);
+    cmd_data(cmd, NULL, 0);
 }
 
+// Send image buffer in DATA_CHUNK_SIZE-byte chunks, each in its own CS window,
+// copied to a stack-local buffer to avoid PSRAM DMA issues.
 static void send_buffer(uint8_t *data, int len)
 {
-    gpio_set_level(g_cfg.pin_dc, 1);  // DC high = data
-    gpio_set_level(g_cfg.pin_cs, 0);  // Hold CS low for entire transfer
-
-    spi_transaction_t t = {};
-    int chunks = len / 5000;
-    int remainder = len % 5000;
+    uint8_t buf[DATA_CHUNK_SIZE];
     uint8_t *ptr = data;
+    int remaining = len;
 
-    ESP_LOGI(TAG, "Sending %d bytes in %d chunks of 5000 + %d remainder", len, chunks, remainder);
+    ESP_LOGI(TAG, "Sending %d bytes in %d-byte chunks", len, DATA_CHUNK_SIZE);
 
-    int chunk = 0;
-    while (chunks--) {
-        t.length = 8 * 5000;
-        t.tx_buffer = ptr;
-        esp_err_t ret = spi_device_polling_transmit(spi, &t);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "SPI transmit failed at chunk %d: %s", chunk, esp_err_to_name(ret));
-        }
-        assert(ret == ESP_OK);
-        ptr += 5000;
-        chunk++;
+    while (remaining > 0) {
+        int chunk = (remaining > DATA_CHUNK_SIZE) ? DATA_CHUNK_SIZE : remaining;
 
-        // Yield to watchdog every 10 chunks (~50KB)
-        if (chunk % 10 == 0) {
-            vTaskDelay(1);
-        }
+        // Copy to stack buffer (internal RAM) for reliable DMA
+        memcpy(buf, ptr, chunk);
+
+        gpio_set_level(g_cfg.pin_dc, 1);  // DC high = data
+        spi_begin();
+        gpio_set_level(g_cfg.pin_cs, 0);  // CS low
+        spi_write(buf, chunk);
+        gpio_set_level(g_cfg.pin_cs, 1);  // CS high
+        spi_end();
+
+        ptr += chunk;
+        remaining -= chunk;
     }
 
-    if (remainder > 0) {
-        t.length = 8 * remainder;
-        t.tx_buffer = ptr;
-        esp_err_t ret = spi_device_polling_transmit(spi, &t);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "SPI transmit failed at final chunk: %s", esp_err_to_name(ret));
-        }
-        assert(ret == ESP_OK);
-    }
-
-    gpio_set_level(g_cfg.pin_cs, 1);
     ESP_LOGI(TAG, "Buffer send complete");
 }
 
-static void wait_busy(void)
+static bool is_busy(void)
 {
+    int level = gpio_get_level(g_cfg.pin_busy);
+    return level == 0;
+}
+
+static void wait_busy(const char *label)
+{
+    vTaskDelay(pdMS_TO_TICKS(10));
     int wait_count = 0;
-    while (!gpio_get_level(g_cfg.pin_busy)) {
+    while (is_busy()) {
         vTaskDelay(pdMS_TO_TICKS(10));
         if (++wait_count > 4000) {  // 40s timeout
-            ESP_LOGW(TAG, "Display busy timeout after 40s");
+            ESP_LOGW(TAG, "[%s] BUSY timeout after 40s", label);
             return;
         }
     }
+    ESP_LOGI(TAG, "[%s] BUSY released after %d ms", label, (wait_count + 1) * 10);
 }
 
 // --- Hardware setup ---
 
 static void gpio_init(void)
 {
+    // Set desired output levels BEFORE enabling output drivers to avoid glitches
+    gpio_set_level(g_cfg.pin_cs, 1);   // CS HIGH = deselected
+    gpio_set_level(g_cfg.pin_dc, 0);   // DC LOW = command mode
+    gpio_set_level(g_cfg.pin_rst, 1);  // RST HIGH = not in reset
+
     gpio_config_t out_conf = {
         .mode = GPIO_MODE_OUTPUT,
         .pin_bit_mask = (1ULL << g_cfg.pin_rst) | (1ULL << g_cfg.pin_dc) | (1ULL << g_cfg.pin_cs),
@@ -117,8 +177,6 @@ static void gpio_init(void)
         .pull_up_en = GPIO_PULLUP_ENABLE,
     };
     ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_config(&in_conf));
-
-    gpio_set_level(g_cfg.pin_rst, 1);
 
     if (g_cfg.pin_enable >= 0) {
         gpio_config_t en_conf = {
@@ -135,11 +193,11 @@ static void gpio_init(void)
 static void spi_add_device(void)
 {
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = (g_cfg.spi_host == SPI3_HOST) ? 40 * 1000 * 1000 : 10 * 1000 * 1000,
+        .clock_speed_hz = 20 * 1000 * 1000,
         .mode = 0,
         .spics_io_num = -1,  // CS is manually controlled
-        .queue_size = 7,
-        .flags = SPI_DEVICE_HALFDUPLEX,
+        .queue_size = 1,
+        .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_DUMMY,
     };
     ESP_ERROR_CHECK(spi_bus_add_device(g_cfg.spi_host, &devcfg, &spi));
 }
@@ -156,18 +214,59 @@ static void hw_reset(void)
 
 // --- Display operations ---
 
-static void turn_on_display(void)
+static void send_init_sequence(void)
 {
+    cmd_data(0xAA, (uint8_t[]){0x49, 0x55, 0x20, 0x08, 0x09, 0x18}, 6);  // CMDH
+    cmd_data(0x01, (uint8_t[]){0x3F}, 1);                                // PWRR
+    cmd_data(0x00, (uint8_t[]){0x5F, 0x69}, 2);                          // PSR
+    cmd_data(0x03, (uint8_t[]){0x00, 0x54, 0x00, 0x44}, 4);              // POFS
+    cmd_data(0x05, (uint8_t[]){0x40, 0x1F, 0x1F, 0x2C}, 4);              // BTST1
+    cmd_data(0x06, (uint8_t[]){0x6F, 0x1F, 0x17, 0x49}, 4);              // BTST2
+    cmd_data(0x08, (uint8_t[]){0x6F, 0x1F, 0x1F, 0x22}, 4);              // BTST3
+    cmd_data(0x30, (uint8_t[]){0x03}, 1);                                // PLL
+    cmd_data(0x50, (uint8_t[]){0x3F}, 1);                                // CDI
+    cmd_data(0x60, (uint8_t[]){0x02, 0x00}, 2);                          // TCON
+    cmd_data(0x61, (uint8_t[]){0x03, 0x20, 0x01, 0xE0}, 4);              // TRES
+    cmd_data(0x84, (uint8_t[]){0x01}, 1);                                // T_VDCS
+    cmd_data(0xE3, (uint8_t[]){0x2F}, 1);                                // PWS
+}
+
+// Full display update cycle:
+// RESET -> INIT -> wait -> DTM -> DATA -> PON -> wait -> DRF -> wait -> POF -> wait -> DSLP
+static void display_update_cycle(uint8_t *image)
+{
+#ifdef CONFIG_PM_ENABLE
+    if (pm_lock) {
+        esp_pm_lock_acquire(pm_lock);
+    }
+#endif
+
+    hw_reset();
+    wait_busy("reset");
+
+    send_init_sequence();
+    wait_busy("init");
+
+    send_command(0x10);  // DATA_START_TRANSMISSION
+    send_buffer(image, EPD_BUF_SIZE);
+    wait_busy("data");
+
     send_command(0x04);  // POWER_ON
-    wait_busy();
+    wait_busy("power_on");
 
-    send_command(0x12);  // DISPLAY_REFRESH
-    send_data(0x00);
-    wait_busy();
+    cmd_data(0x12, (uint8_t[]){0x00}, 1);  // DISPLAY_REFRESH
+    wait_busy("refresh");
 
-    send_command(0x02);  // POWER_OFF
-    send_data(0x00);
-    wait_busy();
+    cmd_data(0x02, (uint8_t[]){0x00}, 1);  // POWER_OFF
+    wait_busy("power_off");
+
+    cmd_data(0x07, (uint8_t[]){0xA5}, 1);  // DEEP_SLEEP
+
+#ifdef CONFIG_PM_ENABLE
+    if (pm_lock) {
+        esp_pm_lock_release(pm_lock);
+    }
+#endif
 }
 
 // --- Public API ---
@@ -190,117 +289,13 @@ void epaper_init(const epaper_config_t *cfg)
 
     spi_add_device();
     gpio_init();
-    hw_reset();
-    wait_busy();
-    vTaskDelay(pdMS_TO_TICKS(50));
 
-    // CMDH (0xAA) - Command Header (unlock command access)
-    send_command(0xAA);
-    send_data(0x49);
-    send_data(0x55);
-    send_data(0x20);
-    send_data(0x08);
-    send_data(0x09);
-    send_data(0x18);
-
-    // PWRR (0x01) - Power Setting Register
-    send_command(0x01);
-    send_data(0x3F);
-    send_data(0x00);
-    send_data(0x32);
-    send_data(0x2A);
-    send_data(0x0E);
-    send_data(0x2A);
-
-    // PSR (0x00) - Panel Setting
-    send_command(0x00);
-    send_data(0x5F);
-    send_data(0x69);
-
-    // POFS (0x03) - Power OFF Sequence Setting
-    send_command(0x03);
-    send_data(0x00);
-    send_data(0x54);
-    send_data(0x00);
-    send_data(0x44);
-
-    // BTST1 (0x05) - Booster Soft Start 1
-    send_command(0x05);
-    send_data(0x40);
-    send_data(0x1F);
-    send_data(0x1F);
-    send_data(0x2C);
-
-    // BTST2 (0x06) - Booster Soft Start 2
-    send_command(0x06);
-    send_data(0x6F);
-    send_data(0x1F);
-    send_data(0x16);
-    send_data(0x25);
-
-    // BTST3 (0x08) - Booster Soft Start 3
-    send_command(0x08);
-    send_data(0x6F);
-    send_data(0x1F);
-    send_data(0x1F);
-    send_data(0x22);
-
-    // IPC (0x13) - Internal Power Control
-    send_command(0x13);
-    send_data(0x00);
-    send_data(0x04);
-
-    // PLL (0x30) - PLL Control
-    send_command(0x30);
-    send_data(0x02);
-
-    // TSE (0x41) - Temperature Sensor Enable
-    send_command(0x41);
-    send_data(0x00);
-
-    // CDI (0x50) - VCOM and Data Interval Setting
-    send_command(0x50);
-    send_data(0x3F);
-
-    // TCON (0x60) - TCON Setting
-    send_command(0x60);
-    send_data(0x02);
-    send_data(0x00);
-
-    // TRES (0x61) - Resolution Setting (800 x 480)
-    send_command(0x61);
-    send_data(0x03);
-    send_data(0x20);
-    send_data(0x01);
-    send_data(0xE0);
-
-    // VDCS (0x82) - VCOM DC Setting
-    send_command(0x82);
-    send_data(0x1E);
-
-    // T_VDCS (0x84) - Temperature VCOM DC Setting
-    send_command(0x84);
-    send_data(0x01);
-
-    // AGID (0x86)
-    send_command(0x86);
-    send_data(0x00);
-
-    // PWS (0xE3) - Power Width Setting
-    send_command(0xE3);
-    send_data(0x2F);
-
-    // CCSET (0xE0) - Color Control Setting
-    send_command(0xE0);
-    send_data(0x00);
-
-    // TSSET (0xE6) - Temperature Sensor Setting
-    send_command(0xE6);
-    send_data(0x00);
-
-    // PON (0x04) - Power ON
-    send_command(0x04);
-    wait_busy();
+#ifdef CONFIG_PM_ENABLE
+    esp_err_t ret = esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "epd_update", &pm_lock);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create PM lock: %s", esp_err_to_name(ret));
+    }
+#endif
 }
 
 void epaper_clear(uint8_t *image, uint8_t color)
@@ -308,19 +303,15 @@ void epaper_clear(uint8_t *image, uint8_t color)
     uint8_t packed = (color << 4) | color;
     memset(image, packed, EPD_BUF_SIZE);
 
-    send_command(0x10);
-    send_buffer(image, EPD_BUF_SIZE);
-    turn_on_display();
+    ESP_LOGI(TAG, "Clearing display with color 0x%02x", color);
+    display_update_cycle(image);
+    ESP_LOGI(TAG, "Clear complete");
 }
 
 void epaper_display(uint8_t *image)
 {
     ESP_LOGI(TAG, "Starting display update: %d bytes", EPD_BUF_SIZE);
-
-    send_command(0x10);
-    send_buffer(image, EPD_BUF_SIZE);
-    turn_on_display();
-
+    display_update_cycle(image);
     ESP_LOGI(TAG, "Display update complete");
 }
 
@@ -328,17 +319,26 @@ void epaper_enter_deepsleep(void)
 {
     ESP_LOGI(TAG, "Entering deep sleep");
 
-    // Power OFF
-    send_command(0x02);
-    send_data(0x00);
-    wait_busy();
+#ifdef CONFIG_PM_ENABLE
+    if (pm_lock) {
+        esp_pm_lock_acquire(pm_lock);
+    }
+#endif
 
-    // Deep Sleep
-    send_command(0x07);
-    send_data(0xA5);
+    // display_update_cycle() already sends POF + DSLP after each update,
+    // so the display should already be in deep sleep. Send again to be safe.
+    cmd_data(0x02, (uint8_t[]){0x00}, 1);  // POWER_OFF
+    wait_busy("deepsleep_power_off");
+    cmd_data(0x07, (uint8_t[]){0xA5}, 1);  // DEEP_SLEEP
 
     if (g_cfg.pin_enable >= 0) {
         vTaskDelay(pdMS_TO_TICKS(100));       // Ensure display enters sleep before cutting power
         gpio_set_level(g_cfg.pin_enable, 0);  // Cut power
     }
+
+#ifdef CONFIG_PM_ENABLE
+    if (pm_lock) {
+        esp_pm_lock_release(pm_lock);
+    }
+#endif
 }
