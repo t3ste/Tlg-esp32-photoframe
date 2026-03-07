@@ -357,7 +357,7 @@ function newImage() {
                   <ul class="pl-4 mt-2">
                     <li>Chrome, Edge, or Opera browser (Web Serial API required)</li>
                     <li>USB-C cable connected to your ESP32-S3 PhotoFrame</li>
-                    <li>Compatible ESP32-S3 board (Waveshare or Seeed XIAO)</li>
+                    <li>Compatible ESP32-S3 board (Waveshare, Seeed XIAO, or Seeed reTerminal)</li>
                   </ul>
                 </v-alert>
 

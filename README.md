@@ -1,6 +1,6 @@
 # ESP32 PhotoFrame
 
-A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently supporting **Waveshare PhotoPainter** and **Seeed Studio XIAO EE02**). This firmware replaces stock firmware with a powerful RESTful API, web interface, and **significantly better image quality**.
+A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently supporting **Waveshare PhotoPainter**, **Seeed Studio XIAO EE02/EE04**, and **Seeed Studio reTerminal E1002**). This firmware replaces stock firmware with a powerful RESTful API, web interface, and **significantly better image quality**.
 
 ![PhotoFrame](.img/esp32-photoframe.png)
 
@@ -99,23 +99,17 @@ Configure your API keys in **Settings > AI Generation**.
 
 ## Supported Hardware
 
-### Waveshare ESP32-S3-PhotoPainter
-- **Product**: [Waveshare Wiki](https://www.waveshare.com/wiki/ESP32-S3-PhotoPainter)
-- **Board Name**: `waveshare_photopainter_73`
-- **Features**: 7.3" 7-color e-paper, integrated ESP32-S3, SD card slot
+| Board | Display | Storage | Board Name |
+|-------|---------|---------|------------|
+| [Waveshare PhotoPainter](https://www.waveshare.com/wiki/ESP32-S3-PhotoPainter) | 7.3" 7-color | SD card (SDIO) | `waveshare_photopainter_73` |
+| [Seeed Studio XIAO EE02](https://www.seeedstudio.com/XIAO-ePaper-DIY-Kit-EE02-for-13-3-Spectratm-6-E-Ink.html) | 13.3" 6-color | Internal flash | `seeedstudio_xiao_ee02` |
+| [Seeed Studio XIAO EE04](https://www.seeedstudio.com/XIAO-ePaper-EE04-DIY-Bundle-Kit.html) | 7.3" 6-color | Internal flash | `seeedstudio_xiao_ee04` |
+| [Seeed Studio reTerminal E1002](https://www.seeedstudio.com/reTerminal-E1002-p-6533.html) | 7.3" 6-color | SD card (SPI) | `seeedstudio_reterminal_e1002` |
 
-### Seeed Studio XIAO EE02
-- **Product**: [Seeed Studio XIAO EE02](https://www.seeedstudio.com/XIAO-ePaper-DIY-Kit-EE02-for-13-3-Spectratm-6-E-Ink.html)
-- **Board Name**: `seeedstudio_xiao_ee02`
-- **Configuration**: Setup using Seeed Studio XIAO EE02 + dedicated 13.3" ePaper display
+The reTerminal E1002 also includes a SHT40 temperature/humidity sensor, PCF8563 RTC, and battery monitoring.
 
-### Seeed Studio XIAO EE04
-- **Product**: [Seeed Studio XIAO EE04](https://www.seeedstudio.com/XIAO-ePaper-EE04-DIY-Bundle-Kit.html)
-- **Board Name**: `seeedstudio_xiao_ee04`
-- **Configuration**: Setup using Seeed Studio XIAO EE04 + dedicated 7.3" 6-color ePaper display
-
-### 💾 Cnfigurable Internal Storage 
-Use the board's internal flash as a virtual SD card to store images (switchable via Kconfig, supports from 8MB up to 128MB flash chips, resulting in up to 120MB image storage).
+### 💾 Internal Flash Storage
+Boards without SD card slots (XIAO EE02/EE04) use internal flash as storage via LittleFS. This is configurable via Kconfig and supports 8MB to 128MB flash chips (up to ~120MB image storage).
 
 ### Known Issues / Work in Progress 🚧
 
@@ -133,7 +127,7 @@ Use the board's internal flash as a virtual SD card to store images (switchable 
 Download from [Releases](https://github.com/aitjcize/esp32-photoframe/releases):
 
 ```bash
-esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 photoframe-firmware-merged.bin
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 photoframe-firmware-<board>-merged.bin
 ```
 
 **Device not detected?** Hold BOOT button + press PWR to enter download mode.
@@ -152,6 +146,9 @@ We provide a `build.py` helper script to simplify building for different boards.
 # Build for Seeed Studio XIAO EE04
 ./build.py --board seeedstudio_xiao_ee04
 
+# Build for Seeed Studio reTerminal E1002
+./build.py --board seeedstudio_reterminal_e1002
+
 # Flash the firmware
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
@@ -160,22 +157,25 @@ For more details, see [DEV.md](docs/DEV.md)
 
 ## Setup
 
-> **⚠️ Insert MicroSD card before first boot**
+> **💡 SD card is optional.** Boards with SD card slots (Waveshare, reTerminal) will use SD card storage if inserted, otherwise the device falls back to an in-memory filesystem (MemFS). An SD card is recommended for persistent image storage and SD card WiFi provisioning.
 
 ### WiFi Provisioning
 
 The device supports two methods for WiFi provisioning:
 
-#### Option 1: SD Card Provisioning (Easiest)
+#### Option 1: SD Card Provisioning (boards with SD card only)
 
 1. Create a file named `wifi.txt` on your SD card with:
    ```
    YourWiFiSSID
    YourWiFiPassword
+   MyPhotoFrame
    ```
    - Line 1: WiFi SSID (network name)
    - Line 2: WiFi password
+   - Line 3: Device name (optional, defaults to "PhotoFrame")
    - Use plain text, no quotes or extra formatting
+   - The file can be placed at the root or in a `config/` folder
 
 2. Insert SD card and power on the device
 3. Device automatically reads credentials, saves to memory, and connects
