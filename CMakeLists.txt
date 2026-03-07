@@ -26,10 +26,22 @@ message(STATUS "Firmware version: ${FIRMWARE_VERSION}")
 add_compile_options(-Wno-missing-field-initializers)
 add_compile_definitions(FIRMWARE_VERSION="${FIRMWARE_VERSION}")
 
-# Generate partitions.csv early, before ESP-IDF starts analyzing components.
+# Generate partitions.csv by reading config from sdkconfig / defaults files.
+set(_config_files "")
+if(DEFINED SDKCONFIG_DEFAULTS)
+    foreach(_f ${SDKCONFIG_DEFAULTS})
+        list(APPEND _config_files ${CMAKE_SOURCE_DIR}/${_f})
+    endforeach()
+else()
+    list(APPEND _config_files ${CMAKE_SOURCE_DIR}/sdkconfig.defaults)
+endif()
+if(EXISTS ${CMAKE_SOURCE_DIR}/sdkconfig)
+    list(APPEND _config_files ${CMAKE_SOURCE_DIR}/sdkconfig)
+endif()
+
 execute_process(
     COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/gen_partitions.py
-        --sdkconfig ${CMAKE_SOURCE_DIR}/sdkconfig
+        --sdkconfig ${_config_files}
         --output ${CMAKE_SOURCE_DIR}/partitions.csv
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )

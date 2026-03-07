@@ -53,22 +53,19 @@ def main():
         print("  ✗ 'npm' not found. Please ensure Node.js is installed and in your PATH.")
         sys.exit(1)
 
-    cmd = [
+    idf_base = [
         "idf.py",
         f"-DSDKCONFIG_DEFAULTS={sdkconfig_defaults}",
     ]
 
-    # Add build command if no other command is provided
-    if not extra_args:
-        cmd.append("build")
-    else:
-        cmd.extend(extra_args)
-
+    # Always build first to ensure sdkconfig and partitions.csv are generated,
+    # then run any extra commands (e.g. flash, monitor) separately.
+    build_cmd = idf_base + ["build"]
     print(f"Building for board: {board}")
-    print(f"Running: {' '.join(cmd)}")
-    
+    print(f"Running: {' '.join(build_cmd)}")
+
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(build_cmd, check=True)
     except subprocess.CalledProcessError as e:
         print(f"Build failed with exit code {e.returncode}")
         sys.exit(e.returncode)
@@ -76,6 +73,15 @@ def main():
         print("Error: 'idf.py' not found. Please ensure ESP-IDF is correctly installed and activated.")
         print("Hint: Try adding ~/Work/esp/esp-idf/tools to your PATH.")
         sys.exit(1)
+
+    if extra_args:
+        post_cmd = idf_base + extra_args
+        print(f"Running: {' '.join(post_cmd)}")
+        try:
+            subprocess.run(post_cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Post-build command failed with exit code {e.returncode}")
+            sys.exit(e.returncode)
 
 if __name__ == "__main__":
     main()

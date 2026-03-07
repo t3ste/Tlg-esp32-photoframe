@@ -3,10 +3,10 @@
 Generate partitions.csv for ESP32 PhotoFrame based on sdkconfig settings.
 
 Reads CONFIG_USE_INTERNAL_FLASH_STORAGE and CONFIG_ESPTOOLPY_FLASHSIZE_*
-from sdkconfig to determine the appropriate partition layout.
+from one or more config files to determine the appropriate partition layout.
 
 Usage:
-    python3 gen_partitions.py --sdkconfig <path> --output <path>
+    python3 gen_partitions.py --sdkconfig sdkconfig.defaults sdkconfig.defaults.board --output partitions.csv
 """
 
 import argparse
@@ -29,22 +29,21 @@ phy_init, data, phy,     0x11000, 0x1000,
 """
 
 
-def parse_sdkconfig(path):
+def parse_config_files(paths):
     use_internal_flash = False
     flash_size_mb = 16  # default
 
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if line == "CONFIG_USE_INTERNAL_FLASH_STORAGE=y":
-                    use_internal_flash = True
-                elif line in FLASH_SIZE_MAP:
-                    flash_size_mb = FLASH_SIZE_MAP[line]
-    except FileNotFoundError:
-        print(
-            f"Warning: sdkconfig not found at {path}, using defaults", file=sys.stderr
-        )
+    for path in paths:
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line == "CONFIG_USE_INTERNAL_FLASH_STORAGE=y":
+                        use_internal_flash = True
+                    elif line in FLASH_SIZE_MAP:
+                        flash_size_mb = FLASH_SIZE_MAP[line]
+        except FileNotFoundError:
+            print(f"Warning: config file not found: {path}", file=sys.stderr)
 
     return use_internal_flash, flash_size_mb
 
@@ -93,11 +92,16 @@ def main():
     parser = argparse.ArgumentParser(
         description="Generate partitions.csv for ESP32 PhotoFrame"
     )
-    parser.add_argument("--sdkconfig", required=True, help="Path to sdkconfig file")
+    parser.add_argument(
+        "--sdkconfig",
+        nargs="+",
+        required=True,
+        help="One or more sdkconfig/defaults files to read",
+    )
     parser.add_argument("--output", required=True, help="Path to write partitions.csv")
     args = parser.parse_args()
 
-    use_internal_flash, flash_size_mb = parse_sdkconfig(args.sdkconfig)
+    use_internal_flash, flash_size_mb = parse_config_files(args.sdkconfig)
     csv = generate_csv(use_internal_flash, flash_size_mb)
 
     with open(args.output, "w") as f:

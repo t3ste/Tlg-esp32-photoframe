@@ -22,19 +22,3 @@ config SDCARD_DRIVER_SPI
         More flexible pin assignment but slower than SDIO.
 
         This is automatically selected by board drivers that use SPI.
-
-menu "Internal Storage Configuration"
-
-    config USE_INTERNAL_FLASH_STORAGE
-        bool "Use internal flash as storage (LittleFS)"
-        default y if BOARD_DRIVER_SEEEDSTUDIO_XIAO_EE02 || BOARD_DRIVER_SEEEDSTUDIO_XIAO_EE04 || BOARD_DRIVER_SEEEDSTUDIO_RETERMINAL_E1002
-        default n
-        help
-            Mounts a LittleFS partition from internal flash to use as storage.
-            Disable this if your board has limited flash space (e.g. 4MB)
-            and you don't have enough space for a storage partition.
-            If disabled, the system will use a small RAM-based filesystem (MemFS)
-            for temporary image processing instead.
-
-
-endmenu
