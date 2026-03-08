@@ -167,6 +167,123 @@ const saveMessage = ref("");
 const saveError = ref(false);
 const showFactoryResetDialog = ref(false);
 const resetting = ref(false);
+const showImportDialog = ref(false);
+const importData = ref(null);
+const importFileName = ref("");
+
+async function exportConfig() {
+  try {
+    const [configRes, processingRes, paletteRes] = await Promise.all([
+      fetch("/api/config"),
+      fetch("/api/settings/processing"),
+      fetch("/api/settings/palette"),
+    ]);
+
+    const exported = {};
+
+    if (configRes.ok) {
+      const config = await configRes.json();
+      // Remove sensitive fields
+      delete config.wifi_password;
+      exported.config = config;
+    }
+    if (processingRes.ok) exported.processing = await processingRes.json();
+    if (paletteRes.ok) exported.palette = await paletteRes.json();
+
+    const blob = new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const deviceName = settingsStore.deviceSettings.deviceName || "photoframe";
+    a.download = `${deviceName.toLowerCase().replace(/\s+/g, "-")}-config.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error("Failed to export config:", error);
+  }
+}
+
+function onImportFileSelected(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  importFileName.value = file.name;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      importData.value = JSON.parse(e.target.result);
+      showImportDialog.value = true;
+    } catch {
+      saveError.value = true;
+      saveMessage.value = "Invalid JSON file";
+      setTimeout(() => (saveError.value = false), 5000);
+    }
+  };
+  reader.readAsText(file);
+  // Reset input so the same file can be selected again
+  event.target.value = "";
+}
+
+async function performImport() {
+  if (!importData.value) return;
+
+  showImportDialog.value = false;
+  saving.value = true;
+
+  try {
+    const promises = [];
+
+    if (importData.value.config) {
+      promises.push(
+        fetch("/api/config", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(importData.value.config),
+        })
+      );
+    }
+    if (importData.value.processing) {
+      promises.push(
+        fetch("/api/settings/processing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(importData.value.processing),
+        })
+      );
+    }
+    if (importData.value.palette) {
+      promises.push(
+        fetch("/api/settings/palette", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(importData.value.palette),
+        })
+      );
+    }
+
+    await Promise.all(promises);
+
+    // Reload all settings from device
+    await Promise.all([
+      settingsStore.loadDeviceSettings(),
+      settingsStore.loadSettings(),
+      settingsStore.loadPalette(),
+    ]);
+
+    saveSuccess.value = true;
+    saveError.value = false;
+    saveMessage.value = "Config imported successfully!";
+    setTimeout(() => (saveSuccess.value = false), 3000);
+  } catch (error) {
+    console.error("Failed to import config:", error);
+    saveError.value = true;
+    saveMessage.value = "Failed to import config";
+    setTimeout(() => (saveError.value = false), 5000);
+  } finally {
+    saving.value = false;
+    importData.value = null;
+  }
+}
 
 async function saveSettings() {
   saving.value = true;
@@ -231,7 +348,8 @@ async function performFactoryReset() {
         <v-tab value="homeAssistant"> Home Assistant </v-tab>
         <v-tab value="processing"> Processing </v-tab>
         <v-tab value="ai"> AI Generation </v-tab>
-        <v-tab value="calibration"> Palette Calibration </v-tab>
+        <v-tab value="calibration"> Palette </v-tab>
+        <v-tab value="maintenance"> Maintenance </v-tab>
       </v-tabs>
 
       <v-card-text>
@@ -346,16 +464,6 @@ async function performFactoryReset() {
               </v-col>
             </v-row>
 
-            <!-- Factory Reset Section -->
-            <v-divider class="my-6" />
-            <v-row>
-              <v-col cols="12">
-                <v-btn color="error" variant="outlined" @click="showFactoryResetDialog = true">
-                  <v-icon start>mdi-restore-alert</v-icon>
-                  Factory Reset Device
-                </v-btn>
-              </v-col>
-            </v-row>
           </v-tabs-window-item>
 
           <!-- Auto Rotate Tab -->
@@ -843,6 +951,42 @@ async function performFactoryReset() {
           <v-tabs-window-item value="calibration">
             <PaletteCalibration />
           </v-tabs-window-item>
+
+          <!-- Maintenance Tab -->
+          <v-tabs-window-item value="maintenance">
+            <div class="text-subtitle-1 mt-2 mb-4">Config Backup</div>
+            <v-row>
+              <v-col cols="12">
+                <v-btn variant="outlined" class="mr-2" @click="exportConfig">
+                  <v-icon start>mdi-download</v-icon>
+                  Export Config
+                </v-btn>
+                <v-btn variant="outlined" @click="$refs.importInput.click()">
+                  <v-icon start>mdi-upload</v-icon>
+                  Import Config
+                </v-btn>
+                <input
+                  ref="importInput"
+                  type="file"
+                  accept=".json"
+                  style="display: none"
+                  @change="onImportFileSelected"
+                />
+              </v-col>
+            </v-row>
+
+            <v-divider class="my-6" />
+
+            <div class="text-subtitle-1 mb-4">Factory Reset</div>
+            <v-row>
+              <v-col cols="12">
+                <v-btn color="error" variant="outlined" @click="showFactoryResetDialog = true">
+                  <v-icon start>mdi-restore-alert</v-icon>
+                  Factory Reset Device
+                </v-btn>
+              </v-col>
+            </v-row>
+          </v-tabs-window-item>
         </v-tabs-window>
       </v-card-text>
 
@@ -903,6 +1047,36 @@ async function performFactoryReset() {
           <v-btn color="error" variant="flat" :loading="resetting" @click="performFactoryReset">
             Reset Device
           </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+    <!-- Import Config Confirmation Dialog -->
+    <v-dialog v-model="showImportDialog" max-width="500">
+      <v-card>
+        <v-card-title>
+          <v-icon icon="mdi-upload" class="mr-2" />
+          Import Config
+        </v-card-title>
+        <v-card-text>
+          <v-alert type="warning" variant="tonal" class="mb-4">
+            This will overwrite your current settings with the imported config.
+          </v-alert>
+          <div class="text-body-2 mb-2">
+            File: <strong>{{ importFileName }}</strong>
+          </div>
+          <div v-if="importData" class="text-body-2">
+            Sections to import:
+            <ul class="mt-1 ml-4">
+              <li v-if="importData.config">Device settings</li>
+              <li v-if="importData.processing">Processing settings</li>
+              <li v-if="importData.palette">Palette calibration</li>
+            </ul>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="showImportDialog = false">Cancel</v-btn>
+          <v-btn color="primary" variant="flat" @click="performImport"> Import </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
