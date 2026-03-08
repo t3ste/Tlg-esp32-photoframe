@@ -111,10 +111,10 @@ The reTerminal E1002 also includes a SHT40 temperature/humidity sensor, PCF8563 
 ### 💾 Internal Flash Storage
 Boards with larger flash chips (XIAO EE02/EE04, reTerminal E1002) use internal flash as persistent storage via LittleFS. On the reTerminal, the SD card takes priority when inserted; internal flash serves as a fallback. The Waveshare board does not have internal flash storage due to its 16MB flash being fully allocated to OTA partitions.
 
-### Known Issues / Work in Progress 🚧
+### Known Issues 🚧
 
 - **PhotoPainter Restarts**: All existing Waveshare PhotoPainter boards on the market use the AXP2101 power management IC, which causes unexplained restarts when connected to both Type-C and a lithium battery simultaneously. **Workaround:** use either USB power only or battery only. Using both at the same time may cause frequent firmware restarts due to unstable power supply. Waveshare has confirmed this issue and future boards will ship with TG28 as a replacement, which will not have this problem. See [waveshareteam/ESP32-S3-PhotoPainter#5](https://github.com/waveshareteam/ESP32-S3-PhotoPainter/issues/5#issuecomment-3876269519) for details.
-- **XIAO EE02 Charging**: Battery charging functionality for the Seeed Studio XIAO EE02 board is currently **WIP** and not yet supported. Please power via USB-C or use an external charger for now.
+- **Seeed Studio Deep Sleep & USB Power**: The XIAO EE02, XIAO EE04, and reTerminal E1002 can only detect USB connections from a **PC** (via USB-Serial-JTAG SOF packets). Chargers and power banks will **not** keep the device awake — it will enter deep sleep as normal. This is a hardware limitation: these boards do not route USB VBUS to an ESP32 GPIO. The Waveshare PhotoPainter does not have this limitation as it uses the AXP2101 PMIC for USB power detection. **Workaround:** If you want the device to stay always accessible while powered by a charger or power bank, disable deep sleep in **Settings > General**.
 
 ## Installation
 
