@@ -6,7 +6,7 @@ Reads CONFIG_USE_INTERNAL_FLASH_STORAGE and CONFIG_ESPTOOLPY_FLASHSIZE_*
 from one or more config files to determine the appropriate partition layout.
 
 Usage:
-    python3 gen_partitions.py --sdkconfig sdkconfig.defaults sdkconfig.defaults.board --output partitions.csv
+    python3 gen_partitions.py --sdkconfig sdkconfig.defaults boards/sdkconfig.defaults.board --output partitions.csv
 """
 
 import argparse

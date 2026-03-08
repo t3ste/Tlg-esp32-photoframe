@@ -42,7 +42,7 @@ def main():
             print(f"  ✗ idf.py fullclean failed with exit code {e.returncode}")
             sys.exit(e.returncode)
 
-    sdkconfig_defaults = f"sdkconfig.defaults;sdkconfig.defaults.{board}"
+    sdkconfig_defaults = f"sdkconfig.defaults;boards/sdkconfig.defaults.{board}"
 
     try:
         subprocess.run("npm run build", shell=True, check=True, cwd="webapp")

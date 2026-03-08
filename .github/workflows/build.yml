@@ -62,7 +62,7 @@ jobs:
         esp_idf_version: release-v6.0
         target: esp32s3
         command: |
-          idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.${{ matrix.board }}" \
+          idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/sdkconfig.defaults.${{ matrix.board }}" \
                  -DFIRMWARE_VERSION='${{ steps.version.outputs.version }}' build
     
     - name: Install esptool
