@@ -369,8 +369,15 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
                     return ESP_ERR_NO_MEM;
                 }
 
-                fread(file_buffer, 1, file_size, fp);
+                size_t bytes_read = fread(file_buffer, 1, file_size, fp);
                 fclose(fp);
+
+                if (bytes_read != (size_t) file_size) {
+                    ESP_LOGE(TAG, "Incomplete file read: %zu of %ld bytes", bytes_read, file_size);
+                    heap_caps_free(file_buffer);
+                    unlink(temp_upload_path);
+                    return ESP_ERR_INVALID_SIZE;
+                }
 
                 // For JPEG: save as thumbnail
                 if (image_format == IMAGE_FORMAT_JPG && !thumbnail_downloaded) {

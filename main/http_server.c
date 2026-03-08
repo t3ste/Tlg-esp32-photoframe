@@ -744,8 +744,17 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
                     return ESP_FAIL;
                 }
 
-                fread(file_buffer, 1, file_size, fp);
+                size_t bytes_read = fread(file_buffer, 1, file_size, fp);
                 fclose(fp);
+
+                if (bytes_read != (size_t) file_size) {
+                    ESP_LOGE(TAG, "Incomplete file read: %zu of %ld bytes", bytes_read, file_size);
+                    heap_caps_free(file_buffer);
+                    unlink(temp_upload_path);
+                    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                        "Failed to read image file");
+                    return ESP_FAIL;
+                }
 
                 // For JPEG: save as thumbnail; for PNG: delete original
                 if (image_format == IMAGE_FORMAT_JPG) {
