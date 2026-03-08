@@ -92,7 +92,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
@@ -144,6 +144,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    concurrency:
+      group: deploy-pages
+      cancel-in-progress: false
     permissions:
       contents: read
       pages: write
@@ -186,8 +189,14 @@ jobs:
           # On a tag push: use this tag as stable version
           STABLE_TAG="${GITHUB_REF#refs/tags/}"
         else
-          # On main branch: get latest published release
-          STABLE_TAG=$(gh release view --json tagName -q '.tagName' 2>/dev/null || echo "")
+          # On main branch: check if HEAD has a tag (e.g., tag and main pushed together)
+          HEAD_TAG=$(git tag --points-at HEAD | grep '^v' | head -1)
+          if [[ -n "$HEAD_TAG" ]]; then
+            STABLE_TAG="$HEAD_TAG"
+          else
+            # Fall back to latest published release
+            STABLE_TAG=$(gh release view --json tagName -q '.tagName' 2>/dev/null || echo "")
+          fi
         fi
         echo "Stable version: ${STABLE_TAG:-none}"
 
