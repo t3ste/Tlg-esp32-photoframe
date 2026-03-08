@@ -26,6 +26,6 @@ endif()
 idf_component_register(
     SRCS "${SRCS}"
     INCLUDE_DIRS "include"
-    REQUIRES esp_timer driver esp_adc esp_driver_gpio epaper sensor
+    REQUIRES esp_timer driver esp_adc esp_driver_gpio esp_driver_usb_serial_jtag epaper sensor
     PRIV_REQUIRES ${PRIV_REQS}
 )

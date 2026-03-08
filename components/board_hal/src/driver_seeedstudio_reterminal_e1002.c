@@ -5,6 +5,7 @@
 #include "epaper.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -270,7 +271,7 @@ bool board_hal_is_charging(void)
 
 bool board_hal_is_usb_connected(void)
 {
-    return true;
+    return usb_serial_jtag_is_connected();
 }
 
 void board_hal_shutdown(void)

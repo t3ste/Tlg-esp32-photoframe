@@ -4,6 +4,7 @@
 #include "epaper.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_sleep.h"
 
 static const char *TAG = "board_hal_ee04";
@@ -129,9 +130,7 @@ bool board_hal_is_charging(void)
 
 bool board_hal_is_usb_connected(void)
 {
-    // TODO: Detect USB presence via BQ24070 PG (power-good) pin or VBUS sensing.
-    // Hardcoded to true to prevent aggressive sleep during development.
-    return true;
+    return usb_serial_jtag_is_connected();
 }
 
 void board_hal_shutdown(void)
