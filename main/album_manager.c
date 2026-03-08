@@ -348,6 +348,11 @@ esp_err_t album_manager_get_album_path(const char *album_name, char *path, size_
         return ESP_ERR_INVALID_ARG;
     }
 
+    // Reject path traversal attempts
+    if (strchr(album_name, '/') != NULL || strstr(album_name, "..") != NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     snprintf(path, path_len, "%s/%s", IMAGE_DIRECTORY, album_name);
     return ESP_OK;
 }

@@ -48,6 +48,24 @@ static bool system_ready = false;
 
 #define HTTPD_503 "503 Service Unavailable"
 
+/**
+ * @brief Validate a user-supplied path component to prevent directory traversal attacks.
+ *
+ * Rejects paths containing ".." sequences or starting with "/".
+ *
+ * @return true if the path is safe, false otherwise.
+ */
+static bool is_path_safe(const char *path)
+{
+    if (!path || path[0] == '/') {
+        return false;
+    }
+    if (strstr(path, "..") != NULL) {
+        return false;
+    }
+    return true;
+}
+
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
 extern const uint8_t index_css_start[] asm("_binary_index_css_start");
@@ -993,11 +1011,16 @@ static esp_err_t serve_image_handler(httpd_req_t *req)
     char decoded_filename[256];
     url_decode(decoded_filename, param_value, sizeof(decoded_filename));
 
+    if (!is_path_safe(decoded_filename)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid filepath");
+        return ESP_FAIL;
+    }
+
     char filepath[512];
     const char *content_type = "image/jpeg";
 
     // Filename can be "album/file.jpg" or just "file.jpg"
-    // Build full path: /sdcard/images/ + decoded_filename
+    // Build full path
     snprintf(filepath, sizeof(filepath), "%s/%s", IMAGE_DIRECTORY, decoded_filename);
 
     // Detect content type from extension
@@ -1106,6 +1129,12 @@ static esp_err_t delete_image_handler(httpd_req_t *req)
 
     const char *filepath_str = filepath_obj->valuestring;
 
+    if (!is_path_safe(filepath_str)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid filepath");
+        return ESP_FAIL;
+    }
+
     // Copy filepath to local buffer before deleting JSON
     char filepath_copy[256];
     strncpy(filepath_copy, filepath_str, sizeof(filepath_copy) - 1);
@@ -1203,6 +1232,12 @@ static esp_err_t display_image_handler(httpd_req_t *req)
     }
 
     const char *filepath_str = filepath_obj->valuestring;
+
+    if (!is_path_safe(filepath_str)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid filepath");
+        return ESP_FAIL;
+    }
 
     // Build absolute path - filepath is "album/file.bmp" format
     char filepath[512];
