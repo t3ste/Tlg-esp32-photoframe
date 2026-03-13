@@ -160,13 +160,7 @@ function createFramedCanvas() {
     // Custom mode
     const w = Math.round(srcW * customZoom.value);
     const h = Math.round(srcH * customZoom.value);
-    ctx.drawImage(
-      sourceCanvas,
-      Math.round(customPanX.value),
-      Math.round(customPanY.value),
-      w,
-      h
-    );
+    ctx.drawImage(sourceCanvas, Math.round(customPanX.value), Math.round(customPanY.value), w, h);
   }
 
   // Build background mask from alpha channel (alpha=0 → background pixel)
@@ -594,8 +588,7 @@ onUnmounted(() => {
                 ref="processedCanvasRef"
                 class="preview-canvas processed"
                 :style="{
-                  clipPath:
-                    scaleMode !== 'custom' ? `inset(0 0 0 ${sliderPosition}%)` : 'none',
+                  clipPath: scaleMode !== 'custom' ? `inset(0 0 0 ${sliderPosition}%)` : 'none',
                 }"
               />
               <!-- Comparison slider (hidden in custom mode) -->
@@ -712,5 +705,4 @@ onUnmounted(() => {
   align-self: flex-end;
   margin-left: 20px;
 }
-
 </style>
