@@ -6,6 +6,7 @@ This guide covers building the firmware from source and advanced configuration o
 
 - ESP-IDF v6.0 or later
 - Python 3.7+ (for build tools)
+- npm, vite (note: this excludes use under Wayland)
 - ESP Component Manager (comes with ESP-IDF)
 
 ## Building from Source
@@ -24,6 +25,11 @@ We provide a `build.py` helper script that handles configuration and building fo
 
 ```bash
 cd <path to photoframe-api>
+
+# install npm dependencies
+cd webapp
+npm install
+cd ..
 
 # Build for Waveshare PhotoPainter (7.3" 7-color e-paper)
 ./build.py --board waveshare_photopainter_73
