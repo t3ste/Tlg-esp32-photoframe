@@ -1190,15 +1190,10 @@ static esp_err_t delete_image_handler(httpd_req_t *req)
     char jpg_filename[256];
     strncpy(jpg_filename, filepath_copy, sizeof(jpg_filename) - 1);
     jpg_filename[sizeof(jpg_filename) - 1] = '\0';
-    char *epd_ext = strstr(jpg_filename, ".epdgz");
-    if (epd_ext) {
-        strcpy(epd_ext, ".jpg");
-    } else {
-        char *ext = strrchr(jpg_filename, '.');
-        if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
-                    strcasecmp(ext, ".epdgz") == 0)) {
-            strcpy(ext, ".jpg");
-        }
+    char *ext = strrchr(jpg_filename, '.');
+    if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
+                strcasecmp(ext, ".epdgz") == 0)) {
+        strcpy(ext, ".jpg");
     }
 
     char jpg_path[512];
@@ -1528,7 +1523,8 @@ static esp_err_t current_image_handler(httpd_req_t *req)
     thumbnail_path[sizeof(thumbnail_path) - 1] = '\0';
 
     char *ext = strrchr(thumbnail_path, '.');
-    if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0)) {
+    if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
+                strcasecmp(ext, ".epdgz") == 0)) {
         strcpy(ext, ".jpg");
     }
 
@@ -2189,13 +2185,7 @@ static esp_err_t album_images_handler(httpd_req_t *req)
                 char thumbnail_path[512];
 
                 // Extract base name without extension
-                const char *epd_ext = strstr(entry->d_name, ".epdgz");
-                int base_len;
-                if (epd_ext) {
-                    base_len = epd_ext - entry->d_name;
-                } else {
-                    base_len = ext - entry->d_name;
-                }
+                int base_len = ext - entry->d_name;
                 snprintf(thumbnail_name, sizeof(thumbnail_name), "%.*s.jpg", base_len,
                          entry->d_name);
                 snprintf(thumbnail_path, sizeof(thumbnail_path), "%s/%s", album_path,
