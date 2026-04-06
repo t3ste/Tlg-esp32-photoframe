@@ -11,6 +11,7 @@ import FormData from "form-data";
 import {
   generateThumbnail,
   createPNG,
+  createEPDGZ,
   getPreset,
   getPresetNames,
   getDefaultParams,
@@ -127,11 +128,34 @@ async function fetchDevicePalette(host) {
   });
 }
 
-// Fetch device display resolution from system info
-async function fetchDeviceResolution(host) {
+// Minimum firmware version that supports epd.gz format
+const MIN_EPDGZ_VERSION = "2.6.1";
+
+// Compare two semver strings (with optional "v" prefix).
+// Returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2.
+function compareVersions(v1, v2) {
+  v1 = v1.replace(/^v/, "");
+  v2 = v2.replace(/^v/, "");
+  if (v1.startsWith("dev-")) return -1;
+  if (v2.startsWith("dev-")) return 1;
+  const p1 = v1.split(".").map(Number);
+  const p2 = v2.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((p1[i] || 0) < (p2[i] || 0)) return -1;
+    if ((p1[i] || 0) > (p2[i] || 0)) return 1;
+  }
+  return 0;
+}
+
+function supportsEPDGZ(version) {
+  return version && compareVersions(version, MIN_EPDGZ_VERSION) > 0;
+}
+
+// Fetch device system info (resolution + version)
+async function fetchDeviceSystemInfo(host) {
   return new Promise((resolve, reject) => {
     const url = `http://${host}/api/system-info`;
-    console.log(`Fetching display resolution from device: ${url}`);
+    console.log(`Fetching system info from device: ${url}`);
 
     http
       .get(url, (res) => {
@@ -149,7 +173,14 @@ async function fetchDeviceResolution(host) {
                 console.log(
                   `Device display resolution: ${info.width}x${info.height}`,
                 );
-                resolve({ width: info.width, height: info.height });
+                if (info.version) {
+                  console.log(`Device firmware version: ${info.version}`);
+                }
+                resolve({
+                  width: info.width,
+                  height: info.height,
+                  version: info.version || "",
+                });
               } else {
                 reject(
                   new Error("Device system info does not contain width/height"),
@@ -202,16 +233,19 @@ async function displayDirectly(host, pngPath, thumbPath, retries = 3) {
 }
 
 // Single direct display attempt
-function displayDirectlyOnce(host, pngPath, thumbPath) {
+function displayDirectlyOnce(host, imagePath, thumbPath) {
   return new Promise((resolve, reject) => {
     console.log(`Displaying image directly on device: ${host}`);
-    console.log(`  Image: ${pngPath}`);
+    console.log(`  Image: ${imagePath}`);
     console.log(`  Thumbnail: ${thumbPath}`);
 
+    const contentType = imagePath.endsWith(".epd.gz")
+      ? "application/octet-stream"
+      : "image/png";
     const form = new FormData();
-    form.append("image", fs.createReadStream(pngPath), {
-      filename: path.basename(pngPath),
-      contentType: "image/png",
+    form.append("image", fs.createReadStream(imagePath), {
+      filename: path.basename(imagePath),
+      contentType,
     });
     form.append("thumbnail", fs.createReadStream(thumbPath), {
       filename: path.basename(thumbPath),
@@ -293,19 +327,22 @@ async function uploadToDevice(
 }
 
 // Single upload attempt
-function uploadToDeviceOnce(host, pngPath, thumbPath, album = null) {
+function uploadToDeviceOnce(host, imagePath, thumbPath, album = null) {
   return new Promise((resolve, reject) => {
     console.log(`Uploading to device: ${host}`);
-    console.log(`  Image: ${pngPath}`);
+    console.log(`  Image: ${imagePath}`);
     console.log(`  Thumbnail: ${thumbPath}`);
     if (album) {
       console.log(`  Album: ${album}`);
     }
 
+    const contentType = imagePath.endsWith(".epd.gz")
+      ? "application/octet-stream"
+      : "image/png";
     const form = new FormData();
-    form.append("image", fs.createReadStream(pngPath), {
-      filename: path.basename(pngPath),
-      contentType: "image/png",
+    form.append("image", fs.createReadStream(imagePath), {
+      filename: path.basename(imagePath),
+      contentType,
     });
     form.append("thumbnail", fs.createReadStream(thumbPath), {
       filename: path.basename(thumbPath),
@@ -509,7 +546,9 @@ async function processFolderStructure(
       const imageFile = imageFiles[i];
       const inputPath = path.join(albumInputPath, imageFile);
       const baseName = path.basename(imageFile, path.extname(imageFile));
-      const outputPng = path.join(albumOutputPath, `${baseName}.png`);
+      const fmt = options.format || "epd.gz";
+      const ext = fmt === "bmp" ? ".bmp" : fmt === "png" ? ".png" : ".epd.gz";
+      const outputFile = path.join(albumOutputPath, `${baseName}${ext}`);
       const outputThumb = path.join(albumOutputPath, `${baseName}.jpg`);
 
       try {
@@ -518,7 +557,7 @@ async function processFolderStructure(
         );
         await processImageFile(
           inputPath,
-          outputPng,
+          outputFile,
           outputThumb,
           options,
           devicePalette,
@@ -528,7 +567,12 @@ async function processFolderStructure(
         // Upload if requested
         if (uploadHost) {
           try {
-            await uploadToDevice(uploadHost, outputPng, outputThumb, albumName);
+            await uploadToDevice(
+              uploadHost,
+              outputFile,
+              outputThumb,
+              albumName,
+            );
             totalUploaded++;
           } catch (error) {
             console.error(`  ERROR uploading ${imageFile}: ${error.message}`);
@@ -579,9 +623,13 @@ async function processImageFile(
   const ctx = canvas.getContext("2d");
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-  // 5. Write output file (BMP or PNG)
-  const format = processingOptions.format || "png";
-  if (format === "png") {
+  // 5. Write output file
+  const format = processingOptions.format || "epd.gz";
+  if (format === "epd.gz") {
+    console.log(`  Writing EPD.GZ: ${outputBmp}`);
+    const epdBuffer = await createEPDGZ(canvas);
+    fs.writeFileSync(outputBmp, epdBuffer);
+  } else if (format === "png") {
     const outputPng = outputBmp.replace(/\.bmp$/, ".png");
     console.log(`  Writing PNG: ${outputPng}`);
     const pngBuffer = await createPNG(canvas);
@@ -590,7 +638,9 @@ async function processImageFile(
     console.log(`  Writing BMP: ${outputBmp}`);
     writeBMP(imageData, outputBmp);
   } else {
-    throw new Error(`Unsupported format: ${format}. Use 'png' or 'bmp'`);
+    throw new Error(
+      `Unsupported format: ${format}. Use 'epd.gz', 'png', or 'bmp'`,
+    );
   }
 
   // 6. Generate thumbnail if requested (from EXIF-corrected source, not processed image)
@@ -630,7 +680,7 @@ program
     "",
   )
   .option("-v, --verbose", "Enable verbose logging")
-  .option("--format <format>", "Output format: png or bmp", "png")
+  .option("--format <format>", "Output format: epd.gz, png, or bmp", "epd.gz")
   .option(
     "--preset <name>",
     `Processing preset: ${getPresetNames().join(", ")} `,
@@ -651,8 +701,8 @@ program
   .option("--serve-port <port>", "Port for HTTP server in --serve mode", "8080")
   .option(
     "--serve-format <format>",
-    "Image format to serve: png, jpg, or bmp (default: png)",
-    "png",
+    "Image format to serve: epd.gz, png, jpg, or bmp",
+    "epd.gz",
   )
   .option(
     "--host <host>",
@@ -753,20 +803,35 @@ program
       }
 
       // If --host is explicitly specified, query device for display resolution
+      // and firmware version (to determine output format)
       // This overwrites any -d / --display-width / --display-height values
+      let deviceVersion = "";
       const hostExplicit = program.getOptionValueSource("host") === "cli";
       if (hostExplicit) {
         try {
-          const resolution = await fetchDeviceResolution(options.host);
-          options.displayWidth = resolution.width;
-          options.displayHeight = resolution.height;
+          const sysInfo = await fetchDeviceSystemInfo(options.host);
+          options.displayWidth = sysInfo.width;
+          options.displayHeight = sysInfo.height;
+          deviceVersion = sysInfo.version;
         } catch (error) {
           console.error(
-            `Warning: Could not fetch display resolution from device: ${error.message}`,
+            `Warning: Could not fetch system info from device: ${error.message}`,
           );
           console.error(
             `  Using default resolution: ${options.displayWidth}x${options.displayHeight}`,
           );
+        }
+      }
+
+      // Auto-select format based on firmware version when uploading/displaying
+      // to device and format is not explicitly overridden by user
+      const formatExplicit = program.getOptionValueSource("format") === "cli";
+      if (!formatExplicit && (options.upload || options.direct)) {
+        if (!supportsEPDGZ(deviceVersion)) {
+          console.log(
+            `Device firmware ${deviceVersion || "(unknown)"} does not support epd.gz, using PNG`,
+          );
+          options.format = "png";
         }
       }
 
@@ -976,8 +1041,9 @@ program
         // Process single file
         const baseName = path.basename(input, path.extname(input));
         const suffix = options.suffix || "";
-        const format = options.format || "png";
-        const ext = format === "bmp" ? ".bmp" : ".png";
+        const format = processOptions.format || "epd.gz";
+        const ext =
+          format === "bmp" ? ".bmp" : format === "png" ? ".png" : ".epd.gz";
         const outputFile = path.join(outputDir, `${baseName}${suffix}${ext}`);
         const outputThumb = path.join(outputDir, `${baseName}${suffix}.jpg`);
 
@@ -989,14 +1055,16 @@ program
           devicePalette,
         );
 
-        // Upload or display directly on device (only works with PNG)
+        // Upload or display directly on device
         if (options.upload || options.direct) {
-          if (format !== "png") {
-            console.error(`Error: Upload/direct display requires PNG format`);
+          if (format === "bmp") {
+            console.error(
+              `Error: Upload/direct display does not support BMP format`,
+            );
             process.exit(1);
           }
           if (!fs.existsSync(outputFile)) {
-            console.error(`Error: PNG file not found: ${outputFile}`);
+            console.error(`Error: Output file not found: ${outputFile}`);
             process.exit(1);
           }
           if (!fs.existsSync(outputThumb)) {

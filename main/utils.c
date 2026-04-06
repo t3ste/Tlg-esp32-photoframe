@@ -312,7 +312,16 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
     const char *final_path = NULL;
 
     // ========== STEP 1: Image Processing (always done first) ==========
-    if (image_format == IMAGE_FORMAT_BMP) {
+    if (image_format == IMAGE_FORMAT_EPD_GZ) {
+        // EPD.GZ: already display-ready, just move to temp path (no processing needed)
+        unlink(CURRENT_EPD_PATH);
+        if (rename(temp_upload_path, CURRENT_EPD_PATH) != 0) {
+            ESP_LOGE(TAG, "Failed to move EPD.GZ to temp path");
+            unlink(temp_upload_path);
+            return ESP_FAIL;
+        }
+        final_path = CURRENT_EPD_PATH;
+    } else if (image_format == IMAGE_FORMAT_BMP) {
         // BMP: just move to temp_bmp_path (no processing needed)
         unlink(temp_bmp_path);
         if (rename(temp_upload_path, temp_bmp_path) != 0) {
@@ -469,22 +478,18 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
             char final_image_path[512];
             bool thumbnail_saved_to_album = false;
 
+            const char *save_ext = ".png";
             if (image_format == IMAGE_FORMAT_BMP) {
-                snprintf(final_image_path, sizeof(final_image_path), "%s/%s.bmp", downloads_path,
-                         filename_base);
-                if (rename(final_path, final_image_path) != 0) {
-                    ESP_LOGW(TAG, "Failed to move BMP to Downloads album, using temp path");
-                } else {
-                    final_path = NULL;  // Will be set below
-                }
+                save_ext = ".bmp";
+            } else if (image_format == IMAGE_FORMAT_EPD_GZ) {
+                save_ext = ".epd.gz";
+            }
+            snprintf(final_image_path, sizeof(final_image_path), "%s/%s%s", downloads_path,
+                     filename_base, save_ext);
+            if (rename(final_path, final_image_path) != 0) {
+                ESP_LOGW(TAG, "Failed to move image to Downloads album, using temp path");
             } else {
-                snprintf(final_image_path, sizeof(final_image_path), "%s/%s.png", downloads_path,
-                         filename_base);
-                if (rename(final_path, final_image_path) != 0) {
-                    ESP_LOGW(TAG, "Failed to move PNG to Downloads album, using temp path");
-                } else {
-                    final_path = NULL;  // Will be set below
-                }
+                final_path = NULL;  // Will be set below
             }
 
             // Move thumbnail to album if we successfully moved the main image

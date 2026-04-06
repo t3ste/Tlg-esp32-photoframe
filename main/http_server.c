@@ -537,6 +537,7 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
         // Keep the thumbnail (.current.jpg) for the web UI.
         unlink(temp_bmp_path);
         unlink(temp_png_path);
+        unlink(CURRENT_EPD_PATH);
 
         ha_notify_update();
 
@@ -592,6 +593,7 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
     unlink(temp_jpg_path);
     unlink(temp_bmp_path);
     unlink(temp_png_path);
+    unlink(CURRENT_EPD_PATH);
 
     // Open file for writing
     FILE *fp = fopen(temp_upload_path, "wb");
@@ -855,6 +857,7 @@ static esp_err_t display_image_direct_handler(httpd_req_t *req)
     // Keep the thumbnail (.current.jpg) for the web UI.
     unlink(temp_bmp_path);
     unlink(temp_png_path);
+    unlink(CURRENT_EPD_PATH);
 
     ha_notify_update();
 
