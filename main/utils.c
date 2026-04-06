@@ -12,6 +12,7 @@
 #include "config.h"
 #include "config_manager.h"
 #include "display_manager.h"
+#include "esp_app_desc.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -172,6 +173,10 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
             client, "X-Display-Orientation",
             config_manager_get_display_orientation() == DISPLAY_ORIENTATION_LANDSCAPE ? "landscape"
                                                                                       : "portrait");
+
+        // Add firmware version header
+        const esp_app_desc_t *app_desc = esp_app_get_description();
+        esp_http_client_set_header(client, "X-Firmware-Version", app_desc->version);
 
         // Add processing settings as JSON header
         processing_settings_t proc_settings;
