@@ -126,6 +126,8 @@ esp_err_t board_hal_prepare_for_sleep(void)
 {
     ESP_LOGI(TAG, "Preparing system for sleep");
 
+    epaper_enter_deepsleep();
+
     // Put SHTC3 sensor to sleep
     if (sensor_is_available()) {
         sensor_sleep();
