@@ -5,9 +5,9 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <zlib.h>
 
 #include "GUI_BMPfile.h"
+#include "GUI_EPDGZfile.h"
 #include "GUI_PNGfile.h"
 #include "GUI_Paint.h"
 #include "GUI_RawBuffer.h"
@@ -34,9 +34,6 @@ static char last_displayed_image[256] = {0};  // Internal state: last displayed 
 
 static uint8_t *epd_image_buffer = NULL;
 static uint32_t image_buffer_size;
-
-// Forward Declaration
-static esp_err_t display_manager_show_raw_gzip(const char *filename);
 
 // Load last displayed image from NVS
 static void load_last_displayed_image(void)
@@ -146,7 +143,7 @@ esp_err_t display_manager_show_image(const char *filename)
 
     if (is_epdgz) {
         ESP_LOGI(TAG, "Reading EPDGZ file into buffer");
-        if (display_manager_show_raw_gzip(filename) != ESP_OK) {
+        if (GUI_ReadEPDGZ(filename) != 0) {
             ESP_LOGE(TAG, "Failed to read EPDGZ file");
             xSemaphoreGive(display_mutex);
             return ESP_FAIL;
@@ -231,79 +228,6 @@ esp_err_t display_manager_show_rgb_buffer(const uint8_t *rgb_buffer, int width, 
     xSemaphoreGive(display_mutex);
 
     ESP_LOGI(TAG, "RGB buffer displayed successfully");
-    return ESP_OK;
-}
-
-static esp_err_t display_manager_show_raw_gzip(const char *filename)
-{
-    FILE *fp = fopen(filename, "rb");
-    if (!fp) {
-        ESP_LOGE(TAG, "Failed to open raw gzip file: %s", filename);
-        return ESP_FAIL;
-    }
-
-    fseek(fp, 0, SEEK_END);
-    long compressed_size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-
-    uint8_t *compressed_data = heap_caps_malloc(compressed_size, MALLOC_CAP_SPIRAM);
-    if (!compressed_data) {
-        fclose(fp);
-        return ESP_ERR_NO_MEM;
-    }
-    fread(compressed_data, 1, compressed_size, fp);
-    fclose(fp);
-
-    int width = Paint.Width;
-    int height = Paint.Height;
-    int uncompressed_size = (width * height + 1) / 2;
-
-    uint8_t *uncompressed_data = heap_caps_malloc(uncompressed_size, MALLOC_CAP_SPIRAM);
-    if (!uncompressed_data) {
-        heap_caps_free(compressed_data);
-        return ESP_ERR_NO_MEM;
-    }
-
-    z_stream strm = {0};
-    strm.avail_in = compressed_size;
-    strm.next_in = compressed_data;
-    strm.avail_out = uncompressed_size;
-    strm.next_out = uncompressed_data;
-
-    // 16 + MAX_WBITS enables gzip decoding
-    if (inflateInit2(&strm, 16 + MAX_WBITS) != Z_OK) {
-        ESP_LOGE(TAG, "inflateInit2 failed");
-        heap_caps_free(compressed_data);
-        heap_caps_free(uncompressed_data);
-        return ESP_FAIL;
-    }
-
-    int ret = inflate(&strm, Z_FINISH);
-    inflateEnd(&strm);
-    heap_caps_free(compressed_data);
-
-    if (ret != Z_STREAM_END && ret != Z_OK) {
-        ESP_LOGE(TAG, "Decompression failed: %d", ret);
-        heap_caps_free(uncompressed_data);
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "Decompressed raw image successfully, rendering via Paint_SetPixel");
-
-    int byteIdx = 0;
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x += 2) {
-            uint8_t byte = uncompressed_data[byteIdx++];
-            uint8_t p1 = (byte >> 4) & 0x0F;
-            uint8_t p2 = byte & 0x0F;
-            Paint_SetPixel(x, y, p1);
-            if (x + 1 < width) {
-                Paint_SetPixel(x + 1, y, p2);
-            }
-        }
-    }
-
-    heap_caps_free(uncompressed_data);
     return ESP_OK;
 }
 
