@@ -7,6 +7,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 
 const char *TAG = "axp2101";
@@ -308,9 +309,21 @@ bool axp2101_is_battery_connected(void)
     return axp2101.isBatteryConnect();
 }
 
+// Cache USB connection status to reduce I2C polling frequency.
+// The AXP2101 can intermittently NACK status register reads,
+// and polling every second generates excessive warning logs.
+static bool cached_usb_connected = false;
+static int64_t last_usb_check_time = 0;
+#define USB_CHECK_INTERVAL_US (5 * 1000 * 1000)  // 5 seconds
+
 bool axp2101_is_usb_connected(void)
 {
-    return axp2101.isVbusIn();
+    int64_t now = esp_timer_get_time();
+    if (now - last_usb_check_time >= USB_CHECK_INTERVAL_US) {
+        last_usb_check_time = now;
+        cached_usb_connected = axp2101.isVbusIn();
+    }
+    return cached_usb_connected;
 }
 
 void axp2101_shutdown(void)
