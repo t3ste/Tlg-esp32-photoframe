@@ -9,6 +9,7 @@ A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently 
 ## Key Features
 
 - 🎨 **Superior Image Quality**: Measured color palette with automatic calibration produces significantly better results than stock firmware
+- ⚡ **EPDGZ Format**: Pre-processed 4-bit-per-pixel compressed format that saves storage space and enables instant display rendering without on-device image processing
 - 🔋 **Smart Power Management**: Deep sleep mode for weeks of battery life, or always-on for Home Assistant
 - 📁 **Flexible Image Sources**: SD card rotation, URL-based fetching (weather, news, random images from image server)
 - 🌐 **Modern Web Interface**: Drag-and-drop uploads, gallery view, real-time battery status
@@ -225,10 +226,10 @@ node cli.js ~/Photos/Albums --upload --device-parameters --host photoframe.local
 Serve pre-processed images directly to your ESP32 over HTTP:
 
 ```bash
-node cli.js --serve ~/Photos --serve-port 9000 --serve-format png --device-parameters --host photoframe.local
+node cli.js --serve ~/Photos --serve-port 9000 --device-parameters --host photoframe.local
 ```
 
-The ESP32 can fetch images from your computer instead of storing them on SD card. Supports BMP, PNG, and JPG formats with automatic thumbnail generation.
+The ESP32 can fetch images from your computer instead of storing them on SD card. Supports EPDGZ, BMP, PNG, and JPG formats with automatic thumbnail generation.
 
 See [process-cli/README.md](process-cli/README.md) for details.
 
