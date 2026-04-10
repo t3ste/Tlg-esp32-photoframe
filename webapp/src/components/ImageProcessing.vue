@@ -151,17 +151,15 @@ function createFramedCanvas() {
     const covered = imageProcessor.resizeImageCover(sourceCanvas, frameWidth, frameHeight);
     ctx.drawImage(covered, 0, 0);
   } else if (scaleMode.value === "fit") {
-    const scale = Math.min(frameWidth / srcW, frameHeight / srcH);
-    const w = Math.round(srcW * scale);
-    const h = Math.round(srcH * scale);
-    const x = Math.round((frameWidth - w) / 2);
-    const y = Math.round((frameHeight - h) / 2);
-    ctx.drawImage(sourceCanvas, x, y, w, h);
+    const fitted = imageProcessor.resizeImageFit(sourceCanvas, frameWidth, frameHeight, "rgba(0,0,0,0)");
+    ctx.drawImage(fitted, 0, 0);
   } else {
     // Custom mode
-    const w = Math.round(srcW * customZoom.value);
-    const h = Math.round(srcH * customZoom.value);
-    ctx.drawImage(sourceCanvas, Math.round(customPanX.value), Math.round(customPanY.value), w, h);
+    const custom = imageProcessor.resizeImageCustom(
+      sourceCanvas, frameWidth, frameHeight,
+      customZoom.value, customPanX.value, customPanY.value, "rgba(0,0,0,0)",
+    );
+    ctx.drawImage(custom, 0, 0);
   }
 
   // Build background mask from alpha channel (alpha=0 → background pixel)
