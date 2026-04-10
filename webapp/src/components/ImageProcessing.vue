@@ -512,11 +512,14 @@ function updateSlider(event) {
 
 // Expose method for upload component to get framed canvas and background mask
 defineExpose({
-  getUploadCanvas() {
-    if (!sourceCanvas) return null;
-    const { canvas, bgMask } = createFramedCanvas();
-    const theoreticalBg = getBgPaletteColor(false);
-    return { canvas, bgMask, theoreticalBg };
+  scaleMode,
+  getUploadParams() {
+    return {
+      backgroundColorName: bgColorMode.value,
+      zoom: customZoom.value,
+      panX: customPanX.value,
+      panY: customPanY.value,
+    };
   },
 });
 

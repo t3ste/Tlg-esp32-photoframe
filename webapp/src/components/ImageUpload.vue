@@ -119,61 +119,34 @@ async function uploadImage(mode = "upload") {
     const orientation = settingsStore.deviceSettings.displayOrientation;
     const palette = imageProcessor.SPECTRA6;
 
-    // Get framed canvas (at orientation-aware dimensions from preview)
-    const uploadData = imageProcessingRef.value?.getUploadCanvas();
-    let uploadCanvas = uploadData?.canvas || sourceCanvas.value;
+    // Get scale mode and params from the preview component
+    // Vue auto-unwraps refs from defineExpose, so no .value needed
+    const scaleMode = imageProcessingRef.value?.scaleMode || "cover";
+    const uploadParams = imageProcessingRef.value?.getUploadParams() || {};
 
-    // Rotate portrait content (480x800) to native layout (800x480) before processing
-    if (orientation === "portrait" && uploadCanvas.width < uploadCanvas.height) {
+    // Use source canvas — the library handles all scaling
+    let uploadCanvas = sourceCanvas.value;
+
+    // Rotate portrait content to native layout
+    if (orientation === "portrait") {
       uploadCanvas = imageProcessor.rotateImage(uploadCanvas, 90);
     }
 
-    // Process image with theoretical palette for device at native dimensions
+    // Process image with theoretical palette for device at native dimensions.
+    // The library handles scaling (cover/fit/custom) and clean background
+    // replacement after dithering.
     const result = imageProcessor.processImage(uploadCanvas, {
       displayWidth: targetWidth,
       displayHeight: targetHeight,
       palette,
       params,
+      scaleMode,
+      backgroundColor: uploadParams.backgroundColorName || "black",
+      zoom: uploadParams.zoom,
+      panX: uploadParams.panX,
+      panY: uploadParams.panY,
       usePerceivedOutput: false, // Use theoretical palette
     });
-
-    // Replace background pixels with clean theoretical palette color (no dithering artifacts)
-    if (uploadData?.bgMask && uploadData?.theoreticalBg) {
-      const srcW = uploadCanvas.width;
-      const srcH = uploadCanvas.height;
-      const outW = result.canvas.width;
-      const outH = result.canvas.height;
-
-      // If processImage rotated the canvas 90° clockwise (orientation mismatch),
-      // we must rotate the bgMask to match: (x, y) in WxH → (H-1-y, x) in HxW
-      const wasRotated = srcW !== outW || srcH !== outH;
-      let mask = uploadData.bgMask;
-      if (wasRotated) {
-        const rotated = new Uint8Array(outW * outH);
-        for (let y = 0; y < srcH; y++) {
-          for (let x = 0; x < srcW; x++) {
-            const srcIdx = y * srcW + x;
-            const dstX = srcH - 1 - y;
-            const dstY = x;
-            rotated[dstY * outW + dstX] = mask[srcIdx];
-          }
-        }
-        mask = rotated;
-      }
-
-      const ctx = result.canvas.getContext("2d");
-      const imageData = ctx.getImageData(0, 0, outW, outH);
-      const data = imageData.data;
-      const bg = uploadData.theoreticalBg;
-      for (let i = 0; i < mask.length; i++) {
-        if (mask[i]) {
-          data[i * 4] = bg.r;
-          data[i * 4 + 1] = bg.g;
-          data[i * 4 + 2] = bg.b;
-        }
-      }
-      ctx.putImageData(imageData, 0, 0);
-    }
 
     // Convert dithered canvas to gzip-compressed 4-bit EPD format using the library
     const compressedBuffer = await imageProcessor.createEPDGZ(result.canvas);

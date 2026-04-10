@@ -655,6 +655,8 @@ async function processImageFile(
       verbose: processingOptions.verbose || true,
       autoOrient: processingOptions.autoOrient || false,
       rotate: processingOptions.rotate || 0,
+      scaleMode: processingOptions.scaleMode || "cover",
+      backgroundColor: processingOptions.backgroundColor || "black",
     },
   );
 
@@ -795,6 +797,8 @@ program
     "Display orientation: landscape or portrait (overridden by --device-parameters)",
     "landscape",
   )
+  .option("--scale-mode <mode>", "Scale mode: cover (crop to fill) or fit (letterbox)", "cover")
+  .option("--background-color <name>", "Background palette color for fit mode (black, white, etc.)", "black")
   .option("--display-width <width>", "Display width in pixels", parseInt, 800)
   .option(
     "--display-height <height>",
@@ -961,7 +965,9 @@ program
             displayHeight: options.displayHeight,
             format: options.format,
             autoOrient: options.autoOrient || false,
-            rotate: options.rotate ? parseInt(options.rotate) : 0,
+            rotate: options.rotate ? parseInt(options.rotate, 10) : 0,
+            scaleMode: options.scaleMode || "cover",
+            backgroundColor: options.backgroundColor || "black",
           }
         : {
             generateThumbnail: true,
@@ -1015,7 +1021,9 @@ program
             displayHeight: options.displayHeight,
             format: options.format,
             autoOrient: options.autoOrient || false,
-            rotate: options.rotate ? parseInt(options.rotate) : 0,
+            rotate: options.rotate ? parseInt(options.rotate, 10) : 0,
+            scaleMode: options.scaleMode || "cover",
+            backgroundColor: options.backgroundColor || "black",
           };
 
       // Check if --serve mode is enabled
