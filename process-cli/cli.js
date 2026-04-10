@@ -152,6 +152,7 @@ function supportsEPDGZ(version) {
 }
 
 // Fetch device system info (resolution + version)
+
 async function fetchDeviceSystemInfo(host) {
   return new Promise((resolve, reject) => {
     const url = `http://${host}/api/system-info`;
@@ -206,6 +207,42 @@ async function fetchDeviceSystemInfo(host) {
         reject(
           new Error(`Failed to connect to device at ${host}: ${error.message}`),
         );
+      });
+  });
+}
+
+// Fetch display orientation from device settings
+async function fetchDeviceOrientation(host) {
+  return new Promise((resolve, reject) => {
+    const url = `http://${host}/api/config`;
+    console.log(`Fetching display orientation from device: ${url}`);
+
+    http
+      .get(url, (res) => {
+        let data = "";
+
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+
+        res.on("end", () => {
+          if (res.statusCode === 200) {
+            try {
+              const settings = JSON.parse(data);
+              const orientation =
+                settings.display_orientation || "landscape";
+              console.log(`Device display orientation: ${orientation}`);
+              resolve(orientation);
+            } catch (error) {
+              resolve("landscape");
+            }
+          } else {
+            resolve("landscape");
+          }
+        });
+      })
+      .on("error", () => {
+        resolve("landscape");
       });
   });
 }
@@ -753,6 +790,11 @@ program
     "Dithering algorithm: floyd-steinberg, stucki, burkes, or sierra",
   )
   .option("--auto-orient", "Auto-rotate images to match target display orientation")
+  .option(
+    "--orientation <mode>",
+    "Display orientation: landscape or portrait (overridden by --device-parameters)",
+    "landscape",
+  )
   .option("--display-width <width>", "Display width in pixels", parseInt, 800)
   .option(
     "--display-height <height>",
@@ -777,6 +819,8 @@ program
       try {
         deviceSettings = await fetchDeviceSettings(options.host);
         devicePalette = await fetchDevicePalette(options.host);
+        // Fetch orientation from device (overrides --orientation flag)
+        options.orientation = await fetchDeviceOrientation(options.host);
       } catch (error) {
         console.error(`Error: ${error.message}`);
         process.exit(1);
@@ -835,6 +879,13 @@ program
           );
           options.format = "png";
         }
+      }
+
+      // For portrait orientation, rotate source 90° CW so content fills
+      // the native landscape panel correctly for portrait-mounted viewing
+      if (options.orientation === "portrait") {
+        options.rotate = "90";
+        console.log("Portrait orientation: rotating source 90° CW");
       }
 
       // Apply preset values if not overridden by explicit options
