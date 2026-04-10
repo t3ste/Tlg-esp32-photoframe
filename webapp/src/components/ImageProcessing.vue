@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from "vue";
 import ToneCurve from "./ToneCurve.vue";
-import { useAppStore } from "../stores";
+import { useAppStore, useSettingsStore } from "../stores";
 
 const props = defineProps({
   imageFile: {
@@ -20,6 +20,7 @@ const props = defineProps({
 
 const emit = defineEmits(["processed"]);
 const appStore = useAppStore();
+const settingsStore = useSettingsStore();
 
 // Canvas refs
 const originalCanvasRef = ref(null);
@@ -97,20 +98,20 @@ function calculateHistogram(canvas) {
   return bins;
 }
 
-// Get frame dimensions accounting for source/display orientation mismatch
+// Get frame dimensions based on device orientation config.
+// The preview shows what the user sees on the physical device.
 function getFrameDimensions() {
-  const targetWidth = appStore.systemInfo.width || 800;
-  const targetHeight = appStore.systemInfo.height || 480;
+  let frameWidth = appStore.systemInfo.width || 800;
+  let frameHeight = appStore.systemInfo.height || 480;
+  const orientation = settingsStore.deviceSettings.displayOrientation;
 
-  if (!sourceCanvas) return { frameWidth: targetWidth, frameHeight: targetHeight };
-
-  const isSourcePortrait = sourceCanvas.height > sourceCanvas.width;
-  const isTargetPortrait = targetHeight > targetWidth;
-
-  if (isSourcePortrait !== isTargetPortrait) {
-    return { frameWidth: targetHeight, frameHeight: targetWidth };
+  if (orientation === "portrait" && frameWidth > frameHeight) {
+    [frameWidth, frameHeight] = [frameHeight, frameWidth];
+  } else if (orientation === "landscape" && frameWidth < frameHeight) {
+    [frameWidth, frameHeight] = [frameHeight, frameWidth];
   }
-  return { frameWidth: targetWidth, frameHeight: targetHeight };
+
+  return { frameWidth, frameHeight };
 }
 
 // Initialize custom mode pan/zoom to match cover position
@@ -359,16 +360,15 @@ async function updatePreview() {
     palette.perceived = props.palette;
   }
 
-  const targetWidth = appStore.systemInfo.width;
-  const targetHeight = appStore.systemInfo.height;
+  const { frameWidth, frameHeight } = getFrameDimensions();
 
   // Create framed canvas at exact display dimensions (all scaling done client-side)
   const { canvas: framedCanvas, bgMask } = createFramedCanvas();
   const inputCanvas = framedCanvas;
 
   const result = imageProcessor.processImage(inputCanvas, {
-    displayWidth: targetWidth,
-    displayHeight: targetHeight,
+    displayWidth: frameWidth,
+    displayHeight: frameHeight,
     palette,
     params: processingParams,
     usePerceivedOutput: true,
@@ -379,8 +379,8 @@ async function updatePreview() {
 
   // Process again without dithering to get histogram of tone-mapped image
   const preDitherResult = imageProcessor.processImage(inputCanvas, {
-    displayWidth: targetWidth,
-    displayHeight: targetHeight,
+    displayWidth: frameWidth,
+    displayHeight: frameHeight,
     palette,
     params: processingParams,
     skipDithering: true,

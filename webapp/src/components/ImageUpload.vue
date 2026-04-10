@@ -113,16 +113,22 @@ async function uploadImage(mode = "upload") {
       compressDynamicRange: settingsStore.params.compressDynamicRange,
     };
 
-    // Use native board dimensions for upload
+    // Always use native panel dimensions for processing
     const targetWidth = displayWidth.value;
     const targetHeight = displayHeight.value;
+    const orientation = settingsStore.deviceSettings.displayOrientation;
     const palette = imageProcessor.SPECTRA6;
 
-    // Use framed canvas (scaling/cropping done client-side) or fall back to raw source
+    // Get framed canvas (at orientation-aware dimensions from preview)
     const uploadData = imageProcessingRef.value?.getUploadCanvas();
-    const uploadCanvas = uploadData?.canvas || sourceCanvas.value;
+    let uploadCanvas = uploadData?.canvas || sourceCanvas.value;
 
-    // Process image with theoretical palette for device
+    // Rotate portrait content (480x800) to native layout (800x480) before processing
+    if (orientation === "portrait" && uploadCanvas.width < uploadCanvas.height) {
+      uploadCanvas = imageProcessor.rotateImage(uploadCanvas, 90);
+    }
+
+    // Process image with theoretical palette for device at native dimensions
     const result = imageProcessor.processImage(uploadCanvas, {
       displayWidth: targetWidth,
       displayHeight: targetHeight,
