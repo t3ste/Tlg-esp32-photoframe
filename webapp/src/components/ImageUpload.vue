@@ -143,8 +143,11 @@ async function uploadImage(mode = "upload") {
       scaleMode,
       backgroundColor: uploadParams.backgroundColorName || "black",
       zoom: uploadParams.zoom,
-      panX: uploadParams.panX,
-      panY: uploadParams.panY,
+      // Transform pan coordinates for portrait since source is rotated 90° CW
+      panX: orientation === "portrait"
+        ? targetWidth - uploadParams.panY - sourceCanvas.value.height * uploadParams.zoom
+        : uploadParams.panX,
+      panY: orientation === "portrait" ? uploadParams.panX : uploadParams.panY,
       usePerceivedOutput: false, // Use theoretical palette
     });
 

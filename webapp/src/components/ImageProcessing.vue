@@ -121,11 +121,11 @@ function initCustomMode() {
   const { frameWidth, frameHeight } = getFrameDimensions();
   const srcW = sourceCanvas.width;
   const srcH = sourceCanvas.height;
-  const coverScale = Math.max(frameWidth / srcW, frameHeight / srcH);
+  const fitScale = Math.min(frameWidth / srcW, frameHeight / srcH);
 
-  customZoom.value = coverScale;
-  customPanX.value = (frameWidth - srcW * coverScale) / 2;
-  customPanY.value = (frameHeight - srcH * coverScale) / 2;
+  customZoom.value = fitScale;
+  customPanX.value = (frameWidth - srcW * fitScale) / 2;
+  customPanY.value = (frameHeight - srcH * fitScale) / 2;
 }
 
 // Create a framed canvas at exact display dimensions for all scale modes.
@@ -321,6 +321,17 @@ async function loadAndProcessImage(file) {
     sourceCanvas.height = img.height;
     const sourceCtx = sourceCanvas.getContext("2d");
     sourceCtx.drawImage(img, 0, 0);
+
+    // Auto-select scale mode: use fit if source orientation doesn't match
+    // display orientation, cover otherwise
+    const { frameWidth, frameHeight } = getFrameDimensions();
+    const isSourcePortrait = img.height > img.width;
+    const isTargetPortrait = frameHeight > frameWidth;
+    if (isSourcePortrait !== isTargetPortrait) {
+      scaleMode.value = "fit";
+    } else {
+      scaleMode.value = "cover";
+    }
 
     // Reinitialize custom mode if active
     if (scaleMode.value === "custom") {
