@@ -651,7 +651,7 @@ async function processImageFile(
     {
       verbose: processingOptions.verbose || true,
       autoOrient: processingOptions.autoOrient || false,
-      rotate: processingOptions.rotate || 0,
+      orientation: processingOptions.orientation || "landscape",
       scaleMode: processingOptions.scaleMode || "cover",
       backgroundColor: processingOptions.backgroundColor || "white",
     },
@@ -892,13 +892,6 @@ program
         }
       }
 
-      // For portrait orientation, rotate source 90° CW so content fills
-      // the native landscape panel correctly for portrait-mounted viewing
-      if (options.orientation === "portrait") {
-        options.rotate = "90";
-        console.log("Portrait orientation: rotating source 90° CW");
-      }
-
       // Apply preset values if not overridden by explicit options
       const presetName = options.preset || "balanced";
       // presetParams is declared here, ensure no duplicate declaration below
@@ -972,7 +965,7 @@ program
             displayHeight: options.displayHeight,
             format: options.format,
             autoOrient: options.autoOrient || false,
-            rotate: options.rotate ? parseInt(options.rotate, 10) : 0,
+            orientation: options.orientation || "landscape",
             scaleMode: options.scaleMode || "cover",
             backgroundColor: options.backgroundColor || "white",
           }
@@ -1028,7 +1021,7 @@ program
             displayHeight: options.displayHeight,
             format: options.format,
             autoOrient: options.autoOrient || false,
-            rotate: options.rotate ? parseInt(options.rotate, 10) : 0,
+            orientation: options.orientation || "landscape",
             scaleMode: options.scaleMode || "cover",
             backgroundColor: options.backgroundColor || "white",
           };

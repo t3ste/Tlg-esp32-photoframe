@@ -123,31 +123,20 @@ async function uploadImage(mode = "upload") {
     const scaleMode = imageProcessingRef.value?.scaleMode || "cover";
     const uploadParams = imageProcessingRef.value?.getUploadParams() || {};
 
-    // Use source canvas — the library handles all scaling
-    let uploadCanvas = sourceCanvas.value;
-
-    // Rotate portrait content to native layout
-    if (orientation === "portrait") {
-      uploadCanvas = imageProcessor.rotateImage(uploadCanvas, 90);
-    }
-
     // Process image with theoretical palette for device at native dimensions.
-    // The library handles scaling (cover/fit/custom) and clean background
-    // replacement after dithering.
-    const result = imageProcessor.processImage(uploadCanvas, {
+    // The library handles rotation, scaling (cover/fit/custom), and clean
+    // background replacement after dithering.
+    const result = imageProcessor.processImage(sourceCanvas.value, {
       displayWidth: targetWidth,
       displayHeight: targetHeight,
       palette,
       params,
+      orientation,
       scaleMode,
-      backgroundColor: uploadParams.backgroundColorName || "black",
+      backgroundColor: uploadParams.backgroundColorName || "white",
       zoom: uploadParams.zoom,
-      // Transform pan coordinates for portrait since source is rotated 90° CW
-      panX:
-        orientation === "portrait"
-          ? targetWidth - uploadParams.panY - sourceCanvas.value.height * uploadParams.zoom
-          : uploadParams.panX,
-      panY: orientation === "portrait" ? uploadParams.panX : uploadParams.panY,
+      panX: uploadParams.panX,
+      panY: uploadParams.panY,
       usePerceivedOutput: false, // Use theoretical palette
     });
 

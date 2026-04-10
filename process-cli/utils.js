@@ -60,7 +60,7 @@ function getExifOrientation(imagePath) {
  *   - verbose {boolean} - Enable verbose logging
  *   - skipDithering {boolean} - Skip dithering step
  *   - autoOrient {boolean} - Auto-rotate image to match target orientation
- *   - rotate {number} - Manual rotation in degrees (0, 90, 180, 270)
+ *   - orientation {string} - Display orientation: "landscape" or "portrait"
  *   - scaleMode {string} - Scale mode: "cover" or "fit" (default: "cover")
  *   - backgroundColor {string} - Palette color name for fit mode background (default: "white")
  * @returns {Promise<Object>} { canvas, originalCanvas, thumbnail }
@@ -77,7 +77,7 @@ export async function processImagePipeline(
     verbose = false,
     skipDithering = false,
     autoOrient = false,
-    rotate = 0,
+    orientation = "landscape",
     scaleMode = "cover",
     backgroundColor = "white",
   } = options;
@@ -89,22 +89,14 @@ export async function processImagePipeline(
   ctx.drawImage(img, 0, 0);
 
   // Apply EXIF orientation
-  const orientation = getExifOrientation(imagePath);
-  if (orientation > 1) {
+  const exifOrientation = getExifOrientation(imagePath);
+  if (exifOrientation > 1) {
     if (verbose) {
-      console.log(`  Applying EXIF orientation: ${orientation}`);
+      console.log(`  Applying EXIF orientation: ${exifOrientation}`);
     }
-    canvas = applyExifOrientation(canvas, orientation, createCanvas);
+    canvas = applyExifOrientation(canvas, exifOrientation, createCanvas);
     if (verbose) {
       console.log(`  After EXIF correction: ${canvas.width}x${canvas.height}`);
-    }
-  }
-
-  // Apply manual rotation if requested
-  if (rotate) {
-    canvas = rotateImage(canvas, rotate, createCanvas);
-    if (verbose) {
-      console.log(`  Rotated ${rotate}° (${canvas.width}x${canvas.height})`);
     }
   }
 
@@ -143,6 +135,7 @@ export async function processImagePipeline(
     displayHeight,
     palette,
     params: processingParams,
+    orientation,
     scaleMode,
     backgroundColor,
     verbose,
