@@ -229,8 +229,7 @@ async function fetchDeviceOrientation(host) {
           if (res.statusCode === 200) {
             try {
               const settings = JSON.parse(data);
-              const orientation =
-                settings.display_orientation || "landscape";
+              const orientation = settings.display_orientation || "landscape";
               console.log(`Device display orientation: ${orientation}`);
               resolve(orientation);
             } catch (error) {
@@ -656,7 +655,7 @@ async function processImageFile(
       autoOrient: processingOptions.autoOrient || false,
       rotate: processingOptions.rotate || 0,
       scaleMode: processingOptions.scaleMode || "cover",
-      backgroundColor: processingOptions.backgroundColor || "black",
+      backgroundColor: processingOptions.backgroundColor || "white",
     },
   );
 
@@ -791,14 +790,25 @@ program
     "--dither-algorithm <algorithm>",
     "Dithering algorithm: floyd-steinberg, stucki, burkes, or sierra",
   )
-  .option("--auto-orient", "Auto-rotate images to match target display orientation")
+  .option(
+    "--auto-orient",
+    "Auto-rotate images to match target display orientation",
+  )
   .option(
     "--orientation <mode>",
     "Display orientation: landscape or portrait (overridden by --device-parameters)",
     "landscape",
   )
-  .option("--scale-mode <mode>", "Scale mode: cover (crop to fill) or fit (letterbox)", "cover")
-  .option("--background-color <name>", "Background palette color for fit mode (black, white, etc.)", "black")
+  .option(
+    "--scale-mode <mode>",
+    "Scale mode: cover (crop to fill) or fit (letterbox)",
+    "cover",
+  )
+  .option(
+    "--background-color <name>",
+    "Background palette color for fit mode (black, white, etc.)",
+    "white",
+  )
   .option("--display-width <width>", "Display width in pixels", parseInt, 800)
   .option(
     "--display-height <height>",
@@ -967,7 +977,7 @@ program
             autoOrient: options.autoOrient || false,
             rotate: options.rotate ? parseInt(options.rotate, 10) : 0,
             scaleMode: options.scaleMode || "cover",
-            backgroundColor: options.backgroundColor || "black",
+            backgroundColor: options.backgroundColor || "white",
           }
         : {
             generateThumbnail: true,
@@ -1023,7 +1033,7 @@ program
             autoOrient: options.autoOrient || false,
             rotate: options.rotate ? parseInt(options.rotate, 10) : 0,
             scaleMode: options.scaleMode || "cover",
-            backgroundColor: options.backgroundColor || "black",
+            backgroundColor: options.backgroundColor || "white",
           };
 
       // Check if --serve mode is enabled

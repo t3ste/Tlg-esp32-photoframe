@@ -151,13 +151,23 @@ function createFramedCanvas() {
     const covered = imageProcessor.resizeImageCover(sourceCanvas, frameWidth, frameHeight);
     ctx.drawImage(covered, 0, 0);
   } else if (scaleMode.value === "fit") {
-    const fitted = imageProcessor.resizeImageFit(sourceCanvas, frameWidth, frameHeight, "rgba(0,0,0,0)");
+    const fitted = imageProcessor.resizeImageFit(
+      sourceCanvas,
+      frameWidth,
+      frameHeight,
+      "rgba(0,0,0,0)"
+    );
     ctx.drawImage(fitted, 0, 0);
   } else {
     // Custom mode
     const custom = imageProcessor.resizeImageCustom(
-      sourceCanvas, frameWidth, frameHeight,
-      customZoom.value, customPanX.value, customPanY.value, "rgba(0,0,0,0)",
+      sourceCanvas,
+      frameWidth,
+      frameHeight,
+      customZoom.value,
+      customPanX.value,
+      customPanY.value,
+      "rgba(0,0,0,0)"
     );
     ctx.drawImage(custom, 0, 0);
   }

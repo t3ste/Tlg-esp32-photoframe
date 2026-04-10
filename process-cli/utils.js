@@ -62,7 +62,7 @@ function getExifOrientation(imagePath) {
  *   - autoOrient {boolean} - Auto-rotate image to match target orientation
  *   - rotate {number} - Manual rotation in degrees (0, 90, 180, 270)
  *   - scaleMode {string} - Scale mode: "cover" or "fit" (default: "cover")
- *   - backgroundColor {string} - Palette color name for fit mode background (default: "black")
+ *   - backgroundColor {string} - Palette color name for fit mode background (default: "white")
  * @returns {Promise<Object>} { canvas, originalCanvas, thumbnail }
  */
 export async function processImagePipeline(
@@ -79,7 +79,7 @@ export async function processImagePipeline(
     autoOrient = false,
     rotate = 0,
     scaleMode = "cover",
-    backgroundColor = "black",
+    backgroundColor = "white",
   } = options;
 
   // Load image (with HEIC conversion if needed)
