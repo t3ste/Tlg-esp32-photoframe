@@ -546,9 +546,6 @@ void app_main(void)
 
     xTaskCreate(button_task, "button_task", 8192, NULL, 5, NULL);
 
-    // Perform the initial check on boot
-    ota_check_for_update(NULL, 0);
-
     ESP_ERROR_CHECK(http_server_init());
     http_server_set_ready();
 
@@ -572,4 +569,8 @@ void app_main(void)
     ha_notify_online();
 
     ESP_LOGI(TAG, "PhotoFrame started successfully");
+
+    // Delay OTA check to avoid competing with boot-time network activity
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    ota_check_for_update(NULL, 0);
 }
