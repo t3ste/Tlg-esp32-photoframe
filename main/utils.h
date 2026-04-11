@@ -12,6 +12,10 @@
 // Does NOT take ownership of root - caller must free with cJSON_Delete().
 esp_err_t apply_config_from_json(cJSON *root);
 
+// Get/set the last image fetch error (transient, for UI display)
+void utils_set_last_fetch_error(const char *error);
+const char *utils_get_last_fetch_error(void);
+
 // Fetch image from URL, process it, and save to Downloads album
 // Returns ESP_OK on success, error code on failure
 // saved_image_path will contain the path to the processed image (PNG)

@@ -1446,10 +1446,9 @@ static esp_err_t trust_cert_handler(httpd_req_t *req)
 
         ESP_LOGI(TAG, "Fetching TLS certificate from %s:%d", host, port);
 
-        // Connect with esp_tls (skip verification) to get server cert
-        esp_tls_cfg_t tls_cfg = {
-            .skip_common_name = true,
-        };
+        // Connect with esp_tls (skip cert verification) to get server cert
+        // Note: skip_common_name must be false for SNI to work
+        esp_tls_cfg_t tls_cfg = {0};
 
         esp_tls_t *tls = esp_tls_init();
         if (!tls) {
@@ -1459,10 +1458,30 @@ static esp_err_t trust_cert_handler(httpd_req_t *req)
 
         int ret = esp_tls_conn_new_sync(host, strlen(host), port, &tls_cfg, tls);
         if (ret != 1) {
-            ESP_LOGE(TAG, "TLS connection failed to %s:%d", host, port);
+            int esp_tls_err = 0;
+            int mbedtls_err = 0;
+            esp_tls_error_handle_t error_handle = NULL;
+            esp_tls_get_error_handle(tls, &error_handle);
+            if (error_handle) {
+                esp_tls_get_and_clear_last_error(error_handle, &esp_tls_err, &mbedtls_err);
+            }
+            ESP_LOGE(TAG, "TLS connection failed to %s:%d (esp_tls=0x%x, mbedtls=-0x%04x)", host,
+                     port, esp_tls_err, -mbedtls_err);
             esp_tls_conn_destroy(tls);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                                "Failed to connect to server");
+
+            // Return JSON error for better UI display
+            cJSON *err_resp = cJSON_CreateObject();
+            char err_detail[384];
+            snprintf(err_detail, sizeof(err_detail),
+                     "TLS handshake failed with %s:%d (mbedtls error -0x%04x)", host, port,
+                     -mbedtls_err);
+            cJSON_AddStringToObject(err_resp, "error", err_detail);
+            char *err_json = cJSON_Print(err_resp);
+            httpd_resp_set_status(req, HTTPD_500);
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_sendstr(req, err_json);
+            free(err_json);
+            cJSON_Delete(err_resp);
             return ESP_FAIL;
         }
 
@@ -1472,7 +1491,9 @@ static esp_err_t trust_cert_handler(httpd_req_t *req)
         if (!peer_cert) {
             ESP_LOGE(TAG, "No peer certificate received");
             esp_tls_conn_destroy(tls);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No certificate from server");
+            httpd_resp_set_status(req, HTTPD_500);
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_sendstr(req, "{\"error\":\"No certificate received from server\"}");
             return ESP_FAIL;
         }
 
@@ -1762,6 +1783,11 @@ static esp_err_t config_handler(httpd_req_t *req)
         size_t ca_cert_len = 0;
         config_manager_get_ca_cert_der(&ca_cert_len);
         cJSON_AddBoolToObject(root, "ca_cert_set", ca_cert_len > 0);
+
+        const char *fetch_error = utils_get_last_fetch_error();
+        if (fetch_error && strlen(fetch_error) > 0) {
+            cJSON_AddStringToObject(root, "last_fetch_error", fetch_error);
+        }
 
         const char *access_token = config_manager_get_access_token();
         cJSON_AddStringToObject(root, "access_token", access_token ? access_token : "");

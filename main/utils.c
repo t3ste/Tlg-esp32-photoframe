@@ -467,6 +467,21 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
     // Check final result after all retries
     if (err != ESP_OK || status_code != 200 || total_downloaded <= 0) {
         ESP_LOGE(TAG, "Failed to download image after %d attempts", max_retries);
+        // Store descriptive error for UI display
+        char err_msg[256];
+        if (err != ESP_OK) {
+            const char *err_name = esp_err_to_name(err);
+            if (err == ESP_ERR_HTTP_CONNECT) {
+                snprintf(err_msg, sizeof(err_msg), "Connection failed (%s)", err_name);
+            } else {
+                snprintf(err_msg, sizeof(err_msg), "%s", err_name);
+            }
+        } else if (status_code != 200) {
+            snprintf(err_msg, sizeof(err_msg), "Server returned HTTP %d", status_code);
+        } else {
+            snprintf(err_msg, sizeof(err_msg), "No data received from server");
+        }
+        utils_set_last_fetch_error(err_msg);
         free(content_type);
         free(thumbnail_url_buffer);
         free(config_payload_buffer);
@@ -813,6 +828,7 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
     }
 
     ESP_LOGI(TAG, "Successfully processed image: %s", saved_image_path);
+    utils_set_last_fetch_error(NULL);  // Clear error on success
 
     return ESP_OK;
 }

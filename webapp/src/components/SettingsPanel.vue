@@ -166,12 +166,18 @@ async function trustCertificate() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: settingsStore.deviceSettings.imageUrl }),
     });
-    const data = await response.json();
-    if (response.ok) {
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+    if (response.ok && data) {
       settingsStore.deviceSettings.caCertSet = true;
       trustCertMessage.value = `Trusted: ${data.subject}`;
     } else {
-      trustCertMessage.value = `Error: ${data.error || "Failed to fetch certificate"}`;
+      trustCertMessage.value = `Error: ${data?.error || text || "Failed to fetch certificate"}`;
     }
   } catch (e) {
     trustCertMessage.value = `Error: ${e.message}`;
@@ -637,6 +643,16 @@ async function performFactoryReset() {
                         Pin a self-signed or custom CA certificate for this HTTPS URL
                       </div>
                     </div>
+
+                    <v-alert
+                      v-if="settingsStore.deviceSettings.lastFetchError"
+                      type="error"
+                      variant="tonal"
+                      density="compact"
+                      class="mb-4"
+                    >
+                      Last fetch error: {{ settingsStore.deviceSettings.lastFetchError }}
+                    </v-alert>
 
                     <v-checkbox
                       v-if="
