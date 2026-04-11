@@ -27,7 +27,6 @@
 #include "freertos/task.h"
 #include "ha_integration.h"
 #include "image_processor.h"
-#include "mdns_service.h"
 #include "nvs_flash.h"
 #include "ota_manager.h"
 #include "periodic_tasks.h"
@@ -36,7 +35,6 @@
 #include "sdcard.h"
 #include "storage.h"
 #include "utils.h"
-#include "wifi_manager.h"
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -1691,224 +1689,29 @@ static esp_err_t config_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
 
-        // General
-        cJSON *device_name_obj = cJSON_GetObjectItem(root, "device_name");
-        if (device_name_obj && cJSON_IsString(device_name_obj)) {
-            const char *new_name = cJSON_GetStringValue(device_name_obj);
-            const char *current_name = config_manager_get_device_name();
-
-            // Only update mDNS if the device name actually changed
-            if (strcmp(new_name, current_name) != 0) {
-                config_manager_set_device_name(new_name);
-                mdns_service_update_hostname();
-            }
-        }
-
-        cJSON *timezone_obj = cJSON_GetObjectItem(root, "timezone");
-        if (timezone_obj && cJSON_IsString(timezone_obj)) {
-            const char *tz = cJSON_GetStringValue(timezone_obj);
-            config_manager_set_timezone(tz);
-            // Apply timezone immediately
-            setenv("TZ", tz, 1);
-            tzset();
-        }
-
-        cJSON *ntp_server_obj = cJSON_GetObjectItem(root, "ntp_server");
-        if (ntp_server_obj && cJSON_IsString(ntp_server_obj)) {
-            config_manager_set_ntp_server(cJSON_GetStringValue(ntp_server_obj));
-            // Re-sync SNTP with the new server
-            periodic_tasks_force_run(SNTP_TASK_NAME);
-            periodic_tasks_check_and_run();
-        }
-
-        cJSON *wifi_ssid_obj = cJSON_GetObjectItem(root, "wifi_ssid");
-        cJSON *wifi_password_obj = cJSON_GetObjectItem(root, "wifi_password");
-        if (wifi_ssid_obj && cJSON_IsString(wifi_ssid_obj)) {
-            const char *new_ssid = cJSON_GetStringValue(wifi_ssid_obj);
-            const char *new_password = NULL;
-            if (wifi_password_obj && cJSON_IsString(wifi_password_obj) &&
-                strlen(cJSON_GetStringValue(wifi_password_obj)) > 0) {
-                new_password = cJSON_GetStringValue(wifi_password_obj);
-            }
-
-            // Check if WiFi credentials actually changed
-            const char *current_ssid = config_manager_get_wifi_ssid();
-            if (strcmp(new_ssid, current_ssid) != 0 || new_password != NULL) {
-                // Use current password if no new password provided
-                if (new_password == NULL) {
-                    new_password = config_manager_get_wifi_password();
-                }
-
-                ESP_LOGI(TAG, "WiFi credentials changed, testing connection to: %s", new_ssid);
-
-                // Try connecting to new WiFi first
-                esp_err_t err = wifi_manager_connect(new_ssid, new_password);
-                if (err == ESP_OK) {
-                    // Connection successful, save credentials
-                    config_manager_set_wifi_ssid(new_ssid);
-                    if (wifi_password_obj && cJSON_IsString(wifi_password_obj) &&
-                        strlen(cJSON_GetStringValue(wifi_password_obj)) > 0) {
-                        config_manager_set_wifi_password(new_password);
-                    }
-                    ESP_LOGI(TAG, "Successfully connected and saved WiFi credentials");
-                } else {
-                    // Connection failed, revert to previous credentials
-                    ESP_LOGW(TAG,
-                             "Failed to connect to new WiFi, reverting to previous credentials");
-                    wifi_manager_connect(current_ssid, config_manager_get_wifi_password());
-
-                    // Return error response
-                    cJSON_Delete(root);
-                    cJSON *error_response = cJSON_CreateObject();
-                    cJSON_AddStringToObject(error_response, "status", "error");
-                    cJSON_AddStringToObject(
-                        error_response, "message",
-                        "Failed to connect to WiFi network. Please check SSID and password.");
-
-                    char *json_str = cJSON_Print(error_response);
-                    httpd_resp_set_type(req, "application/json");
-                    httpd_resp_set_status(req, "400 Bad Request");
-                    httpd_resp_sendstr(req, json_str);
-
-                    free(json_str);
-                    cJSON_Delete(error_response);
-                    return ESP_FAIL;
-                }
-            }
-        }
-
-        cJSON *display_orient_obj = cJSON_GetObjectItem(root, "display_orientation");
-        if (display_orient_obj && cJSON_IsString(display_orient_obj)) {
-            const char *orient_str = cJSON_GetStringValue(display_orient_obj);
-            if (strcmp(orient_str, "portrait") == 0) {
-                config_manager_set_display_orientation(DISPLAY_ORIENTATION_PORTRAIT);
-            } else {
-                config_manager_set_display_orientation(DISPLAY_ORIENTATION_LANDSCAPE);
-            }
-        }
-
-        cJSON *disp_rot_deg_obj = cJSON_GetObjectItem(root, "display_rotation_deg");
-        if (disp_rot_deg_obj && cJSON_IsNumber(disp_rot_deg_obj)) {
-            config_manager_set_display_rotation_deg(disp_rot_deg_obj->valueint);
-            display_manager_initialize_paint();
-        }
-
-        // Auto Rotate
-        cJSON *auto_rotate_obj = cJSON_GetObjectItem(root, "auto_rotate");
-        if (auto_rotate_obj && cJSON_IsBool(auto_rotate_obj)) {
-            config_manager_set_auto_rotate(cJSON_IsTrue(auto_rotate_obj));
-            power_manager_reset_rotate_timer();
-        }
-
-        cJSON *interval_obj = cJSON_GetObjectItem(root, "rotate_interval");
-        if (interval_obj && cJSON_IsNumber(interval_obj)) {
-            config_manager_set_rotate_interval(interval_obj->valueint);
-            power_manager_reset_rotate_timer();
-        }
-
-        cJSON *auto_rotate_aligned_obj = cJSON_GetObjectItem(root, "auto_rotate_aligned");
-        if (auto_rotate_aligned_obj && cJSON_IsBool(auto_rotate_aligned_obj)) {
-            config_manager_set_auto_rotate_aligned(cJSON_IsTrue(auto_rotate_aligned_obj));
-            power_manager_reset_rotate_timer();
-        }
-
-        cJSON *sleep_sched_enabled_obj = cJSON_GetObjectItem(root, "sleep_schedule_enabled");
-        if (sleep_sched_enabled_obj && cJSON_IsBool(sleep_sched_enabled_obj)) {
-            bool enabled = cJSON_IsTrue(sleep_sched_enabled_obj);
-            config_manager_set_sleep_schedule_enabled(enabled);
-        }
-
-        cJSON *sleep_sched_start_obj = cJSON_GetObjectItem(root, "sleep_schedule_start");
-        if (sleep_sched_start_obj && cJSON_IsNumber(sleep_sched_start_obj)) {
-            int start_minutes = sleep_sched_start_obj->valueint;
-            config_manager_set_sleep_schedule_start(start_minutes);
-        }
-
-        cJSON *sleep_sched_end_obj = cJSON_GetObjectItem(root, "sleep_schedule_end");
-        if (sleep_sched_end_obj && cJSON_IsNumber(sleep_sched_end_obj)) {
-            int end_minutes = sleep_sched_end_obj->valueint;
-            config_manager_set_sleep_schedule_end(end_minutes);
-        }
-
-        cJSON *rotation_mode_obj = cJSON_GetObjectItem(root, "rotation_mode");
-        if (rotation_mode_obj && cJSON_IsString(rotation_mode_obj)) {
-            const char *mode_str = cJSON_GetStringValue(rotation_mode_obj);
-            rotation_mode_t mode = ROTATION_MODE_STORAGE;
-            if (strcmp(mode_str, "url") == 0)
-                mode = ROTATION_MODE_URL;
-            // Backwards compatibility: accept "sdcard" as alias for "storage"
-            if (strcmp(mode_str, "sdcard") == 0)
-                mode = ROTATION_MODE_STORAGE;
-            config_manager_set_rotation_mode(mode);
-        }
-
-        // Auto Rotate - SDCARD
-        cJSON *sd_rotation_mode_obj = cJSON_GetObjectItem(root, "sd_rotation_mode");
-        if (sd_rotation_mode_obj && cJSON_IsString(sd_rotation_mode_obj)) {
-            const char *mode_str = cJSON_GetStringValue(sd_rotation_mode_obj);
-            sd_rotation_mode_t mode =
-                (strcmp(mode_str, "sequential") == 0) ? SD_ROTATION_SEQUENTIAL : SD_ROTATION_RANDOM;
-            config_manager_set_sd_rotation_mode(mode);
-        }
-
-        // Auto Rotate - URL
-        cJSON *image_url_obj = cJSON_GetObjectItem(root, "image_url");
-        if (image_url_obj && cJSON_IsString(image_url_obj)) {
-            const char *url = cJSON_GetStringValue(image_url_obj);
-            config_manager_set_image_url(url);
-        }
-
-        cJSON *access_token_obj = cJSON_GetObjectItem(root, "access_token");
-        if (access_token_obj && cJSON_IsString(access_token_obj)) {
-            const char *token = cJSON_GetStringValue(access_token_obj);
-            config_manager_set_access_token(token);
-        }
-
-        cJSON *http_header_key_obj = cJSON_GetObjectItem(root, "http_header_key");
-        if (http_header_key_obj && cJSON_IsString(http_header_key_obj)) {
-            const char *key = cJSON_GetStringValue(http_header_key_obj);
-            config_manager_set_http_header_key(key);
-        }
-
-        cJSON *http_header_value_obj = cJSON_GetObjectItem(root, "http_header_value");
-        if (http_header_value_obj && cJSON_IsString(http_header_value_obj)) {
-            const char *value = cJSON_GetStringValue(http_header_value_obj);
-            config_manager_set_http_header_value(value);
-        }
-
-        cJSON *save_dl_obj = cJSON_GetObjectItem(root, "save_downloaded_images");
-        if (save_dl_obj && cJSON_IsBool(save_dl_obj)) {
-            bool save_dl = cJSON_IsTrue(save_dl_obj);
-            config_manager_set_save_downloaded_images(save_dl);
-        }
-
-        // Home Assistant
-        cJSON *ha_url_obj = cJSON_GetObjectItem(root, "ha_url");
-        if (ha_url_obj && cJSON_IsString(ha_url_obj)) {
-            const char *url = cJSON_GetStringValue(ha_url_obj);
-            config_manager_set_ha_url(url);
-        }
-
-        // AI API Keys
-        cJSON *openai_key_obj = cJSON_GetObjectItem(root, "openai_api_key");
-        if (openai_key_obj && cJSON_IsString(openai_key_obj)) {
-            const char *key = cJSON_GetStringValue(openai_key_obj);
-            config_manager_set_openai_api_key(key);
-        }
-
-        cJSON *google_key_obj = cJSON_GetObjectItem(root, "google_api_key");
-        if (google_key_obj && cJSON_IsString(google_key_obj)) {
-            const char *key = cJSON_GetStringValue(google_key_obj);
-            config_manager_set_google_api_key(key);
-        }
-
-        // Power
-        cJSON *deep_sleep_obj = cJSON_GetObjectItem(root, "deep_sleep_enabled");
-        if (deep_sleep_obj && cJSON_IsBool(deep_sleep_obj)) {
-            power_manager_set_deep_sleep_enabled(cJSON_IsTrue(deep_sleep_obj));
-        }
-
+        esp_err_t apply_result = apply_config_from_json(root);
         cJSON_Delete(root);
+
+        if (apply_result != ESP_OK) {
+            // WiFi connection failed
+            cJSON *error_response = cJSON_CreateObject();
+            cJSON_AddStringToObject(error_response, "status", "error");
+            cJSON_AddStringToObject(
+                error_response, "message",
+                "Failed to connect to WiFi network. Please check SSID and password.");
+
+            char *json_str = cJSON_Print(error_response);
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_sendstr(req, json_str);
+
+            free(json_str);
+            cJSON_Delete(error_response);
+            return ESP_FAIL;
+        }
+
+        // Update config timestamp for remote sync
+        config_manager_touch_config();
 
         cJSON *response = cJSON_CreateObject();
         cJSON_AddStringToObject(response, "status", "success");
@@ -2497,45 +2300,7 @@ static esp_err_t processing_settings_handler(httpd_req_t *req)
 
         processing_settings_t settings;
         processing_settings_get_defaults(&settings);
-
-        cJSON *item;
-        if ((item = cJSON_GetObjectItem(json, "exposure")) && cJSON_IsNumber(item)) {
-            settings.exposure = (float) item->valuedouble;
-        }
-        if ((item = cJSON_GetObjectItem(json, "saturation")) && cJSON_IsNumber(item)) {
-            settings.saturation = (float) item->valuedouble;
-        }
-        if ((item = cJSON_GetObjectItem(json, "toneMode")) && cJSON_IsString(item)) {
-            strncpy(settings.tone_mode, item->valuestring, sizeof(settings.tone_mode) - 1);
-        }
-        if ((item = cJSON_GetObjectItem(json, "contrast")) && cJSON_IsNumber(item)) {
-            settings.contrast = (float) item->valuedouble;
-        }
-        if ((item = cJSON_GetObjectItem(json, "strength")) && cJSON_IsNumber(item)) {
-            settings.strength = (float) item->valuedouble;
-        }
-        if ((item = cJSON_GetObjectItem(json, "shadowBoost")) && cJSON_IsNumber(item)) {
-            settings.shadow_boost = (float) item->valuedouble;
-        }
-        if ((item = cJSON_GetObjectItem(json, "highlightCompress")) && cJSON_IsNumber(item)) {
-            settings.highlight_compress = (float) item->valuedouble;
-        }
-        if ((item = cJSON_GetObjectItem(json, "midpoint")) && cJSON_IsNumber(item)) {
-            settings.midpoint = (float) item->valuedouble;
-        }
-        if ((item = cJSON_GetObjectItem(json, "colorMethod")) && cJSON_IsString(item)) {
-            strncpy(settings.color_method, item->valuestring, sizeof(settings.color_method) - 1);
-        }
-        cJSON *compress_dr = cJSON_GetObjectItem(json, "compressDynamicRange");
-        if (compress_dr && cJSON_IsBool(compress_dr)) {
-            settings.compress_dynamic_range = cJSON_IsTrue(compress_dr);
-        }
-        cJSON *dither_algo = cJSON_GetObjectItem(json, "ditherAlgorithm");
-        if (dither_algo && cJSON_IsString(dither_algo)) {
-            strncpy(settings.dither_algorithm, dither_algo->valuestring,
-                    sizeof(settings.dither_algorithm) - 1);
-        }
-
+        processing_settings_from_json(json, &settings);
         cJSON_Delete(json);
 
         esp_err_t err = processing_settings_save(&settings);
@@ -2712,64 +2477,7 @@ static esp_err_t color_palette_handler(httpd_req_t *req)
 
         color_palette_t palette;
         color_palette_get_defaults(&palette);
-
-        cJSON *color;
-        cJSON *component;
-
-        if ((color = cJSON_GetObjectItem(json, "black"))) {
-            if ((component = cJSON_GetObjectItem(color, "r")) && cJSON_IsNumber(component))
-                palette.black.r = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "g")) && cJSON_IsNumber(component))
-                palette.black.g = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "b")) && cJSON_IsNumber(component))
-                palette.black.b = (uint8_t) component->valueint;
-        }
-
-        if ((color = cJSON_GetObjectItem(json, "white"))) {
-            if ((component = cJSON_GetObjectItem(color, "r")) && cJSON_IsNumber(component))
-                palette.white.r = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "g")) && cJSON_IsNumber(component))
-                palette.white.g = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "b")) && cJSON_IsNumber(component))
-                palette.white.b = (uint8_t) component->valueint;
-        }
-
-        if ((color = cJSON_GetObjectItem(json, "yellow"))) {
-            if ((component = cJSON_GetObjectItem(color, "r")) && cJSON_IsNumber(component))
-                palette.yellow.r = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "g")) && cJSON_IsNumber(component))
-                palette.yellow.g = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "b")) && cJSON_IsNumber(component))
-                palette.yellow.b = (uint8_t) component->valueint;
-        }
-
-        if ((color = cJSON_GetObjectItem(json, "red"))) {
-            if ((component = cJSON_GetObjectItem(color, "r")) && cJSON_IsNumber(component))
-                palette.red.r = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "g")) && cJSON_IsNumber(component))
-                palette.red.g = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "b")) && cJSON_IsNumber(component))
-                palette.red.b = (uint8_t) component->valueint;
-        }
-
-        if ((color = cJSON_GetObjectItem(json, "blue"))) {
-            if ((component = cJSON_GetObjectItem(color, "r")) && cJSON_IsNumber(component))
-                palette.blue.r = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "g")) && cJSON_IsNumber(component))
-                palette.blue.g = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "b")) && cJSON_IsNumber(component))
-                palette.blue.b = (uint8_t) component->valueint;
-        }
-
-        if ((color = cJSON_GetObjectItem(json, "green"))) {
-            if ((component = cJSON_GetObjectItem(color, "r")) && cJSON_IsNumber(component))
-                palette.green.r = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "g")) && cJSON_IsNumber(component))
-                palette.green.g = (uint8_t) component->valueint;
-            if ((component = cJSON_GetObjectItem(color, "b")) && cJSON_IsNumber(component))
-                palette.green.b = (uint8_t) component->valueint;
-        }
-
+        color_palette_from_json(json, &palette);
         cJSON_Delete(json);
 
         esp_err_t err = color_palette_save(&palette);

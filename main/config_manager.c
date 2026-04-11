@@ -52,6 +52,9 @@ static char google_api_key[AI_API_KEY_MAX_LEN] = {0};
 // Power
 static bool deep_sleep_enabled = true;  // Enabled by default
 
+// Config sync
+static int64_t config_last_updated = 0;
+
 esp_err_t config_manager_init(void)
 {
     ESP_LOGI(TAG, "Initializing config manager");
@@ -252,6 +255,11 @@ esp_err_t config_manager_init(void)
             deep_sleep_enabled = (deep_sleep_val != 0);
             ESP_LOGI(TAG, "Loaded deep sleep setting from NVS: %s",
                      deep_sleep_enabled ? "enabled" : "disabled");
+        }
+
+        // Config sync timestamp
+        if (nvs_get_i64(nvs_handle, "cfg_updated", &config_last_updated) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded config_last_updated: %lld", (long long) config_last_updated);
         }
 
         nvs_close(nvs_handle);
@@ -869,4 +877,27 @@ void config_manager_set_deep_sleep_enabled(bool enabled)
 bool config_manager_get_deep_sleep_enabled(void)
 {
     return deep_sleep_enabled;
+}
+
+void config_manager_set_config_last_updated(int64_t timestamp)
+{
+    config_last_updated = timestamp;
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_i64(nvs_handle, "cfg_updated", config_last_updated);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int64_t config_manager_get_config_last_updated(void)
+{
+    return config_last_updated;
+}
+
+void config_manager_touch_config(void)
+{
+    time_t now;
+    time(&now);
+    config_manager_set_config_last_updated((int64_t) now);
 }

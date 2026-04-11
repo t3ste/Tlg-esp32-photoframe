@@ -17,18 +17,211 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "image_processor.h"
+#include "mdns_service.h"
+#include "periodic_tasks.h"
+#include "power_manager.h"
 #include "processing_settings.h"
 #include "storage.h"
 #include "testable_utils.h"
+#include "wifi_manager.h"
 
 static const char *TAG = "utils";
+
+esp_err_t apply_config_from_json(cJSON *root)
+{
+    cJSON *item;
+
+    // General
+    item = cJSON_GetObjectItem(root, "device_name");
+    if (item && cJSON_IsString(item)) {
+        const char *new_name = cJSON_GetStringValue(item);
+        const char *current_name = config_manager_get_device_name();
+        if (strcmp(new_name, current_name) != 0) {
+            config_manager_set_device_name(new_name);
+            mdns_service_update_hostname();
+        }
+    }
+
+    item = cJSON_GetObjectItem(root, "timezone");
+    if (item && cJSON_IsString(item)) {
+        const char *tz = cJSON_GetStringValue(item);
+        config_manager_set_timezone(tz);
+        setenv("TZ", tz, 1);
+        tzset();
+    }
+
+    item = cJSON_GetObjectItem(root, "ntp_server");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_ntp_server(cJSON_GetStringValue(item));
+        periodic_tasks_force_run(SNTP_TASK_NAME);
+        periodic_tasks_check_and_run();
+    }
+
+    // WiFi
+    cJSON *wifi_ssid_obj = cJSON_GetObjectItem(root, "wifi_ssid");
+    cJSON *wifi_password_obj = cJSON_GetObjectItem(root, "wifi_password");
+    if (wifi_ssid_obj && cJSON_IsString(wifi_ssid_obj)) {
+        const char *new_ssid = cJSON_GetStringValue(wifi_ssid_obj);
+        const char *new_password = NULL;
+        if (wifi_password_obj && cJSON_IsString(wifi_password_obj) &&
+            strlen(cJSON_GetStringValue(wifi_password_obj)) > 0) {
+            new_password = cJSON_GetStringValue(wifi_password_obj);
+        }
+
+        const char *current_ssid = config_manager_get_wifi_ssid();
+        if (strcmp(new_ssid, current_ssid) != 0 || new_password != NULL) {
+            if (new_password == NULL) {
+                new_password = config_manager_get_wifi_password();
+            }
+
+            ESP_LOGI(TAG, "WiFi credentials changed, testing connection to: %s", new_ssid);
+
+            esp_err_t err = wifi_manager_connect(new_ssid, new_password);
+            if (err == ESP_OK) {
+                config_manager_set_wifi_ssid(new_ssid);
+                if (wifi_password_obj && cJSON_IsString(wifi_password_obj) &&
+                    strlen(cJSON_GetStringValue(wifi_password_obj)) > 0) {
+                    config_manager_set_wifi_password(new_password);
+                }
+                ESP_LOGI(TAG, "Successfully connected and saved WiFi credentials");
+            } else {
+                ESP_LOGW(TAG, "Failed to connect to new WiFi, reverting to previous credentials");
+                wifi_manager_connect(current_ssid, config_manager_get_wifi_password());
+                return ESP_FAIL;
+            }
+        }
+    }
+
+    item = cJSON_GetObjectItem(root, "display_orientation");
+    if (item && cJSON_IsString(item)) {
+        const char *orient_str = cJSON_GetStringValue(item);
+        if (strcmp(orient_str, "portrait") == 0) {
+            config_manager_set_display_orientation(DISPLAY_ORIENTATION_PORTRAIT);
+        } else {
+            config_manager_set_display_orientation(DISPLAY_ORIENTATION_LANDSCAPE);
+        }
+    }
+
+    item = cJSON_GetObjectItem(root, "display_rotation_deg");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_display_rotation_deg(item->valueint);
+        display_manager_initialize_paint();
+    }
+
+    // Auto Rotate
+    item = cJSON_GetObjectItem(root, "auto_rotate");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_auto_rotate(cJSON_IsTrue(item));
+        power_manager_reset_rotate_timer();
+    }
+
+    item = cJSON_GetObjectItem(root, "rotate_interval");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_rotate_interval(item->valueint);
+        power_manager_reset_rotate_timer();
+    }
+
+    item = cJSON_GetObjectItem(root, "auto_rotate_aligned");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_auto_rotate_aligned(cJSON_IsTrue(item));
+        power_manager_reset_rotate_timer();
+    }
+
+    item = cJSON_GetObjectItem(root, "sleep_schedule_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_sleep_schedule_enabled(cJSON_IsTrue(item));
+    }
+
+    item = cJSON_GetObjectItem(root, "sleep_schedule_start");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_sleep_schedule_start(item->valueint);
+    }
+
+    item = cJSON_GetObjectItem(root, "sleep_schedule_end");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_sleep_schedule_end(item->valueint);
+    }
+
+    item = cJSON_GetObjectItem(root, "rotation_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *mode_str = cJSON_GetStringValue(item);
+        rotation_mode_t mode = ROTATION_MODE_STORAGE;
+        if (strcmp(mode_str, "url") == 0)
+            mode = ROTATION_MODE_URL;
+        // Backwards compatibility: accept "sdcard" as alias for "storage"
+        if (strcmp(mode_str, "sdcard") == 0)
+            mode = ROTATION_MODE_STORAGE;
+        config_manager_set_rotation_mode(mode);
+    }
+
+    // Auto Rotate - SDCARD
+    item = cJSON_GetObjectItem(root, "sd_rotation_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *mode_str = cJSON_GetStringValue(item);
+        sd_rotation_mode_t mode =
+            (strcmp(mode_str, "sequential") == 0) ? SD_ROTATION_SEQUENTIAL : SD_ROTATION_RANDOM;
+        config_manager_set_sd_rotation_mode(mode);
+    }
+
+    // Auto Rotate - URL
+    item = cJSON_GetObjectItem(root, "image_url");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_image_url(cJSON_GetStringValue(item));
+    }
+
+    item = cJSON_GetObjectItem(root, "access_token");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_access_token(cJSON_GetStringValue(item));
+    }
+
+    item = cJSON_GetObjectItem(root, "http_header_key");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_http_header_key(cJSON_GetStringValue(item));
+    }
+
+    item = cJSON_GetObjectItem(root, "http_header_value");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_http_header_value(cJSON_GetStringValue(item));
+    }
+
+    item = cJSON_GetObjectItem(root, "save_downloaded_images");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_save_downloaded_images(cJSON_IsTrue(item));
+    }
+
+    // Home Assistant
+    item = cJSON_GetObjectItem(root, "ha_url");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_ha_url(cJSON_GetStringValue(item));
+    }
+
+    // AI API Keys
+    item = cJSON_GetObjectItem(root, "openai_api_key");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_openai_api_key(cJSON_GetStringValue(item));
+    }
+
+    item = cJSON_GetObjectItem(root, "google_api_key");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_google_api_key(cJSON_GetStringValue(item));
+    }
+
+    // Power
+    item = cJSON_GetObjectItem(root, "deep_sleep_enabled");
+    if (item && cJSON_IsBool(item)) {
+        power_manager_set_deep_sleep_enabled(cJSON_IsTrue(item));
+    }
+
+    return ESP_OK;
+}
 
 // Context for HTTP event handler
 typedef struct {
     FILE *file;
     int total_read;
     char *content_type;
-    char *thumbnail_url;  // Optional thumbnail URL from X-Thumbnail-URL header
+    char *thumbnail_url;   // Optional thumbnail URL from X-Thumbnail-URL header
+    char *config_payload;  // Optional config JSON from X-Config-Payload header
 } download_context_t;
 
 // HTTP event handler to write data to file
@@ -52,6 +245,13 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
                 strncpy(ctx->thumbnail_url, evt->header_value, 511);
                 ctx->thumbnail_url[511] = '\0';
                 ESP_LOGI(TAG, "Thumbnail URL provided: %s", ctx->thumbnail_url);
+            }
+        } else if (strcasecmp(evt->header_key, "X-Config-Payload") == 0) {
+            // Capture config payload for remote sync
+            if (ctx->config_payload && strlen(evt->header_value) > 0) {
+                strncpy(ctx->config_payload, evt->header_value, 2047);
+                ctx->config_payload[2047] = '\0';
+                ESP_LOGI(TAG, "Config payload received from server");
             }
         }
         break;
@@ -79,16 +279,18 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
     int total_downloaded = 0;
     const int max_retries = 3;
 
+    char *config_payload_buffer = NULL;
+
     // Allocate buffers once before retry loop
     thumbnail_url_buffer = calloc(512, 1);
     content_type = calloc(128, 1);
+    config_payload_buffer = calloc(2048, 1);
 
-    if (!content_type || !thumbnail_url_buffer) {
+    if (!content_type || !thumbnail_url_buffer || !config_payload_buffer) {
         ESP_LOGE(TAG, "Failed to allocate memory for download context");
-        if (content_type)
-            free(content_type);
-        if (thumbnail_url_buffer)
-            free(thumbnail_url_buffer);
+        free(content_type);
+        free(thumbnail_url_buffer);
+        free(config_payload_buffer);
         return ESP_FAIL;
     }
 
@@ -107,11 +309,13 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
 
         // Clear buffers for this retry
         memset(content_type, 0, 128);
+        memset(config_payload_buffer, 0, 2048);
 
         download_context_t ctx = {.file = file,
                                   .total_read = 0,
                                   .content_type = content_type,
-                                  .thumbnail_url = thumbnail_url_buffer};
+                                  .thumbnail_url = thumbnail_url_buffer,
+                                  .config_payload = config_payload_buffer};
 
         esp_http_client_config_t config = {
             .url = url,
@@ -178,6 +382,12 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
         const esp_app_desc_t *app_desc = esp_app_get_description();
         esp_http_client_set_header(client, "X-Firmware-Version", app_desc->version);
 
+        // Add config timestamp for remote sync
+        char config_ts[24];
+        snprintf(config_ts, sizeof(config_ts), "%lld",
+                 (long long) config_manager_get_config_last_updated());
+        esp_http_client_set_header(client, "X-Config-Last-Updated", config_ts);
+
         // Add processing settings as JSON header
         processing_settings_t proc_settings;
         if (processing_settings_load(&proc_settings) != ESP_OK) {
@@ -235,6 +445,7 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
         ESP_LOGE(TAG, "Failed to download image after %d attempts", max_retries);
         free(content_type);
         free(thumbnail_url_buffer);
+        free(config_payload_buffer);
         unlink(temp_upload_path);
         return ESP_FAIL;
     }
@@ -308,6 +519,50 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
     if (thumbnail_url_buffer) {
         free(thumbnail_url_buffer);
     }
+
+    // Apply remote config payload if received from server
+    // Expected structure: { "config": {...}, "processing_settings": {...}, "color_palette": {...} }
+    if (config_payload_buffer && strlen(config_payload_buffer) > 0) {
+        cJSON *payload = cJSON_Parse(config_payload_buffer);
+        if (payload) {
+            bool applied = false;
+
+            cJSON *config_obj = cJSON_GetObjectItem(payload, "config");
+            if (config_obj && cJSON_IsObject(config_obj)) {
+                apply_config_from_json(config_obj);
+                applied = true;
+            }
+
+            cJSON *proc_obj = cJSON_GetObjectItem(payload, "processing_settings");
+            if (proc_obj && cJSON_IsObject(proc_obj)) {
+                processing_settings_t settings;
+                processing_settings_get_defaults(&settings);
+                processing_settings_from_json(proc_obj, &settings);
+                processing_settings_save(&settings);
+                applied = true;
+            }
+
+            cJSON *palette_obj = cJSON_GetObjectItem(payload, "color_palette");
+            if (palette_obj && cJSON_IsObject(palette_obj)) {
+                color_palette_t palette;
+                color_palette_get_defaults(&palette);
+                color_palette_from_json(palette_obj, &palette);
+                color_palette_save(&palette);
+                image_processor_reload_palette();
+                applied = true;
+            }
+
+            cJSON_Delete(payload);
+
+            if (applied) {
+                config_manager_touch_config();
+                ESP_LOGI(TAG, "Remote config payload applied successfully");
+            }
+        } else {
+            ESP_LOGE(TAG, "Failed to parse config payload JSON");
+        }
+    }
+    free(config_payload_buffer);
 
     const char *final_path = NULL;
 

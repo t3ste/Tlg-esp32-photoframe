@@ -113,4 +113,12 @@ const char *config_manager_get_google_api_key(void);
 void config_manager_set_deep_sleep_enabled(bool enabled);
 bool config_manager_get_deep_sleep_enabled(void);
 
+// ============================================================================
+// Config Sync
+// ============================================================================
+
+void config_manager_set_config_last_updated(int64_t timestamp);
+int64_t config_manager_get_config_last_updated(void);
+void config_manager_touch_config(void);  // Set last_updated to current time
+
 #endif
