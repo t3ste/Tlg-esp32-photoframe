@@ -22,11 +22,14 @@
 #include "esp_http_server.h"
 #include "esp_littlefs.h"
 #include "esp_log.h"
+#include "esp_tls.h"
 #include "esp_vfs.h"
 #include "esp_vfs_fat.h"
 #include "freertos/task.h"
 #include "ha_integration.h"
 #include "image_processor.h"
+#include "mbedtls/ssl.h"
+#include "mbedtls/x509_crt.h"
 #include "nvs_flash.h"
 #include "ota_manager.h"
 #include "periodic_tasks.h"
@@ -1390,6 +1393,138 @@ static void delayed_sleep_task(void *arg)
     vTaskDelete(NULL);
 }
 
+// POST /api/trust-cert - fetch and pin the server's TLS certificate
+static esp_err_t trust_cert_handler(httpd_req_t *req)
+{
+    if (req->method == HTTP_POST) {
+        // Read request body (JSON with "url" field)
+        char buf[512];
+        int received = httpd_req_recv(req, buf, MIN(req->content_len, sizeof(buf) - 1));
+        if (received <= 0) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to receive data");
+            return ESP_FAIL;
+        }
+        buf[received] = '\0';
+
+        cJSON *root = cJSON_Parse(buf);
+        if (!root) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+            return ESP_FAIL;
+        }
+
+        cJSON *url_obj = cJSON_GetObjectItem(root, "url");
+        if (!url_obj || !cJSON_IsString(url_obj)) {
+            cJSON_Delete(root);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'url' field");
+            return ESP_FAIL;
+        }
+
+        const char *url = cJSON_GetStringValue(url_obj);
+
+        // Parse host and port from URL
+        char host[256] = {0};
+        int port = 443;
+        const char *host_start = strstr(url, "://");
+        if (!host_start) {
+            cJSON_Delete(root);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid URL format");
+            return ESP_FAIL;
+        }
+        host_start += 3;
+        const char *host_end = strchr(host_start, '/');
+        if (!host_end)
+            host_end = host_start + strlen(host_start);
+        const char *port_sep = strchr(host_start, ':');
+        if (port_sep && port_sep < host_end) {
+            strncpy(host, host_start, port_sep - host_start);
+            port = atoi(port_sep + 1);
+        } else {
+            strncpy(host, host_start, host_end - host_start);
+        }
+
+        cJSON_Delete(root);
+
+        ESP_LOGI(TAG, "Fetching TLS certificate from %s:%d", host, port);
+
+        // Connect with esp_tls (skip verification) to get server cert
+        esp_tls_cfg_t tls_cfg = {
+            .skip_common_name = true,
+        };
+
+        esp_tls_t *tls = esp_tls_init();
+        if (!tls) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "TLS init failed");
+            return ESP_FAIL;
+        }
+
+        int ret = esp_tls_conn_new_sync(host, strlen(host), port, &tls_cfg, tls);
+        if (ret != 1) {
+            ESP_LOGE(TAG, "TLS connection failed to %s:%d", host, port);
+            esp_tls_conn_destroy(tls);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                "Failed to connect to server");
+            return ESP_FAIL;
+        }
+
+        // Get the peer certificate via the mbedtls SSL context
+        mbedtls_ssl_context *ssl = (mbedtls_ssl_context *) esp_tls_get_ssl_context(tls);
+        const mbedtls_x509_crt *peer_cert = mbedtls_ssl_get_peer_cert(ssl);
+        if (!peer_cert) {
+            ESP_LOGE(TAG, "No peer certificate received");
+            esp_tls_conn_destroy(tls);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No certificate from server");
+            return ESP_FAIL;
+        }
+
+        // Copy DER cert data before destroying the TLS connection
+        size_t cert_der_len = peer_cert->raw.len;
+        unsigned char *cert_der = malloc(cert_der_len);
+        char subject[256] = {0};
+        char issuer[256] = {0};
+
+        if (!cert_der) {
+            esp_tls_conn_destroy(tls);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+            return ESP_FAIL;
+        }
+        memcpy(cert_der, peer_cert->raw.p, cert_der_len);
+        mbedtls_x509_dn_gets(subject, sizeof(subject), &peer_cert->subject);
+        mbedtls_x509_dn_gets(issuer, sizeof(issuer), &peer_cert->issuer);
+
+        esp_tls_conn_destroy(tls);
+
+        // Store the DER cert
+        config_manager_set_ca_cert_der(cert_der, cert_der_len);
+        config_manager_touch_config();
+
+        // Build response with cert info
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "status", "trusted");
+        cJSON_AddStringToObject(response, "subject", subject);
+        cJSON_AddStringToObject(response, "issuer", issuer);
+        cJSON_AddNumberToObject(response, "size", (double) cert_der_len);
+
+        free(cert_der);
+
+        char *json_str = cJSON_Print(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, json_str);
+        free(json_str);
+        cJSON_Delete(response);
+        return ESP_OK;
+    } else if (req->method == HTTP_DELETE) {
+        // Clear the pinned cert
+        config_manager_set_ca_cert_der(NULL, 0);
+        config_manager_touch_config();
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"cleared\"}");
+        return ESP_OK;
+    }
+
+    httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+    return ESP_FAIL;
+}
+
 static esp_err_t sleep_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -1623,6 +1758,10 @@ static esp_err_t config_handler(httpd_req_t *req)
         // Auto Rotate - URL
         const char *image_url = config_manager_get_image_url();
         cJSON_AddStringToObject(root, "image_url", image_url ? image_url : "");
+
+        size_t ca_cert_len = 0;
+        config_manager_get_ca_cert_der(&ca_cert_len);
+        cJSON_AddBoolToObject(root, "ca_cert_set", ca_cert_len > 0);
 
         const char *access_token = config_manager_get_access_token();
         cJSON_AddStringToObject(root, "access_token", access_token ? access_token : "");
@@ -2599,6 +2738,18 @@ esp_err_t http_server_init(void)
                                         .handler = config_handler,
                                         .user_ctx = NULL};
         httpd_register_uri_handler(server, &config_patch_uri);
+
+        httpd_uri_t trust_cert_post_uri = {.uri = "/api/trust-cert",
+                                           .method = HTTP_POST,
+                                           .handler = trust_cert_handler,
+                                           .user_ctx = NULL};
+        httpd_register_uri_handler(server, &trust_cert_post_uri);
+
+        httpd_uri_t trust_cert_delete_uri = {.uri = "/api/trust-cert",
+                                             .method = HTTP_DELETE,
+                                             .handler = trust_cert_handler,
+                                             .user_ctx = NULL};
+        httpd_register_uri_handler(server, &trust_cert_delete_uri);
 
         httpd_uri_t battery_uri = {.uri = "/api/battery",
                                    .method = HTTP_GET,

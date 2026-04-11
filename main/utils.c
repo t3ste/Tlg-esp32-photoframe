@@ -27,6 +27,24 @@
 
 static const char *TAG = "utils";
 
+// Last image fetch error (transient, not persisted)
+static char last_fetch_error[256] = {0};
+
+void utils_set_last_fetch_error(const char *error)
+{
+    if (error) {
+        strncpy(last_fetch_error, error, sizeof(last_fetch_error) - 1);
+        last_fetch_error[sizeof(last_fetch_error) - 1] = '\0';
+    } else {
+        last_fetch_error[0] = '\0';
+    }
+}
+
+const char *utils_get_last_fetch_error(void)
+{
+    return last_fetch_error;
+}
+
 esp_err_t apply_config_from_json(cJSON *root)
 {
     cJSON *item;
@@ -317,6 +335,10 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
                                   .thumbnail_url = thumbnail_url_buffer,
                                   .config_payload = config_payload_buffer};
 
+        // Use custom CA cert for HTTPS if configured
+        size_t pinned_cert_len = 0;
+        const uint8_t *pinned_cert = config_manager_get_ca_cert_der(&pinned_cert_len);
+
         esp_http_client_config_t config = {
             .url = url,
             .timeout_ms = 120000,
@@ -325,6 +347,8 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
             .max_redirection_count = 5,
             .user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             .buffer_size_tx = 2048,
+            .cert_der = (const char *) pinned_cert,
+            .cert_len = pinned_cert_len,
         };
 
         esp_http_client_handle_t client = esp_http_client_init(&config);

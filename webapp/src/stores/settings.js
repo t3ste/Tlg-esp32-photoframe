@@ -39,6 +39,7 @@ export const useSettingsStore = defineStore("settings", () => {
     sdRotationMode: "random",
     // Auto Rotate - URL
     imageUrl: "https://loremflickr.com/800/480",
+    caCertSet: false,
     accessToken: "",
     httpHeaderKey: "",
     httpHeaderValue: "",
@@ -161,6 +162,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
       deviceSettings.value.displayRotationDeg = data.display_rotation_deg ?? 180;
       deviceSettings.value.imageUrl = data.image_url || "https://loremflickr.com/800/480";
+      deviceSettings.value.caCertSet = data.ca_cert_set || false;
       deviceSettings.value.deepSleepEnabled = data.deep_sleep_enabled !== false;
       deviceSettings.value.haUrl = data.ha_url || "";
       deviceSettings.value.saveDownloadedImages = data.save_downloaded_images !== false;
