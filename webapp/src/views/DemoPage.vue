@@ -1,8 +1,13 @@
 <script setup>
 import { ref, onMounted, watch } from "vue";
 import { getPreset, getPresetOptions, getDefaultParams } from "@aitjcize/epaper-image-convert";
+import { useSettingsStore } from "../stores";
 import ImageProcessing from "../components/ImageProcessing.vue";
 import ProcessingControls from "../components/ProcessingControls.vue";
+
+const settingsStore = useSettingsStore();
+// Default demo to portrait since the sample image is portrait
+settingsStore.deviceSettings.displayOrientation = "portrait";
 
 // State
 const tab = ref("demo");
