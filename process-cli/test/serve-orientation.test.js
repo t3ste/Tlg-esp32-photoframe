@@ -73,8 +73,7 @@ describe.each(["jpg", "png", "bmp"])(
     test("served image should be landscape (800x480) with correct content-type", async () => {
       const { buffer, contentType } = await fetchImage(port);
 
-      const expectedType =
-        format === "jpg" ? "image/jpeg" : `image/${format}`;
+      const expectedType = format === "jpg" ? "image/jpeg" : `image/${format}`;
       expect(contentType).toBe(expectedType);
 
       const dims = await getImageDimensions(buffer);
