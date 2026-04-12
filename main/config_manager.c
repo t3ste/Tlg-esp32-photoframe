@@ -42,7 +42,7 @@ static size_t ca_cert_der_len = 0;
 static char access_token[ACCESS_TOKEN_MAX_LEN] = {0};
 static char http_header_key[HTTP_HEADER_KEY_MAX_LEN] = {0};
 static char http_header_value[HTTP_HEADER_VALUE_MAX_LEN] = {0};
-static bool save_downloaded_images = true;
+static bool save_downloaded_images = false;
 
 // Home Assistant
 static char ha_url[HA_URL_MAX_LEN] = {0};
@@ -236,7 +236,7 @@ esp_err_t config_manager_init(void)
             ESP_LOGI(TAG, "Loaded HTTP header value from NVS (length: %zu)", http_header_value_len);
         }
 
-        uint8_t stored_save_dl = 1;
+        uint8_t stored_save_dl = 0;
         if (nvs_get_u8(nvs_handle, NVS_SAVE_DOWNLOADED_KEY, &stored_save_dl) == ESP_OK) {
             save_downloaded_images = (stored_save_dl != 0);
             ESP_LOGI(TAG, "Loaded save_downloaded_images from NVS: %s",
