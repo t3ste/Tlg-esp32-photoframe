@@ -8,6 +8,7 @@
 
 #include "board_hal.h"
 #include "cJSON.h"
+#include "cert_pin.h"
 #include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
@@ -43,6 +44,28 @@ void utils_set_last_fetch_error(const char *error)
 const char *utils_get_last_fetch_error(void)
 {
     return last_fetch_error;
+}
+
+// Last cert pin error (transient, consumed by HTTP handler on failure response)
+static char last_cert_pin_error[256] = {0};
+
+void utils_set_cert_pin_error(const char *msg)
+{
+    if (msg) {
+        strncpy(last_cert_pin_error, msg, sizeof(last_cert_pin_error) - 1);
+        last_cert_pin_error[sizeof(last_cert_pin_error) - 1] = '\0';
+    } else {
+        last_cert_pin_error[0] = '\0';
+    }
+}
+
+const char *utils_consume_cert_pin_error(void)
+{
+    static char out[256];
+    strncpy(out, last_cert_pin_error, sizeof(out));
+    out[sizeof(out) - 1] = '\0';
+    last_cert_pin_error[0] = '\0';
+    return out;
 }
 
 esp_err_t apply_config_from_json(cJSON *root)
@@ -181,10 +204,34 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_sd_rotation_mode(mode);
     }
 
-    // Auto Rotate - URL
+    // Auto Rotate - URL (with auto-pinning)
     item = cJSON_GetObjectItem(root, "image_url");
     if (item && cJSON_IsString(item)) {
-        config_manager_set_image_url(cJSON_GetStringValue(item));
+        const char *new_url = cJSON_GetStringValue(item);
+        const char *cur_url = config_manager_get_image_url();
+        if (!cur_url)
+            cur_url = "";
+
+        bool new_is_https = (strncmp(new_url, "https://", 8) == 0);
+        bool cur_is_https = (strncmp(cur_url, "https://", 8) == 0);
+        bool url_changed = (strcmp(new_url, cur_url) != 0);
+
+        if (url_changed) {
+            if (new_is_https) {
+                char err_buf[256] = {0};
+                esp_err_t pin_ret =
+                    cert_pin_fetch_and_store(new_url, err_buf, sizeof(err_buf));
+                if (pin_ret != ESP_OK) {
+                    ESP_LOGE(TAG, "Cert pin failed, rejecting config: %s", err_buf);
+                    utils_set_cert_pin_error(err_buf);
+                    return ESP_FAIL;
+                }
+            } else if (cur_is_https) {
+                // Downgrading to HTTP/empty: clear the pinned cert
+                cert_pin_clear();
+            }
+            config_manager_set_image_url(new_url);
+        }
     }
 
     item = cJSON_GetObjectItem(root, "access_token");

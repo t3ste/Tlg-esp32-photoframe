@@ -16,6 +16,12 @@ esp_err_t apply_config_from_json(cJSON *root);
 void utils_set_last_fetch_error(const char *error);
 const char *utils_get_last_fetch_error(void);
 
+// Last cert pin error (transient). set: stash a message after a failed pin.
+// consume: read and clear; returns "" if empty. Used by the config HTTP handler
+// to surface why apply_config_from_json returned ESP_FAIL.
+void utils_set_cert_pin_error(const char *msg);
+const char *utils_consume_cert_pin_error(void);
+
 // Fetch image from URL, process it, and save to Downloads album
 // Returns ESP_OK on success, error code on failure
 // saved_image_path will contain the path to the processed image (PNG)
