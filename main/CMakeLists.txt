@@ -1,5 +1,6 @@
-set(SOURCES 
+set(SOURCES
     "album_manager.c"
+    "cert_pin.c"
     "color_palette.c"
     "config_manager.c"
     "display_manager.c"
