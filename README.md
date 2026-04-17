@@ -179,10 +179,6 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 For more details, see [DEV.md](docs/DEV.md)
 
-## Setup
-
-> **💡 SD card is optional.** Boards with SD card slots (Waveshare, reTerminal) will use SD card storage if inserted, otherwise the device falls back to an in-memory filesystem (MemFS). An SD card is recommended for persistent image storage and SD card WiFi provisioning.
-
 ### WiFi Provisioning
 
 The device supports two methods for WiFi provisioning:
@@ -255,6 +251,8 @@ node cli.js --serve ~/Photos --serve-port 9000 --device-parameters --host photof
 The ESP32 can fetch images from your computer instead of storing them on SD card. Supports EPDGZ, BMP, PNG, and JPG formats with automatic thumbnail generation.
 
 See [process-cli/README.md](process-cli/README.md) for details.
+
+**Building your own image server?** The firmware's URL rotation fetch protocol — request method, custom `X-*` headers, `Authorization` / custom-header handling, and the `ETag` / `304 Not Modified` caching flow — is documented in [docs/API.md → URL Rotation Fetch](docs/API.md#url-rotation-fetch).
 
 ## Support
 

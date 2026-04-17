@@ -446,12 +446,6 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
             }
         }
 
-        // Add hostname header (mDNS name with .local suffix)
-        char hostname[64];
-        sanitize_hostname(config_manager_get_device_name(), hostname, sizeof(hostname) - 6);
-        strlcat(hostname, ".local", sizeof(hostname));
-        esp_http_client_set_header(client, "X-Hostname", hostname);
-
         // Add display resolution and orientation headers
         char width_str[16];
         char height_str[16];
