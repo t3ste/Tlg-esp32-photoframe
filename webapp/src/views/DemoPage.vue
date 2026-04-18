@@ -177,10 +177,16 @@ function newImage() {
   <v-app>
     <!-- Header -->
     <v-app-bar color="primary" dark>
-      <v-toolbar-title>
-        <v-icon icon="mdi-image-frame" class="mr-2" />
-        ESP32 PhotoFrame - Demo & Flash
-      </v-toolbar-title>
+      <template #prepend>
+        <v-img
+          :src="`${baseUrl}favicon.svg`"
+          alt="PhotoFrame"
+          width="40"
+          height="40"
+          class="ml-2"
+        />
+      </template>
+      <v-toolbar-title class="ml-4">ESP32 PhotoFrame - Demo & Flash</v-toolbar-title>
       <v-spacer />
       <v-chip variant="outlined" class="mr-2">
         {{ stableVersion }}
