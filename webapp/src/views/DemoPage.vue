@@ -17,11 +17,35 @@ const selectedVersion = ref("stable");
 const selectedBoard = ref("waveshare_photopainter_73");
 const baseUrl = import.meta.env.BASE_URL;
 
-const boardOptions = [
-  { label: "Waveshare ESP32-S3-PhotoPainter", value: "waveshare_photopainter_73" },
-  { label: "Seeed Studio XIAO EE02", value: "seeedstudio_xiao_ee02" },
-  { label: "Seeed Studio XIAO EE04", value: "seeedstudio_xiao_ee04" },
-  { label: "Seeed Studio reTerminal E1002", value: "seeedstudio_reterminal_e1002" },
+const supportedBoards = [
+  {
+    value: "waveshare_photopainter_73",
+    label: "Waveshare ESP32-S3-PhotoPainter",
+    display: '7.3" 7-color',
+    storage: "SD card (SDIO)",
+    url: "https://www.waveshare.com/wiki/ESP32-S3-PhotoPainter",
+  },
+  {
+    value: "seeedstudio_xiao_ee02",
+    label: "Seeed Studio XIAO EE02",
+    display: '13.3" 6-color',
+    storage: "Internal flash",
+    url: "https://www.seeedstudio.com/XIAO-ePaper-DIY-Kit-EE02-for-13-3-Spectratm-6-E-Ink.html",
+  },
+  {
+    value: "seeedstudio_xiao_ee04",
+    label: "Seeed Studio XIAO EE04",
+    display: '7.3" 6-color',
+    storage: "Internal flash",
+    url: "https://www.seeedstudio.com/XIAO-ePaper-EE04-DIY-Bundle-Kit.html",
+  },
+  {
+    value: "seeedstudio_reterminal_e1002",
+    label: "Seeed Studio reTerminal E1002",
+    display: '7.3" 6-color',
+    storage: "SD (SPI) + Internal flash",
+    url: "https://www.seeedstudio.com/reTerminal-E1002-p-6533.html",
+  },
 ];
 
 // Image state
@@ -213,6 +237,143 @@ function newImage() {
           @change="onFileSelected"
         />
 
+        <!-- Project Intro -->
+        <v-card class="mb-4">
+          <v-card-text class="pa-6">
+            <div class="d-flex align-center mb-4">
+              <v-img
+                :src="`${baseUrl}favicon.svg`"
+                alt="ESP32 PhotoFrame"
+                width="64"
+                height="64"
+                class="mr-4 flex-grow-0"
+              />
+              <div>
+                <div class="text-h5 font-weight-bold">ESP32 PhotoFrame</div>
+                <div class="text-body-2 text-grey-darken-1">
+                  Open-source firmware for ESP32-based e-paper photo frames
+                </div>
+              </div>
+            </div>
+            <p class="text-body-1 mb-4">
+              A drop-in replacement for stock e-paper photo-frame firmware, with significantly
+              better image quality, a REST API and web interface, client-side AI image
+              generation, and Home Assistant integration. Designed for always-on ambient display
+              with weeks of battery life on deep sleep.
+            </p>
+            <v-row>
+              <v-col cols="6" md="3">
+                <v-card variant="tonal" class="text-center pa-4" height="100%">
+                  <v-icon icon="mdi-palette" size="32" color="primary" class="mb-2" />
+                  <div class="text-subtitle-2 font-weight-bold">Measured Palette</div>
+                  <div class="text-caption">
+                    Dither against real panel colors for accurate, non-washed-out output
+                  </div>
+                </v-card>
+              </v-col>
+              <v-col cols="6" md="3">
+                <v-card variant="tonal" class="text-center pa-4" height="100%">
+                  <v-icon icon="mdi-zip-box" size="32" color="primary" class="mb-2" />
+                  <div class="text-subtitle-2 font-weight-bold">EPDGZ Format</div>
+                  <div class="text-caption">
+                    4 bpp pre-processed format for small files and instant render
+                  </div>
+                </v-card>
+              </v-col>
+              <v-col cols="6" md="3">
+                <v-card variant="tonal" class="text-center pa-4" height="100%">
+                  <v-icon icon="mdi-battery-charging" size="32" color="primary" class="mb-2" />
+                  <div class="text-subtitle-2 font-weight-bold">Deep Sleep</div>
+                  <div class="text-caption">
+                    Weeks of battery life, or always-on for Home Assistant
+                  </div>
+                </v-card>
+              </v-col>
+              <v-col cols="6" md="3">
+                <v-card variant="tonal" class="text-center pa-4" height="100%">
+                  <v-icon icon="mdi-api" size="32" color="primary" class="mb-2" />
+                  <div class="text-subtitle-2 font-weight-bold">REST API + Web UI</div>
+                  <div class="text-caption">
+                    Full programmatic control, drag-and-drop uploads, live status
+                  </div>
+                </v-card>
+              </v-col>
+            </v-row>
+            <div class="mt-4 d-flex flex-wrap ga-2">
+              <v-btn
+                variant="tonal"
+                size="small"
+                href="https://github.com/aitjcize/esp32-photoframe"
+                target="_blank"
+                prepend-icon="mdi-github"
+              >
+                Firmware
+              </v-btn>
+              <v-btn
+                variant="tonal"
+                size="small"
+                href="https://github.com/aitjcize/esp32-photoframe-server"
+                target="_blank"
+                prepend-icon="mdi-server"
+              >
+                Image Server
+              </v-btn>
+              <v-btn
+                variant="tonal"
+                size="small"
+                href="https://github.com/aitjcize/ha-esp32-photoframe"
+                target="_blank"
+                prepend-icon="mdi-home-assistant"
+              >
+                Home Assistant
+              </v-btn>
+              <v-btn
+                variant="tonal"
+                size="small"
+                href="https://github.com/aitjcize/esp32-photoframe-app"
+                target="_blank"
+                prepend-icon="mdi-cellphone"
+              >
+                Mobile App
+                <v-chip size="x-small" class="ml-2" color="warning" variant="flat">
+                  Coming Soon
+                </v-chip>
+              </v-btn>
+            </div>
+          </v-card-text>
+        </v-card>
+
+        <!-- Supported Hardware -->
+        <v-card class="mb-6">
+          <v-card-title>
+            <v-icon icon="mdi-chip" class="mr-2" />
+            Supported Hardware
+          </v-card-title>
+          <v-card-text>
+            <v-table density="comfortable">
+              <thead>
+                <tr>
+                  <th>Board</th>
+                  <th>Display</th>
+                  <th>Storage</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="b in supportedBoards" :key="b.value">
+                  <td class="font-weight-medium">
+                    <a :href="b.url" target="_blank" rel="noopener" class="board-link">
+                      {{ b.label }}
+                      <v-icon icon="mdi-open-in-new" size="x-small" class="ml-1" />
+                    </a>
+                  </td>
+                  <td>{{ b.display }}</td>
+                  <td>{{ b.storage }}</td>
+                </tr>
+              </tbody>
+            </v-table>
+          </v-card-text>
+        </v-card>
+
         <!-- Tabs -->
         <v-tabs v-model="tab" color="primary" class="mb-6">
           <v-tab value="demo">
@@ -295,70 +456,6 @@ function newImage() {
           <v-tabs-window-item value="flash">
             <v-row justify="center">
               <v-col cols="12" md="10">
-                <!-- About Section -->
-                <v-card class="mb-4">
-                  <v-card-title>
-                    <v-icon icon="mdi-information" class="mr-2" />
-                    About
-                  </v-card-title>
-                  <v-card-text>
-                    <p class="mb-4">
-                      A modern firmware for the Waveshare ESP32-S3-PhotoPainter that provides a
-                      powerful RESTful API and web interface for managing your e-paper photo frame.
-                    </p>
-
-                    <!-- Feature Grid -->
-                    <v-row>
-                      <v-col cols="6" md="3">
-                        <v-card variant="tonal" class="text-center pa-4">
-                          <v-icon icon="mdi-camera" size="32" color="primary" class="mb-2" />
-                          <div class="text-subtitle-2 font-weight-bold">Smart Upload</div>
-                          <div class="text-caption">
-                            Drag & drop JPEG files with automatic processing
-                          </div>
-                        </v-card>
-                      </v-col>
-                      <v-col cols="6" md="3">
-                        <v-card variant="tonal" class="text-center pa-4">
-                          <v-icon icon="mdi-rotate-right" size="32" color="primary" class="mb-2" />
-                          <div class="text-subtitle-2 font-weight-bold">Auto-Rotate</div>
-                          <div class="text-caption">
-                            Automatic image rotation with configurable intervals
-                          </div>
-                        </v-card>
-                      </v-col>
-                      <v-col cols="6" md="3">
-                        <v-card variant="tonal" class="text-center pa-4">
-                          <v-icon
-                            icon="mdi-battery-charging"
-                            size="32"
-                            color="primary"
-                            class="mb-2"
-                          />
-                          <div class="text-subtitle-2 font-weight-bold">Power Smart</div>
-                          <div class="text-caption">
-                            2-minute auto-sleep with battery monitoring
-                          </div>
-                        </v-card>
-                      </v-col>
-                      <v-col cols="6" md="3">
-                        <v-card variant="tonal" class="text-center pa-4">
-                          <v-icon
-                            icon="mdi-cellphone-link"
-                            size="32"
-                            color="primary"
-                            class="mb-2"
-                          />
-                          <div class="text-subtitle-2 font-weight-bold">Web Control</div>
-                          <div class="text-caption">
-                            Modern web interface with real-time updates
-                          </div>
-                        </v-card>
-                      </v-col>
-                    </v-row>
-                  </v-card-text>
-                </v-card>
-
                 <!-- Requirements -->
                 <v-alert type="warning" variant="tonal" class="mb-4">
                   <template #title>
@@ -403,7 +500,7 @@ function newImage() {
 
                     <v-select
                       v-model="selectedBoard"
-                      :items="boardOptions"
+                      :items="supportedBoards"
                       item-title="label"
                       item-value="value"
                       label="Select Board"
@@ -462,6 +559,14 @@ function newImage() {
 </template>
 
 <style scoped>
+.board-link {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+}
+.board-link:hover {
+  text-decoration: underline;
+}
+
 .flash-button {
   padding: 16px 32px;
   font-size: 1.1rem;
