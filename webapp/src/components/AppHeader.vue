@@ -1,10 +1,15 @@
 <script setup>
-import { ref } from "vue";
-import { useAppStore } from "../stores";
+import { ref, computed } from "vue";
+import { useAppStore, useSettingsStore } from "../stores";
 
 const appStore = useAppStore();
+const settingsStore = useSettingsStore();
 const sleepDialog = ref(false);
 const rotating = ref(false);
+
+const deviceTitle = computed(
+  () => settingsStore.deviceSettings.deviceName?.trim() || "ESP32 PhotoFrame"
+);
 
 async function handleSleep() {
   await appStore.enterSleep();
@@ -30,7 +35,7 @@ function getBatteryColor(level) {
       <v-img src="/favicon.svg" alt="PhotoFrame" width="40" height="40" class="ml-2 mr-n2" />
     </template>
 
-    <v-app-bar-title class="ml-4">PhotoFrame Control Panel</v-app-bar-title>
+    <v-app-bar-title class="ml-4">{{ deviceTitle }}</v-app-bar-title>
 
     <template #append>
       <!-- Rotate Now Button -->
