@@ -257,9 +257,9 @@ function newImage() {
             </div>
             <p class="text-body-1 mb-4">
               A drop-in replacement for stock e-paper photo-frame firmware, with significantly
-              better image quality, a REST API and web interface, client-side AI image
-              generation, and Home Assistant integration. Designed for always-on ambient display
-              with weeks of battery life on deep sleep.
+              better image quality, a REST API and web interface, client-side AI image generation,
+              and Home Assistant integration. Designed for always-on ambient display with weeks of
+              battery life on deep sleep.
             </p>
             <v-row>
               <v-col cols="6" md="3">
