@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { useAppStore, useSettingsStore } from "../stores";
 
 const appStore = useAppStore();
@@ -9,6 +9,14 @@ const rotating = ref(false);
 
 const deviceTitle = computed(
   () => settingsStore.deviceSettings.deviceName?.trim() || "ESP32 PhotoFrame"
+);
+
+watch(
+  deviceTitle,
+  (title) => {
+    document.title = title;
+  },
+  { immediate: true }
 );
 
 async function handleSleep() {
