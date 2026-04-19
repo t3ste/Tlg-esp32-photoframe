@@ -203,7 +203,7 @@ function newImage() {
     <v-app-bar color="primary" dark>
       <template #prepend>
         <v-img
-          :src="`${baseUrl}favicon.svg`"
+          :src="`${baseUrl}icon.svg`"
           alt="PhotoFrame"
           width="40"
           height="40"
@@ -242,7 +242,7 @@ function newImage() {
           <v-card-text class="pa-6">
             <div class="d-flex align-center mb-4">
               <v-img
-                :src="`${baseUrl}favicon.svg`"
+                :src="`${baseUrl}icon.svg`"
                 alt="ESP32 PhotoFrame"
                 width="64"
                 height="64"

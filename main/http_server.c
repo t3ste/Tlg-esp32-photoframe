@@ -79,8 +79,8 @@ extern const uint8_t browser_js_end[] asm("_binary_browser_js_end");
 extern const uint8_t vite_browser_external_js_start[] asm(
     "_binary___vite_browser_external_js_start");
 extern const uint8_t vite_browser_external_js_end[] asm("_binary___vite_browser_external_js_end");
-extern const uint8_t favicon_svg_start[] asm("_binary_favicon_svg_start");
-extern const uint8_t favicon_svg_end[] asm("_binary_favicon_svg_end");
+extern const uint8_t icon_svg_start[] asm("_binary_icon_svg_start");
+extern const uint8_t icon_svg_end[] asm("_binary_icon_svg_end");
 extern const uint8_t measurement_sample_jpg_start[] asm("_binary_measurement_sample_jpg_start");
 extern const uint8_t measurement_sample_jpg_end[] asm("_binary_measurement_sample_jpg_end");
 
@@ -142,11 +142,11 @@ static esp_err_t vite_browser_external_js_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static esp_err_t favicon_handler(httpd_req_t *req)
+static esp_err_t icon_handler(httpd_req_t *req)
 {
-    const size_t favicon_svg_size = (favicon_svg_end - favicon_svg_start);
+    const size_t icon_svg_size = (icon_svg_end - icon_svg_start);
     httpd_resp_set_type(req, "image/svg+xml");
-    httpd_resp_send(req, (const char *) favicon_svg_start, favicon_svg_size);
+    httpd_resp_send(req, (const char *) icon_svg_start, icon_svg_size);
     return ESP_OK;
 }
 
@@ -2581,11 +2581,11 @@ esp_err_t http_server_init(void)
                                                     .user_ctx = NULL};
         httpd_register_uri_handler(server, &vite_browser_external_js_uri);
 
-        httpd_uri_t favicon_uri = {.uri = "/favicon.svg",
+        httpd_uri_t icon_uri = {.uri = "/icon.svg",
                                    .method = HTTP_GET,
-                                   .handler = favicon_handler,
+                                   .handler = icon_handler,
                                    .user_ctx = NULL};
-        httpd_register_uri_handler(server, &favicon_uri);
+        httpd_register_uri_handler(server, &icon_uri);
 
         httpd_uri_t measurement_sample_uri = {.uri = "/measurement_sample.jpg",
                                               .method = HTTP_GET,

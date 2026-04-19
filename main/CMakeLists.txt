@@ -55,5 +55,5 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES ""
     PRIV_REQUIRES ${PRIV_REQUIRES} 
-    EMBED_FILES "webapp/index.html" "webapp/favicon.svg" "webapp/assets/index.css" "webapp/assets/index.js" "webapp/assets/index2.js" "webapp/assets/exif-reader.js" "webapp/assets/browser.js" "webapp/assets/__vite-browser-external.js" "resources/measurement_sample.jpg"
+    EMBED_FILES "webapp/index.html" "webapp/icon.svg" "webapp/assets/index.css" "webapp/assets/index.js" "webapp/assets/index2.js" "webapp/assets/exif-reader.js" "webapp/assets/browser.js" "webapp/assets/__vite-browser-external.js" "resources/measurement_sample.jpg"
 )

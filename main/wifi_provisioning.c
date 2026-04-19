@@ -44,8 +44,8 @@ extern const uint8_t browser_js_end[] asm("_binary_browser_js_end");
 extern const uint8_t vite_browser_external_js_start[] asm(
     "_binary___vite_browser_external_js_start");
 extern const uint8_t vite_browser_external_js_end[] asm("_binary___vite_browser_external_js_end");
-extern const uint8_t favicon_svg_start[] asm("_binary_favicon_svg_start");
-extern const uint8_t favicon_svg_end[] asm("_binary_favicon_svg_end");
+extern const uint8_t icon_svg_start[] asm("_binary_icon_svg_start");
+extern const uint8_t icon_svg_end[] asm("_binary_icon_svg_end");
 
 static esp_err_t provision_keep_alive_handler(httpd_req_t *req)
 {
@@ -119,11 +119,11 @@ static esp_err_t provision_vite_js_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static esp_err_t provision_favicon_handler(httpd_req_t *req)
+static esp_err_t provision_icon_handler(httpd_req_t *req)
 {
-    const size_t favicon_svg_size = (favicon_svg_end - favicon_svg_start);
+    const size_t icon_svg_size = (icon_svg_end - icon_svg_start);
     httpd_resp_set_type(req, "image/svg+xml");
-    httpd_resp_send(req, (const char *) favicon_svg_start, favicon_svg_size);
+    httpd_resp_send(req, (const char *) icon_svg_start, icon_svg_size);
     return ESP_OK;
 }
 
@@ -560,11 +560,11 @@ esp_err_t wifi_provisioning_start_ap(void)
                                 .user_ctx = NULL};
         httpd_register_uri_handler(provisioning_server, &vite_uri);
 
-        httpd_uri_t favicon_uri = {.uri = "/favicon.svg",
+        httpd_uri_t icon_uri = {.uri = "/icon.svg",
                                    .method = HTTP_GET,
-                                   .handler = provision_favicon_handler,
+                                   .handler = provision_icon_handler,
                                    .user_ctx = NULL};
-        httpd_register_uri_handler(provisioning_server, &favicon_uri);
+        httpd_register_uri_handler(provisioning_server, &icon_uri);
 
         // Save credentials handler
         httpd_uri_t save_uri = {.uri = "/save",

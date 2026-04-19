@@ -40,7 +40,7 @@ function getBatteryColor(level) {
 <template>
   <v-app-bar color="primary" density="comfortable">
     <template #prepend>
-      <v-img src="/favicon.svg" alt="PhotoFrame" width="40" height="40" class="ml-2" />
+      <v-img src="/icon.svg" alt="PhotoFrame" width="40" height="40" class="ml-2" />
     </template>
 
     <v-app-bar-title class="ml-4">{{ deviceTitle }}</v-app-bar-title>
