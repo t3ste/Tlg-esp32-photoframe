@@ -2581,10 +2581,8 @@ esp_err_t http_server_init(void)
                                                     .user_ctx = NULL};
         httpd_register_uri_handler(server, &vite_browser_external_js_uri);
 
-        httpd_uri_t icon_uri = {.uri = "/icon.svg",
-                                   .method = HTTP_GET,
-                                   .handler = icon_handler,
-                                   .user_ctx = NULL};
+        httpd_uri_t icon_uri = {
+            .uri = "/icon.svg", .method = HTTP_GET, .handler = icon_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &icon_uri);
 
         httpd_uri_t measurement_sample_uri = {.uri = "/measurement_sample.jpg",

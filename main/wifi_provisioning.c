@@ -561,9 +561,9 @@ esp_err_t wifi_provisioning_start_ap(void)
         httpd_register_uri_handler(provisioning_server, &vite_uri);
 
         httpd_uri_t icon_uri = {.uri = "/icon.svg",
-                                   .method = HTTP_GET,
-                                   .handler = provision_icon_handler,
-                                   .user_ctx = NULL};
+                                .method = HTTP_GET,
+                                .handler = provision_icon_handler,
+                                .user_ctx = NULL};
         httpd_register_uri_handler(provisioning_server, &icon_uri);
 
         // Save credentials handler

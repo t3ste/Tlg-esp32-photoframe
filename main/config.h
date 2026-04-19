@@ -68,6 +68,7 @@ typedef enum {
 
 // General
 #define NVS_NAMESPACE "photoframe"
+#define NVS_SETUP_COMPLETE_KEY "setup_complete"
 #define NVS_DEVICE_NAME_KEY "device_name"
 #define NVS_TIMEZONE_KEY "timezone"
 #define NVS_NTP_SERVER_KEY "ntp_server"

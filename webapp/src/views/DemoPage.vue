@@ -17,6 +17,17 @@ const selectedVersion = ref("stable");
 const selectedBoard = ref("waveshare_photopainter_73");
 const baseUrl = import.meta.env.BASE_URL;
 
+const appFeatures = [
+  { icon: "mdi-access-point-network", text: "Auto Discovery" },
+  { icon: "mdi-image-multiple", text: "Gallery Management" },
+  { icon: "mdi-auto-fix", text: "AI Image Generation" },
+  { icon: "mdi-wifi", text: "WiFi Provisioning" },
+  { icon: "mdi-cog", text: "Device Settings" },
+  { icon: "mdi-update", text: "OTA Updates" },
+  { icon: "mdi-camera", text: "Camera Upload" },
+  { icon: "mdi-palette", text: "Image Processing" },
+];
+
 const supportedBoards = [
   {
     value: "waveshare_photopainter_73",
@@ -103,7 +114,7 @@ watch(
 onMounted(async () => {
   // Handle URL hash for tab selection
   const hash = window.location.hash.slice(1);
-  if (hash === "demo" || hash === "flash") {
+  if (hash === "demo" || hash === "flash" || hash === "app") {
     tab.value = hash;
   }
 
@@ -202,13 +213,7 @@ function newImage() {
     <!-- Header -->
     <v-app-bar color="primary" dark>
       <template #prepend>
-        <v-img
-          :src="`${baseUrl}icon.svg`"
-          alt="PhotoFrame"
-          width="40"
-          height="40"
-          class="ml-2"
-        />
+        <v-img :src="`${baseUrl}icon.svg`" alt="PhotoFrame" width="40" height="40" class="ml-2" />
       </template>
       <v-toolbar-title class="ml-4">ESP32 PhotoFrame - Demo & Flash</v-toolbar-title>
       <v-spacer />
@@ -384,6 +389,10 @@ function newImage() {
             <v-icon icon="mdi-flash" start />
             Flash Firmware
           </v-tab>
+          <v-tab value="app">
+            <v-icon icon="mdi-cellphone-arrow-down" start />
+            Companion App
+          </v-tab>
         </v-tabs>
 
         <v-tabs-window v-model="tab">
@@ -548,6 +557,66 @@ function newImage() {
                       <li>Connect to the access point and configure your WiFi settings</li>
                     </ol>
                   </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
+          </v-tabs-window-item>
+
+          <!-- App Tab -->
+          <v-tabs-window-item value="app">
+            <v-row justify="center">
+              <v-col cols="12" md="8">
+                <v-card class="text-center pa-8">
+                  <v-icon icon="mdi-cellphone-arrow-down" size="80" color="primary" class="mb-4" />
+                  <div class="text-h4 font-weight-bold mb-2">ESP Frame Companion App</div>
+                  <div class="text-body-1 text-grey-darken-1 mb-8">
+                    Manage your e-paper photo frame from your phone. Discover devices, upload
+                    photos, generate AI images, and configure settings — all from one app.
+                  </div>
+
+                  <v-chip color="info" size="large" class="mb-8">
+                    <v-icon icon="mdi-clock-outline" start />
+                    Coming Soon
+                  </v-chip>
+
+                  <v-row justify="center" class="mb-6">
+                    <v-col cols="auto">
+                      <v-card
+                        variant="outlined"
+                        class="pa-4"
+                        style="opacity: 0.5; min-width: 180px"
+                      >
+                        <v-icon icon="mdi-apple" size="40" class="mb-2" />
+                        <div class="text-subtitle-2">App Store</div>
+                      </v-card>
+                    </v-col>
+                    <v-col cols="auto">
+                      <v-card
+                        variant="outlined"
+                        class="pa-4"
+                        style="opacity: 0.5; min-width: 180px"
+                      >
+                        <v-icon icon="mdi-google-play" size="40" class="mb-2" />
+                        <div class="text-subtitle-2">Google Play</div>
+                      </v-card>
+                    </v-col>
+                  </v-row>
+
+                  <v-divider class="mb-6" />
+
+                  <div class="text-h6 mb-4">Features</div>
+                  <v-row justify="center">
+                    <v-col
+                      cols="6"
+                      sm="4"
+                      md="3"
+                      v-for="feature in appFeatures"
+                      :key="feature.icon"
+                    >
+                      <v-icon :icon="feature.icon" size="32" color="primary" class="mb-2" />
+                      <div class="text-caption">{{ feature.text }}</div>
+                    </v-col>
+                  </v-row>
                 </v-card>
               </v-col>
             </v-row>
