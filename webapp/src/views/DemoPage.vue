@@ -4,6 +4,7 @@ import { getPreset, getPresetOptions, getDefaultParams } from "@aitjcize/epaper-
 import { useSettingsStore } from "../stores";
 import ImageProcessing from "../components/ImageProcessing.vue";
 import ProcessingControls from "../components/ProcessingControls.vue";
+import boardsData from "../../../boards/boards.json";
 
 const settingsStore = useSettingsStore();
 // Default demo to portrait since the sample image is portrait
@@ -28,36 +29,11 @@ const appFeatures = [
   { icon: "mdi-palette", text: "Image Processing" },
 ];
 
-const supportedBoards = [
-  {
-    value: "waveshare_photopainter_73",
-    label: "Waveshare ESP32-S3-PhotoPainter",
-    display: '7.3" 7-color',
-    storage: "SD card (SDIO)",
-    url: "https://www.waveshare.com/wiki/ESP32-S3-PhotoPainter",
-  },
-  {
-    value: "seeedstudio_xiao_ee02",
-    label: "Seeed Studio XIAO EE02",
-    display: '13.3" 6-color',
-    storage: "Internal flash",
-    url: "https://www.seeedstudio.com/XIAO-ePaper-DIY-Kit-EE02-for-13-3-Spectratm-6-E-Ink.html",
-  },
-  {
-    value: "seeedstudio_xiao_ee04",
-    label: "Seeed Studio XIAO EE04",
-    display: '7.3" 6-color',
-    storage: "Internal flash",
-    url: "https://www.seeedstudio.com/XIAO-ePaper-EE04-DIY-Bundle-Kit.html",
-  },
-  {
-    value: "seeedstudio_reterminal_e1002",
-    label: "Seeed Studio reTerminal E1002",
-    display: '7.3" 6-color',
-    storage: "SD (SPI) + Internal flash",
-    url: "https://www.seeedstudio.com/reTerminal-E1002-p-6533.html",
-  },
-];
+const supportedBoards = boardsData.map((b) => ({
+  ...b,
+  value: b.id,
+  resolution: `${b.resolution[0]} × ${b.resolution[1]}`,
+}));
 
 // Image state
 const fileInput = ref(null);
@@ -360,6 +336,7 @@ function newImage() {
                 <tr>
                   <th>Board</th>
                   <th>Display</th>
+                  <th>Resolution</th>
                   <th>Storage</th>
                 </tr>
               </thead>
@@ -372,6 +349,7 @@ function newImage() {
                     </a>
                   </td>
                   <td>{{ b.display }}</td>
+                  <td>{{ b.resolution }}</td>
                   <td>{{ b.storage }}</td>
                 </tr>
               </tbody>
