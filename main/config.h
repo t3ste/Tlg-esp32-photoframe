@@ -163,6 +163,14 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define NVS_TELEGRAM_BOT_TOKEN_KEY "tg_bot_token"
 #define NVS_TELEGRAM_CHAT_ID_KEY "tg_chat_id"
 #define NVS_TELEGRAM_LAST_UPDATE_ID_KEY "tg_last_upd_id"
+// Orientation-pairing: combine two mismatched-orientation Telegram photos
+// (e.g. two portrait shots on a landscape frame) into one image instead of
+// ever showing one alone. "Pending" is the one reserved image waiting for
+// its partner, persisted across deep sleep (RAM/files don't survive on
+// MemFS-only boards, NVS does).
+#define NVS_TELEGRAM_PAIRING_KEY "tg_pairing"
+#define NVS_TELEGRAM_PENDING_PATH_KEY "tg_pend_path"
+#define NVS_TELEGRAM_PENDING_CAPTION_KEY "tg_pend_cap"
 
 // AI API Keys (for webapp client use)
 #define AI_API_KEY_MAX_LEN 256
@@ -185,5 +193,7 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define TELEGRAM_RESET_COMMAND "/telegram_reset"
 #define TELEGRAM_MAX_PENDING_COMMANDS 8
 #define TELEGRAM_COMMAND_MAX_LEN 128
+#define TELEGRAM_CAPTION_MAX_LEN 128
+#define TELEGRAM_FILE_ID_MAX_LEN 128
 
 #endif

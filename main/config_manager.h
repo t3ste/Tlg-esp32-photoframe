@@ -136,6 +136,20 @@ bool config_manager_telegram_is_configured(void);
 void config_manager_set_telegram_last_update_id(int64_t update_id);
 int64_t config_manager_get_telegram_last_update_id(void);
 
+// Orientation-pairing mode: combine two mismatched-orientation Telegram
+// photos into one composed image instead of ever showing one alone.
+// Togglable via the web UI and the "/pairing" bot command.
+void config_manager_set_telegram_pairing_enabled(bool enabled);
+bool config_manager_get_telegram_pairing_enabled(void);
+
+// The one reserved image waiting for its orientation partner (empty path =
+// none pending). Persisted so it survives deep sleep even on MemFS-only
+// boards where the file itself won't.
+void config_manager_set_telegram_pending_image(const char *path, const char *caption);
+const char *config_manager_get_telegram_pending_image_path(void);
+const char *config_manager_get_telegram_pending_image_caption(void);
+void config_manager_clear_telegram_pending_image(void);
+
 // ============================================================================
 // AI API Keys
 // ============================================================================

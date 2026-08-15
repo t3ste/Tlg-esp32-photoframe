@@ -764,6 +764,20 @@ async function performFactoryReset() {
                       class="mb-4"
                     />
 
+                    <v-switch
+                      v-model="settingsStore.deviceSettings.telegramPairingEnabled"
+                      label="Combine mismatched-orientation photos instead of showing one alone"
+                      color="primary"
+                      class="mb-2"
+                      hide-details
+                    />
+                    <div class="text-caption text-medium-emphasis mb-4">
+                      Two portrait photos on a landscape frame (or two landscape photos on a
+                      portrait frame) are combined side by side / stacked. A lone mismatched
+                      photo is held back until its partner arrives. Also togglable via the
+                      "/pairing" bot command.
+                    </div>
+
                     <v-alert
                       v-if="settingsStore.deviceSettings.lastFetchError"
                       type="error"

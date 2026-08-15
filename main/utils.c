@@ -467,6 +467,14 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_telegram_chat_id(chat_id);
     }
 
+    item = cJSON_GetObjectItem(root, "telegram_pairing_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_telegram_pairing_enabled(cJSON_IsTrue(item));
+        if (!cJSON_IsTrue(item)) {
+            config_manager_clear_telegram_pending_image();
+        }
+    }
+
     // AI API Keys
     item = cJSON_GetObjectItem(root, "openai_api_key");
     if (item && cJSON_IsString(item)) {

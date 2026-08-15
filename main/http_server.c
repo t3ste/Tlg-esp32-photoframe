@@ -1725,6 +1725,8 @@ static esp_err_t config_handler(httpd_req_t *req)
         const char *tg_chat_id = config_manager_get_telegram_chat_id();
         cJSON_AddStringToObject(root, "telegram_chat_id", tg_chat_id ? tg_chat_id : "");
         cJSON_AddBoolToObject(root, "telegram_configured", config_manager_telegram_is_configured());
+        cJSON_AddBoolToObject(root, "telegram_pairing_enabled",
+                              config_manager_get_telegram_pairing_enabled());
 
         // AI API Keys
         const char *openai_key = config_manager_get_openai_api_key();

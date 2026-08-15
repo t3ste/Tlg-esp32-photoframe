@@ -249,18 +249,10 @@ static void build_api_url(const char *method, char *out, size_t out_len)
     snprintf(out, out_len, TELEGRAM_API_BASE_FMT, config_manager_get_telegram_bot_token(), method);
 }
 
-esp_err_t telegram_bot_send_message(const char *text)
+// POSTs a JSON body to a Telegram API method with retry on transient failure.
+// Takes ownership of `body` (always deletes it).
+static esp_err_t telegram_api_post(const char *method, cJSON *body)
 {
-    if (!config_manager_telegram_is_configured() || !text) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    cJSON *body = cJSON_CreateObject();
-    if (!body) {
-        return ESP_ERR_NO_MEM;
-    }
-    cJSON_AddStringToObject(body, "chat_id", config_manager_get_telegram_chat_id());
-    cJSON_AddStringToObject(body, "text", text);
     char *payload = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     if (!payload) {
@@ -268,12 +260,12 @@ esp_err_t telegram_bot_send_message(const char *text)
     }
 
     char url[256];
-    build_api_url("sendMessage", url, sizeof(url));
+    build_api_url(method, url, sizeof(url));
 
     esp_err_t result = ESP_FAIL;
     for (int attempt = 1; attempt <= TELEGRAM_HTTP_RETRY_COUNT; attempt++) {
         if (attempt > 1) {
-            ESP_LOGW(TAG, "Retrying sendMessage (%d/%d) after %d ms...", attempt,
+            ESP_LOGW(TAG, "Retrying %s (%d/%d) after %d ms...", method, attempt,
                      TELEGRAM_HTTP_RETRY_COUNT, TELEGRAM_HTTP_RETRY_DELAY_MS);
             vTaskDelay(pdMS_TO_TICKS(TELEGRAM_HTTP_RETRY_DELAY_MS));
         }
@@ -297,7 +289,7 @@ esp_err_t telegram_bot_send_message(const char *text)
         esp_http_client_cleanup(client);
 
         if (err != ESP_OK || status != 200) {
-            ESP_LOGW(TAG, "sendMessage failed (err=%s, status=%d)", esp_err_to_name(err), status);
+            ESP_LOGW(TAG, "%s failed (err=%s, status=%d)", method, esp_err_to_name(err), status);
             continue;
         }
         result = ESP_OK;
@@ -306,6 +298,63 @@ esp_err_t telegram_bot_send_message(const char *text)
 
     free(payload);
     return result;
+}
+
+esp_err_t telegram_bot_send_message(const char *text)
+{
+    if (!config_manager_telegram_is_configured() || !text) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    cJSON *body = cJSON_CreateObject();
+    if (!body) {
+        return ESP_ERR_NO_MEM;
+    }
+    cJSON_AddStringToObject(body, "chat_id", config_manager_get_telegram_chat_id());
+    cJSON_AddStringToObject(body, "text", text);
+    return telegram_api_post("sendMessage", body);
+}
+
+// Same as telegram_bot_send_message(), but threaded as a reply to a specific
+// message (reply_to_message_id <= 0 means "no threading").
+static esp_err_t telegram_bot_send_message_reply(const char *text, int64_t reply_to_message_id)
+{
+    if (!config_manager_telegram_is_configured() || !text) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    cJSON *body = cJSON_CreateObject();
+    if (!body) {
+        return ESP_ERR_NO_MEM;
+    }
+    cJSON_AddStringToObject(body, "chat_id", config_manager_get_telegram_chat_id());
+    cJSON_AddStringToObject(body, "text", text);
+    if (reply_to_message_id > 0) {
+        cJSON_AddNumberToObject(body, "reply_to_message_id", (double) reply_to_message_id);
+    }
+    return telegram_api_post("sendMessage", body);
+}
+
+// Sends a photo the bot already knows about (by file_id - no re-upload needed)
+// as a captioned reply to a specific message. Used for the per-image "saved"
+// confirmation, echoing back the smallest available Telegram-hosted size.
+static esp_err_t telegram_bot_send_photo_reply(const char *file_id, const char *caption,
+                                               int64_t reply_to_message_id)
+{
+    if (!config_manager_telegram_is_configured() || !file_id || file_id[0] == '\0') {
+        return ESP_ERR_INVALID_STATE;
+    }
+    cJSON *body = cJSON_CreateObject();
+    if (!body) {
+        return ESP_ERR_NO_MEM;
+    }
+    cJSON_AddStringToObject(body, "chat_id", config_manager_get_telegram_chat_id());
+    cJSON_AddStringToObject(body, "photo", file_id);
+    if (caption) {
+        cJSON_AddStringToObject(body, "caption", caption);
+    }
+    if (reply_to_message_id > 0) {
+        cJSON_AddNumberToObject(body, "reply_to_message_id", (double) reply_to_message_id);
+    }
+    return telegram_api_post("sendPhoto", body);
 }
 
 // Resolves a Telegram file_id to a downloadable file_path via getFile.
@@ -457,9 +506,25 @@ static esp_err_t make_unique_telegram_path(const char *ext, char *out, size_t ou
 // the current one is too large for getFile, fails to download, or turns out
 // to be a progressive JPEG we can't decode - until one succeeds or the
 // smallest size has also failed.
+//
+// out_thumb_file_id is filled with the smallest available size's file_id
+// regardless of which size was actually saved - Telegram already hosts it,
+// so it can be echoed straight back via sendPhoto as a lightweight "saved"
+// confirmation without re-uploading anything.
 static esp_err_t download_photo_with_fallback(cJSON *photo_array, char *out_path,
-                                               size_t out_path_len)
+                                               size_t out_path_len, char *out_thumb_file_id,
+                                               size_t out_thumb_file_id_len)
 {
+    if (out_thumb_file_id && out_thumb_file_id_len > 0) {
+        out_thumb_file_id[0] = '\0';
+        cJSON *smallest = cJSON_GetArrayItem(photo_array, 0);
+        cJSON *smallest_id = smallest ? cJSON_GetObjectItem(smallest, "file_id") : NULL;
+        if (smallest_id && cJSON_IsString(smallest_id)) {
+            strncpy(out_thumb_file_id, smallest_id->valuestring, out_thumb_file_id_len - 1);
+            out_thumb_file_id[out_thumb_file_id_len - 1] = '\0';
+        }
+    }
+
     int n = cJSON_GetArraySize(photo_array);
     for (int i = n - 1; i >= 0; i--) {
         cJSON *size_obj = cJSON_GetArrayItem(photo_array, i);
@@ -536,8 +601,27 @@ static bool document_pick_extension(cJSON *document, const char **out_ext)
     return ext != NULL;
 }
 
-static esp_err_t download_document_image(cJSON *document, char *out_path, size_t out_path_len)
+// out_thumb_file_id is filled from the document's own "thumbnail" (or the
+// older "thumb" field name), if Telegram provided one - documents have no
+// smaller sizes of their own, so this is the only lightweight option for a
+// photo-reply confirmation; left empty if unavailable (caller falls back to
+// a plain text reply).
+static esp_err_t download_document_image(cJSON *document, char *out_path, size_t out_path_len,
+                                          char *out_thumb_file_id, size_t out_thumb_file_id_len)
 {
+    if (out_thumb_file_id && out_thumb_file_id_len > 0) {
+        out_thumb_file_id[0] = '\0';
+        cJSON *thumb = cJSON_GetObjectItem(document, "thumbnail");
+        if (!thumb) {
+            thumb = cJSON_GetObjectItem(document, "thumb");
+        }
+        cJSON *thumb_id = thumb ? cJSON_GetObjectItem(thumb, "file_id") : NULL;
+        if (thumb_id && cJSON_IsString(thumb_id)) {
+            strncpy(out_thumb_file_id, thumb_id->valuestring, out_thumb_file_id_len - 1);
+            out_thumb_file_id[out_thumb_file_id_len - 1] = '\0';
+        }
+    }
+
     cJSON *file_id_item = cJSON_GetObjectItem(document, "file_id");
     if (!file_id_item || !cJSON_IsString(file_id_item)) {
         return ESP_FAIL;
@@ -571,7 +655,11 @@ static esp_err_t download_document_image(cJSON *document, char *out_path, size_t
 // already display-ready, PNG/JPG go through image_processor_process) and
 // shows it. The original file under TELEGRAM_DOWNLOAD_DIRECTORY is left in
 // place for later rotation cycles.
-static esp_err_t process_and_display_telegram_image(const char *path)
+//
+// If `caption` is non-empty, it's overlaid as a caption bar on the displayed
+// image (only supported for the PNG/JPG path - EPDGZ/BMP are already
+// display-ready blobs with no RGB buffer to draw into).
+static esp_err_t process_and_display_telegram_image(const char *path, const char *caption)
 {
     image_format_t format = image_processor_detect_format(path);
 
@@ -585,6 +673,9 @@ static esp_err_t process_and_display_telegram_image(const char *path)
     }
 
     if (format == IMAGE_FORMAT_PNG && image_processor_is_processed(path)) {
+        if (caption && caption[0] != '\0') {
+            image_processor_add_caption_to_file(path, caption);
+        }
         return display_manager_show_image(path);
     }
 
@@ -595,7 +686,156 @@ static esp_err_t process_and_display_telegram_image(const char *path)
         return err;
     }
 
+    if (caption && caption[0] != '\0') {
+        image_processor_add_caption_to_file(CURRENT_PNG_PATH, caption);
+    }
+
     return display_manager_show_image(CURRENT_PNG_PATH);
+}
+
+// Handles the orientation-pairing/reservation logic for the "latest" image
+// about to be displayed, falling back to the normal single-image path
+// whenever pairing doesn't apply (disabled, unsupported format, or the
+// image's orientation already matches the configured frame mounting).
+//
+// *out_displayed: whether anything was actually shown this cycle (false
+// means a lone mismatched-orientation image was reserved and the eInk keeps
+// its previous content - "kein Hochkantbild soll allein angezeigt werden").
+// *out_combined: whether the shown image is a freshly composed pair (two
+// source photos) rather than a single image.
+static esp_err_t handle_display_with_pairing(const char *path, const char *caption,
+                                             bool *out_displayed, bool *out_combined)
+{
+    *out_displayed = false;
+    *out_combined = false;
+
+    image_format_t format = image_processor_detect_format(path);
+
+    if (!config_manager_get_telegram_pairing_enabled() ||
+        (format != IMAGE_FORMAT_PNG && format != IMAGE_FORMAT_JPG)) {
+        // Pairing only applies to raw PNG/JPG photos we can decode+recompose;
+        // EPDGZ/BMP (already display-ready) always show normally.
+        esp_err_t err = process_and_display_telegram_image(path, caption);
+        *out_displayed = (err == ESP_OK);
+        return err;
+    }
+
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return ESP_FAIL;
+    }
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *file_buffer = (uint8_t *) heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
+    if (!file_buffer) {
+        fclose(f);
+        return ESP_ERR_NO_MEM;
+    }
+    size_t read_bytes = fread(file_buffer, 1, file_size, f);
+    fclose(f);
+    if (read_bytes != (size_t) file_size) {
+        heap_caps_free(file_buffer);
+        return ESP_FAIL;
+    }
+
+    int width = 0, height = 0;
+    esp_err_t dim_err =
+        image_processor_peek_dimensions(file_buffer, file_size, format, &width, &height);
+    if (dim_err != ESP_OK || width <= 0 || height <= 0) {
+        heap_caps_free(file_buffer);
+        ESP_LOGW(TAG, "Could not read dimensions of %s, displaying without pairing", path);
+        esp_err_t err = process_and_display_telegram_image(path, caption);
+        *out_displayed = (err == ESP_OK);
+        return err;
+    }
+
+    bool wants_portrait_frame =
+        (config_manager_get_display_orientation() == DISPLAY_ORIENTATION_PORTRAIT);
+    bool image_is_portrait = (height > width);
+    bool mismatch = (image_is_portrait != wants_portrait_frame);
+
+    if (!mismatch) {
+        heap_caps_free(file_buffer);
+        esp_err_t err = process_and_display_telegram_image(path, caption);
+        *out_displayed = (err == ESP_OK);
+        return err;
+    }
+
+    const char *pending_path = config_manager_get_telegram_pending_image_path();
+    struct stat pending_st;
+    bool have_pending = pending_path[0] != '\0' && stat(pending_path, &pending_st) == 0;
+
+    if (!have_pending) {
+        heap_caps_free(file_buffer);
+        config_manager_set_telegram_pending_image(path, caption ? caption : "");
+        ESP_LOGI(TAG, "Reserved %s for orientation pairing (waiting for a %s partner)", path,
+                 wants_portrait_frame ? "landscape" : "portrait");
+        return ESP_OK;  // nothing displayed this cycle
+    }
+
+    FILE *pf = fopen(pending_path, "rb");
+    if (!pf) {
+        // Pending file vanished (e.g. MemFS wiped by a deep-sleep reboot) -
+        // self-heal by reserving the current image instead of erroring out.
+        heap_caps_free(file_buffer);
+        ESP_LOGW(TAG, "Pending pair image %s vanished, reserving current image instead",
+                 pending_path);
+        config_manager_set_telegram_pending_image(path, caption ? caption : "");
+        return ESP_OK;
+    }
+    fseek(pf, 0, SEEK_END);
+    long pending_size = ftell(pf);
+    fseek(pf, 0, SEEK_SET);
+    uint8_t *pending_buffer = (uint8_t *) heap_caps_malloc(pending_size, MALLOC_CAP_SPIRAM);
+    if (!pending_buffer) {
+        fclose(pf);
+        heap_caps_free(file_buffer);
+        return ESP_ERR_NO_MEM;
+    }
+    size_t pending_read = fread(pending_buffer, 1, pending_size, pf);
+    fclose(pf);
+    if (pending_read != (size_t) pending_size) {
+        heap_caps_free(pending_buffer);
+        heap_caps_free(file_buffer);
+        return ESP_FAIL;
+    }
+
+    image_format_t pending_format = image_processor_detect_format(pending_path);
+    dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+
+    image_process_rgb_result_t result;
+    // Pending (first-arrived) image goes in the first slot, current
+    // (just-arrived) in the second, matching arrival order.
+    esp_err_t compose_err = image_processor_compose_pair_to_rgb(
+        pending_buffer, (size_t) pending_size, pending_format, file_buffer, (size_t) file_size,
+        format, wants_portrait_frame /* stack_vertically */, algo, &result);
+
+    heap_caps_free(pending_buffer);
+    heap_caps_free(file_buffer);
+
+    if (compose_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to compose paired images: %s", esp_err_to_name(compose_err));
+        return compose_err;
+    }
+
+    const char *pending_caption = config_manager_get_telegram_pending_image_caption();
+    const char *overlay_caption =
+        (caption && caption[0]) ? caption : (pending_caption[0] ? pending_caption : NULL);
+    if (overlay_caption) {
+        image_processor_draw_caption(result.rgb_data, result.width, result.height,
+                                     overlay_caption);
+    }
+
+    esp_err_t disp_err =
+        display_manager_show_rgb_buffer(result.rgb_data, result.width, result.height);
+    heap_caps_free(result.rgb_data);
+
+    config_manager_clear_telegram_pending_image();
+
+    *out_displayed = (disp_err == ESP_OK);
+    *out_combined = (disp_err == ESP_OK);
+    return disp_err;
 }
 
 // ----------------------------------------------------------------------------
@@ -764,7 +1004,19 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
     }
 
     // ---- Second pass: download images (newest wins for display), queue commands ----
+    typedef struct {
+        char path[320];
+        char thumb_file_id[TELEGRAM_FILE_ID_MAX_LEN];
+        char filename[64];
+        int64_t message_id;
+    } telegram_saved_image_t;
+
+#define TELEGRAM_MAX_TRACKED_IMAGES 8
+    telegram_saved_image_t saved_images[TELEGRAM_MAX_TRACKED_IMAGES];
+    int saved_image_count = 0;
+
     char latest_image_path[320] = {0};
+    char latest_caption[TELEGRAM_CAPTION_MAX_LEN] = {0};
     bool have_image = false;
     bool image_attempt_failed = false;
 
@@ -779,32 +1031,60 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
         cJSON *photo = cJSON_GetObjectItem(message, "photo");
         cJSON *document = cJSON_GetObjectItem(message, "document");
         char downloaded_path[320];
+        char thumb_file_id[TELEGRAM_FILE_ID_MAX_LEN];
         bool got_image = false;
 
         if (photo && cJSON_IsArray(photo) && cJSON_GetArraySize(photo) > 0) {
-            got_image =
-                (download_photo_with_fallback(photo, downloaded_path, sizeof(downloaded_path)) ==
-                 ESP_OK);
+            got_image = (download_photo_with_fallback(photo, downloaded_path,
+                                                       sizeof(downloaded_path), thumb_file_id,
+                                                       sizeof(thumb_file_id)) == ESP_OK);
             if (!got_image) {
                 image_attempt_failed = true;
             }
         } else if (document && cJSON_IsObject(document)) {
-            got_image =
-                (download_document_image(document, downloaded_path, sizeof(downloaded_path)) ==
-                 ESP_OK);
+            got_image = (download_document_image(document, downloaded_path,
+                                                  sizeof(downloaded_path), thumb_file_id,
+                                                  sizeof(thumb_file_id)) == ESP_OK);
             if (!got_image) {
                 image_attempt_failed = true;
             }
         }
+
+        const char *text = get_text(message);
 
         if (got_image) {
             strncpy(latest_image_path, downloaded_path, sizeof(latest_image_path) - 1);
             latest_image_path[sizeof(latest_image_path) - 1] = '\0';
             have_image = true;
             ESP_LOGI(TAG, "Saved Telegram image: %s", downloaded_path);
+
+            // Only a genuine caption becomes a display overlay - not a "/"
+            // command that happens to be attached to the same photo.
+            if (text && text[0] != '/') {
+                strncpy(latest_caption, text, sizeof(latest_caption) - 1);
+                latest_caption[sizeof(latest_caption) - 1] = '\0';
+            } else {
+                latest_caption[0] = '\0';
+            }
+
+            if (saved_image_count < TELEGRAM_MAX_TRACKED_IMAGES) {
+                telegram_saved_image_t *entry = &saved_images[saved_image_count++];
+                strncpy(entry->path, downloaded_path, sizeof(entry->path) - 1);
+                entry->path[sizeof(entry->path) - 1] = '\0';
+                strncpy(entry->thumb_file_id, thumb_file_id, sizeof(entry->thumb_file_id) - 1);
+                entry->thumb_file_id[sizeof(entry->thumb_file_id) - 1] = '\0';
+                const char *fname = strrchr(downloaded_path, '/');
+                fname = fname ? fname + 1 : downloaded_path;
+                strncpy(entry->filename, fname, sizeof(entry->filename) - 1);
+                entry->filename[sizeof(entry->filename) - 1] = '\0';
+                cJSON *mid = cJSON_GetObjectItem(message, "message_id");
+                entry->message_id = (mid && cJSON_IsNumber(mid)) ? (int64_t) mid->valuedouble : 0;
+            } else {
+                ESP_LOGW(TAG, "Too many images in this batch, skipping reply confirmation for %s",
+                         downloaded_path);
+            }
         }
 
-        const char *text = get_text(message);
         if (text && text[0] == '/') {
             queue_command(text);
         }
@@ -812,23 +1092,53 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
 
     cJSON_Delete(root);
 
+    bool displayed = false;
+    bool combined = false;
+    esp_err_t disp_err = ESP_OK;
     if (have_image) {
-        esp_err_t disp_err = process_and_display_telegram_image(latest_image_path);
-        const char *fname = strrchr(latest_image_path, '/');
-        fname = fname ? fname + 1 : latest_image_path;
-        char msg[192];
-        if (disp_err == ESP_OK) {
-            snprintf(msg, sizeof(msg), "Bild empfangen und angezeigt: %.100s", fname);
-        } else {
-            snprintf(msg, sizeof(msg), "Bild empfangen (%.80s), aber Anzeige fehlgeschlagen: %.30s",
-                     fname, esp_err_to_name(disp_err));
-        }
-        telegram_bot_send_message(msg);
+        disp_err =
+            handle_display_with_pairing(latest_image_path, latest_caption, &displayed, &combined);
     } else if (image_attempt_failed) {
         telegram_bot_send_message(
             "Telegram-Bild konnte nicht geladen werden (zu gross, nicht unterstuetztes Format, "
             "oder nur als progressives JPEG verfuegbar). Bitte kleineres Bild oder als Datei "
             "senden.");
+    }
+
+    // Per-image "saved" confirmations, threaded as a reply to the original
+    // message and (where Telegram gave us a thumbnail file_id) attaching the
+    // smallest available photo size - already hosted by Telegram, so no
+    // re-upload is needed.
+    for (int i = 0; i < saved_image_count; i++) {
+        telegram_saved_image_t *entry = &saved_images[i];
+        bool is_latest = (strcmp(entry->path, latest_image_path) == 0);
+        char caption_text[192];
+
+        if (is_latest && displayed && combined) {
+            snprintf(caption_text, sizeof(caption_text),
+                     "Gespeichert & mit vorherigem Bild kombiniert angezeigt: %.80s",
+                     entry->filename);
+        } else if (is_latest && displayed) {
+            snprintf(caption_text, sizeof(caption_text), "Gespeichert & angezeigt: %.100s",
+                     entry->filename);
+        } else if (is_latest && disp_err != ESP_OK) {
+            snprintf(caption_text, sizeof(caption_text),
+                     "Gespeichert (%.80s), Anzeige fehlgeschlagen: %.30s", entry->filename,
+                     esp_err_to_name(disp_err));
+        } else if (is_latest) {
+            snprintf(caption_text, sizeof(caption_text),
+                     "Gespeichert, wartet auf Hoch-/Querformat-Partnerbild: %.100s",
+                     entry->filename);
+        } else {
+            snprintf(caption_text, sizeof(caption_text), "Gespeichert (Warteschlange): %.100s",
+                     entry->filename);
+        }
+
+        if (entry->thumb_file_id[0] != '\0') {
+            telegram_bot_send_photo_reply(entry->thumb_file_id, caption_text, entry->message_id);
+        } else {
+            telegram_bot_send_message_reply(caption_text, entry->message_id);
+        }
     }
 
     config_manager_set_telegram_last_update_id(max_update_id);
@@ -894,9 +1204,36 @@ static void execute_command(const char *raw_text)
         vTaskDelay(pdMS_TO_TICKS(500));  // give the HTTP send a moment to flush
         esp_restart();
         // Does not return.
+    } else if (strcmp(cmd, "/pairing") == 0) {
+        bool enabled = !config_manager_get_telegram_pairing_enabled();
+        config_manager_set_telegram_pairing_enabled(enabled);
+        if (!enabled) {
+            // Turning pairing off drops any half-finished reservation - a
+            // lone reserved image would otherwise sit there indefinitely.
+            config_manager_clear_telegram_pending_image();
+        }
+        bool portrait_frame =
+            (config_manager_get_display_orientation() == DISPLAY_ORIENTATION_PORTRAIT);
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "Hoch-/Querformat-Kombination %s.\nAktuelle Rahmenausrichtung: %s",
+                 enabled ? "aktiviert" : "deaktiviert", portrait_frame ? "Hochformat" : "Querformat");
+        telegram_bot_send_message(msg);
+    } else if (strcmp(cmd, "/help") == 0) {
+        telegram_bot_send_message(
+            "Verfuegbare Befehle:\n"
+            "/status - Status, Batterie, WLAN, Firmware\n"
+            "/clear - Anzeige loeschen\n"
+            "/restart - Neustart des Bilderrahmens\n"
+            "/pairing - Hoch-/Querformat-Kombination ein-/ausschalten\n"
+            "/help - Diese Uebersicht\n"
+            "/telegram_reset - Notfall: Warteschlange sofort leeren\n\n"
+            "Bilder koennen als Foto oder als Datei gesendet werden. Eine "
+            "Bildunterschrift wird als Overlay auf dem Bild angezeigt (ausser "
+            "sie beginnt mit \"/\").");
     } else {
         char msg[192];
-        snprintf(msg, sizeof(msg), "Unbekannter Befehl: %s\nVerfuegbar: /status, /restart, /clear",
+        snprintf(msg, sizeof(msg), "Unbekannter Befehl: %s\nSiehe /help fuer eine Uebersicht.",
                  cmd);
         telegram_bot_send_message(msg);
     }

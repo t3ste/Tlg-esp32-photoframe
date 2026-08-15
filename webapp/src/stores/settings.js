@@ -50,6 +50,7 @@ export const useSettingsStore = defineStore("settings", () => {
     telegramBotToken: "",
     telegramChatId: "",
     telegramConfigured: false,
+    telegramPairingEnabled: true,
     // Home Assistant
     haUrl: "",
     // Power
@@ -208,6 +209,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.telegramBotToken = data.telegram_bot_token || "";
       deviceSettings.value.telegramChatId = data.telegram_chat_id || "";
       deviceSettings.value.telegramConfigured = data.telegram_configured === true;
+      deviceSettings.value.telegramPairingEnabled = data.telegram_pairing_enabled !== false;
       deviceSettings.value.deviceName = data.device_name || "PhotoFrame";
       deviceSettings.value.ntpServer = data.ntp_server || "pool.ntp.org";
       deviceSettings.value.ipMode = data.ip_mode || "dhcp";
@@ -265,6 +267,7 @@ export const useSettingsStore = defineStore("settings", () => {
       image_url: deviceSettings.value.imageUrl,
       telegram_bot_token: deviceSettings.value.telegramBotToken,
       telegram_chat_id: deviceSettings.value.telegramChatId,
+      telegram_pairing_enabled: deviceSettings.value.telegramPairingEnabled,
       ha_url: deviceSettings.value.haUrl,
       deep_sleep_enabled: deviceSettings.value.deepSleepEnabled,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,

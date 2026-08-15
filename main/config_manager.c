@@ -58,6 +58,9 @@ static char ha_url[HA_URL_MAX_LEN] = {0};
 static char telegram_bot_token[TELEGRAM_BOT_TOKEN_MAX_LEN] = {0};
 static char telegram_chat_id[TELEGRAM_CHAT_ID_MAX_LEN] = {0};
 static int64_t telegram_last_update_id = 0;
+static bool telegram_pairing_enabled = true;
+static char telegram_pending_path[512] = {0};
+static char telegram_pending_caption[TELEGRAM_CAPTION_MAX_LEN] = {0};
 
 // AI API Keys
 static char openai_api_key[AI_API_KEY_MAX_LEN] = {0};
@@ -370,6 +373,23 @@ esp_err_t config_manager_init(void)
             ESP_OK) {
             ESP_LOGI(TAG, "Loaded Telegram last update_id from NVS: %lld",
                      (long long) telegram_last_update_id);
+        }
+
+        uint8_t stored_pairing = 1;  // Default to enabled
+        if (nvs_get_u8(nvs_handle, NVS_TELEGRAM_PAIRING_KEY, &stored_pairing) == ESP_OK) {
+            telegram_pairing_enabled = (stored_pairing != 0);
+        }
+        ESP_LOGI(TAG, "Telegram orientation pairing: %s",
+                 telegram_pairing_enabled ? "enabled" : "disabled");
+
+        size_t pend_path_len = sizeof(telegram_pending_path);
+        nvs_get_str(nvs_handle, NVS_TELEGRAM_PENDING_PATH_KEY, telegram_pending_path,
+                   &pend_path_len);
+        size_t pend_cap_len = sizeof(telegram_pending_caption);
+        nvs_get_str(nvs_handle, NVS_TELEGRAM_PENDING_CAPTION_KEY, telegram_pending_caption,
+                   &pend_cap_len);
+        if (telegram_pending_path[0]) {
+            ESP_LOGI(TAG, "Loaded pending Telegram pair image: %s", telegram_pending_path);
         }
 
         // AI API Keys
@@ -1154,6 +1174,64 @@ void config_manager_set_telegram_last_update_id(int64_t update_id)
 int64_t config_manager_get_telegram_last_update_id(void)
 {
     return telegram_last_update_id;
+}
+
+void config_manager_set_telegram_pairing_enabled(bool enabled)
+{
+    telegram_pairing_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_TELEGRAM_PAIRING_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Telegram orientation pairing %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_telegram_pairing_enabled(void)
+{
+    return telegram_pairing_enabled;
+}
+
+void config_manager_set_telegram_pending_image(const char *path, const char *caption)
+{
+    strncpy(telegram_pending_path, path ? path : "", sizeof(telegram_pending_path) - 1);
+    telegram_pending_path[sizeof(telegram_pending_path) - 1] = '\0';
+    strncpy(telegram_pending_caption, caption ? caption : "", sizeof(telegram_pending_caption) - 1);
+    telegram_pending_caption[sizeof(telegram_pending_caption) - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (telegram_pending_path[0]) {
+            nvs_set_str(nvs_handle, NVS_TELEGRAM_PENDING_PATH_KEY, telegram_pending_path);
+            nvs_set_str(nvs_handle, NVS_TELEGRAM_PENDING_CAPTION_KEY, telegram_pending_caption);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_TELEGRAM_PENDING_PATH_KEY);
+            nvs_erase_key(nvs_handle, NVS_TELEGRAM_PENDING_CAPTION_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Telegram pending pair image set to: %s",
+             telegram_pending_path[0] ? telegram_pending_path : "(none)");
+}
+
+const char *config_manager_get_telegram_pending_image_path(void)
+{
+    return telegram_pending_path;
+}
+
+const char *config_manager_get_telegram_pending_image_caption(void)
+{
+    return telegram_pending_caption;
+}
+
+void config_manager_clear_telegram_pending_image(void)
+{
+    config_manager_set_telegram_pending_image(NULL, NULL);
 }
 
 // ============================================================================
