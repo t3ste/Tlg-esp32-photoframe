@@ -46,6 +46,10 @@ export const useSettingsStore = defineStore("settings", () => {
     httpHeaderKey: "",
     httpHeaderValue: "",
     saveDownloadedImages: true,
+    // Auto Rotate - Telegram
+    telegramBotToken: "",
+    telegramChatId: "",
+    telegramConfigured: false,
     // Home Assistant
     haUrl: "",
     // Power
@@ -201,6 +205,9 @@ export const useSettingsStore = defineStore("settings", () => {
       appliedOrientation.value = deviceSettings.value.displayOrientation;
       deviceSettings.value.rotationMode = data.rotation_mode || "storage";
       deviceSettings.value.sdRotationMode = data.sd_rotation_mode || "random";
+      deviceSettings.value.telegramBotToken = data.telegram_bot_token || "";
+      deviceSettings.value.telegramChatId = data.telegram_chat_id || "";
+      deviceSettings.value.telegramConfigured = data.telegram_configured === true;
       deviceSettings.value.deviceName = data.device_name || "PhotoFrame";
       deviceSettings.value.ntpServer = data.ntp_server || "pool.ntp.org";
       deviceSettings.value.ipMode = data.ip_mode || "dhcp";
@@ -256,6 +263,8 @@ export const useSettingsStore = defineStore("settings", () => {
       rotation_mode: deviceSettings.value.rotationMode,
       sd_rotation_mode: deviceSettings.value.sdRotationMode,
       image_url: deviceSettings.value.imageUrl,
+      telegram_bot_token: deviceSettings.value.telegramBotToken,
+      telegram_chat_id: deviceSettings.value.telegramChatId,
       ha_url: deviceSettings.value.haUrl,
       deep_sleep_enabled: deviceSettings.value.deepSleepEnabled,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,

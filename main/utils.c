@@ -27,6 +27,7 @@
 #include "power_manager.h"
 #include "processing_settings.h"
 #include "storage.h"
+#include "telegram_bot.h"
 #include "wifi_manager.h"
 
 static const char *TAG = "utils";
@@ -367,6 +368,8 @@ esp_err_t apply_config_from_json(cJSON *root)
         rotation_mode_t mode = ROTATION_MODE_STORAGE;
         if (strcmp(mode_str, "url") == 0)
             mode = ROTATION_MODE_URL;
+        else if (strcmp(mode_str, "telegram") == 0)
+            mode = ROTATION_MODE_TELEGRAM;
         // Backwards compatibility: accept "sdcard" as alias for "storage"
         if (strcmp(mode_str, "sdcard") == 0)
             mode = ROTATION_MODE_STORAGE;
@@ -435,6 +438,33 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "ha_url");
     if (item && cJSON_IsString(item)) {
         config_manager_set_ha_url(cJSON_GetStringValue(item));
+    }
+
+    // Telegram Bot
+    item = cJSON_GetObjectItem(root, "telegram_bot_token");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_telegram_bot_token(cJSON_GetStringValue(item));
+    }
+
+    item = cJSON_GetObjectItem(root, "telegram_chat_id");
+    if (item && cJSON_IsString(item)) {
+        const char *chat_id = cJSON_GetStringValue(item);
+        // Must be empty (clearing) or a plain integer (optionally negative -
+        // Telegram uses negative IDs for groups/supergroups).
+        bool valid = true;
+        for (size_t i = 0; chat_id[i] != '\0' && valid; i++) {
+            if (chat_id[i] == '-' && i == 0) {
+                continue;
+            }
+            if (chat_id[i] < '0' || chat_id[i] > '9') {
+                valid = false;
+            }
+        }
+        if (!valid) {
+            utils_set_config_error("Telegram chat ID must be a numeric ID");
+            return ESP_FAIL;
+        }
+        config_manager_set_telegram_chat_id(chat_id);
     }
 
     // AI API Keys
@@ -1151,7 +1181,34 @@ esp_err_t trigger_image_rotation(void)
     rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
     esp_err_t result = ESP_OK;
 
-    if (rotation_mode == ROTATION_MODE_URL) {
+    if (rotation_mode == ROTATION_MODE_TELEGRAM) {
+        // Telegram mode - poll getUpdates, download+display the newest image
+        // (with progressive-size fallback), queue any "/" commands.
+        telegram_poll_result_t poll_result = TELEGRAM_POLL_ERROR;
+        esp_err_t poll_err = telegram_bot_poll(&poll_result);
+
+        if (poll_result == TELEGRAM_POLL_RESET) {
+            // Emergency "/telegram_reset": the queue was already cleared and
+            // acknowledged inside telegram_bot_poll() - skip HA notify, the
+            // post-rotate HTTP window, everything, and sleep right now.
+            ESP_LOGW(TAG, "Telegram emergency reset - entering deep sleep immediately");
+            power_manager_enter_sleep();
+            // Not reached.
+        }
+
+        if (poll_err == ESP_OK) {
+            utils_set_last_fetch_error(NULL);
+            result = ESP_OK;
+        } else {
+            const char *reason = (poll_result == TELEGRAM_POLL_NOT_CONFIGURED)
+                                     ? "Telegram bot not configured"
+                                     : "Telegram poll failed";
+            ESP_LOGW(TAG, "%s, falling back to local rotation", reason);
+            utils_set_last_fetch_error(reason);
+            display_manager_rotate_from_storage();
+            result = ESP_FAIL;
+        }
+    } else if (rotation_mode == ROTATION_MODE_URL) {
         // URL mode - fetch image from URL
         const char *image_url = config_manager_get_image_url();
         ESP_LOGI(TAG, "URL rotation mode - downloading from: %s", image_url);

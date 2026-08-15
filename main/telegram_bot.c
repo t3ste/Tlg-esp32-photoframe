@@ -756,10 +756,10 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
         fname = fname ? fname + 1 : latest_image_path;
         char msg[192];
         if (disp_err == ESP_OK) {
-            snprintf(msg, sizeof(msg), "Bild empfangen und angezeigt: %s", fname);
+            snprintf(msg, sizeof(msg), "Bild empfangen und angezeigt: %.100s", fname);
         } else {
-            snprintf(msg, sizeof(msg), "Bild empfangen (%s), aber Anzeige fehlgeschlagen: %s", fname,
-                     esp_err_to_name(disp_err));
+            snprintf(msg, sizeof(msg), "Bild empfangen (%.80s), aber Anzeige fehlgeschlagen: %.30s",
+                     fname, esp_err_to_name(disp_err));
         }
         telegram_bot_send_message(msg);
     } else if (image_attempt_failed) {

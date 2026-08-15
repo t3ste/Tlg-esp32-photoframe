@@ -134,7 +134,10 @@ const rotationOptions = [
 ];
 
 const rotationModeOptions = computed(() => {
-  const options = [{ title: "URL - Fetch image from URL", value: "url" }];
+  const options = [
+    { title: "URL - Fetch image from URL", value: "url" },
+    { title: "Telegram - Receive images via Telegram bot", value: "telegram" },
+  ];
   if (appStore.systemInfo.sdcard_inserted || appStore.systemInfo.has_flash_storage) {
     options.unshift({ title: "Storage - Rotate through images", value: "storage" });
   }
@@ -711,6 +714,71 @@ async function performFactoryReset() {
                         />
                       </v-col>
                     </v-row>
+                  </v-card-text>
+                </v-card>
+              </v-expand-transition>
+
+              <v-expand-transition>
+                <v-card
+                  v-if="
+                    settingsStore.deviceSettings.autoRotate &&
+                    settingsStore.deviceSettings.rotationMode === 'telegram'
+                  "
+                  variant="tonal"
+                  class="mb-4"
+                >
+                  <v-card-text>
+                    <v-chip
+                      :color="settingsStore.deviceSettings.telegramConfigured ? 'success' : 'warning'"
+                      size="small"
+                      variant="tonal"
+                      class="mb-4"
+                    >
+                      <v-icon start>{{
+                        settingsStore.deviceSettings.telegramConfigured
+                          ? "mdi-check-circle"
+                          : "mdi-alert-circle-outline"
+                      }}</v-icon>
+                      {{
+                        settingsStore.deviceSettings.telegramConfigured
+                          ? "Telegram bot configured"
+                          : "Bot token and chat ID required"
+                      }}
+                    </v-chip>
+
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.telegramBotToken"
+                      label="Telegram Bot Token"
+                      variant="outlined"
+                      hint="From @BotFather, e.g. 123456789:AAbecomes..."
+                      persistent-hint
+                      class="mb-4"
+                    />
+
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.telegramChatId"
+                      label="Telegram Chat ID"
+                      variant="outlined"
+                      hint="Only messages from this numeric chat/group ID are processed"
+                      persistent-hint
+                      class="mb-4"
+                    />
+
+                    <v-alert
+                      v-if="settingsStore.deviceSettings.lastFetchError"
+                      type="error"
+                      variant="tonal"
+                      density="compact"
+                      class="mb-2"
+                    >
+                      Last fetch error: {{ settingsStore.deviceSettings.lastFetchError }}
+                    </v-alert>
+
+                    <div class="text-caption text-medium-emphasis">
+                      Send a photo or image file to the bot, or a "/" command
+                      (/status, /restart, /clear). Send /telegram_reset to
+                      immediately clear a stuck message queue.
+                    </div>
                   </v-card-text>
                 </v-card>
               </v-expand-transition>

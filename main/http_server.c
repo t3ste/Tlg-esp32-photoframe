@@ -1679,6 +1679,8 @@ static esp_err_t config_handler(httpd_req_t *req)
         rotation_mode_t rm = config_manager_get_rotation_mode();
         if (rm == ROTATION_MODE_URL)
             rotation_mode_str = "url";
+        else if (rm == ROTATION_MODE_TELEGRAM)
+            rotation_mode_str = "telegram";
         cJSON_AddStringToObject(root, "rotation_mode", rotation_mode_str);
 
         // Auto Rotate - SDCARD
@@ -1716,6 +1718,13 @@ static esp_err_t config_handler(httpd_req_t *req)
         // Home Assistant
         const char *ha_url = config_manager_get_ha_url();
         cJSON_AddStringToObject(root, "ha_url", ha_url ? ha_url : "");
+
+        // Telegram Bot
+        const char *tg_token = config_manager_get_telegram_bot_token();
+        cJSON_AddStringToObject(root, "telegram_bot_token", tg_token ? tg_token : "");
+        const char *tg_chat_id = config_manager_get_telegram_chat_id();
+        cJSON_AddStringToObject(root, "telegram_chat_id", tg_chat_id ? tg_chat_id : "");
+        cJSON_AddBoolToObject(root, "telegram_configured", config_manager_telegram_is_configured());
 
         // AI API Keys
         const char *openai_key = config_manager_get_openai_api_key();
