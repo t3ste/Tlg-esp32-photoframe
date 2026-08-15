@@ -89,8 +89,16 @@ static esp_err_t body_capture_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
-// Performs a GET request and returns the response body (caller frees with
-// free()). *out_body is NULL on any failure.
+// Transient TLS/network hiccups (e.g. a failed mbedtls handshake against
+// api.telegram.org) are common enough on ESP32 to warrant a couple of quick
+// retries, mirroring the retry loop already used for image-server fetches in
+// utils.c - a single blip shouldn't cost the whole poll cycle (missed
+// images/commands until the next wake).
+#define TELEGRAM_HTTP_RETRY_COUNT 3
+#define TELEGRAM_HTTP_RETRY_DELAY_MS 1500
+
+// Performs a GET request (with retry on transient failure) and returns the
+// response body (caller frees with free()). *out_body is NULL on any failure.
 static esp_err_t telegram_http_get(const char *url, int timeout_ms, char **out_body,
                                    size_t *out_len)
 {
@@ -99,44 +107,60 @@ static esp_err_t telegram_http_get(const char *url, int timeout_ms, char **out_b
         *out_len = 0;
     }
 
-    http_body_buf_t ctx = {0};
+    esp_err_t last_err = ESP_FAIL;
 
-    esp_http_client_config_t config = {
-        .url = url,
-        .timeout_ms = timeout_ms,
-        .event_handler = body_capture_handler,
-        .user_data = &ctx,
-        .buffer_size = 2048,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
+    for (int attempt = 1; attempt <= TELEGRAM_HTTP_RETRY_COUNT; attempt++) {
+        if (attempt > 1) {
+            ESP_LOGW(TAG, "Retrying GET (%d/%d) after %d ms...", attempt, TELEGRAM_HTTP_RETRY_COUNT,
+                     TELEGRAM_HTTP_RETRY_DELAY_MS);
+            vTaskDelay(pdMS_TO_TICKS(TELEGRAM_HTTP_RETRY_DELAY_MS));
+        }
 
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) {
-        ESP_LOGE(TAG, "Failed to init HTTP client for GET %s", url);
-        free(ctx.buf);
-        return ESP_FAIL;
+        http_body_buf_t ctx = {0};
+
+        esp_http_client_config_t config = {
+            .url = url,
+            .timeout_ms = timeout_ms,
+            .event_handler = body_capture_handler,
+            .user_data = &ctx,
+            .buffer_size = 2048,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+        };
+
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        if (!client) {
+            ESP_LOGE(TAG, "Failed to init HTTP client for GET %s", url);
+            free(ctx.buf);
+            last_err = ESP_FAIL;
+            continue;
+        }
+
+        esp_err_t err = esp_http_client_perform(client);
+        int status = esp_http_client_get_status_code(client);
+        esp_http_client_cleanup(client);
+
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "GET %s failed: %s", url, esp_err_to_name(err));
+            free(ctx.buf);
+            last_err = err;
+            continue;
+        }
+        if (status != 200 || ctx.overflow || !ctx.buf) {
+            ESP_LOGE(TAG, "GET %s returned HTTP %d%s", url, status,
+                     ctx.overflow ? " (truncated)" : "");
+            free(ctx.buf);
+            last_err = ESP_FAIL;
+            continue;
+        }
+
+        *out_body = ctx.buf;
+        if (out_len) {
+            *out_len = ctx.len;
+        }
+        return ESP_OK;
     }
 
-    esp_err_t err = esp_http_client_perform(client);
-    int status = esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
-
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "GET %s failed: %s", url, esp_err_to_name(err));
-        free(ctx.buf);
-        return err;
-    }
-    if (status != 200 || ctx.overflow || !ctx.buf) {
-        ESP_LOGE(TAG, "GET %s returned HTTP %d%s", url, status, ctx.overflow ? " (truncated)" : "");
-        free(ctx.buf);
-        return ESP_FAIL;
-    }
-
-    *out_body = ctx.buf;
-    if (out_len) {
-        *out_len = ctx.len;
-    }
-    return ESP_OK;
+    return last_err;
 }
 
 // Downloads raw bytes (a Telegram file) straight to a local file.
@@ -158,45 +182,62 @@ static esp_err_t file_download_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
+// Retries a couple of times on transient failure before letting the
+// progressive size fallback (in download_photo_with_fallback) give up on this
+// size entirely - a quick retry at the preferred size beats silently
+// dropping to a lower-quality one over a one-off network blip.
+#define TELEGRAM_DOWNLOAD_RETRY_COUNT 2
+#define TELEGRAM_DOWNLOAD_RETRY_DELAY_MS 1500
+
 static esp_err_t telegram_download_to_file(const char *url, const char *local_path)
 {
-    FILE *f = fopen(local_path, "wb");
-    if (!f) {
-        ESP_LOGE(TAG, "Failed to open %s for writing", local_path);
-        return ESP_FAIL;
-    }
+    for (int attempt = 1; attempt <= TELEGRAM_DOWNLOAD_RETRY_COUNT; attempt++) {
+        if (attempt > 1) {
+            ESP_LOGW(TAG, "Retrying download (%d/%d) after %d ms...", attempt,
+                     TELEGRAM_DOWNLOAD_RETRY_COUNT, TELEGRAM_DOWNLOAD_RETRY_DELAY_MS);
+            vTaskDelay(pdMS_TO_TICKS(TELEGRAM_DOWNLOAD_RETRY_DELAY_MS));
+        }
 
-    file_download_ctx_t ctx = {.file = f, .total_bytes = 0};
-    esp_http_client_config_t config = {
-        .url = url,
-        .timeout_ms = TELEGRAM_HTTP_TIMEOUT_MS,
-        .event_handler = file_download_handler,
-        .user_data = &ctx,
-        .buffer_size = 4096,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
+        FILE *f = fopen(local_path, "wb");
+        if (!f) {
+            ESP_LOGE(TAG, "Failed to open %s for writing", local_path);
+            return ESP_FAIL;
+        }
 
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) {
+        file_download_ctx_t ctx = {.file = f, .total_bytes = 0};
+        esp_http_client_config_t config = {
+            .url = url,
+            .timeout_ms = TELEGRAM_HTTP_TIMEOUT_MS,
+            .event_handler = file_download_handler,
+            .user_data = &ctx,
+            .buffer_size = 4096,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+        };
+
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        if (!client) {
+            fclose(f);
+            unlink(local_path);
+            continue;
+        }
+
+        esp_err_t err = esp_http_client_perform(client);
+        int status = esp_http_client_get_status_code(client);
         fclose(f);
-        unlink(local_path);
-        return ESP_FAIL;
+        esp_http_client_cleanup(client);
+
+        if (err != ESP_OK || status != 200 || ctx.total_bytes <= 0) {
+            ESP_LOGW(TAG, "File download failed (err=%s, status=%d, bytes=%d)", esp_err_to_name(err),
+                     status, ctx.total_bytes);
+            unlink(local_path);
+            continue;
+        }
+
+        ESP_LOGI(TAG, "Downloaded %d bytes to %s", ctx.total_bytes, local_path);
+        return ESP_OK;
     }
 
-    esp_err_t err = esp_http_client_perform(client);
-    int status = esp_http_client_get_status_code(client);
-    fclose(f);
-    esp_http_client_cleanup(client);
-
-    if (err != ESP_OK || status != 200 || ctx.total_bytes <= 0) {
-        ESP_LOGW(TAG, "File download failed (err=%s, status=%d, bytes=%d)", esp_err_to_name(err),
-                 status, ctx.total_bytes);
-        unlink(local_path);
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "Downloaded %d bytes to %s", ctx.total_bytes, local_path);
-    return ESP_OK;
+    return ESP_FAIL;
 }
 
 // ----------------------------------------------------------------------------
@@ -229,31 +270,42 @@ esp_err_t telegram_bot_send_message(const char *text)
     char url[256];
     build_api_url("sendMessage", url, sizeof(url));
 
-    esp_http_client_config_t config = {
-        .url = url,
-        .method = HTTP_METHOD_POST,
-        .timeout_ms = TELEGRAM_HTTP_TIMEOUT_MS,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) {
-        free(payload);
-        return ESP_FAIL;
+    esp_err_t result = ESP_FAIL;
+    for (int attempt = 1; attempt <= TELEGRAM_HTTP_RETRY_COUNT; attempt++) {
+        if (attempt > 1) {
+            ESP_LOGW(TAG, "Retrying sendMessage (%d/%d) after %d ms...", attempt,
+                     TELEGRAM_HTTP_RETRY_COUNT, TELEGRAM_HTTP_RETRY_DELAY_MS);
+            vTaskDelay(pdMS_TO_TICKS(TELEGRAM_HTTP_RETRY_DELAY_MS));
+        }
+
+        esp_http_client_config_t config = {
+            .url = url,
+            .method = HTTP_METHOD_POST,
+            .timeout_ms = TELEGRAM_HTTP_TIMEOUT_MS,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+        };
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        if (!client) {
+            continue;
+        }
+
+        esp_http_client_set_header(client, "Content-Type", "application/json");
+        esp_http_client_set_post_field(client, payload, strlen(payload));
+
+        esp_err_t err = esp_http_client_perform(client);
+        int status = esp_http_client_get_status_code(client);
+        esp_http_client_cleanup(client);
+
+        if (err != ESP_OK || status != 200) {
+            ESP_LOGW(TAG, "sendMessage failed (err=%s, status=%d)", esp_err_to_name(err), status);
+            continue;
+        }
+        result = ESP_OK;
+        break;
     }
 
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-    esp_http_client_set_post_field(client, payload, strlen(payload));
-
-    esp_err_t err = esp_http_client_perform(client);
-    int status = esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
     free(payload);
-
-    if (err != ESP_OK || status != 200) {
-        ESP_LOGW(TAG, "sendMessage failed (err=%s, status=%d)", esp_err_to_name(err), status);
-        return ESP_FAIL;
-    }
-    return ESP_OK;
+    return result;
 }
 
 // Resolves a Telegram file_id to a downloadable file_path via getFile.
@@ -574,11 +626,21 @@ static bool message_from_allowed_chat(cJSON *message, const char *allowed_chat_i
     return strcmp(id_str, allowed_chat_id) == 0;
 }
 
+// Plain text messages carry the command in "text"; a photo/document sent with
+// a caption (e.g. a photo captioned "/status") carries it in "caption"
+// instead - Telegram never sets both on the same message, so text wins when
+// present and caption is the fallback. Both the emergency reset scan and the
+// command queue go through this, so a captioned "/telegram_reset" is caught
+// too.
 static const char *get_text(cJSON *message)
 {
     cJSON *text_item = cJSON_GetObjectItem(message, "text");
     if (text_item && cJSON_IsString(text_item)) {
         return text_item->valuestring;
+    }
+    cJSON *caption_item = cJSON_GetObjectItem(message, "caption");
+    if (caption_item && cJSON_IsString(caption_item)) {
+        return caption_item->valuestring;
     }
     return NULL;
 }
