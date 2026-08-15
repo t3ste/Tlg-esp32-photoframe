@@ -471,7 +471,8 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_telegram_pairing_enabled(cJSON_IsTrue(item));
         if (!cJSON_IsTrue(item)) {
-            config_manager_clear_telegram_pending_image();
+            // Clears the tracking queue only - files stay on storage.
+            config_manager_clear_telegram_pending_images();
         }
     }
 
@@ -496,6 +497,12 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "debug_log_enabled");
     if (item && cJSON_IsBool(item)) {
         debug_log_set_enabled(cJSON_IsTrue(item));
+    }
+
+    // OTA
+    item = cJSON_GetObjectItem(root, "ota_check_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_ota_check_enabled(cJSON_IsTrue(item));
     }
 
     return ESP_OK;

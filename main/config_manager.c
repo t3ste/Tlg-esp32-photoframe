@@ -59,8 +59,17 @@ static char telegram_bot_token[TELEGRAM_BOT_TOKEN_MAX_LEN] = {0};
 static char telegram_chat_id[TELEGRAM_CHAT_ID_MAX_LEN] = {0};
 static int64_t telegram_last_update_id = 0;
 static bool telegram_pairing_enabled = true;
-static char telegram_pending_path[512] = {0};
-static char telegram_pending_caption[TELEGRAM_CAPTION_MAX_LEN] = {0};
+static bool telegram_low_battery_warned = false;
+
+typedef struct {
+    char path[320];
+    char caption[TELEGRAM_CAPTION_MAX_LEN];
+} telegram_pending_image_t;
+static telegram_pending_image_t telegram_pending_images[TELEGRAM_MAX_PENDING_IMAGES];
+static int telegram_pending_image_count = 0;
+
+// OTA
+static bool ota_check_enabled = true;
 
 // AI API Keys
 static char openai_api_key[AI_API_KEY_MAX_LEN] = {0};
@@ -127,6 +136,85 @@ static void cron_persist(void)
         }
         nvs_commit(nvs_handle);
         nvs_close(nvs_handle);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Telegram pending-image list helpers (queue of images waiting for an
+// orientation-pairing partner). Joined-string NVS encoding mirrors the cron
+// helpers above: 0x1F separates path/caption within an entry, 0x1E separates
+// entries. Those control bytes can't appear in normal text, so no escaping is
+// needed even though captions may contain arbitrary UTF-8/newlines.
+// ----------------------------------------------------------------------------
+
+#define TELEGRAM_PENDING_JOINED_MAX \
+    (TELEGRAM_MAX_PENDING_IMAGES * (sizeof(((telegram_pending_image_t *) 0)->path) + \
+                                    TELEGRAM_CAPTION_MAX_LEN + 2))
+
+static void telegram_pending_persist(void)
+{
+    // static, not a stack local: this project's main task stack is only
+    // 6144 bytes and this buffer (TELEGRAM_MAX_PENDING_IMAGES * ~450 bytes)
+    // is called from deep within the Telegram poll's call chain, where
+    // stack headroom is already tight. config_manager runs single-threaded
+    // (main task only), so a static buffer here is safe.
+    static char joined[TELEGRAM_PENDING_JOINED_MAX];
+    size_t off = 0;
+    joined[0] = '\0';
+    for (int i = 0; i < telegram_pending_image_count; i++) {
+        int n = snprintf(joined + off, sizeof(joined) - off, "%s\x1F%s\x1E",
+                         telegram_pending_images[i].path, telegram_pending_images[i].caption);
+        if (n < 0 || (size_t) n >= sizeof(joined) - off) {
+            break;
+        }
+        off += (size_t) n;
+    }
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (telegram_pending_image_count > 0) {
+            nvs_set_str(nvs_handle, NVS_TELEGRAM_PENDING_LIST_KEY, joined);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_TELEGRAM_PENDING_LIST_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+static void telegram_pending_load_from_joined(const char *joined)
+{
+    telegram_pending_image_count = 0;
+    if (!joined) {
+        return;
+    }
+    const char *p = joined;
+    while (*p != '\0' && telegram_pending_image_count < TELEGRAM_MAX_PENDING_IMAGES) {
+        const char *rec_end = strchr(p, '\x1E');
+        size_t rec_len = rec_end ? (size_t) (rec_end - p) : strlen(p);
+        const char *sep = memchr(p, '\x1F', rec_len);
+        if (sep) {
+            telegram_pending_image_t *e = &telegram_pending_images[telegram_pending_image_count];
+            size_t path_len = (size_t) (sep - p);
+            if (path_len >= sizeof(e->path)) {
+                path_len = sizeof(e->path) - 1;
+            }
+            memcpy(e->path, p, path_len);
+            e->path[path_len] = '\0';
+
+            size_t cap_len = rec_len - (size_t) (sep - p) - 1;
+            if (cap_len >= sizeof(e->caption)) {
+                cap_len = sizeof(e->caption) - 1;
+            }
+            memcpy(e->caption, sep + 1, cap_len);
+            e->caption[cap_len] = '\0';
+
+            telegram_pending_image_count++;
+        }
+        if (!rec_end) {
+            break;
+        }
+        p = rec_end + 1;
     }
 }
 
@@ -366,7 +454,7 @@ esp_err_t config_manager_init(void)
         size_t tg_chat_id_len = TELEGRAM_CHAT_ID_MAX_LEN;
         if (nvs_get_str(nvs_handle, NVS_TELEGRAM_CHAT_ID_KEY, telegram_chat_id, &tg_chat_id_len) ==
             ESP_OK) {
-            ESP_LOGI(TAG, "Loaded Telegram chat ID from NVS: %s", telegram_chat_id);
+            ESP_LOGI(TAG, "Loaded Telegram chat ID from NVS (length: %zu)", tg_chat_id_len);
         }
 
         if (nvs_get_i64(nvs_handle, NVS_TELEGRAM_LAST_UPDATE_ID_KEY, &telegram_last_update_id) ==
@@ -382,15 +470,29 @@ esp_err_t config_manager_init(void)
         ESP_LOGI(TAG, "Telegram orientation pairing: %s",
                  telegram_pairing_enabled ? "enabled" : "disabled");
 
-        size_t pend_path_len = sizeof(telegram_pending_path);
-        nvs_get_str(nvs_handle, NVS_TELEGRAM_PENDING_PATH_KEY, telegram_pending_path,
-                   &pend_path_len);
-        size_t pend_cap_len = sizeof(telegram_pending_caption);
-        nvs_get_str(nvs_handle, NVS_TELEGRAM_PENDING_CAPTION_KEY, telegram_pending_caption,
-                   &pend_cap_len);
-        if (telegram_pending_path[0]) {
-            ESP_LOGI(TAG, "Loaded pending Telegram pair image: %s", telegram_pending_path);
+        uint8_t stored_low_batt_warned = 0;
+        if (nvs_get_u8(nvs_handle, NVS_TELEGRAM_LOW_BATT_WARNED_KEY, &stored_low_batt_warned) ==
+            ESP_OK) {
+            telegram_low_battery_warned = (stored_low_batt_warned != 0);
         }
+
+        {
+            static char pending_buf[TELEGRAM_PENDING_JOINED_MAX];
+            pending_buf[0] = '\0';
+            size_t pending_len = sizeof(pending_buf);
+            if (nvs_get_str(nvs_handle, NVS_TELEGRAM_PENDING_LIST_KEY, pending_buf, &pending_len) ==
+                ESP_OK) {
+                telegram_pending_load_from_joined(pending_buf);
+                ESP_LOGI(TAG, "Loaded %d pending Telegram pair image(s) from NVS",
+                         telegram_pending_image_count);
+            }
+        }
+
+        uint8_t stored_ota_check = 1;  // Default to enabled (unchanged prior behavior)
+        if (nvs_get_u8(nvs_handle, NVS_OTA_CHECK_ENABLED_KEY, &stored_ota_check) == ESP_OK) {
+            ota_check_enabled = (stored_ota_check != 0);
+        }
+        ESP_LOGI(TAG, "Automatic OTA check: %s", ota_check_enabled ? "enabled" : "disabled");
 
         // AI API Keys
         size_t openai_key_len = AI_API_KEY_MAX_LEN;
@@ -1144,7 +1246,7 @@ void config_manager_set_telegram_chat_id(const char *chat_id)
         nvs_close(nvs_handle);
     }
 
-    ESP_LOGI(TAG, "Telegram chat ID set to: %s", telegram_chat_id[0] ? telegram_chat_id : "(empty)");
+    ESP_LOGI(TAG, "Telegram chat ID %s", telegram_chat_id[0] ? "set" : "cleared");
 }
 
 const char *config_manager_get_telegram_chat_id(void)
@@ -1195,43 +1297,107 @@ bool config_manager_get_telegram_pairing_enabled(void)
     return telegram_pairing_enabled;
 }
 
-void config_manager_set_telegram_pending_image(const char *path, const char *caption)
+void config_manager_add_telegram_pending_image(const char *path, const char *caption)
 {
-    strncpy(telegram_pending_path, path ? path : "", sizeof(telegram_pending_path) - 1);
-    telegram_pending_path[sizeof(telegram_pending_path) - 1] = '\0';
-    strncpy(telegram_pending_caption, caption ? caption : "", sizeof(telegram_pending_caption) - 1);
-    telegram_pending_caption[sizeof(telegram_pending_caption) - 1] = '\0';
+    if (!path || path[0] == '\0') {
+        return;
+    }
+    if (telegram_pending_image_count >= TELEGRAM_MAX_PENDING_IMAGES) {
+        ESP_LOGW(TAG,
+                 "Telegram pending-pair queue full (%d), cannot track %s (file is still saved on "
+                 "storage)",
+                 TELEGRAM_MAX_PENDING_IMAGES, path);
+        return;
+    }
+
+    telegram_pending_image_t *e = &telegram_pending_images[telegram_pending_image_count++];
+    strncpy(e->path, path, sizeof(e->path) - 1);
+    e->path[sizeof(e->path) - 1] = '\0';
+    strncpy(e->caption, caption ? caption : "", sizeof(e->caption) - 1);
+    e->caption[sizeof(e->caption) - 1] = '\0';
+
+    telegram_pending_persist();
+    ESP_LOGI(TAG, "Queued %s for orientation pairing (%d pending)", path,
+             telegram_pending_image_count);
+}
+
+int config_manager_get_telegram_pending_image_count(void)
+{
+    return telegram_pending_image_count;
+}
+
+bool config_manager_get_telegram_pending_image_at(int index, char *path_out, size_t path_out_len,
+                                                  char *caption_out, size_t caption_out_len)
+{
+    if (index < 0 || index >= telegram_pending_image_count) {
+        return false;
+    }
+    if (path_out) {
+        snprintf(path_out, path_out_len, "%s", telegram_pending_images[index].path);
+    }
+    if (caption_out) {
+        snprintf(caption_out, caption_out_len, "%s", telegram_pending_images[index].caption);
+    }
+    return true;
+}
+
+void config_manager_remove_telegram_pending_image_at(int index)
+{
+    if (index < 0 || index >= telegram_pending_image_count) {
+        return;
+    }
+    for (int i = index; i < telegram_pending_image_count - 1; i++) {
+        telegram_pending_images[i] = telegram_pending_images[i + 1];
+    }
+    telegram_pending_image_count--;
+    telegram_pending_persist();
+}
+
+void config_manager_clear_telegram_pending_images(void)
+{
+    telegram_pending_image_count = 0;
+    telegram_pending_persist();
+    ESP_LOGI(TAG, "Cleared Telegram pending-pair queue (files were left on storage)");
+}
+
+void config_manager_set_telegram_low_battery_warned(bool warned)
+{
+    telegram_low_battery_warned = warned;
 
     nvs_handle_t nvs_handle;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        if (telegram_pending_path[0]) {
-            nvs_set_str(nvs_handle, NVS_TELEGRAM_PENDING_PATH_KEY, telegram_pending_path);
-            nvs_set_str(nvs_handle, NVS_TELEGRAM_PENDING_CAPTION_KEY, telegram_pending_caption);
-        } else {
-            nvs_erase_key(nvs_handle, NVS_TELEGRAM_PENDING_PATH_KEY);
-            nvs_erase_key(nvs_handle, NVS_TELEGRAM_PENDING_CAPTION_KEY);
-        }
+        nvs_set_u8(nvs_handle, NVS_TELEGRAM_LOW_BATT_WARNED_KEY, warned ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+bool config_manager_get_telegram_low_battery_warned(void)
+{
+    return telegram_low_battery_warned;
+}
+
+// ============================================================================
+// OTA
+// ============================================================================
+
+void config_manager_set_ota_check_enabled(bool enabled)
+{
+    ota_check_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_OTA_CHECK_ENABLED_KEY, enabled ? 1 : 0);
         nvs_commit(nvs_handle);
         nvs_close(nvs_handle);
     }
 
-    ESP_LOGI(TAG, "Telegram pending pair image set to: %s",
-             telegram_pending_path[0] ? telegram_pending_path : "(none)");
+    ESP_LOGI(TAG, "Automatic OTA check %s", enabled ? "enabled" : "disabled");
 }
 
-const char *config_manager_get_telegram_pending_image_path(void)
+bool config_manager_get_ota_check_enabled(void)
 {
-    return telegram_pending_path;
-}
-
-const char *config_manager_get_telegram_pending_image_caption(void)
-{
-    return telegram_pending_caption;
-}
-
-void config_manager_clear_telegram_pending_image(void)
-{
-    config_manager_set_telegram_pending_image(NULL, NULL);
+    return ota_check_enabled;
 }
 
 // ============================================================================

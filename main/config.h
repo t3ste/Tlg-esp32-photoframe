@@ -165,12 +165,14 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define NVS_TELEGRAM_LAST_UPDATE_ID_KEY "tg_last_upd_id"
 // Orientation-pairing: combine two mismatched-orientation Telegram photos
 // (e.g. two portrait shots on a landscape frame) into one image instead of
-// ever showing one alone. "Pending" is the one reserved image waiting for
-// its partner, persisted across deep sleep (RAM/files don't survive on
-// MemFS-only boards, NVS does).
+// ever showing one alone. Every mismatched image that arrives is queued here
+// (not just one) so nothing is lost if several arrive before a partner shows
+// up; persisted across deep sleep (RAM/files don't survive on MemFS-only
+// boards, NVS does).
 #define NVS_TELEGRAM_PAIRING_KEY "tg_pairing"
-#define NVS_TELEGRAM_PENDING_PATH_KEY "tg_pend_path"
-#define NVS_TELEGRAM_PENDING_CAPTION_KEY "tg_pend_cap"
+#define NVS_TELEGRAM_PENDING_LIST_KEY "tg_pend_list"
+#define TELEGRAM_MAX_PENDING_IMAGES 6
+#define NVS_TELEGRAM_LOW_BATT_WARNED_KEY "tg_low_batt"
 
 // AI API Keys (for webapp client use)
 #define AI_API_KEY_MAX_LEN 256
@@ -180,6 +182,7 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // OTA Configuration
 #define GITHUB_API_URL "https://api.github.com/repos/aitjcize/esp32-photoframe/releases/latest"
 #define OTA_CHECK_INTERVAL_MS (24 * 60 * 60 * 1000)  // 24 hours
+#define NVS_OTA_CHECK_ENABLED_KEY "ota_check_en"
 
 // Telegram Bot API
 // Note: the real Telegram Bot API base is "https://api.telegram.org/bot<TOKEN>/<METHOD>"

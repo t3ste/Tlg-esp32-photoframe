@@ -55,6 +55,7 @@ export const useSettingsStore = defineStore("settings", () => {
     haUrl: "",
     // Power
     deepSleepEnabled: true,
+    otaCheckEnabled: true,
     // Debugging
     debugLogEnabled: false,
     // AI API Keys (for client-side AI generation)
@@ -196,6 +197,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.caCertSet = data.ca_cert_set || false;
       deviceSettings.value.lastFetchError = data.last_fetch_error || "";
       deviceSettings.value.deepSleepEnabled = data.deep_sleep_enabled !== false;
+      deviceSettings.value.otaCheckEnabled = data.ota_check_enabled !== false;
       deviceSettings.value.debugLogEnabled = data.debug_log_enabled === true;
       deviceSettings.value.haUrl = data.ha_url || "";
       deviceSettings.value.saveDownloadedImages = data.save_downloaded_images !== false;
@@ -270,6 +272,7 @@ export const useSettingsStore = defineStore("settings", () => {
       telegram_pairing_enabled: deviceSettings.value.telegramPairingEnabled,
       ha_url: deviceSettings.value.haUrl,
       deep_sleep_enabled: deviceSettings.value.deepSleepEnabled,
+      ota_check_enabled: deviceSettings.value.otaCheckEnabled,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,
       save_downloaded_images: deviceSettings.value.saveDownloadedImages,
       display_orientation: deviceSettings.value.displayOrientation,

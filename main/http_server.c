@@ -1737,6 +1737,7 @@ static esp_err_t config_handler(httpd_req_t *req)
         // Other
         cJSON_AddBoolToObject(root, "deep_sleep_enabled", config_manager_get_deep_sleep_enabled());
         cJSON_AddBoolToObject(root, "debug_log_enabled", config_manager_get_debug_log_enabled());
+        cJSON_AddBoolToObject(root, "ota_check_enabled", config_manager_get_ota_check_enabled());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");

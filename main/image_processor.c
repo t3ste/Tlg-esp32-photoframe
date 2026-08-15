@@ -1239,11 +1239,100 @@ static void draw_glyph(uint8_t *rgb, int width, int height, int x, int y, char c
 #define CAPTION_LINE_MAX_CHARS 96
 #define CAPTION_LINE_PADDING 4
 
+// Telegram captions are UTF-8; Font24 only has bitmap glyphs for ASCII
+// (space..~). Transliterate the German umlauts/sz-ligature to ASCII digraphs
+// (still legible) and silently drop every other non-ASCII code point (emoji,
+// other accents, ...) - not worth carrying a Unicode-capable bitmap font for.
+static void sanitize_caption_ascii(const char *utf8, char *out, size_t out_len)
+{
+    size_t o = 0;
+    const unsigned char *p = (const unsigned char *) utf8;
+
+    while (*p != '\0' && o + 1 < out_len) {
+        unsigned char b0 = p[0];
+
+        if (b0 < 0x80) {
+            out[o++] = (char) b0;
+            p++;
+            continue;
+        }
+
+        uint32_t cp = 0;
+        int extra;
+        if ((b0 & 0xE0) == 0xC0) {
+            cp = b0 & 0x1F;
+            extra = 1;
+        } else if ((b0 & 0xF0) == 0xE0) {
+            cp = b0 & 0x0F;
+            extra = 2;
+        } else if ((b0 & 0xF8) == 0xF0) {
+            cp = b0 & 0x07;
+            extra = 3;
+        } else {
+            p++;  // stray continuation/invalid byte, skip
+            continue;
+        }
+
+        bool valid = true;
+        for (int i = 0; i < extra; i++) {
+            unsigned char cb = p[1 + i];
+            if ((cb & 0xC0) != 0x80) {
+                valid = false;
+                break;
+            }
+            cp = (cp << 6) | (cb & 0x3F);
+        }
+        if (!valid) {
+            p++;
+            continue;
+        }
+        p += 1 + extra;
+
+        const char *sub = NULL;
+        switch (cp) {
+        case 0x00E4:
+            sub = "ae";
+            break;  // ä
+        case 0x00F6:
+            sub = "oe";
+            break;  // ö
+        case 0x00FC:
+            sub = "ue";
+            break;  // ü
+        case 0x00C4:
+            sub = "Ae";
+            break;  // Ä
+        case 0x00D6:
+            sub = "Oe";
+            break;  // Ö
+        case 0x00DC:
+            sub = "Ue";
+            break;  // Ü
+        case 0x00DF:
+            sub = "ss";
+            break;  // ß
+        default:
+            break;  // everything else (accents, emoji, symbols, ...) dropped
+        }
+        for (const char *s = sub; s && *s != '\0' && o + 1 < out_len; s++) {
+            out[o++] = *s;
+        }
+    }
+    out[o] = '\0';
+}
+
 void image_processor_draw_caption(uint8_t *rgb_buffer, int width, int height, const char *caption)
 {
     if (!rgb_buffer || !caption || caption[0] == '\0') {
         return;
     }
+
+    char ascii_caption[CAPTION_LINE_MAX_CHARS * CAPTION_MAX_LINES];
+    sanitize_caption_ascii(caption, ascii_caption, sizeof(ascii_caption));
+    if (ascii_caption[0] == '\0') {
+        return;  // nothing renderable left (e.g. an emoji-only caption)
+    }
+    caption = ascii_caption;
 
     int chars_per_line = (width - 2 * CAPTION_LINE_PADDING) / Font24.Width;
     if (chars_per_line < 1) {
@@ -1389,4 +1478,13 @@ esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *
     err = write_png_file(png_path, rgb_buffer, width, height);
     heap_caps_free(rgb_buffer);
     return err;
+}
+
+esp_err_t image_processor_write_rgb_to_png(const uint8_t *rgb_buffer, int width, int height,
+                                           const char *output_path)
+{
+    if (!rgb_buffer || !output_path || width <= 0 || height <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return write_png_file(output_path, (uint8_t *) rgb_buffer, width, height);
 }

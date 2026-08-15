@@ -121,4 +121,13 @@ void image_processor_draw_caption(uint8_t *rgb_buffer, int width, int height, co
  */
 esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *caption);
 
+/**
+ * @brief Writes an already-processed RGB888 buffer to a PNG file. Thin
+ * wrapper so callers outside this module (e.g. the Telegram orientation-pair
+ * compositor) can persist a composed/captioned buffer without duplicating
+ * libpng plumbing.
+ */
+esp_err_t image_processor_write_rgb_to_png(const uint8_t *rgb_buffer, int width, int height,
+                                           const char *output_path);
+
 #endif

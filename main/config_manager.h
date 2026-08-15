@@ -142,13 +142,25 @@ int64_t config_manager_get_telegram_last_update_id(void);
 void config_manager_set_telegram_pairing_enabled(bool enabled);
 bool config_manager_get_telegram_pairing_enabled(void);
 
-// The one reserved image waiting for its orientation partner (empty path =
-// none pending). Persisted so it survives deep sleep even on MemFS-only
-// boards where the file itself won't.
-void config_manager_set_telegram_pending_image(const char *path, const char *caption);
-const char *config_manager_get_telegram_pending_image_path(void);
-const char *config_manager_get_telegram_pending_image_caption(void);
-void config_manager_clear_telegram_pending_image(void);
+// Queue of images waiting for an orientation partner (FIFO - oldest first).
+// Every mismatched image is appended here, not just one, so nothing is lost
+// if several arrive before a partner shows up. Persisted so it survives deep
+// sleep even on MemFS-only boards where the files themselves won't (callers
+// should stat() before trusting a path is still there).
+void config_manager_add_telegram_pending_image(const char *path, const char *caption);
+int config_manager_get_telegram_pending_image_count(void);
+bool config_manager_get_telegram_pending_image_at(int index, char *path_out, size_t path_out_len,
+                                                  char *caption_out, size_t caption_out_len);
+void config_manager_remove_telegram_pending_image_at(int index);
+// Clears the tracking queue only - does NOT delete the underlying files
+// (they remain on storage like any other received image).
+void config_manager_clear_telegram_pending_images(void);
+
+// Whether a low-battery Telegram warning has already been sent for the
+// current discharge episode (cleared once the battery recovers), so the
+// warning fires once rather than on every poll.
+void config_manager_set_telegram_low_battery_warned(bool warned);
+bool config_manager_get_telegram_low_battery_warned(void);
 
 // ============================================================================
 // AI API Keys
@@ -159,6 +171,15 @@ const char *config_manager_get_openai_api_key(void);
 
 void config_manager_set_google_api_key(const char *key);
 const char *config_manager_get_google_api_key(void);
+
+// ============================================================================
+// OTA
+// ============================================================================
+
+// Automatic OTA checks (periodic + cold-boot). A manual "check now" from the
+// web UI is unaffected by this setting.
+void config_manager_set_ota_check_enabled(bool enabled);
+bool config_manager_get_ota_check_enabled(void);
 
 // ============================================================================
 // Power

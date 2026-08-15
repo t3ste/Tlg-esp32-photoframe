@@ -750,7 +750,10 @@ void app_main(void)
 
     ESP_LOGI(TAG, "PhotoFrame started successfully");
 
-    // Delay OTA check to avoid competing with boot-time network activity
-    vTaskDelay(pdMS_TO_TICKS(10000));
-    ota_check_for_update(NULL, 0);
+    // Delay OTA check to avoid competing with boot-time network activity.
+    // A manual "check now" from the web UI bypasses this setting.
+    if (config_manager_get_ota_check_enabled()) {
+        vTaskDelay(pdMS_TO_TICKS(10000));
+        ota_check_for_update(NULL, 0);
+    }
 }

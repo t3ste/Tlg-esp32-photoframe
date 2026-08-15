@@ -819,6 +819,20 @@ async function performFactoryReset() {
                 power consumption. Only disable if permanently powered via USB.
               </v-alert>
             </v-expand-transition>
+
+            <v-switch
+              v-model="settingsStore.deviceSettings.otaCheckEnabled"
+              label="Enable automatic update checks"
+              color="primary"
+              class="mb-2 mt-4"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis">
+              Checks for a new firmware release once a day and on every cold boot. A manually
+              triggered "Check for updates" (below) always works regardless of this setting.
+              Useful to turn off for self-built/dev firmware, which otherwise always reports an
+              "update available".
+            </div>
           </v-tabs-window-item>
 
           <!-- Home Assistant Tab -->
