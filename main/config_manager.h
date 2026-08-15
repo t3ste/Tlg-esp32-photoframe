@@ -119,6 +119,24 @@ void config_manager_set_ha_url(const char *url);
 const char *config_manager_get_ha_url(void);
 
 // ============================================================================
+// Telegram Bot
+// ============================================================================
+
+void config_manager_set_telegram_bot_token(const char *token);
+const char *config_manager_get_telegram_bot_token(void);
+
+void config_manager_set_telegram_chat_id(const char *chat_id);
+const char *config_manager_get_telegram_chat_id(void);
+
+// True once both a bot token and a chat ID are configured.
+bool config_manager_telegram_is_configured(void);
+
+// Highest Telegram update_id processed so far (0 = none yet). The next
+// getUpdates poll should request offset = value + 1.
+void config_manager_set_telegram_last_update_id(int64_t update_id);
+int64_t config_manager_get_telegram_last_update_id(void);
+
+// ============================================================================
 // AI API Keys
 // ============================================================================
 

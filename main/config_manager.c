@@ -54,6 +54,11 @@ static char image_etag[HTTP_ETAG_MAX_LEN] = {0};
 // Home Assistant
 static char ha_url[HA_URL_MAX_LEN] = {0};
 
+// Telegram Bot
+static char telegram_bot_token[TELEGRAM_BOT_TOKEN_MAX_LEN] = {0};
+static char telegram_chat_id[TELEGRAM_CHAT_ID_MAX_LEN] = {0};
+static int64_t telegram_last_update_id = 0;
+
 // AI API Keys
 static char openai_api_key[AI_API_KEY_MAX_LEN] = {0};
 static char google_api_key[AI_API_KEY_MAX_LEN] = {0};
@@ -346,6 +351,25 @@ esp_err_t config_manager_init(void)
             strncpy(ha_url, DEFAULT_HA_URL, HA_URL_MAX_LEN - 1);
             ha_url[HA_URL_MAX_LEN - 1] = '\0';
             ESP_LOGI(TAG, "No HA URL in NVS, using default (empty)");
+        }
+
+        // Telegram Bot
+        size_t tg_token_len = TELEGRAM_BOT_TOKEN_MAX_LEN;
+        if (nvs_get_str(nvs_handle, NVS_TELEGRAM_BOT_TOKEN_KEY, telegram_bot_token,
+                        &tg_token_len) == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded Telegram bot token from NVS (length: %zu)", tg_token_len);
+        }
+
+        size_t tg_chat_id_len = TELEGRAM_CHAT_ID_MAX_LEN;
+        if (nvs_get_str(nvs_handle, NVS_TELEGRAM_CHAT_ID_KEY, telegram_chat_id, &tg_chat_id_len) ==
+            ESP_OK) {
+            ESP_LOGI(TAG, "Loaded Telegram chat ID from NVS: %s", telegram_chat_id);
+        }
+
+        if (nvs_get_i64(nvs_handle, NVS_TELEGRAM_LAST_UPDATE_ID_KEY, &telegram_last_update_id) ==
+            ESP_OK) {
+            ESP_LOGI(TAG, "Loaded Telegram last update_id from NVS: %lld",
+                     (long long) telegram_last_update_id);
         }
 
         // AI API Keys
@@ -1052,6 +1076,84 @@ void config_manager_set_ha_url(const char *url)
 const char *config_manager_get_ha_url(void)
 {
     return ha_url;
+}
+
+// ============================================================================
+// Telegram Bot
+// ============================================================================
+
+void config_manager_set_telegram_bot_token(const char *token)
+{
+    const char *new_token = token ? token : "";
+    strncpy(telegram_bot_token, new_token, TELEGRAM_BOT_TOKEN_MAX_LEN - 1);
+    telegram_bot_token[TELEGRAM_BOT_TOKEN_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (telegram_bot_token[0] != '\0') {
+            nvs_set_str(nvs_handle, NVS_TELEGRAM_BOT_TOKEN_KEY, telegram_bot_token);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_TELEGRAM_BOT_TOKEN_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Telegram bot token %s", telegram_bot_token[0] ? "set" : "cleared");
+}
+
+const char *config_manager_get_telegram_bot_token(void)
+{
+    return telegram_bot_token;
+}
+
+void config_manager_set_telegram_chat_id(const char *chat_id)
+{
+    const char *new_id = chat_id ? chat_id : "";
+    strncpy(telegram_chat_id, new_id, TELEGRAM_CHAT_ID_MAX_LEN - 1);
+    telegram_chat_id[TELEGRAM_CHAT_ID_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (telegram_chat_id[0] != '\0') {
+            nvs_set_str(nvs_handle, NVS_TELEGRAM_CHAT_ID_KEY, telegram_chat_id);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_TELEGRAM_CHAT_ID_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Telegram chat ID set to: %s", telegram_chat_id[0] ? telegram_chat_id : "(empty)");
+}
+
+const char *config_manager_get_telegram_chat_id(void)
+{
+    return telegram_chat_id;
+}
+
+bool config_manager_telegram_is_configured(void)
+{
+    return telegram_bot_token[0] != '\0' && telegram_chat_id[0] != '\0';
+}
+
+void config_manager_set_telegram_last_update_id(int64_t update_id)
+{
+    telegram_last_update_id = update_id;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_i64(nvs_handle, NVS_TELEGRAM_LAST_UPDATE_ID_KEY, telegram_last_update_id);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Telegram last update_id set to: %lld", (long long) telegram_last_update_id);
+}
+
+int64_t config_manager_get_telegram_last_update_id(void)
+{
+    return telegram_last_update_id;
 }
 
 // ============================================================================

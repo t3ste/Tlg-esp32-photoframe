@@ -6,7 +6,11 @@
 // Uncomment to debug deep sleep wake
 // #define DEBUG_DEEP_SLEEP_WAKE
 
-typedef enum { ROTATION_MODE_STORAGE = 0, ROTATION_MODE_URL = 1 } rotation_mode_t;
+typedef enum {
+    ROTATION_MODE_STORAGE = 0,
+    ROTATION_MODE_URL = 1,
+    ROTATION_MODE_TELEGRAM = 2
+} rotation_mode_t;
 
 typedef enum { SD_ROTATION_RANDOM = 0, SD_ROTATION_SEQUENTIAL = 1 } sd_rotation_mode_t;
 
@@ -34,12 +38,16 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define HTTP_HEADER_VALUE_MAX_LEN 512
 #define CA_CERT_MAX_LEN 4096
 #define HTTP_ETAG_MAX_LEN 128
+#define TELEGRAM_BOT_TOKEN_MAX_LEN 128
+#define TELEGRAM_CHAT_ID_MAX_LEN 32
 
 #define DEFAULT_DEVICE_NAME "PhotoFrame"
 #define DEFAULT_WIFI_SSID "PhotoFrame"
 #define DEFAULT_WIFI_PASSWORD "photoframe123"
 #define DEFAULT_IMAGE_URL "https://loremflickr.com/800/480"
 #define DEFAULT_HA_URL ""
+#define DEFAULT_TELEGRAM_BOT_TOKEN ""
+#define DEFAULT_TELEGRAM_CHAT_ID ""
 #define DEFAULT_TIMEZONE "UTC0"
 #define DEFAULT_NTP_SERVER "pool.ntp.org"
 
@@ -51,6 +59,7 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 
 #define IMAGE_DIRECTORY FS_MOUNT_POINT "/images"
 #define DOWNLOAD_DIRECTORY IMAGE_DIRECTORY "/Downloads"
+#define TELEGRAM_DOWNLOAD_DIRECTORY IMAGE_DIRECTORY "/Telegram"
 
 #define CURRENT_UPLOAD_PATH FS_MOUNT_POINT "/.current.tmp"
 #define CURRENT_JPG_PATH FS_MOUNT_POINT "/.current.jpg"
@@ -150,6 +159,11 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // Home Assistant
 #define NVS_HA_URL_KEY "ha_url"
 
+// Telegram Bot
+#define NVS_TELEGRAM_BOT_TOKEN_KEY "tg_bot_token"
+#define NVS_TELEGRAM_CHAT_ID_KEY "tg_chat_id"
+#define NVS_TELEGRAM_LAST_UPDATE_ID_KEY "tg_last_upd_id"
+
 // AI API Keys (for webapp client use)
 #define AI_API_KEY_MAX_LEN 256
 #define NVS_OPENAI_API_KEY_KEY "openai_key"
@@ -158,5 +172,18 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // OTA Configuration
 #define GITHUB_API_URL "https://api.github.com/repos/aitjcize/esp32-photoframe/releases/latest"
 #define OTA_CHECK_INTERVAL_MS (24 * 60 * 60 * 1000)  // 24 hours
+
+// Telegram Bot API
+// Note: the real Telegram Bot API base is "https://api.telegram.org/bot<TOKEN>/<METHOD>"
+// (not "https://telegram.org<TOKEN>/..."). TELEGRAM_API_HOST + TELEGRAM_API_BASE_FMT
+// build that URL at runtime once the token is known.
+#define TELEGRAM_API_HOST "api.telegram.org"
+#define TELEGRAM_API_BASE_FMT "https://api.telegram.org/bot%s/%s"
+#define TELEGRAM_POLL_TIMEOUT_SEC 10    // long-poll timeout passed to getUpdates
+#define TELEGRAM_HTTP_TIMEOUT_MS 15000  // per-request HTTP timeout
+#define TELEGRAM_MAX_UPDATES_PER_POLL 50
+#define TELEGRAM_RESET_COMMAND "/telegram_reset"
+#define TELEGRAM_MAX_PENDING_COMMANDS 8
+#define TELEGRAM_COMMAND_MAX_LEN 128
 
 #endif
