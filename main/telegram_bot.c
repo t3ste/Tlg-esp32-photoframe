@@ -881,7 +881,7 @@ static void check_and_warn_low_battery(void)
         if (!config_manager_get_telegram_low_battery_warned()) {
             char msg[128];
             snprintf(msg, sizeof(msg),
-                     "Batteriewarnung: Nur noch %d%% verbleibend. Bitte bald aufladen.", percent);
+                     "[!] Batteriewarnung: Nur noch %d%% verbleibend. Bitte bald aufladen.", percent);
             telegram_bot_send_message(msg);
             config_manager_set_telegram_low_battery_warned(true);
         }
@@ -958,7 +958,7 @@ static void send_wake_notification_if_enabled(void)
     if (!config_manager_get_telegram_wake_notify_enabled()) {
         return;
     }
-    char wake_msg[512];
+    char wake_msg[900];
     build_status_message("PhotoFrame wach", wake_msg, sizeof(wake_msg));
     telegram_bot_send_message(wake_msg);
 }
@@ -1067,7 +1067,7 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
         ESP_LOGW(TAG, "/telegram_reset received - discarding %d update(s), going to sleep", count);
         config_manager_set_telegram_last_update_id(max_update_id);
         cJSON_Delete(root);
-        telegram_bot_send_message("Reset ausgefuehrt, Warteschlange geloescht.");
+        telegram_bot_send_message("[OK] Reset ausgefuehrt, Warteschlange geloescht.");
         if (out_result) {
             *out_result = TELEGRAM_POLL_RESET;
         }
@@ -1282,9 +1282,9 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
         displayed = (disp_err == ESP_OK);
     } else if (image_attempt_failed) {
         telegram_bot_send_message(
-            "Telegram-Bild konnte nicht geladen werden (zu gross, nicht unterstuetztes Format, "
-            "oder nur als progressives JPEG verfuegbar). Bitte kleineres Bild oder als Datei "
-            "senden.");
+            "[FEHLER] Telegram-Bild konnte nicht geladen werden\n"
+            "(zu gross, nicht unterstuetztes Format, oder nur als progressives JPEG "
+            "verfuegbar). Bitte kleineres Bild oder als Datei senden.");
     }
 
     // Per-image "saved" confirmations, threaded as a reply to the original
@@ -1325,28 +1325,28 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
 
         if (this_pair_is_shown) {
             snprintf(caption_text, sizeof(caption_text),
-                     "Gespeichert & mit vorherigem Bild kombiniert angezeigt: %.80s",
+                     "[OK] Gespeichert & mit vorherigem Bild kombiniert angezeigt\n%.80s",
                      entry->filename);
         } else if (pair_index >= 0 && pair_results[pair_index].ok) {
             snprintf(caption_text, sizeof(caption_text),
-                     "Gespeichert & kombiniert im Album gespeichert (nicht angezeigt): %.60s",
+                     "[OK] Gespeichert & kombiniert im Album (nicht angezeigt)\n%.60s",
                      entry->filename);
         } else if (pair_index >= 0) {
             snprintf(caption_text, sizeof(caption_text),
-                     "Gespeichert, Kombination fehlgeschlagen: %.80s", entry->filename);
+                     "[!] Gespeichert, Kombination fehlgeschlagen\n%.80s", entry->filename);
         } else if (this_is_shown && displayed) {
-            snprintf(caption_text, sizeof(caption_text), "Gespeichert & angezeigt: %.100s",
+            snprintf(caption_text, sizeof(caption_text), "[OK] Gespeichert & angezeigt\n%.100s",
                      entry->filename);
         } else if (this_is_shown) {
             snprintf(caption_text, sizeof(caption_text),
-                     "Gespeichert (%.80s), Anzeige fehlgeschlagen: %.30s", entry->filename,
+                     "[!] Gespeichert (%.80s)\nAnzeige fehlgeschlagen: %.30s", entry->filename,
                      esp_err_to_name(disp_err));
         } else if (still_pending) {
             snprintf(caption_text, sizeof(caption_text),
-                     "Gespeichert, wartet auf Hoch-/Querformat-Partnerbild: %.100s",
+                     "[OK] Gespeichert, wartet auf Hoch-/Querformat-Partnerbild\n%.100s",
                      entry->filename);
         } else {
-            snprintf(caption_text, sizeof(caption_text), "Gespeichert (Warteschlange): %.100s",
+            snprintf(caption_text, sizeof(caption_text), "[OK] Gespeichert (Warteschlange)\n%.100s",
                      entry->filename);
         }
 
@@ -1435,8 +1435,35 @@ static void format_free_storage(char *out, size_t out_len)
         snprintf(out, out_len, "n/a");
         return;
     }
-    snprintf(out, out_len, "%.1f/%.1f MB frei", free_bytes / (1024.0 * 1024.0),
-             total / (1024.0 * 1024.0));
+    int percent = (total > 0) ? (int) ((free_bytes * 100ULL) / total) : 0;
+    snprintf(out, out_len, "%.1f/%.1f MB frei (%d%%)", free_bytes / (1024.0 * 1024.0),
+             total / (1024.0 * 1024.0), percent);
+}
+
+static void format_heap(char *out, size_t out_len)
+{
+    size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+    size_t total_bytes = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
+    int percent = (total_bytes > 0) ? (int) ((free_bytes * 100ULL) / total_bytes) : 0;
+    snprintf(out, out_len, "%.1f/%.1f MB frei (%d%%)", free_bytes / (1024.0 * 1024.0),
+             total_bytes / (1024.0 * 1024.0), percent);
+}
+
+static void format_toggles(char *out, size_t out_len)
+{
+    snprintf(out, out_len,
+             "[%c] Pairing (Hoch-/Quer-Kombi)\n"
+             "[%c] Deep Sleep\n"
+             "[%c] Auto-Rotate\n"
+             "[%c] Wach-Auf-Meldung\n"
+             "[%c] Fehler-Overlay\n"
+             "[%c] WLAN-Performance",
+             config_manager_get_telegram_pairing_enabled() ? 'x' : ' ',
+             config_manager_get_deep_sleep_enabled() ? 'x' : ' ',
+             config_manager_get_auto_rotate() ? 'x' : ' ',
+             config_manager_get_telegram_wake_notify_enabled() ? 'x' : ' ',
+             config_manager_get_error_overlay_enabled() ? 'x' : ' ',
+             config_manager_get_wifi_performance_mode_enabled() ? 'x' : ' ');
 }
 
 static void format_rotation_schedule(char *out, size_t out_len)
@@ -1477,26 +1504,37 @@ static void build_status_message(const char *title, char *out, size_t out_len)
     char ip_str[16] = "n/a";
     wifi_manager_get_ip(ip_str, sizeof(ip_str));
 
-    char storage[48];
+    char storage[64];
     format_free_storage(storage, sizeof(storage));
+
+    char heap[64];
+    format_heap(heap, sizeof(heap));
 
     char schedule[160];
     format_rotation_schedule(schedule, sizeof(schedule));
 
+    char toggles[224];
+    format_toggles(toggles, sizeof(toggles));
+
     const char *ssid = config_manager_get_wifi_ssid();
 
     snprintf(out, out_len,
-             "%s\n"
+             "=== %s ===\n"
              "Firmware: %s (%s)\n"
              "Neustartgrund: %s\n"
+             "\n"
              "Batterie: %s\n"
              "WLAN: %s (%s)\n"
+             "\n"
              "Speicher: %s\n"
+             "Heap: %s\n"
+             "\n"
              "Rotations-Zeitplan: %s\n"
-             "Freier Heap: %lu Bytes",
+             "\n"
+             "Einstellungen:\n"
+             "%s",
              title, app_desc->version, BOARD_HAL_NAME, reset_reason_string(), battery,
-             ssid ? ssid : "n/a", ip_str, storage, schedule,
-             (unsigned long) esp_get_free_heap_size());
+             ssid ? ssid : "n/a", ip_str, storage, heap, schedule, toggles);
 }
 
 // Executes one queued "/"-command and sends a sendMessage reply. Strips an
@@ -1532,15 +1570,15 @@ static void execute_command(const char *raw_text)
     ESP_LOGI(TAG, "Executing Telegram command: %s%s%s", cmd, args ? " " : "", args ? args : "");
 
     if (strcmp(cmd, "/status") == 0) {
-        char msg[512];
+        char msg[900];
         build_status_message("PhotoFrame Status", msg, sizeof(msg));
         telegram_bot_send_message(msg);
     } else if (strcmp(cmd, "/clear") == 0) {
         esp_err_t err = display_manager_clear();
-        telegram_bot_send_message(err == ESP_OK ? "Anzeige geloescht."
-                                                 : "Anzeige loeschen fehlgeschlagen.");
+        telegram_bot_send_message(err == ESP_OK ? "[OK] Anzeige geloescht."
+                                                 : "[FEHLER] Anzeige loeschen fehlgeschlagen.");
     } else if (strcmp(cmd, "/restart") == 0) {
-        telegram_bot_send_message("Neustart wird durchgefuehrt...");
+        telegram_bot_send_message("[OK] Neustart wird durchgefuehrt...");
         vTaskDelay(pdMS_TO_TICKS(500));  // give the HTTP send a moment to flush
         esp_restart();
         // Does not return.
@@ -1554,104 +1592,113 @@ static void execute_command(const char *raw_text)
         }
         char msg[160];
         snprintf(msg, sizeof(msg),
-                 "Hoch-/Querformat-Kombination %s.\nAktuelle Rahmenausrichtung: %s",
-                 enabled ? "aktiviert" : "deaktiviert",
+                 "[%c] Hoch-/Querformat-Kombination\n"
+                 "Aktuelle Rahmenausrichtung: %s",
+                 enabled ? 'x' : ' ',
                  wants_portrait_frame_now() ? "Hochformat" : "Querformat");
         telegram_bot_send_message(msg);
     } else if (strcmp(cmd, "/rotate_cron") == 0) {
         if (!args) {
             telegram_bot_send_message(
-                "Verwendung: /rotate_cron <Minute Stunde Wochentag>\nBeispiel: /rotate_cron 0 "
-                "*/12 *");
+                "[i] Verwendung: /rotate_cron <Minute Stunde Wochentag>\n"
+                "Beispiel: /rotate_cron 0 */12 *");
         } else {
             cron_rule_t tmp;
             if (!cron_parse(args, &tmp)) {
                 char msg[192];
-                snprintf(msg, sizeof(msg), "Ungueltiger Cron-Ausdruck: %.100s", args);
+                snprintf(msg, sizeof(msg), "[FEHLER] Ungueltiger Cron-Ausdruck: %.100s", args);
                 telegram_bot_send_message(msg);
             } else {
                 const char *one[1] = {args};
                 config_manager_set_cron_rules(one, 1);
                 power_manager_reset_rotate_timer();
                 char msg[192];
-                snprintf(msg, sizeof(msg), "Rotations-Zeitplan gesetzt: %.100s", args);
+                snprintf(msg, sizeof(msg), "[OK] Rotations-Zeitplan gesetzt: %.100s", args);
                 telegram_bot_send_message(msg);
             }
         }
     } else if (strcmp(cmd, "/deep_sleep") == 0) {
         if (args && strcasecmp(args, "on") == 0) {
             power_manager_set_deep_sleep_enabled(true);
-            telegram_bot_send_message("Deep Sleep aktiviert.");
+            telegram_bot_send_message("[x] Deep Sleep aktiviert.");
         } else if (args && strcasecmp(args, "off") == 0) {
             power_manager_set_deep_sleep_enabled(false);
-            telegram_bot_send_message("Deep Sleep deaktiviert.");
+            telegram_bot_send_message("[ ] Deep Sleep deaktiviert.");
         } else {
-            telegram_bot_send_message("Verwendung: /deep_sleep on|off");
+            telegram_bot_send_message("[i] Verwendung: /deep_sleep on|off");
         }
     } else if (strcmp(cmd, "/auto_rotate") == 0) {
         if (args && strcasecmp(args, "on") == 0) {
             config_manager_set_auto_rotate(true);
             power_manager_reset_rotate_timer();
-            telegram_bot_send_message("Auto-Rotate aktiviert.");
+            telegram_bot_send_message("[x] Auto-Rotate aktiviert.");
         } else if (args && strcasecmp(args, "off") == 0) {
             config_manager_set_auto_rotate(false);
-            telegram_bot_send_message("Auto-Rotate deaktiviert.");
+            telegram_bot_send_message("[ ] Auto-Rotate deaktiviert.");
         } else {
-            telegram_bot_send_message("Verwendung: /auto_rotate on|off");
+            telegram_bot_send_message("[i] Verwendung: /auto_rotate on|off");
         }
     } else if (strcmp(cmd, "/wake_notify") == 0) {
         if (args && strcasecmp(args, "on") == 0) {
             config_manager_set_telegram_wake_notify_enabled(true);
-            telegram_bot_send_message("Wach-Auf-Benachrichtigung aktiviert.");
+            telegram_bot_send_message("[x] Wach-Auf-Benachrichtigung aktiviert.");
         } else if (args && strcasecmp(args, "off") == 0) {
             config_manager_set_telegram_wake_notify_enabled(false);
-            telegram_bot_send_message("Wach-Auf-Benachrichtigung deaktiviert.");
+            telegram_bot_send_message("[ ] Wach-Auf-Benachrichtigung deaktiviert.");
         } else {
-            telegram_bot_send_message("Verwendung: /wake_notify on|off");
+            telegram_bot_send_message("[i] Verwendung: /wake_notify on|off");
         }
     } else if (strcmp(cmd, "/error_overlay") == 0) {
         if (args && strcasecmp(args, "on") == 0) {
             config_manager_set_error_overlay_enabled(true);
-            telegram_bot_send_message("Fehler-Overlay auf dem Display aktiviert.");
+            telegram_bot_send_message("[x] Fehler-Overlay auf dem Display aktiviert.");
         } else if (args && strcasecmp(args, "off") == 0) {
             config_manager_set_error_overlay_enabled(false);
-            telegram_bot_send_message("Fehler-Overlay auf dem Display deaktiviert.");
+            telegram_bot_send_message("[ ] Fehler-Overlay auf dem Display deaktiviert.");
         } else {
-            telegram_bot_send_message("Verwendung: /error_overlay on|off");
+            telegram_bot_send_message("[i] Verwendung: /error_overlay on|off");
         }
     } else if (strcmp(cmd, "/wifi_perf") == 0) {
         if (args && strcasecmp(args, "on") == 0) {
             config_manager_set_wifi_performance_mode_enabled(true);
             telegram_bot_send_message(
-                "WLAN-Performance-Modus aktiviert (automatische Umschaltung je nach Kontext).");
+                "[x] WLAN-Performance-Modus aktiviert\n(automatische Umschaltung je nach Kontext).");
         } else if (args && strcasecmp(args, "off") == 0) {
             config_manager_set_wifi_performance_mode_enabled(false);
             telegram_bot_send_message(
-                "WLAN-Performance-Modus deaktiviert (immer Stromsparmodus, langsamere Web-UI).");
+                "[ ] WLAN-Performance-Modus deaktiviert\n(immer Stromsparmodus, langsamere Web-UI).");
         } else {
-            telegram_bot_send_message("Verwendung: /wifi_perf on|off");
+            telegram_bot_send_message("[i] Verwendung: /wifi_perf on|off");
         }
     } else if (strcmp(cmd, "/help") == 0) {
         telegram_bot_send_message(
-            "Verfuegbare Befehle:\n"
-            "/status - Status, Batterie, WLAN, Firmware, Speicher\n"
+            "=== Verfuegbare Befehle ===\n"
+            "\n"
+            "Status:\n"
+            "/status - Status, Batterie, WLAN, Speicher, Einstellungen\n"
+            "\n"
+            "Anzeige:\n"
             "/clear - Anzeige loeschen\n"
             "/restart - Neustart des Bilderrahmens\n"
-            "/pairing - Hoch-/Querformat-Kombination ein-/ausschalten\n"
-            "/rotate_cron <M H Wochentag> - Rotations-Zeitplan setzen (Cron-Format)\n"
-            "/deep_sleep on|off - Deep Sleep ein-/ausschalten\n"
-            "/auto_rotate on|off - Automatische Rotation ein-/ausschalten\n"
-            "/wake_notify on|off - Status-Ping bei jedem Aufwachen ein-/ausschalten\n"
-            "/error_overlay on|off - Fehlerhinweis auf dem Display ein-/ausschalten\n"
-            "/wifi_perf on|off - WLAN-Performance-Modus ein-/ausschalten\n"
-            "/help - Diese Uebersicht\n"
-            "/telegram_reset - Notfall: Warteschlange sofort leeren\n\n"
+            "/pairing - Hoch-/Querformat-Kombination umschalten\n"
+            "\n"
+            "Einstellungen (jeweils on|off, ohne Argument = Hilfe):\n"
+            "/rotate_cron <M H Wochentag> - Rotations-Zeitplan setzen\n"
+            "/deep_sleep on|off\n"
+            "/auto_rotate on|off\n"
+            "/wake_notify on|off - Status-Ping bei jedem Aufwachen\n"
+            "/error_overlay on|off - Fehlerhinweis auf dem Display\n"
+            "/wifi_perf on|off - WLAN-Performance-Modus\n"
+            "\n"
+            "Notfall:\n"
+            "/telegram_reset - Warteschlange sofort leeren\n"
+            "\n"
             "Bilder koennen als Foto oder als Datei gesendet werden. Eine "
             "Bildunterschrift wird als Overlay auf dem Bild angezeigt (ausser "
             "sie beginnt mit \"/\").");
     } else {
         char msg[192];
-        snprintf(msg, sizeof(msg), "Unbekannter Befehl: %s\nSiehe /help fuer eine Uebersicht.",
+        snprintf(msg, sizeof(msg), "[FEHLER] Unbekannter Befehl: %s\nSiehe /help fuer eine Uebersicht.",
                  cmd);
         telegram_bot_send_message(msg);
     }
