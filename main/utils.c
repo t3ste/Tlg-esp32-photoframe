@@ -440,6 +440,11 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_ha_url(cJSON_GetStringValue(item));
     }
 
+    item = cJSON_GetObjectItem(root, "ha_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_ha_enabled(cJSON_IsTrue(item));
+    }
+
     // Telegram Bot
     item = cJSON_GetObjectItem(root, "telegram_bot_token");
     if (item && cJSON_IsString(item)) {
@@ -476,6 +481,11 @@ esp_err_t apply_config_from_json(cJSON *root)
         }
     }
 
+    item = cJSON_GetObjectItem(root, "telegram_wake_notify_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_telegram_wake_notify_enabled(cJSON_IsTrue(item));
+    }
+
     // AI API Keys
     item = cJSON_GetObjectItem(root, "openai_api_key");
     if (item && cJSON_IsString(item)) {
@@ -503,6 +513,18 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "ota_check_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_ota_check_enabled(cJSON_IsTrue(item));
+    }
+
+    // Error overlay
+    item = cJSON_GetObjectItem(root, "error_overlay_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_error_overlay_enabled(cJSON_IsTrue(item));
+    }
+
+    // WiFi performance mode
+    item = cJSON_GetObjectItem(root, "wifi_performance_mode_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_wifi_performance_mode_enabled(cJSON_IsTrue(item));
     }
 
     return ESP_OK;
@@ -1189,6 +1211,70 @@ esp_err_t fetch_and_save_image_from_url(const char *url, char *saved_image_path,
     utils_set_last_fetch_error(NULL);  // Clear error on success
 
     return ESP_OK;
+}
+
+// Overlays a short message on the currently displayed image WITHOUT modifying
+// the original saved file: copies it to the scratch PNG path first, draws the
+// caption there, and displays the copy.
+static void display_error_overlay(const char *message)
+{
+    const char *current_image = display_manager_get_current_image();
+    if (!current_image || current_image[0] == '\0') {
+        ESP_LOGW(TAG, "No current image to overlay error onto, skipping");
+        return;
+    }
+
+    image_format_t format = image_processor_detect_format(current_image);
+    if (format != IMAGE_FORMAT_PNG || !image_processor_is_processed(current_image)) {
+        ESP_LOGW(TAG, "Current image %s is not an overlay-ready processed PNG, skipping",
+                 current_image);
+        return;
+    }
+
+    FILE *src = fopen(current_image, "rb");
+    if (!src) {
+        ESP_LOGE(TAG, "Failed to open %s for error overlay", current_image);
+        return;
+    }
+    FILE *dst = fopen(CURRENT_PNG_PATH, "wb");
+    if (!dst) {
+        fclose(src);
+        ESP_LOGE(TAG, "Failed to open %s for error overlay", CURRENT_PNG_PATH);
+        return;
+    }
+    char buf[512];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
+        fwrite(buf, 1, n, dst);
+    }
+    fclose(src);
+    fclose(dst);
+
+    image_processor_add_caption_to_file(CURRENT_PNG_PATH, message);
+    display_manager_show_image(CURRENT_PNG_PATH);
+    ESP_LOGW(TAG, "Displayed error overlay: %s", message);
+}
+
+void utils_handle_wifi_connect_result(bool connected)
+{
+    if (connected) {
+        if (config_manager_get_wifi_fail_count() != 0) {
+            config_manager_set_wifi_fail_count(0);
+        }
+        return;
+    }
+
+    int count = config_manager_get_wifi_fail_count() + 1;
+    config_manager_set_wifi_fail_count(count);
+    ESP_LOGW(TAG, "WiFi connect failed (%d consecutive)", count);
+
+    if (!config_manager_get_error_overlay_enabled() || count < WIFI_FAIL_OVERLAY_THRESHOLD) {
+        return;
+    }
+
+    char caption[96];
+    snprintf(caption, sizeof(caption), "Fehler: Keine WLAN-Verbindung (%dx in Folge)", count);
+    display_error_overlay(caption);
 }
 
 esp_err_t trigger_image_rotation(void)

@@ -19,13 +19,16 @@
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
+#include "esp_littlefs.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "image_processor.h"
 #include "power_manager.h"
 #include "processing_settings.h"
+#include "storage.h"
 #include "wifi_manager.h"
 
 static const char *TAG = "telegram_bot";
@@ -844,6 +847,23 @@ static esp_err_t compose_pair_and_save(const char *path_a, const char *caption_a
     return err;
 }
 
+// Returns true and fills *out_percent with a valid 0-100 reading only when a
+// battery is actually present and measurable. board_hal_get_battery_percent()
+// returns -1 for "unknown" - notably also on pure-USB power with no battery
+// installed, which must never be treated as "critically low".
+static bool get_valid_battery_percent(int *out_percent)
+{
+    if (!board_hal_is_battery_connected()) {
+        return false;
+    }
+    int percent = board_hal_get_battery_percent();
+    if (percent < 0) {
+        return false;
+    }
+    *out_percent = percent;
+    return true;
+}
+
 // Sends a one-time-per-episode low-battery warning via Telegram, even if
 // this poll had no new updates at all. Debounced via a persisted flag so it
 // fires once per discharge, not on every wake while low; clears once the
@@ -853,10 +873,10 @@ static esp_err_t compose_pair_and_save(const char *path_a, const char *caption_a
 
 static void check_and_warn_low_battery(void)
 {
-    if (!board_hal_is_battery_connected()) {
+    int percent;
+    if (!get_valid_battery_percent(&percent)) {
         return;
     }
-    int percent = board_hal_get_battery_percent();
     if (percent < TELEGRAM_LOW_BATTERY_THRESHOLD) {
         if (!config_manager_get_telegram_low_battery_warned()) {
             char msg[128];
@@ -929,6 +949,20 @@ static void queue_command(const char *text)
     ESP_LOGI(TAG, "Queued Telegram command: %s", text);
 }
 
+// Forward declaration - defined in the "Command execution" section below
+// (shared with /status) but needed here for the optional wake-up ping.
+static void build_status_message(const char *title, char *out, size_t out_len);
+
+static void send_wake_notification_if_enabled(void)
+{
+    if (!config_manager_get_telegram_wake_notify_enabled()) {
+        return;
+    }
+    char wake_msg[512];
+    build_status_message("PhotoFrame wach", wake_msg, sizeof(wake_msg));
+    telegram_bot_send_message(wake_msg);
+}
+
 // ----------------------------------------------------------------------------
 // Public API
 // ----------------------------------------------------------------------------
@@ -996,6 +1030,7 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
     if (count == 0) {
         ESP_LOGI(TAG, "No new Telegram updates");
         cJSON_Delete(root);
+        send_wake_notification_if_enabled();
         if (out_result) {
             *out_result = TELEGRAM_POLL_OK;
         }
@@ -1038,6 +1073,12 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
         }
         return ESP_OK;
     }
+
+    // Optional wake-up ping, sent every poll (even with no new updates - see
+    // the count==0 branch above) once the batch is confirmed not to be an
+    // emergency reset - kept out of the reset path so a flooded queue still
+    // resets as fast as possible.
+    send_wake_notification_if_enabled();
 
     // ---- Second pass: download images, pair mismatched orientations inline
     // (in arrival order, so "newest ready wins" stays consistent whether the
@@ -1331,25 +1372,130 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
 // Command execution
 // ----------------------------------------------------------------------------
 
-static void build_status_message(char *out, size_t out_len)
+static const char *reset_reason_string(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:
+        return "Power-On";
+    case ESP_RST_SW:
+        return "Software-Reset";
+    case ESP_RST_PANIC:
+        return "Exception/Panic";
+    case ESP_RST_INT_WDT:
+        return "Interrupt-Watchdog";
+    case ESP_RST_TASK_WDT:
+        return "Task-Watchdog";
+    case ESP_RST_WDT:
+        return "Watchdog";
+    case ESP_RST_DEEPSLEEP:
+        return "Deep-Sleep-Wake";
+    case ESP_RST_BROWNOUT:
+        return "Brownout";
+    default:
+        return "Unbekannt";
+    }
+}
+
+static void format_battery(char *out, size_t out_len)
+{
+    int percent;
+    if (!get_valid_battery_percent(&percent)) {
+        snprintf(out, out_len, board_hal_is_usb_connected() ? "USB verbunden (kein Akku erkannt)"
+                                                             : "unbekannt");
+        return;
+    }
+    int mv = board_hal_get_battery_voltage();
+    snprintf(out, out_len, "%d%% (%d mV)%s%s", percent, mv, board_hal_is_charging() ? ", laedt" : "",
+             board_hal_is_usb_connected() ? ", USB verbunden" : "");
+}
+
+static void format_free_storage(char *out, size_t out_len)
+{
+    storage_type_t type = storage_get_type();
+    uint64_t total = 0, free_bytes = 0;
+    bool have = false;
+
+    if (type == STORAGE_TYPE_SDCARD) {
+        uint64_t t = 0, f = 0;
+        if (esp_vfs_fat_info(FS_MOUNT_POINT, &t, &f) == ESP_OK) {
+            total = t;
+            free_bytes = f;
+            have = true;
+        }
+    } else if (type == STORAGE_TYPE_LITTLEFS) {
+        size_t t = 0, u = 0;
+        if (esp_littlefs_info(LITTLEFS_PARTITION_LABEL, &t, &u) == ESP_OK) {
+            total = t;
+            free_bytes = (t > u) ? (t - u) : 0;
+            have = true;
+        }
+    }
+
+    if (!have) {
+        snprintf(out, out_len, "n/a");
+        return;
+    }
+    snprintf(out, out_len, "%.1f/%.1f MB frei", free_bytes / (1024.0 * 1024.0),
+             total / (1024.0 * 1024.0));
+}
+
+static void format_rotation_schedule(char *out, size_t out_len)
+{
+    if (!config_manager_get_auto_rotate()) {
+        snprintf(out, out_len, "Auto-Rotate deaktiviert");
+        return;
+    }
+    int count = config_manager_get_cron_rule_count();
+    if (count == 0) {
+        snprintf(out, out_len, "kein Zeitplan konfiguriert");
+        return;
+    }
+    size_t off = 0;
+    out[0] = '\0';
+    for (int i = 0; i < count && off < out_len; i++) {
+        const char *rule = config_manager_get_cron_rule(i);
+        if (!rule) {
+            continue;
+        }
+        int n = snprintf(out + off, out_len - off, "%s%s", i ? ", " : "", rule);
+        if (n < 0 || (size_t) n >= out_len - off) {
+            break;
+        }
+        off += (size_t) n;
+    }
+}
+
+// Shared by /status and the optional wake-up notification - `title` is the
+// only thing that differs between the two use sites.
+static void build_status_message(const char *title, char *out, size_t out_len)
 {
     const esp_app_desc_t *app_desc = esp_app_get_description();
-    int battery_percent = board_hal_get_battery_percent();
-    int battery_mv = board_hal_get_battery_voltage();
-    bool charging = board_hal_is_charging();
-    bool usb = board_hal_is_usb_connected();
+
+    char battery[64];
+    format_battery(battery, sizeof(battery));
 
     char ip_str[16] = "n/a";
     wifi_manager_get_ip(ip_str, sizeof(ip_str));
 
+    char storage[48];
+    format_free_storage(storage, sizeof(storage));
+
+    char schedule[160];
+    format_rotation_schedule(schedule, sizeof(schedule));
+
+    const char *ssid = config_manager_get_wifi_ssid();
+
     snprintf(out, out_len,
-             "PhotoFrame Status\n"
+             "%s\n"
              "Firmware: %s (%s)\n"
-             "Batterie: %d%% (%d mV)%s%s\n"
-             "WLAN: %s\n"
+             "Neustartgrund: %s\n"
+             "Batterie: %s\n"
+             "WLAN: %s (%s)\n"
+             "Speicher: %s\n"
+             "Rotations-Zeitplan: %s\n"
              "Freier Heap: %lu Bytes",
-             app_desc->version, BOARD_HAL_NAME, battery_percent, battery_mv,
-             charging ? ", laedt" : "", usb ? ", USB verbunden" : "", ip_str,
+             title, app_desc->version, BOARD_HAL_NAME, reset_reason_string(), battery,
+             ssid ? ssid : "n/a", ip_str, storage, schedule,
              (unsigned long) esp_get_free_heap_size());
 }
 
@@ -1386,8 +1532,8 @@ static void execute_command(const char *raw_text)
     ESP_LOGI(TAG, "Executing Telegram command: %s%s%s", cmd, args ? " " : "", args ? args : "");
 
     if (strcmp(cmd, "/status") == 0) {
-        char msg[256];
-        build_status_message(msg, sizeof(msg));
+        char msg[512];
+        build_status_message("PhotoFrame Status", msg, sizeof(msg));
         telegram_bot_send_message(msg);
     } else if (strcmp(cmd, "/clear") == 0) {
         esp_err_t err = display_manager_clear();
@@ -1453,16 +1599,51 @@ static void execute_command(const char *raw_text)
         } else {
             telegram_bot_send_message("Verwendung: /auto_rotate on|off");
         }
+    } else if (strcmp(cmd, "/wake_notify") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_telegram_wake_notify_enabled(true);
+            telegram_bot_send_message("Wach-Auf-Benachrichtigung aktiviert.");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_telegram_wake_notify_enabled(false);
+            telegram_bot_send_message("Wach-Auf-Benachrichtigung deaktiviert.");
+        } else {
+            telegram_bot_send_message("Verwendung: /wake_notify on|off");
+        }
+    } else if (strcmp(cmd, "/error_overlay") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_error_overlay_enabled(true);
+            telegram_bot_send_message("Fehler-Overlay auf dem Display aktiviert.");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_error_overlay_enabled(false);
+            telegram_bot_send_message("Fehler-Overlay auf dem Display deaktiviert.");
+        } else {
+            telegram_bot_send_message("Verwendung: /error_overlay on|off");
+        }
+    } else if (strcmp(cmd, "/wifi_perf") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_wifi_performance_mode_enabled(true);
+            telegram_bot_send_message(
+                "WLAN-Performance-Modus aktiviert (automatische Umschaltung je nach Kontext).");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_wifi_performance_mode_enabled(false);
+            telegram_bot_send_message(
+                "WLAN-Performance-Modus deaktiviert (immer Stromsparmodus, langsamere Web-UI).");
+        } else {
+            telegram_bot_send_message("Verwendung: /wifi_perf on|off");
+        }
     } else if (strcmp(cmd, "/help") == 0) {
         telegram_bot_send_message(
             "Verfuegbare Befehle:\n"
-            "/status - Status, Batterie, WLAN, Firmware\n"
+            "/status - Status, Batterie, WLAN, Firmware, Speicher\n"
             "/clear - Anzeige loeschen\n"
             "/restart - Neustart des Bilderrahmens\n"
             "/pairing - Hoch-/Querformat-Kombination ein-/ausschalten\n"
             "/rotate_cron <M H Wochentag> - Rotations-Zeitplan setzen (Cron-Format)\n"
             "/deep_sleep on|off - Deep Sleep ein-/ausschalten\n"
             "/auto_rotate on|off - Automatische Rotation ein-/ausschalten\n"
+            "/wake_notify on|off - Status-Ping bei jedem Aufwachen ein-/ausschalten\n"
+            "/error_overlay on|off - Fehlerhinweis auf dem Display ein-/ausschalten\n"
+            "/wifi_perf on|off - WLAN-Performance-Modus ein-/ausschalten\n"
             "/help - Diese Uebersicht\n"
             "/telegram_reset - Notfall: Warteschlange sofort leeren\n\n"
             "Bilder koennen als Foto oder als Datei gesendet werden. Eine "

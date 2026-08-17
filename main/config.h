@@ -173,6 +173,30 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define NVS_TELEGRAM_PENDING_LIST_KEY "tg_pend_list"
 #define TELEGRAM_MAX_PENDING_IMAGES 6
 #define NVS_TELEGRAM_LOW_BATT_WARNED_KEY "tg_low_batt"
+// Wake-up status ping (SSID/IP/battery/wake reason/rotation schedule) sent to
+// Telegram every poll, even with no new updates - opt-in, off by default.
+#define NVS_TELEGRAM_WAKE_NOTIFY_KEY "tg_wake_notify"
+
+// Home Assistant
+#define NVS_HA_ENABLED_KEY "ha_enabled"
+
+// On-display error overlay for persistent failures (e.g. repeated WiFi
+// connect failure on a scheduled wake) - opt-in, off by default.
+#define NVS_ERROR_OVERLAY_ENABLED_KEY "err_overlay_en"
+#define NVS_WIFI_FAIL_COUNT_KEY "wifi_fail_cnt"
+#define WIFI_FAIL_OVERLAY_THRESHOLD 3
+
+// WiFi performance mode: when enabled (default), the existing tiered policy
+// (power_manager's sleep_timer_task) grants full-RX/low-latency WiFi during
+// interactive wakes or USB power. When disabled, WiFi power-save always stays
+// on regardless of that policy, trading web UI responsiveness for lower draw.
+#define NVS_WIFI_PERF_MODE_ENABLED_KEY "wifi_perf_mode"
+
+// On battery, WiFi association draws a brief high-current TX burst; capping
+// TX power lowers that peak (at some cost to range). Value is in units of
+// 0.25 dBm (esp_wifi_set_max_tx_power() convention) - 60 = 15 dBm, versus the
+// factory default of up to ~20 dBm (80).
+#define WIFI_BATTERY_MAX_TX_POWER_QUARTER_DBM 60
 
 // AI API Keys (for webapp client use)
 #define AI_API_KEY_MAX_LEN 256

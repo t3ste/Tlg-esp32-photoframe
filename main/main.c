@@ -297,7 +297,10 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
                                                                 : "HA battery post"));
         ESP_ERROR_CHECK(wifi_manager_init());
 
-        if (connect_to_wifi_with_timeout(60)) {
+        bool connected_now = connect_to_wifi_with_timeout(60);
+        utils_handle_wifi_connect_result(connected_now);
+
+        if (connected_now) {
             wifi_connected = true;
             ESP_LOGI(TAG, "WiFi connected");
         } else {

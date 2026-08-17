@@ -60,6 +60,7 @@ static char telegram_chat_id[TELEGRAM_CHAT_ID_MAX_LEN] = {0};
 static int64_t telegram_last_update_id = 0;
 static bool telegram_pairing_enabled = true;
 static bool telegram_low_battery_warned = false;
+static bool telegram_wake_notify_enabled = false;
 
 typedef struct {
     char path[320];
@@ -67,6 +68,16 @@ typedef struct {
 } telegram_pending_image_t;
 static telegram_pending_image_t telegram_pending_images[TELEGRAM_MAX_PENDING_IMAGES];
 static int telegram_pending_image_count = 0;
+
+// Home Assistant
+static bool ha_enabled = false;
+
+// Error overlay / WiFi failure tracking
+static bool error_overlay_enabled = false;
+static int wifi_fail_count = 0;
+
+// WiFi
+static bool wifi_performance_mode_enabled = true;
 
 // OTA
 static bool ota_check_enabled = true;
@@ -444,6 +455,17 @@ esp_err_t config_manager_init(void)
             ESP_LOGI(TAG, "No HA URL in NVS, using default (empty)");
         }
 
+        uint8_t stored_ha_enabled;
+        if (nvs_get_u8(nvs_handle, NVS_HA_ENABLED_KEY, &stored_ha_enabled) == ESP_OK) {
+            ha_enabled = (stored_ha_enabled != 0);
+        } else {
+            // No explicit setting yet: preserve pre-existing behavior for a
+            // device that already had an HA URL configured before this
+            // switch existed; fresh/factory-reset devices default to off.
+            ha_enabled = (ha_url[0] != '\0');
+        }
+        ESP_LOGI(TAG, "Home Assistant integration: %s", ha_enabled ? "enabled" : "disabled");
+
         // Telegram Bot
         size_t tg_token_len = TELEGRAM_BOT_TOKEN_MAX_LEN;
         if (nvs_get_str(nvs_handle, NVS_TELEGRAM_BOT_TOKEN_KEY, telegram_bot_token,
@@ -474,6 +496,27 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_TELEGRAM_LOW_BATT_WARNED_KEY, &stored_low_batt_warned) ==
             ESP_OK) {
             telegram_low_battery_warned = (stored_low_batt_warned != 0);
+        }
+
+        uint8_t stored_wake_notify = 0;
+        if (nvs_get_u8(nvs_handle, NVS_TELEGRAM_WAKE_NOTIFY_KEY, &stored_wake_notify) == ESP_OK) {
+            telegram_wake_notify_enabled = (stored_wake_notify != 0);
+        }
+
+        uint8_t stored_error_overlay = 0;
+        if (nvs_get_u8(nvs_handle, NVS_ERROR_OVERLAY_ENABLED_KEY, &stored_error_overlay) ==
+            ESP_OK) {
+            error_overlay_enabled = (stored_error_overlay != 0);
+        }
+
+        int32_t stored_wifi_fail_count = 0;
+        if (nvs_get_i32(nvs_handle, NVS_WIFI_FAIL_COUNT_KEY, &stored_wifi_fail_count) == ESP_OK) {
+            wifi_fail_count = (int) stored_wifi_fail_count;
+        }
+
+        uint8_t stored_wifi_perf = 1;  // Default to enabled (existing tiered behavior)
+        if (nvs_get_u8(nvs_handle, NVS_WIFI_PERF_MODE_ENABLED_KEY, &stored_wifi_perf) == ESP_OK) {
+            wifi_performance_mode_enabled = (stored_wifi_perf != 0);
         }
 
         {
@@ -1200,6 +1243,25 @@ const char *config_manager_get_ha_url(void)
     return ha_url;
 }
 
+void config_manager_set_ha_enabled(bool enabled)
+{
+    ha_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_HA_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Home Assistant integration %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_ha_enabled(void)
+{
+    return ha_enabled;
+}
+
 // ============================================================================
 // Telegram Bot
 // ============================================================================
@@ -1375,6 +1437,88 @@ void config_manager_set_telegram_low_battery_warned(bool warned)
 bool config_manager_get_telegram_low_battery_warned(void)
 {
     return telegram_low_battery_warned;
+}
+
+void config_manager_set_telegram_wake_notify_enabled(bool enabled)
+{
+    telegram_wake_notify_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_TELEGRAM_WAKE_NOTIFY_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Telegram wake-up notification %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_telegram_wake_notify_enabled(void)
+{
+    return telegram_wake_notify_enabled;
+}
+
+// ============================================================================
+// Error overlay / WiFi failure tracking
+// ============================================================================
+
+void config_manager_set_error_overlay_enabled(bool enabled)
+{
+    error_overlay_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_ERROR_OVERLAY_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Critical-error display overlay %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_error_overlay_enabled(void)
+{
+    return error_overlay_enabled;
+}
+
+void config_manager_set_wifi_fail_count(int count)
+{
+    wifi_fail_count = count;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_i32(nvs_handle, NVS_WIFI_FAIL_COUNT_KEY, (int32_t) wifi_fail_count);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int config_manager_get_wifi_fail_count(void)
+{
+    return wifi_fail_count;
+}
+
+// ============================================================================
+// WiFi
+// ============================================================================
+
+void config_manager_set_wifi_performance_mode_enabled(bool enabled)
+{
+    wifi_performance_mode_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_WIFI_PERF_MODE_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "WiFi performance mode %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_wifi_performance_mode_enabled(void)
+{
+    return wifi_performance_mode_enabled;
 }
 
 // ============================================================================

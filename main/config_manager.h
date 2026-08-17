@@ -118,6 +118,14 @@ const char *config_manager_get_image_etag(void);
 void config_manager_set_ha_url(const char *url);
 const char *config_manager_get_ha_url(void);
 
+// Master switch for all Home Assistant integration (online/offline/update
+// notifications and the rotation-veto piggyback). Defaults to false on a
+// fresh device; a device upgrading from a firmware version that predates
+// this switch keeps HA enabled automatically if a ha_url was already
+// configured, so existing setups don't silently break.
+void config_manager_set_ha_enabled(bool enabled);
+bool config_manager_get_ha_enabled(void);
+
 // ============================================================================
 // Telegram Bot
 // ============================================================================
@@ -162,6 +170,11 @@ void config_manager_clear_telegram_pending_images(void);
 void config_manager_set_telegram_low_battery_warned(bool warned);
 bool config_manager_get_telegram_low_battery_warned(void);
 
+// Wake-up status ping (SSID/IP/battery/wake reason/rotation schedule) sent to
+// Telegram on every poll, even when there are no new updates.
+void config_manager_set_telegram_wake_notify_enabled(bool enabled);
+bool config_manager_get_telegram_wake_notify_enabled(void);
+
 // ============================================================================
 // AI API Keys
 // ============================================================================
@@ -171,6 +184,30 @@ const char *config_manager_get_openai_api_key(void);
 
 void config_manager_set_google_api_key(const char *key);
 const char *config_manager_get_google_api_key(void);
+
+// ============================================================================
+// Error overlay / WiFi failure tracking
+// ============================================================================
+
+// On-display error overlay for persistent failures (currently: repeated WiFi
+// connect failure on a scheduled wake). Togglable via web UI and bot command.
+void config_manager_set_error_overlay_enabled(bool enabled);
+bool config_manager_get_error_overlay_enabled(void);
+
+// Consecutive scheduled-wake WiFi connection failures (reset to 0 on any
+// success). Persisted so it survives deep sleep between wakes.
+void config_manager_set_wifi_fail_count(int count);
+int config_manager_get_wifi_fail_count(void);
+
+// ============================================================================
+// WiFi
+// ============================================================================
+
+// When false, WiFi always stays in power-save mode regardless of the
+// interactive/USB-triggered "full RX" policy in power_manager - lower draw,
+// slower web UI. Defaults to true (existing tiered behavior unchanged).
+void config_manager_set_wifi_performance_mode_enabled(bool enabled);
+bool config_manager_get_wifi_performance_mode_enabled(void);
 
 // ============================================================================
 // OTA

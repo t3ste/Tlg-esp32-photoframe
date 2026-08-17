@@ -778,6 +778,19 @@ async function performFactoryReset() {
                       "/pairing" bot command.
                     </div>
 
+                    <v-switch
+                      v-model="settingsStore.deviceSettings.telegramWakeNotifyEnabled"
+                      label="Send a status ping on every wake"
+                      color="primary"
+                      class="mb-2"
+                      hide-details
+                    />
+                    <div class="text-caption text-medium-emphasis mb-4">
+                      Sends SSID, IP, battery, reset/wake reason and rotation schedule to the bot
+                      on every poll, even when there are no new messages. Also togglable via the
+                      "/wake_notify" bot command.
+                    </div>
+
                     <v-alert
                       v-if="settingsStore.deviceSettings.lastFetchError"
                       type="error"
@@ -827,16 +840,51 @@ async function performFactoryReset() {
               class="mb-2 mt-4"
               hide-details
             />
-            <div class="text-caption text-medium-emphasis">
+            <div class="text-caption text-medium-emphasis mb-4">
               Checks for a new firmware release once a day and on every cold boot. A manually
               triggered "Check for updates" (below) always works regardless of this setting.
               Useful to turn off for self-built/dev firmware, which otherwise always reports an
               "update available".
             </div>
+
+            <v-switch
+              v-model="settingsStore.deviceSettings.wifiPerformanceModeEnabled"
+              label="Enable WiFi performance mode"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              When on (default), the frame automatically switches to full WiFi receive power
+              (~60-70 mA extra draw, but a much snappier web UI) whenever someone might be
+              looking - an interactive wake or USB power - and drops back to WiFi power-save
+              otherwise. Turn off to always stay in power-save, even during interactive use,
+              trading web UI responsiveness for lower battery draw.
+            </div>
+
+            <v-switch
+              v-model="settingsStore.deviceSettings.errorOverlayEnabled"
+              label="Show error overlay on display for persistent failures"
+              color="primary"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis">
+              After 3 consecutive failed WiFi connection attempts on a scheduled wake, overlays a
+              short error message on the currently displayed image (without modifying the saved
+              file) so the problem is visible on the frame itself, not just in logs. Also
+              togglable via the "/error_overlay" Telegram bot command.
+            </div>
           </v-tabs-window-item>
 
           <!-- Home Assistant Tab -->
           <v-tabs-window-item class="mt-2" value="homeAssistant">
+            <v-switch
+              v-model="settingsStore.deviceSettings.haEnabled"
+              label="Enable Home Assistant integration"
+              color="primary"
+              class="mb-4"
+              hide-details
+            />
             <v-text-field
               v-model="settingsStore.deviceSettings.haUrl"
               label="Home Assistant URL"
@@ -844,6 +892,7 @@ async function performFactoryReset() {
               placeholder="http://homeassistant.local:8123"
               hint="Configure for dynamic image serving and battery level reporting"
               persistent-hint
+              :disabled="!settingsStore.deviceSettings.haEnabled"
             />
           </v-tabs-window-item>
 
