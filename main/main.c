@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -400,6 +401,32 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
     // Won't reach here after sleep
 }
 
+// Runs deep_sleep_wake_main() on a dedicated task with a generously-sized
+// stack, instead of the small ESP-IDF "main" task (CONFIG_ESP_MAIN_TASK_STACK_SIZE
+// is back to 6144 - the value already validated upstream for this task's own
+// remaining work, "WiFi and HTTP client operations" - now that the heavy
+// rotation pipeline no longer runs there). 12288 bytes matches the size that
+// used to be applied globally for every build (coredump-confirmed sufficient,
+// see commit 4bbaa64's stack-overflow fix) - just relocated to a task that
+// only exists for the duration of one wake cycle, rather than a permanent
+// cost every build pays whether or not it's ever needed. Applies to every
+// rotation mode, not just Telegram: Storage mode's own orientation-pairing
+// image composition (compose_rotation_pair() in display_manager.c) is a
+// similarly non-trivial operation and shouldn't have to independently
+// re-prove it fits in a smaller shared stack.
+//
+// deep_sleep_wake_main() never returns in normal operation - every path ends
+// in power_manager_enter_sleep() -> esp_deep_sleep_start(), which resets the
+// chip before this task (or anything else) runs again. The vTaskDelete(NULL)
+// below is defensive cleanup for the otherwise-unreachable case where it
+// somehow does return.
+static void deep_sleep_wake_task(void *arg)
+{
+    wakeup_source_t wakeup_src = (wakeup_source_t) (intptr_t) arg;
+    deep_sleep_wake_main(wakeup_src);
+    vTaskDelete(NULL);
+}
+
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
 // Dev builds only: if the previous boot stored a core dump (panic), log the
 // crashed task + backtrace so it lands in the persistent debug log, then clear
@@ -602,9 +629,15 @@ void app_main(void)
     case WAKEUP_SOURCE_TIMER:
     case WAKEUP_SOURCE_ROTATE_BUTTON:
         ESP_LOGI(TAG, "Entering deep sleep wake path (timer or rotate button)");
-        deep_sleep_wake_main(wakeup_src);
-        // Won't reach here after sleep
-        break;
+        xTaskCreate(deep_sleep_wake_task, "deep_sleep_wake", 12288,
+                    (void *) (intptr_t) wakeup_src, 5, NULL);
+        // Returning (rather than `break`) hands off exclusively to the new
+        // task - falling through to the cold-boot/BOOT_BUTTON setup code
+        // below would otherwise run concurrently with it (duplicate WiFi/HTTP
+        // server init racing the same state). This wake path always ends in
+        // deep sleep (chip reset) from within that task, so there is nothing
+        // left for the main task to do.
+        return;
 
     case WAKEUP_SOURCE_BOOT_BUTTON:
         ESP_LOGI(TAG, "BOOT button wakeup detected - starting WiFi and HTTP server");
