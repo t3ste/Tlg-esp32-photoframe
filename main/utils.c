@@ -558,6 +558,56 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_telegram_keep_originals_enabled(cJSON_IsTrue(item));
     }
 
+    // Weather + headline overlays (on-device, no companion server needed)
+    item = cJSON_GetObjectItem(root, "weather_overlay_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_weather_overlay_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "weather_location_name");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_weather_location_name(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "weather_lat");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_weather_lat(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "weather_lon");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_weather_lon(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "headlines_overlay_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_headlines_overlay_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "headlines_rss_url");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_headlines_rss_url(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "headlines_count");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_headlines_count(item->valueint);
+    }
+    item = cJSON_GetObjectItem(root, "overlay_invert_colors");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_overlay_invert_colors(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "overlay_language");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_overlay_language(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "headlines_wrap_lines");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_headlines_wrap_lines(item->valueint);
+    }
+    item = cJSON_GetObjectItem(root, "caption_invert_colors_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_caption_invert_colors_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "weather_multiline_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_weather_multiline_enabled(cJSON_IsTrue(item));
+    }
+
     return ESP_OK;
 }
 
@@ -1264,7 +1314,7 @@ static esp_err_t display_error_overlay_blank(const char *message)
     }
     memset(rgb_buffer, 0xFF, buf_size);
 
-    image_processor_draw_caption(rgb_buffer, width, height, message);
+    image_processor_draw_caption(rgb_buffer, width, height, message, false);
     esp_err_t err = image_processor_write_rgb_to_png(rgb_buffer, width, height, CURRENT_PNG_PATH);
     heap_caps_free(rgb_buffer);
     if (err != ESP_OK) {
@@ -1315,7 +1365,10 @@ static esp_err_t display_error_overlay(const char *message)
     fclose(src);
     fclose(dst);
 
-    image_processor_add_caption_to_file(CURRENT_PNG_PATH, message);
+    // Error overlay is a distinct feature from the weather/headline overlay
+    // and Telegram captions - always the fixed default look (black bar,
+    // white text), unaffected by either's color setting.
+    image_processor_add_caption_to_file(CURRENT_PNG_PATH, message, false);
     display_manager_show_image(CURRENT_PNG_PATH);
     ESP_LOGW(TAG, "Displayed error overlay: %s", message);
     return ESP_OK;

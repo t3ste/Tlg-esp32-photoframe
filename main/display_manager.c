@@ -29,6 +29,7 @@
 #include "history_manager.h"
 #include "image_processor.h"
 #include "nvs.h"
+#include "overlay_manager.h"
 #include "processing_settings.h"
 #include "storage.h"
 #include "utils.h"
@@ -544,7 +545,17 @@ static void rotate_sequential(char **enabled_albums, int album_count)
 
                     if (current_idx == target_idx) {
                         ESP_LOGI(TAG, "Found target index %ld: %s", (long) target_idx, fullpath);
-                        display_manager_show_image(fullpath);
+                        const char *shown = overlay_manager_apply(fullpath);
+                        display_manager_show_image(shown);
+                        if (strcmp(shown, fullpath) != 0) {
+                            // The overlay was drawn onto a scratch copy - see
+                            // display_manager_show_image()'s own
+                            // history_manager_mark_shown(filename) call above:
+                            // it just (harmlessly, per its own comment)
+                            // recorded the scratch path, so re-mark the real
+                            // one too.
+                            history_manager_mark_shown(fullpath);
+                        }
                         save_last_displayed_image(fullpath);
                         config_manager_set_last_index(target_idx);
                         found_target = true;
@@ -568,7 +579,11 @@ static void rotate_sequential(char **enabled_albums, int album_count)
     if (!found_target) {
         if (first_image[0] != '\0') {
             ESP_LOGI(TAG, "Wrapping around to start. Displaying: %s", first_image);
-            display_manager_show_image(first_image);
+            const char *shown = overlay_manager_apply(first_image);
+            display_manager_show_image(shown);
+            if (strcmp(shown, first_image) != 0) {
+                history_manager_mark_shown(first_image);
+            }
             save_last_displayed_image(first_image);
             config_manager_set_last_index(0);  // Reset index to 0
         } else {
@@ -870,7 +885,11 @@ static void rotate_random(char **enabled_albums, int album_count)
     // Display random image
     ESP_LOGI(TAG, "Auto-rotate: Displaying random image %d/%d (unseen this cycle: %d): %s",
              random_index + 1, total_image_count, unseen_count, final_path);
-    display_manager_show_image(final_path);
+    const char *shown = overlay_manager_apply(final_path);
+    display_manager_show_image(shown);
+    if (strcmp(shown, final_path) != 0) {
+        history_manager_mark_shown(final_path);
+    }
 
     // Store the displayed image filename in NVS
     save_last_displayed_image(final_path);

@@ -152,20 +152,86 @@ esp_err_t image_processor_compose_pair_to_rgb(const uint8_t *data_a, size_t size
                                               dither_algorithm_t dither_algorithm,
                                               image_process_rgb_result_t *result);
 
+// Per-line char buffer size shared by every text-overlay function in this
+// module (captions, overlay bar lines, and image_processor_wrap_text()'s
+// output) - a single public constant so callers can size their own arrays
+// to match.
+#define OVERLAY_LINE_MAX_CHARS 96
+
 /**
  * @brief Overlays a caption bar (solid background + wrapped bitmap-font text)
  * across the bottom of an already-processed (dithered, palette-quantized)
  * RGB888 buffer. Uses the exact display palette so the result stays a valid
  * "processed" image. No-op if caption is NULL/empty.
+ *
+ * @param invert_colors false (default) = black bar, white text; true = white
+ * bar, black text.
  */
-void image_processor_draw_caption(uint8_t *rgb_buffer, int width, int height, const char *caption);
+void image_processor_draw_caption(uint8_t *rgb_buffer, int width, int height, const char *caption,
+                                  bool invert_colors);
 
 /**
  * @brief Same as image_processor_draw_caption(), but reads an already
  * display-processed PNG file, overlays the caption, and re-writes it in
  * place (no re-dithering). No-op (returns ESP_OK) if caption is NULL/empty.
  */
-esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *caption);
+esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *caption,
+                                              bool invert_colors);
+
+/**
+ * @brief Draws a solid overlay bar across the TOP of an already-processed
+ * RGB888 buffer, one independent line per entry in `lines` (each truncated
+ * with an ellipsis to fit the display width - no word-wrap across lines,
+ * unlike image_processor_draw_caption()/image_processor_wrap_text(); callers
+ * that want a single long string wrapped across several of these lines
+ * should pre-wrap it with image_processor_wrap_text() first). Top-anchored
+ * specifically so it never collides with a caption bar (always
+ * bottom-anchored) baked into the same image. Used for the weather/headline
+ * overlay. No-op if lines is NULL or line_count <= 0.
+ *
+ * @param invert_colors false (default) = black bar, white text; true = white
+ * bar, black text - Web UI toggle, independent of the caption bar's colors
+ * (though callers may choose to pass the same value through).
+ */
+void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height,
+                                      const char *const *lines, int line_count,
+                                      bool invert_colors);
+
+/**
+ * @brief Same as image_processor_draw_overlay_bar(), but reads an already
+ * display-processed PNG file, draws the overlay bar, and re-writes it in
+ * place (no re-dithering). No-op (returns ESP_OK) if lines is NULL/empty.
+ */
+esp_err_t image_processor_add_overlay_to_file(const char *png_path, const char *const *lines,
+                                              int line_count, bool invert_colors);
+
+/**
+ * @brief Greedy word-wraps `text` into up to `max_lines` lines (each written
+ * into `out_lines`, OVERLAY_LINE_MAX_CHARS bytes per row) that fit within
+ * `width` pixels using the same font/wrap rules as
+ * image_processor_draw_caption(). Truncates the last line with "..." if the
+ * text doesn't fit within max_lines. Does NOT draw anything - just computes
+ * the wrapped lines, so callers can assemble a mixed line list (e.g. one
+ * long headline wrapped across several overlay lines, alongside other
+ * already-single-line content) before handing everything to
+ * image_processor_add_overlay_to_file(). ASCII-sanitizes internally, same as
+ * the other text-overlay functions.
+ *
+ * @return Number of lines produced (0 if nothing renderable, e.g. `width`
+ * too narrow for even one character).
+ */
+int image_processor_wrap_text(const char *text, int width, int max_lines,
+                              char out_lines[][OVERLAY_LINE_MAX_CHARS]);
+
+/**
+ * @brief Transliterates UTF-8 (German umlauts/sz-ligature to ASCII digraphs,
+ * everything else non-ASCII silently dropped) to plain ASCII - the same
+ * sanitization image_processor_draw_caption()/draw_overlay_bar() apply
+ * internally, exposed for callers that need ASCII-safe text before it
+ * reaches this module (e.g. the headline RSS extractor, so oversized/raw
+ * titles are already clean before line-length truncation decisions).
+ */
+void image_processor_sanitize_ascii(const char *utf8, char *out, size_t out_len);
 
 /**
  * @brief Writes an already-processed RGB888 buffer to a PNG file. Thin

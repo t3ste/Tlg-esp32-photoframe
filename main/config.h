@@ -78,6 +78,13 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define CURRENT_IMAGE_LINK FS_MOUNT_POINT "/.current.lnk"
 #define TELEGRAM_THUMBNAIL_MAX_DIMENSION 300
 #define CURRENT_CALIBRATION_PATH FS_MOUNT_POINT "/.calibration.png"
+// Scratch copy used to composite the weather/headline overlay bar onto the
+// image a rotation is about to show, without ever mutating the saved album
+// file (its content is only valid for the current wake). Deliberately not
+// CURRENT_PNG_PATH - that's already a shared scratch target written by the
+// Telegram display path and the error overlay; reusing it here risks a
+// same-cycle collision when the rotation's own source is CURRENT_PNG_PATH.
+#define CURRENT_OVERLAY_PNG_PATH FS_MOUNT_POINT "/.overlay.png"
 
 // Display-history file (one shown image's full path per line) - lets random
 // rotation and the Telegram fallback rotation cycle through every image once
@@ -232,6 +239,67 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // Keep a copy of each Telegram photo exactly as received (pre-processing) in
 // TELEGRAM_ORIGINALS_DIRECTORY. Opt-in, off by default.
 #define NVS_TELEGRAM_KEEP_ORIGINALS_KEY "tg_keep_orig"
+
+// Weather + headline overlays: composited as a text bar across the TOP of
+// whatever image a rotation is about to show (see CURRENT_OVERLAY_PNG_PATH) -
+// on-device alternative to esp32-photoframe-server's weather overlay, no
+// companion server required. Both opt-in, off by default, independently
+// togglable. Refreshed opportunistically on whatever wake/rotation cadence
+// the user's own cron schedule already produces - no separate wake timer.
+#define NVS_WEATHER_OVERLAY_ENABLED_KEY "wthr_overlay_en"
+// Free-text location name (e.g. "Berlin"), geocoded once via Open-Meteo's
+// free geocoding API; the resolved coordinates are cached in
+// NVS_WEATHER_LAT_KEY/NVS_WEATHER_LON_KEY (re-geocoded only when this name
+// changes, tracked via NVS_WEATHER_GEOCODED_NAME_KEY) to avoid repeating that
+// round trip every wake. Leave lat/lon set manually instead to skip
+// geocoding entirely.
+#define NVS_WEATHER_LOCATION_NAME_KEY "wthr_loc_name"
+#define NVS_WEATHER_LAT_KEY "wthr_lat"
+#define NVS_WEATHER_LON_KEY "wthr_lon"
+#define NVS_WEATHER_GEOCODED_NAME_KEY "wthr_geo_name"
+#define WEATHER_LOCATION_NAME_MAX_LEN 64
+#define WEATHER_LATLON_MAX_LEN 16
+
+#define NVS_HEADLINES_OVERLAY_ENABLED_KEY "hdln_overlay_en"
+// Any RSS/Atom feed URL (Tagesschau, Spiegel, BBC, ...) - no API key, no
+// rate limit, works with essentially any news outlet.
+#define NVS_HEADLINES_RSS_URL_KEY "hdln_rss_url"
+#define NVS_HEADLINES_COUNT_KEY "hdln_count"  // 1-3, default 3
+#define HEADLINES_RSS_URL_MAX_LEN 256
+#define HEADLINES_COUNT_DEFAULT 3
+#define HEADLINES_COUNT_MIN 1
+#define HEADLINES_COUNT_MAX 3
+// When headlines_count == 1, optionally word-wrap that single headline
+// across this many overlay lines instead of hard-truncating it to one line.
+// 1 (default) = unchanged single-line-with-ellipsis behavior.
+#define NVS_HEADLINES_WRAP_LINES_KEY "hdln_wrap_ln"
+#define HEADLINES_WRAP_LINES_DEFAULT 1
+#define HEADLINES_WRAP_LINES_MIN 1
+#define HEADLINES_WRAP_LINES_MAX 3
+
+// Overlay bar appearance/language, shared by both the weather and headlines
+// overlay content. Colors default to the existing look (black bar, white
+// text); swapped when enabled. Language selects both the weather condition
+// text and weekday abbreviations ("en": Mon..Sun: default; "de": Mo..So).
+#define NVS_OVERLAY_INVERT_COLORS_KEY "ovl_invert_col"
+#define NVS_OVERLAY_LANGUAGE_KEY "ovl_lang"
+#define OVERLAY_LANGUAGE_MAX_LEN 4
+#define OVERLAY_LANGUAGE_DEFAULT "en"
+// Also apply the invert-colors setting above to Telegram photo captions
+// (both a plain caption and an orientation-paired composite's) - a separate
+// opt-in so turning on overlay color inversion doesn't silently change the
+// look of every Telegram caption too. Off by default (fixed black
+// bar/white text, as before this setting existed).
+#define NVS_CAPTION_INVERT_COLORS_KEY "cap_invert_col"
+
+// 46 characters/line is comfortably below what any single condition+temps
+// segment needs (see docs/OVERLAYS.md), but three of them on ONE line can
+// still overflow for longer condition words even after abbreviation - this
+// gives each day its own line instead. Only takes effect while the
+// headlines overlay is disabled (there isn't room for 3 weather lines AND
+// headline lines together); weather always renders as one combined line
+// whenever headlines are also enabled, regardless of this setting.
+#define NVS_WEATHER_MULTILINE_KEY "wthr_multiline"
 
 // On battery, WiFi association draws a brief high-current TX burst; capping
 // TX power lowers that peak (at some cost to range). Value is in units of

@@ -1494,6 +1494,24 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_telegram_rotation_notify_enabled());
         cJSON_AddBoolToObject(root, "telegram_keep_originals_enabled",
                               config_manager_get_telegram_keep_originals_enabled());
+        cJSON_AddBoolToObject(root, "weather_overlay_enabled",
+                              config_manager_get_weather_overlay_enabled());
+        cJSON_AddStringToObject(root, "weather_location_name",
+                                config_manager_get_weather_location_name());
+        cJSON_AddStringToObject(root, "weather_lat", config_manager_get_weather_lat());
+        cJSON_AddStringToObject(root, "weather_lon", config_manager_get_weather_lon());
+        cJSON_AddBoolToObject(root, "headlines_overlay_enabled",
+                              config_manager_get_headlines_overlay_enabled());
+        cJSON_AddStringToObject(root, "headlines_rss_url", config_manager_get_headlines_rss_url());
+        cJSON_AddNumberToObject(root, "headlines_count", config_manager_get_headlines_count());
+        cJSON_AddBoolToObject(root, "overlay_invert_colors",
+                              config_manager_get_overlay_invert_colors());
+        cJSON_AddStringToObject(root, "overlay_language", config_manager_get_overlay_language());
+        cJSON_AddNumberToObject(root, "headlines_wrap_lines", config_manager_get_headlines_wrap_lines());
+        cJSON_AddBoolToObject(root, "caption_invert_colors_enabled",
+                              config_manager_get_caption_invert_colors_enabled());
+        cJSON_AddBoolToObject(root, "weather_multiline_enabled",
+                              config_manager_get_weather_multiline_enabled());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");

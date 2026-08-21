@@ -970,6 +970,187 @@ async function performFactoryReset() {
               useful to preview what it looks like. Overlays onto the current image if there is
               one, otherwise shows it on a blank screen.
             </div>
+
+            <v-divider class="my-6" />
+
+            <div class="text-subtitle-2 mb-2">Weather + Headline Overlays</div>
+            <div class="text-caption text-medium-emphasis mb-4">
+              On-device alternative to the companion image server's weather overlay - no separate
+              server required. Drawn as a text bar across the top of the image whenever a wake
+              rotates to a new photo, so data is only as fresh as your rotation schedule (a sparse
+              schedule means correspondingly stale weather/headlines). Only applies to Storage and
+              Telegram rotation modes - URL rotation streams pixels straight to the display and has
+              no image file to draw an overlay onto.
+            </div>
+
+            <v-row dense class="mb-2">
+              <v-col cols="6" sm="4">
+                <v-select
+                  v-model="settingsStore.deviceSettings.overlayLanguage"
+                  :items="[
+                    { title: 'English', value: 'en' },
+                    { title: 'Deutsch', value: 'de' },
+                  ]"
+                  label="Overlay language"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="6" sm="8" class="d-flex align-center">
+                <v-switch
+                  v-model="settingsStore.deviceSettings.overlayInvertColors"
+                  label="Invert overlay colors (white bar, black text)"
+                  color="primary"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Applies to both overlays below. Language selects the weather condition wording and
+              weekday abbreviations (English default: Mon..Sun; German: Mo..So).
+            </div>
+            <v-checkbox
+              v-model="settingsStore.deviceSettings.captionInvertColorsEnabled"
+              label="Also apply color inversion to Telegram photo captions"
+              color="primary"
+              density="compact"
+              hide-details
+              class="mb-4"
+            />
+
+            <v-switch
+              v-model="settingsStore.deviceSettings.weatherOverlayEnabled"
+              label="Weather overlay"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              3-day forecast (today + next 2 days), e.g.
+              "Wed sunny 16/24 | Thu partly cloudy 17/25 | Fri rain -5/3" (min/max °C). Free, no API
+              key (<a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>).
+              Also togglable via the "/weather" bot command.
+            </div>
+            <v-row dense class="mb-2">
+              <v-col cols="12" sm="6">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.weatherLocationName"
+                  label="Location name"
+                  variant="outlined"
+                  density="compact"
+                  placeholder="Berlin"
+                  hint="Geocoded once, then cached - or set lat/lon directly to skip that"
+                  persistent-hint
+                  :disabled="!settingsStore.deviceSettings.weatherOverlayEnabled"
+                />
+              </v-col>
+              <v-col cols="6" sm="3">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.weatherLat"
+                  label="Latitude (optional)"
+                  variant="outlined"
+                  density="compact"
+                  placeholder="52.5200"
+                  :disabled="!settingsStore.deviceSettings.weatherOverlayEnabled"
+                />
+              </v-col>
+              <v-col cols="6" sm="3">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.weatherLon"
+                  label="Longitude (optional)"
+                  variant="outlined"
+                  density="compact"
+                  placeholder="13.4050"
+                  :disabled="!settingsStore.deviceSettings.weatherOverlayEnabled"
+                />
+              </v-col>
+            </v-row>
+            <v-checkbox
+              v-model="settingsStore.deviceSettings.weatherMultilineEnabled"
+              label="Show as 3 lines (one per day) instead of one combined line"
+              color="primary"
+              density="compact"
+              hide-details
+              :disabled="
+                !settingsStore.deviceSettings.weatherOverlayEnabled ||
+                settingsStore.deviceSettings.headlinesOverlayEnabled
+              "
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              Even abbreviated, a 3-day forecast can't reliably fit on one ~46-character line for
+              every combination (long condition words, 3-digit negative temperatures) - one line
+              per day always fits. Only available while the headlines overlay below is off (not
+              enough room for both).
+            </div>
+
+            <v-switch
+              v-model="settingsStore.deviceSettings.headlinesOverlayEnabled"
+              label="Headlines overlay"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Any RSS/Atom feed URL - no API key, no rate limit. Also togglable via the
+              "/headlines" bot command.
+            </div>
+            <v-row dense>
+              <v-col cols="12" sm="8">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.headlinesRssUrl"
+                  label="RSS feed URL"
+                  variant="outlined"
+                  density="compact"
+                  placeholder="https://www.tagesschau.de/xml/rss2/"
+                  :disabled="!settingsStore.deviceSettings.headlinesOverlayEnabled"
+                />
+              </v-col>
+              <v-col cols="12" sm="4">
+                <v-select
+                  v-model="settingsStore.deviceSettings.headlinesCount"
+                  :items="[1, 2, 3]"
+                  label="Headlines shown"
+                  variant="outlined"
+                  density="compact"
+                  :disabled="!settingsStore.deviceSettings.headlinesOverlayEnabled"
+                />
+              </v-col>
+            </v-row>
+            <v-expand-transition>
+              <v-row
+                v-if="
+                  settingsStore.deviceSettings.headlinesOverlayEnabled &&
+                  settingsStore.deviceSettings.headlinesCount === 1
+                "
+                dense
+              >
+                <v-col cols="12" sm="6">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.headlinesWrapLines"
+                    :items="[
+                      { title: 'Single line (truncated with …)', value: 1 },
+                      { title: 'Wrap across 2 lines', value: 2 },
+                      { title: 'Wrap across 3 lines', value: 3 },
+                    ]"
+                    label="Headline display"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+              </v-row>
+            </v-expand-transition>
+            <div
+              v-if="
+                settingsStore.deviceSettings.headlinesOverlayEnabled &&
+                settingsStore.deviceSettings.headlinesCount === 1
+              "
+              class="text-caption text-medium-emphasis mt-1"
+            >
+              Only offered with exactly 1 headline selected above - with more than one, each
+              already gets its own line.
+            </div>
           </v-tabs-window-item>
 
           <!-- Home Assistant Tab -->

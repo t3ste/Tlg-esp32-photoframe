@@ -227,6 +227,53 @@ bool config_manager_get_telegram_rotation_notify_enabled(void);
 void config_manager_set_telegram_keep_originals_enabled(bool enabled);
 bool config_manager_get_telegram_keep_originals_enabled(void);
 
+// Weather + headline overlays: composited on-device, no companion server
+// needed. Both default to false. See NVS_WEATHER_*/NVS_HEADLINES_* in
+// config.h.
+void config_manager_set_weather_overlay_enabled(bool enabled);
+bool config_manager_get_weather_overlay_enabled(void);
+// Free-text location name, geocoded once (see weather.c); lat/lon below can
+// instead be set directly to skip geocoding entirely.
+void config_manager_set_weather_location_name(const char *name);
+const char *config_manager_get_weather_location_name(void);
+void config_manager_set_weather_lat(const char *lat);
+const char *config_manager_get_weather_lat(void);
+void config_manager_set_weather_lon(const char *lon);
+const char *config_manager_get_weather_lon(void);
+// Internal cache-invalidation marker (weather.c only, not user-facing).
+void config_manager_set_weather_geocoded_name(const char *name);
+const char *config_manager_get_weather_geocoded_name(void);
+
+void config_manager_set_headlines_overlay_enabled(bool enabled);
+bool config_manager_get_headlines_overlay_enabled(void);
+void config_manager_set_headlines_rss_url(const char *url);
+const char *config_manager_get_headlines_rss_url(void);
+// Clamped to [HEADLINES_COUNT_MIN, HEADLINES_COUNT_MAX] (1-3).
+void config_manager_set_headlines_count(int count);
+int config_manager_get_headlines_count(void);
+// Only takes effect when headlines_count == 1. Clamped to
+// [HEADLINES_WRAP_LINES_MIN, HEADLINES_WRAP_LINES_MAX] (1-3); 1 (default) =
+// unchanged single-line-with-ellipsis truncation.
+void config_manager_set_headlines_wrap_lines(int lines);
+int config_manager_get_headlines_wrap_lines(void);
+
+// Overlay bar appearance/language (shared by weather + headlines content).
+// Colors default to false (black bar, white text); swapped when true.
+void config_manager_set_overlay_invert_colors(bool enabled);
+bool config_manager_get_overlay_invert_colors(void);
+// "en" (default) or "de" - anything else is coerced to the default.
+void config_manager_set_overlay_language(const char *language);
+const char *config_manager_get_overlay_language(void);
+// Also apply overlay_invert_colors to Telegram photo captions. Off by
+// default (captions keep the fixed black-bar/white-text look).
+void config_manager_set_caption_invert_colors_enabled(bool enabled);
+bool config_manager_get_caption_invert_colors_enabled(void);
+// Render the weather overlay as 3 lines (one per day) instead of one
+// combined line - only takes effect while headlines_overlay is disabled;
+// weather always renders as one line whenever headlines are also enabled.
+void config_manager_set_weather_multiline_enabled(bool enabled);
+bool config_manager_get_weather_multiline_enabled(void);
+
 // ============================================================================
 // OTA
 // ============================================================================

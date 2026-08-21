@@ -128,6 +128,13 @@ charge) or after 180 days, whichever comes first.
 An estimate of days remaining until 20% - based on the drain rate observed since the last charge -
 is shown next to the Web UI chart, in `/status`, and in the optional wake-up notification.
 
+## Weather + headline overlays
+
+A separate, on-device weather line and news headlines can be drawn across the top of any
+rotation-triggered display (Storage/SD rotation and Telegram-received images alike) - see
+[docs/OVERLAYS.md](OVERLAYS.md) for setup, the `/weather`/`/headlines` commands, and its own
+appearance settings (colors, language, line layout).
+
 ## Settings (Web UI + Telegram)
 
 All default to preserving existing behavior for users who don't configure Telegram at all.

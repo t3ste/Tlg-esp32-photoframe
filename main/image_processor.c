@@ -2280,8 +2280,13 @@ static void draw_glyph(uint8_t *rgb, int width, int height, int x, int y, char c
 }
 
 #define CAPTION_MAX_LINES 3
-#define CAPTION_LINE_MAX_CHARS 96
+// Single source of truth for the per-line char buffer size is
+// OVERLAY_LINE_MAX_CHARS (image_processor.h - public, since
+// image_processor_wrap_text() hands wrapped lines back to callers using it).
+#define CAPTION_LINE_MAX_CHARS OVERLAY_LINE_MAX_CHARS
 #define CAPTION_LINE_PADDING 4
+// Weather (1 line) + headlines (up to 3 lines) share one overlay bar.
+#define OVERLAY_MAX_LINES 4
 
 // Telegram captions are UTF-8; Font24 only has bitmap glyphs for ASCII
 // (space..~). Transliterate the German umlauts/sz-ligature to ASCII digraphs
@@ -2365,98 +2370,22 @@ static void sanitize_caption_ascii(const char *utf8, char *out, size_t out_len)
     out[o] = '\0';
 }
 
-void image_processor_draw_caption(uint8_t *rgb_buffer, int width, int height, const char *caption)
+// Fills a solid horizontal bar (top or bottom edge) and centers each of
+// `line_count` pre-built, already-fits-the-width lines within it. Shared by
+// image_processor_draw_caption() (word-wrapped single string, bottom-anchored)
+// and image_processor_draw_overlay_bar() (independent pre-truncated lines,
+// top-anchored) so the two can never visually collide on the same image.
+static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
+                            char lines[][CAPTION_LINE_MAX_CHARS], int line_count, bool anchor_top,
+                            rgb_t bg, rgb_t fg)
 {
-    if (!rgb_buffer || !caption || caption[0] == '\0') {
-        return;
-    }
-
-    char ascii_caption[CAPTION_LINE_MAX_CHARS * CAPTION_MAX_LINES];
-    sanitize_caption_ascii(caption, ascii_caption, sizeof(ascii_caption));
-    if (ascii_caption[0] == '\0') {
-        return;  // nothing renderable left (e.g. an emoji-only caption)
-    }
-    caption = ascii_caption;
-
-    int chars_per_line = (width - 2 * CAPTION_LINE_PADDING) / Font24.Width;
-    if (chars_per_line < 1) {
-        return;  // display too narrow for this font, skip silently
-    }
-    if (chars_per_line > CAPTION_LINE_MAX_CHARS - 1) {
-        chars_per_line = CAPTION_LINE_MAX_CHARS - 1;
-    }
-
-    // Greedy word-wrap into up to CAPTION_MAX_LINES lines.
-    char lines[CAPTION_MAX_LINES][CAPTION_LINE_MAX_CHARS];
-    int line_count = 0;
-    char current[CAPTION_LINE_MAX_CHARS] = {0};
-    size_t current_len = 0;
-
-    const char *word_start = caption;
-    while (*word_start != '\0' && line_count < CAPTION_MAX_LINES) {
-        const char *word_end = word_start;
-        while (*word_end != '\0' && *word_end != ' ')
-            word_end++;
-        size_t word_len = (size_t) (word_end - word_start);
-        if (word_len > CAPTION_LINE_MAX_CHARS - 1) {
-            word_len = CAPTION_LINE_MAX_CHARS - 1;  // clip an absurdly long "word"
-        }
-
-        size_t needed = current_len + (current_len > 0 ? 1 : 0) + word_len;
-        if ((int) needed > chars_per_line && current_len > 0) {
-            strncpy(lines[line_count], current, CAPTION_LINE_MAX_CHARS - 1);
-            lines[line_count][CAPTION_LINE_MAX_CHARS - 1] = '\0';
-            line_count++;
-            current_len = 0;
-            current[0] = '\0';
-            if (line_count >= CAPTION_MAX_LINES) {
-                break;
-            }
-        }
-        if (current_len > 0) {
-            current[current_len++] = ' ';
-        }
-        memcpy(current + current_len, word_start, word_len);
-        current_len += word_len;
-        current[current_len] = '\0';
-
-        word_start = (*word_end == ' ') ? word_end + 1 : word_end;
-    }
-    if (line_count < CAPTION_MAX_LINES && current_len > 0) {
-        strncpy(lines[line_count], current, CAPTION_LINE_MAX_CHARS - 1);
-        lines[line_count][CAPTION_LINE_MAX_CHARS - 1] = '\0';
-        line_count++;
-    }
-
-    if (line_count == 0) {
-        return;
-    }
-
-    // Mark truncation with an ellipsis if there's leftover text.
-    if (*word_start != '\0') {
-        char *last = lines[line_count - 1];
-        size_t len = strlen(last);
-        size_t max_len = (size_t) chars_per_line;
-        if (len + 3 > max_len) {
-            len = (max_len > 3) ? max_len - 3 : 0;
-        }
-        last[len] = '\0';
-        strcat(last, "...");
-    }
-
     int bar_height = line_count * (Font24.Height + CAPTION_LINE_PADDING) + CAPTION_LINE_PADDING;
     if (bar_height > height) {
         bar_height = height;
     }
-    int bar_top = height - bar_height;
+    int bar_top = anchor_top ? 0 : (height - bar_height);
 
-    // Output in the exact theoretical palette values (matches what the
-    // dithering step already wrote) so the image stays a valid "processed"
-    // buffer: black bar, white text.
-    rgb_t bg = palette[0];
-    rgb_t fg = palette[1];
-
-    for (int y = bar_top; y < height; y++) {
+    for (int y = bar_top; y < bar_top + bar_height; y++) {
         for (int x = 0; x < width; x++) {
             int idx = (y * width + x) * 3;
             rgb_buffer[idx] = bg.r;
@@ -2479,18 +2408,194 @@ void image_processor_draw_caption(uint8_t *rgb_buffer, int width, int height, co
     }
 }
 
-esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *caption)
+// Greedy word-wraps already-ASCII-sanitized `text` into up to `max_lines`
+// lines that fit within `width` pixels, truncating the last line with "..."
+// if there's leftover text. Returns the number of lines produced (0 if
+// nothing renderable, e.g. `width` too narrow for even one character).
+// Shared by image_processor_draw_caption() and the public
+// image_processor_wrap_text().
+static int wrap_ascii_text(const char *text, int width, int max_lines,
+                           char out_lines[][CAPTION_LINE_MAX_CHARS])
 {
-    if (!caption || caption[0] == '\0') {
-        return ESP_OK;
+    int chars_per_line = (width - 2 * CAPTION_LINE_PADDING) / Font24.Width;
+    if (chars_per_line < 1 || max_lines < 1) {
+        return 0;
     }
-    if (!png_path) {
-        return ESP_ERR_INVALID_ARG;
+    if (chars_per_line > CAPTION_LINE_MAX_CHARS - 1) {
+        chars_per_line = CAPTION_LINE_MAX_CHARS - 1;
     }
 
+    int line_count = 0;
+    char current[CAPTION_LINE_MAX_CHARS] = {0};
+    size_t current_len = 0;
+
+    const char *word_start = text;
+    while (*word_start != '\0' && line_count < max_lines) {
+        const char *word_end = word_start;
+        while (*word_end != '\0' && *word_end != ' ')
+            word_end++;
+        size_t word_len = (size_t) (word_end - word_start);
+        if (word_len > CAPTION_LINE_MAX_CHARS - 1) {
+            word_len = CAPTION_LINE_MAX_CHARS - 1;  // clip an absurdly long "word"
+        }
+
+        size_t needed = current_len + (current_len > 0 ? 1 : 0) + word_len;
+        if ((int) needed > chars_per_line && current_len > 0) {
+            strncpy(out_lines[line_count], current, CAPTION_LINE_MAX_CHARS - 1);
+            out_lines[line_count][CAPTION_LINE_MAX_CHARS - 1] = '\0';
+            line_count++;
+            current_len = 0;
+            current[0] = '\0';
+            if (line_count >= max_lines) {
+                break;
+            }
+        }
+        if (current_len > 0) {
+            current[current_len++] = ' ';
+        }
+        memcpy(current + current_len, word_start, word_len);
+        current_len += word_len;
+        current[current_len] = '\0';
+
+        word_start = (*word_end == ' ') ? word_end + 1 : word_end;
+    }
+    if (line_count < max_lines && current_len > 0) {
+        strncpy(out_lines[line_count], current, CAPTION_LINE_MAX_CHARS - 1);
+        out_lines[line_count][CAPTION_LINE_MAX_CHARS - 1] = '\0';
+        line_count++;
+    }
+
+    if (line_count == 0) {
+        return 0;
+    }
+
+    // Mark truncation with an ellipsis if there's leftover text.
+    if (*word_start != '\0') {
+        char *last = out_lines[line_count - 1];
+        size_t len = strlen(last);
+        size_t max_len = (size_t) chars_per_line;
+        if (len + 3 > max_len) {
+            len = (max_len > 3) ? max_len - 3 : 0;
+        }
+        last[len] = '\0';
+        strcat(last, "...");
+    }
+
+    return line_count;
+}
+
+void image_processor_draw_caption(uint8_t *rgb_buffer, int width, int height, const char *caption,
+                                  bool invert_colors)
+{
+    if (!rgb_buffer || !caption || caption[0] == '\0') {
+        return;
+    }
+
+    char ascii_caption[CAPTION_LINE_MAX_CHARS * CAPTION_MAX_LINES];
+    sanitize_caption_ascii(caption, ascii_caption, sizeof(ascii_caption));
+    if (ascii_caption[0] == '\0') {
+        return;  // nothing renderable left (e.g. an emoji-only caption)
+    }
+
+    char lines[CAPTION_MAX_LINES][CAPTION_LINE_MAX_CHARS];
+    int line_count = wrap_ascii_text(ascii_caption, width, CAPTION_MAX_LINES, lines);
+    if (line_count == 0) {
+        return;
+    }
+
+    // Output in the exact theoretical palette values (matches what the
+    // dithering step already wrote) so the image stays a valid "processed"
+    // buffer: black bar, white text by default, swapped when invert_colors
+    // is set (Web UI toggle - independent of the overlay bar's own color
+    // setting, though callers typically pass the same value through).
+    rgb_t bg = invert_colors ? palette[1] : palette[0];
+    rgb_t fg = invert_colors ? palette[0] : palette[1];
+    render_text_bar(rgb_buffer, width, height, lines, line_count, false, bg, fg);
+}
+
+int image_processor_wrap_text(const char *text, int width, int max_lines,
+                              char out_lines[][OVERLAY_LINE_MAX_CHARS])
+{
+    if (!text || !out_lines || max_lines < 1 || width <= 0) {
+        return 0;
+    }
+    char ascii[OVERLAY_LINE_MAX_CHARS * 4];
+    sanitize_caption_ascii(text, ascii, sizeof(ascii));
+    if (ascii[0] == '\0') {
+        return 0;
+    }
+    return wrap_ascii_text(ascii, width, max_lines, out_lines);
+}
+
+void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height,
+                                      const char *const *lines, int line_count, bool invert_colors)
+{
+    if (!rgb_buffer || !lines || line_count <= 0) {
+        return;
+    }
+    if (line_count > OVERLAY_MAX_LINES) {
+        line_count = OVERLAY_MAX_LINES;
+    }
+
+    int chars_per_line = (width - 2 * CAPTION_LINE_PADDING) / Font24.Width;
+    if (chars_per_line < 1) {
+        return;  // display too narrow for this font, skip silently
+    }
+    if (chars_per_line > CAPTION_LINE_MAX_CHARS - 1) {
+        chars_per_line = CAPTION_LINE_MAX_CHARS - 1;
+    }
+
+    // Each input line stands alone (weather line, or one headline) - sanitize
+    // and truncate-with-ellipsis independently, no word-wrap across lines.
+    char built_lines[OVERLAY_MAX_LINES][CAPTION_LINE_MAX_CHARS];
+    int built_count = 0;
+    for (int i = 0; i < line_count; i++) {
+        if (!lines[i] || lines[i][0] == '\0') {
+            continue;
+        }
+        char ascii_line[CAPTION_LINE_MAX_CHARS];
+        sanitize_caption_ascii(lines[i], ascii_line, sizeof(ascii_line));
+        if (ascii_line[0] == '\0') {
+            continue;
+        }
+        size_t len = strlen(ascii_line);
+        if ((int) len > chars_per_line) {
+            size_t cut = (chars_per_line > 3) ? (size_t) (chars_per_line - 3) : 0;
+            ascii_line[cut] = '\0';
+            strcat(ascii_line, "...");
+        }
+        strncpy(built_lines[built_count], ascii_line, CAPTION_LINE_MAX_CHARS - 1);
+        built_lines[built_count][CAPTION_LINE_MAX_CHARS - 1] = '\0';
+        built_count++;
+    }
+
+    if (built_count == 0) {
+        return;
+    }
+
+    // Default: black bar, white text - swapped when invert_colors is set
+    // (Web UI toggle). Still the exact theoretical palette values either
+    // way, so the result stays a valid "processed" buffer.
+    rgb_t bg = invert_colors ? palette[1] : palette[0];
+    rgb_t fg = invert_colors ? palette[0] : palette[1];
+    render_text_bar(rgb_buffer, width, height, built_lines, built_count, true, bg, fg);
+}
+
+void image_processor_sanitize_ascii(const char *utf8, char *out, size_t out_len)
+{
+    sanitize_caption_ascii(utf8, out, out_len);
+}
+
+// Shared decode -> draw -> re-encode body for both file-level overlay
+// wrappers below - `draw` receives the decoded RGB buffer and does the
+// actual compositing (caption word-wrap, or overlay-bar line layout).
+static esp_err_t apply_text_overlay_to_file(const char *png_path,
+                                            void (*draw)(uint8_t *, int, int, const void *),
+                                            const void *draw_arg)
+{
     FILE *fp = fopen(png_path, "rb");
     if (!fp) {
-        ESP_LOGE(TAG, "Failed to open %s for caption overlay", png_path);
+        ESP_LOGE(TAG, "Failed to open %s for text overlay", png_path);
         return ESP_FAIL;
     }
     fseek(fp, 0, SEEK_END);
@@ -2517,11 +2622,61 @@ esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *
         return err;
     }
 
-    image_processor_draw_caption(rgb_buffer, width, height, caption);
+    draw(rgb_buffer, width, height, draw_arg);
 
     err = write_png_file(png_path, rgb_buffer, width, height);
     heap_caps_free(rgb_buffer);
     return err;
+}
+
+typedef struct {
+    const char *caption;
+    bool invert_colors;
+} caption_draw_arg_t;
+
+static void caption_draw_trampoline(uint8_t *rgb_buffer, int width, int height, const void *arg)
+{
+    const caption_draw_arg_t *a = (const caption_draw_arg_t *) arg;
+    image_processor_draw_caption(rgb_buffer, width, height, a->caption, a->invert_colors);
+}
+
+esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *caption,
+                                              bool invert_colors)
+{
+    if (!caption || caption[0] == '\0') {
+        return ESP_OK;
+    }
+    if (!png_path) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    caption_draw_arg_t arg = {.caption = caption, .invert_colors = invert_colors};
+    return apply_text_overlay_to_file(png_path, caption_draw_trampoline, &arg);
+}
+
+typedef struct {
+    const char *const *lines;
+    int line_count;
+    bool invert_colors;
+} overlay_draw_arg_t;
+
+static void overlay_draw_trampoline(uint8_t *rgb_buffer, int width, int height, const void *arg)
+{
+    const overlay_draw_arg_t *a = (const overlay_draw_arg_t *) arg;
+    image_processor_draw_overlay_bar(rgb_buffer, width, height, a->lines, a->line_count,
+                                     a->invert_colors);
+}
+
+esp_err_t image_processor_add_overlay_to_file(const char *png_path, const char *const *lines,
+                                              int line_count, bool invert_colors)
+{
+    if (!lines || line_count <= 0) {
+        return ESP_OK;
+    }
+    if (!png_path) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    overlay_draw_arg_t arg = {.lines = lines, .line_count = line_count, .invert_colors = invert_colors};
+    return apply_text_overlay_to_file(png_path, overlay_draw_trampoline, &arg);
 }
 
 esp_err_t image_processor_write_rgb_to_png(const uint8_t *rgb_buffer, int width, int height,

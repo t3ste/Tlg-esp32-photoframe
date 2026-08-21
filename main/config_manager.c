@@ -82,6 +82,21 @@ static bool rotation_pairing_enabled = false;
 static bool telegram_rotation_notify_enabled = false;
 static bool telegram_keep_originals_enabled = false;
 
+// Weather + headline overlays
+static bool weather_overlay_enabled = false;
+static char weather_location_name[WEATHER_LOCATION_NAME_MAX_LEN] = {0};
+static char weather_lat[WEATHER_LATLON_MAX_LEN] = {0};
+static char weather_lon[WEATHER_LATLON_MAX_LEN] = {0};
+static char weather_geocoded_name[WEATHER_LOCATION_NAME_MAX_LEN] = {0};
+static bool headlines_overlay_enabled = false;
+static char headlines_rss_url[HEADLINES_RSS_URL_MAX_LEN] = {0};
+static uint8_t headlines_count = HEADLINES_COUNT_DEFAULT;
+static uint8_t headlines_wrap_lines = HEADLINES_WRAP_LINES_DEFAULT;
+static bool overlay_invert_colors = false;
+static char overlay_language[OVERLAY_LANGUAGE_MAX_LEN] = OVERLAY_LANGUAGE_DEFAULT;
+static bool caption_invert_colors_enabled = false;
+static bool weather_multiline_enabled = false;
+
 // OTA
 static bool ota_check_enabled = true;
 
@@ -547,6 +562,62 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_TELEGRAM_KEEP_ORIGINALS_KEY, &stored_keep_originals) ==
             ESP_OK) {
             telegram_keep_originals_enabled = (stored_keep_originals != 0);
+        }
+
+        uint8_t stored_weather_overlay = 0;
+        if (nvs_get_u8(nvs_handle, NVS_WEATHER_OVERLAY_ENABLED_KEY, &stored_weather_overlay) ==
+            ESP_OK) {
+            weather_overlay_enabled = (stored_weather_overlay != 0);
+        }
+        size_t weather_loc_len = sizeof(weather_location_name);
+        nvs_get_str(nvs_handle, NVS_WEATHER_LOCATION_NAME_KEY, weather_location_name,
+                    &weather_loc_len);
+        size_t weather_lat_len = sizeof(weather_lat);
+        nvs_get_str(nvs_handle, NVS_WEATHER_LAT_KEY, weather_lat, &weather_lat_len);
+        size_t weather_lon_len = sizeof(weather_lon);
+        nvs_get_str(nvs_handle, NVS_WEATHER_LON_KEY, weather_lon, &weather_lon_len);
+        size_t weather_geo_len = sizeof(weather_geocoded_name);
+        nvs_get_str(nvs_handle, NVS_WEATHER_GEOCODED_NAME_KEY, weather_geocoded_name,
+                    &weather_geo_len);
+
+        uint8_t stored_headlines_overlay = 0;
+        if (nvs_get_u8(nvs_handle, NVS_HEADLINES_OVERLAY_ENABLED_KEY, &stored_headlines_overlay) ==
+            ESP_OK) {
+            headlines_overlay_enabled = (stored_headlines_overlay != 0);
+        }
+        size_t headlines_url_len = sizeof(headlines_rss_url);
+        nvs_get_str(nvs_handle, NVS_HEADLINES_RSS_URL_KEY, headlines_rss_url, &headlines_url_len);
+        uint8_t stored_headlines_count = HEADLINES_COUNT_DEFAULT;
+        if (nvs_get_u8(nvs_handle, NVS_HEADLINES_COUNT_KEY, &stored_headlines_count) == ESP_OK &&
+            stored_headlines_count >= HEADLINES_COUNT_MIN &&
+            stored_headlines_count <= HEADLINES_COUNT_MAX) {
+            headlines_count = stored_headlines_count;
+        }
+        uint8_t stored_wrap_lines = HEADLINES_WRAP_LINES_DEFAULT;
+        if (nvs_get_u8(nvs_handle, NVS_HEADLINES_WRAP_LINES_KEY, &stored_wrap_lines) == ESP_OK &&
+            stored_wrap_lines >= HEADLINES_WRAP_LINES_MIN && stored_wrap_lines <= HEADLINES_WRAP_LINES_MAX) {
+            headlines_wrap_lines = stored_wrap_lines;
+        }
+
+        uint8_t stored_overlay_invert = 0;
+        if (nvs_get_u8(nvs_handle, NVS_OVERLAY_INVERT_COLORS_KEY, &stored_overlay_invert) ==
+            ESP_OK) {
+            overlay_invert_colors = (stored_overlay_invert != 0);
+        }
+        size_t overlay_lang_len = sizeof(overlay_language);
+        if (nvs_get_str(nvs_handle, NVS_OVERLAY_LANGUAGE_KEY, overlay_language,
+                        &overlay_lang_len) != ESP_OK) {
+            strncpy(overlay_language, OVERLAY_LANGUAGE_DEFAULT, sizeof(overlay_language) - 1);
+            overlay_language[sizeof(overlay_language) - 1] = '\0';
+        }
+        uint8_t stored_caption_invert = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CAPTION_INVERT_COLORS_KEY, &stored_caption_invert) ==
+            ESP_OK) {
+            caption_invert_colors_enabled = (stored_caption_invert != 0);
+        }
+        uint8_t stored_weather_multiline = 0;
+        if (nvs_get_u8(nvs_handle, NVS_WEATHER_MULTILINE_KEY, &stored_weather_multiline) == ESP_OK) {
+            weather_multiline_enabled = (stored_weather_multiline != 0);
         }
 
         {
@@ -1606,6 +1677,279 @@ void config_manager_set_telegram_keep_originals_enabled(bool enabled)
 bool config_manager_get_telegram_keep_originals_enabled(void)
 {
     return telegram_keep_originals_enabled;
+}
+
+void config_manager_set_weather_overlay_enabled(bool enabled)
+{
+    weather_overlay_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_WEATHER_OVERLAY_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Weather overlay %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_weather_overlay_enabled(void)
+{
+    return weather_overlay_enabled;
+}
+
+void config_manager_set_weather_location_name(const char *name)
+{
+    const char *new_name = name ? name : "";
+    strncpy(weather_location_name, new_name, WEATHER_LOCATION_NAME_MAX_LEN - 1);
+    weather_location_name[WEATHER_LOCATION_NAME_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (weather_location_name[0] != '\0') {
+            nvs_set_str(nvs_handle, NVS_WEATHER_LOCATION_NAME_KEY, weather_location_name);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_WEATHER_LOCATION_NAME_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_weather_location_name(void)
+{
+    return weather_location_name;
+}
+
+void config_manager_set_weather_lat(const char *lat)
+{
+    const char *new_lat = lat ? lat : "";
+    strncpy(weather_lat, new_lat, WEATHER_LATLON_MAX_LEN - 1);
+    weather_lat[WEATHER_LATLON_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (weather_lat[0] != '\0') {
+            nvs_set_str(nvs_handle, NVS_WEATHER_LAT_KEY, weather_lat);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_WEATHER_LAT_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_weather_lat(void)
+{
+    return weather_lat;
+}
+
+void config_manager_set_weather_lon(const char *lon)
+{
+    const char *new_lon = lon ? lon : "";
+    strncpy(weather_lon, new_lon, WEATHER_LATLON_MAX_LEN - 1);
+    weather_lon[WEATHER_LATLON_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (weather_lon[0] != '\0') {
+            nvs_set_str(nvs_handle, NVS_WEATHER_LON_KEY, weather_lon);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_WEATHER_LON_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_weather_lon(void)
+{
+    return weather_lon;
+}
+
+// Cache-invalidation marker: the location name that was last successfully
+// geocoded. weather.c compares this against the current location name to
+// decide whether a fresh geocode call is needed, or the cached lat/lon
+// above are still valid.
+void config_manager_set_weather_geocoded_name(const char *name)
+{
+    const char *new_name = name ? name : "";
+    strncpy(weather_geocoded_name, new_name, WEATHER_LOCATION_NAME_MAX_LEN - 1);
+    weather_geocoded_name[WEATHER_LOCATION_NAME_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (weather_geocoded_name[0] != '\0') {
+            nvs_set_str(nvs_handle, NVS_WEATHER_GEOCODED_NAME_KEY, weather_geocoded_name);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_WEATHER_GEOCODED_NAME_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_weather_geocoded_name(void)
+{
+    return weather_geocoded_name;
+}
+
+void config_manager_set_headlines_overlay_enabled(bool enabled)
+{
+    headlines_overlay_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_HEADLINES_OVERLAY_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Headlines overlay %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_headlines_overlay_enabled(void)
+{
+    return headlines_overlay_enabled;
+}
+
+void config_manager_set_headlines_rss_url(const char *url)
+{
+    const char *new_url = url ? url : "";
+    strncpy(headlines_rss_url, new_url, HEADLINES_RSS_URL_MAX_LEN - 1);
+    headlines_rss_url[HEADLINES_RSS_URL_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (headlines_rss_url[0] != '\0') {
+            nvs_set_str(nvs_handle, NVS_HEADLINES_RSS_URL_KEY, headlines_rss_url);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_HEADLINES_RSS_URL_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_headlines_rss_url(void)
+{
+    return headlines_rss_url;
+}
+
+void config_manager_set_headlines_count(int count)
+{
+    if (count < HEADLINES_COUNT_MIN) {
+        count = HEADLINES_COUNT_MIN;
+    } else if (count > HEADLINES_COUNT_MAX) {
+        count = HEADLINES_COUNT_MAX;
+    }
+    headlines_count = (uint8_t) count;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_HEADLINES_COUNT_KEY, headlines_count);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int config_manager_get_headlines_count(void)
+{
+    return headlines_count;
+}
+
+void config_manager_set_headlines_wrap_lines(int lines)
+{
+    if (lines < HEADLINES_WRAP_LINES_MIN) {
+        lines = HEADLINES_WRAP_LINES_MIN;
+    } else if (lines > HEADLINES_WRAP_LINES_MAX) {
+        lines = HEADLINES_WRAP_LINES_MAX;
+    }
+    headlines_wrap_lines = (uint8_t) lines;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_HEADLINES_WRAP_LINES_KEY, headlines_wrap_lines);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int config_manager_get_headlines_wrap_lines(void)
+{
+    return headlines_wrap_lines;
+}
+
+void config_manager_set_overlay_invert_colors(bool enabled)
+{
+    overlay_invert_colors = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_OVERLAY_INVERT_COLORS_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+bool config_manager_get_overlay_invert_colors(void)
+{
+    return overlay_invert_colors;
+}
+
+void config_manager_set_overlay_language(const char *language)
+{
+    const char *new_lang =
+        (language && (strcmp(language, "de") == 0 || strcmp(language, "en") == 0)) ? language
+                                                                                    : OVERLAY_LANGUAGE_DEFAULT;
+    strncpy(overlay_language, new_lang, sizeof(overlay_language) - 1);
+    overlay_language[sizeof(overlay_language) - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_OVERLAY_LANGUAGE_KEY, overlay_language);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_overlay_language(void)
+{
+    return overlay_language;
+}
+
+void config_manager_set_caption_invert_colors_enabled(bool enabled)
+{
+    caption_invert_colors_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_CAPTION_INVERT_COLORS_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+bool config_manager_get_caption_invert_colors_enabled(void)
+{
+    return caption_invert_colors_enabled;
+}
+
+void config_manager_set_weather_multiline_enabled(bool enabled)
+{
+    weather_multiline_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_WEATHER_MULTILINE_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+bool config_manager_get_weather_multiline_enabled(void)
+{
+    return weather_multiline_enabled;
 }
 
 // ============================================================================

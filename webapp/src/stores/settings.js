@@ -62,6 +62,19 @@ export const useSettingsStore = defineStore("settings", () => {
     rotationPairingEnabled: false,
     telegramRotationNotifyEnabled: false,
     telegramKeepOriginalsEnabled: false,
+    // Weather + headline overlays (on-device, no companion server needed)
+    weatherOverlayEnabled: false,
+    weatherLocationName: "",
+    weatherLat: "",
+    weatherLon: "",
+    headlinesOverlayEnabled: false,
+    headlinesRssUrl: "",
+    headlinesCount: 3,
+    headlinesWrapLines: 1,
+    overlayInvertColors: false,
+    overlayLanguage: "en",
+    captionInvertColorsEnabled: false,
+    weatherMultilineEnabled: false,
     // Debugging
     debugLogEnabled: false,
     errorOverlayEnabled: false,
@@ -211,6 +224,18 @@ export const useSettingsStore = defineStore("settings", () => {
         data.telegram_rotation_notify_enabled === true;
       deviceSettings.value.telegramKeepOriginalsEnabled =
         data.telegram_keep_originals_enabled === true;
+      deviceSettings.value.weatherOverlayEnabled = data.weather_overlay_enabled === true;
+      deviceSettings.value.weatherLocationName = data.weather_location_name || "";
+      deviceSettings.value.weatherLat = data.weather_lat || "";
+      deviceSettings.value.weatherLon = data.weather_lon || "";
+      deviceSettings.value.headlinesOverlayEnabled = data.headlines_overlay_enabled === true;
+      deviceSettings.value.headlinesRssUrl = data.headlines_rss_url || "";
+      deviceSettings.value.headlinesCount = data.headlines_count ?? 3;
+      deviceSettings.value.headlinesWrapLines = data.headlines_wrap_lines ?? 1;
+      deviceSettings.value.overlayInvertColors = data.overlay_invert_colors === true;
+      deviceSettings.value.overlayLanguage = data.overlay_language || "en";
+      deviceSettings.value.captionInvertColorsEnabled = data.caption_invert_colors_enabled === true;
+      deviceSettings.value.weatherMultilineEnabled = data.weather_multiline_enabled === true;
       deviceSettings.value.debugLogEnabled = data.debug_log_enabled === true;
       deviceSettings.value.errorOverlayEnabled = data.error_overlay_enabled === true;
       deviceSettings.value.haUrl = data.ha_url || "";
@@ -295,6 +320,18 @@ export const useSettingsStore = defineStore("settings", () => {
       rotation_pairing_enabled: deviceSettings.value.rotationPairingEnabled,
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,
       telegram_keep_originals_enabled: deviceSettings.value.telegramKeepOriginalsEnabled,
+      weather_overlay_enabled: deviceSettings.value.weatherOverlayEnabled,
+      weather_location_name: deviceSettings.value.weatherLocationName,
+      weather_lat: deviceSettings.value.weatherLat,
+      weather_lon: deviceSettings.value.weatherLon,
+      headlines_overlay_enabled: deviceSettings.value.headlinesOverlayEnabled,
+      headlines_rss_url: deviceSettings.value.headlinesRssUrl,
+      headlines_count: deviceSettings.value.headlinesCount,
+      headlines_wrap_lines: deviceSettings.value.headlinesWrapLines,
+      overlay_invert_colors: deviceSettings.value.overlayInvertColors,
+      overlay_language: deviceSettings.value.overlayLanguage,
+      caption_invert_colors_enabled: deviceSettings.value.captionInvertColorsEnabled,
+      weather_multiline_enabled: deviceSettings.value.weatherMultilineEnabled,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,
       error_overlay_enabled: deviceSettings.value.errorOverlayEnabled,
       save_downloaded_images: deviceSettings.value.saveDownloadedImages,

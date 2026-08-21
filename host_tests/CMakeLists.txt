@@ -57,10 +57,35 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
 
+# Headline/RSS extraction (pure parsing logic split out of headlines.c's
+# network-calling headlines_fetch(), specifically so it's host-testable
+# without a real HTTP stack)
+add_executable(
+  headlines_test
+  test_headlines.cpp
+  ../main/headlines.c
+  stubs/fake_http_fetch.c
+  stubs/fake_image_processor_sanitize.c
+)
+
+target_link_libraries(
+  headlines_test
+  GTest::gtest_main
+)
+
+target_include_directories(
+  headlines_test
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
 # Discover tests
 include(GoogleTest)
 gtest_discover_tests(cron_test)
 gtest_discover_tests(wake_schedule_test)
+gtest_discover_tests(headlines_test)
 
 # On-device image pipeline characterization tests (host build of
 # main/image_processor.c against ESP-IDF stubs + system libpng)

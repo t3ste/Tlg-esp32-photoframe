@@ -29,6 +29,7 @@
 #include "freertos/task.h"
 #include "history_manager.h"
 #include "image_processor.h"
+#include "overlay_manager.h"
 #include "power_manager.h"
 #include "processing_settings.h"
 #include "storage.h"
@@ -747,6 +748,17 @@ static esp_err_t download_document_image(cJSON *document, char *out_path, size_t
     return ESP_OK;
 }
 
+// Whether Telegram photo captions (both a single image's caption bar and an
+// orientation-paired composite's) should use the same swapped color scheme
+// as the weather/headline overlay bar - opt-in on top of that overlay
+// setting, so enabling colour-inversion for the overlay doesn't silently
+// change the look of every Telegram caption too.
+static bool telegram_caption_invert_colors(void)
+{
+    return config_manager_get_caption_invert_colors_enabled() &&
+           config_manager_get_overlay_invert_colors();
+}
+
 // Runs the downloaded image through the existing processing pipeline (same
 // format handling as fetch_and_display_image_from_url in utils.c: EPDGZ/BMP
 // are already display-ready, PNG/JPG go through image_processor_process) and
@@ -771,9 +783,17 @@ static esp_err_t process_and_display_telegram_image(const char *path, const char
 
     if (format == IMAGE_FORMAT_PNG && image_processor_is_processed(path)) {
         if (caption && caption[0] != '\0') {
-            image_processor_add_caption_to_file(path, caption);
+            image_processor_add_caption_to_file(path, caption, telegram_caption_invert_colors());
         }
-        return display_manager_show_image(path);
+        const char *shown = overlay_manager_apply(path);
+        esp_err_t show_err = display_manager_show_image(shown);
+        if (show_err == ESP_OK && strcmp(shown, path) != 0) {
+            // The weather/headline overlay was drawn onto a scratch copy -
+            // re-mark the real path, same reasoning as the freshly-processed
+            // branch below.
+            history_manager_mark_shown(path);
+        }
+        return show_err;
     }
 
     dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
@@ -784,16 +804,18 @@ static esp_err_t process_and_display_telegram_image(const char *path, const char
     }
 
     if (caption && caption[0] != '\0') {
-        image_processor_add_caption_to_file(CURRENT_PNG_PATH, caption);
+        image_processor_add_caption_to_file(CURRENT_PNG_PATH, caption, telegram_caption_invert_colors());
     }
 
-    esp_err_t show_err = display_manager_show_image(CURRENT_PNG_PATH);
+    const char *shown = overlay_manager_apply(CURRENT_PNG_PATH);
+    esp_err_t show_err = display_manager_show_image(shown);
     if (show_err == ESP_OK) {
-        // CURRENT_PNG_PATH is a shared scratch file reused for every
-        // processed image, so display_manager_show_image()'s own history
-        // hook records the wrong identifier here - mark the real source
-        // path instead, so fallback album rotation (trigger_image_rotation)
-        // knows this specific Telegram image has already been shown.
+        // CURRENT_PNG_PATH (and, if the overlay applied, the further scratch
+        // copy derived from it) is shared/reused, so display_manager_show_image()'s
+        // own history hook records the wrong identifier here - mark the real
+        // source path instead, so fallback album rotation
+        // (trigger_image_rotation) knows this specific Telegram image has
+        // already been shown.
         history_manager_mark_shown(path);
     }
     return show_err;
@@ -1213,7 +1235,8 @@ static esp_err_t compose_pair_and_save(const char *path_a, const char *caption_a
                          : (caption_a && caption_a[0]) ? caption_a
                                                         : NULL;
     if (overlay) {
-        image_processor_draw_caption(result.rgb_data, result.width, result.height, overlay);
+        image_processor_draw_caption(result.rgb_data, result.width, result.height, overlay,
+                                     telegram_caption_invert_colors());
     }
 
     if (make_unique_telegram_path("png", out_path, out_path_len) != ESP_OK) {
@@ -1852,7 +1875,9 @@ static void format_toggles(char *out, size_t out_len)
              "[%c] WiFi performance\n"
              "[%c] Rotation pairing (random mode only)\n"
              "[%c] Rotation notify (thumbnail on fallback display)\n"
-             "[%c] Keep originals (pre-processing copies)",
+             "[%c] Keep originals (pre-processing copies)\n"
+             "[%c] Weather overlay\n"
+             "[%c] Headlines overlay",
              config_manager_get_telegram_pairing_enabled() ? 'x' : ' ',
              config_manager_get_deep_sleep_enabled() ? 'x' : ' ',
              config_manager_get_auto_rotate() ? 'x' : ' ',
@@ -1861,7 +1886,9 @@ static void format_toggles(char *out, size_t out_len)
              config_manager_get_wifi_performance_mode_enabled() ? 'x' : ' ',
              config_manager_get_rotation_pairing_enabled() ? 'x' : ' ',
              config_manager_get_telegram_rotation_notify_enabled() ? 'x' : ' ',
-             config_manager_get_telegram_keep_originals_enabled() ? 'x' : ' ');
+             config_manager_get_telegram_keep_originals_enabled() ? 'x' : ' ',
+             config_manager_get_weather_overlay_enabled() ? 'x' : ' ',
+             config_manager_get_headlines_overlay_enabled() ? 'x' : ' ');
 }
 
 static void format_rotation_schedule(char *out, size_t out_len)
@@ -1928,7 +1955,7 @@ static void build_status_message(const char *title, char *out, size_t out_len)
     char schedule[160];
     format_rotation_schedule(schedule, sizeof(schedule));
 
-    char toggles[320];
+    char toggles[384];
     format_toggles(toggles, sizeof(toggles));
 
     const char *ssid = config_manager_get_wifi_ssid();
@@ -2123,6 +2150,30 @@ static void execute_command(const char *raw_text)
         } else {
             telegram_bot_send_message("[i] Usage: /keep_originals on|off");
         }
+    } else if (strcmp(cmd, "/weather") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_weather_overlay_enabled(true);
+            telegram_bot_send_message(
+                "[x] Weather overlay enabled\n"
+                "(configure the location in the Web UI - Settings).");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_weather_overlay_enabled(false);
+            telegram_bot_send_message("[ ] Weather overlay disabled.");
+        } else {
+            telegram_bot_send_message("[i] Usage: /weather on|off");
+        }
+    } else if (strcmp(cmd, "/headlines") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_headlines_overlay_enabled(true);
+            telegram_bot_send_message(
+                "[x] Headlines overlay enabled\n"
+                "(configure the RSS feed URL in the Web UI - Settings).");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_headlines_overlay_enabled(false);
+            telegram_bot_send_message("[ ] Headlines overlay disabled.");
+        } else {
+            telegram_bot_send_message("[i] Usage: /headlines on|off");
+        }
     } else if (strcmp(cmd, "/list_albums") == 0) {
         char **albums = NULL;
         int count = 0;
@@ -2219,6 +2270,8 @@ static void execute_command(const char *raw_text)
             "  image that didn't come from Telegram (i.e. fallback rotation)\n"
             "/keep_originals on|off - Save each Telegram photo as received,\n"
             "  before e-paper processing, under Telegram/Originals\n"
+            "/weather on|off - Weather overlay (configure location in Web UI)\n"
+            "/headlines on|off - Headline overlay (configure RSS feed in Web UI)\n"
             "\n"
             "Emergency:\n"
             "/telegram_reset - Clear the queue immediately\n"
