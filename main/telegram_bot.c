@@ -1017,23 +1017,37 @@ static void preserve_telegram_original(const char *path, const char *archival_fi
         ESP_LOGW(TAG, "Failed to fetch largest photo size for archival, falling back to local copy");
     }
 
-    uint8_t *data = NULL;
-    long size = 0;
-    if (read_whole_file(path, &data, &size) != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to read %s to preserve original", path);
+    // A verbatim byte copy never needs the whole file in RAM at once (unlike
+    // decoding, which does) - stream it through a small fixed buffer instead
+    // of read_whole_file()'s single whole-file allocation, so a large
+    // "document" upload can still be archived even when that allocation
+    // would fail (see process_jpg_streaming_fallback() in image_processor.c
+    // for the same size class of problem on the decode side).
+    FILE *in = fopen(path, "rb");
+    if (!in) {
+        ESP_LOGW(TAG, "Failed to open %s to preserve original", path);
         return;
     }
     FILE *out = fopen(dest, "wb");
     if (!out) {
         ESP_LOGW(TAG, "Failed to open %s to preserve original", dest);
-        heap_caps_free(data);
+        fclose(in);
         return;
     }
-    size_t written = fwrite(data, 1, (size_t) size, out);
+    char buf[4096];
+    size_t n;
+    bool copy_ok = true;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) {
+            copy_ok = false;
+            break;
+        }
+    }
+    copy_ok = copy_ok && !ferror(in);
+    fclose(in);
     fclose(out);
-    heap_caps_free(data);
-    if (written != (size_t) size) {
-        ESP_LOGW(TAG, "Short write preserving original to %s", dest);
+    if (!copy_ok) {
+        ESP_LOGW(TAG, "Failed to copy %s to preserve original", path);
         unlink(dest);
     }
 }

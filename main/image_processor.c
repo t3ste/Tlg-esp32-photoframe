@@ -22,6 +22,21 @@
 #include "jpeg_decoder.h"
 #include "processing_settings.h"
 
+// Same header choice as jpeg_decoder.c (the wrapper the streaming JPEG
+// decode below bypasses): this chip's ROM has TJpgDec built in
+// (ESP_ROM_HAS_JPEG_DECODE), so JD_USE_ROM defaults on and the vendored
+// managed_components/espressif__esp_jpeg/tjpgd/ source isn't even compiled.
+// The ROM header's jd_decomp() also wants its outfunc to return `unsigned
+// int` instead of `int` - jpg_stream_out_t below mirrors jpeg_decoder.c's
+// own jpeg_decode_out_t for exactly that reason.
+#if CONFIG_JD_USE_ROM
+#include "rom/tjpgd.h"
+typedef unsigned int jpg_stream_out_t;
+#else
+#include "tjpgd.h"
+typedef int jpg_stream_out_t;
+#endif
+
 static const char *TAG = "image_processor";
 
 // Human-readable reason for the most recent processing failure, surfaced in
@@ -768,6 +783,22 @@ static void geometry_repaint_background(const geometry_t *geo, int out_y, uint8_
     }
 }
 
+// One output row's worth of the streaming pipeline: resample from source,
+// color-difference-reduce, dither, restore letterbox bars, then hand off to
+// the sink. Shared by run_stream()'s own for-loop and jpg_stream_run()'s
+// incremental, MCU-row-band-driven equivalent (see the "Streamed JPEG
+// source" section below) - both need the exact same per-row sequence, just
+// driven differently (a fixed range vs. as source rows become available).
+static esp_err_t run_stream_row(geometry_t *geo, cdr_state_t *cdr, dither_state_t *dither,
+                                uint8_t *row, int y, row_sink_fn sink, void *sink_ctx)
+{
+    geometry_fill_row(geo, y, row);
+    cdr_apply_row(cdr, row, geo->out_w);
+    dither_row(dither, row);
+    geometry_repaint_background(geo, y, row);
+    return sink(sink_ctx, y, row);
+}
+
 static esp_err_t run_stream(geometry_t *geo, dither_algorithm_t dither_algorithm, row_sink_fn sink,
                             void *sink_ctx)
 {
@@ -788,11 +819,7 @@ static esp_err_t run_stream(geometry_t *geo, dither_algorithm_t dither_algorithm
     }
 
     for (int y = 0; y < geo->out_h && err == ESP_OK; y++) {
-        geometry_fill_row(geo, y, row);
-        cdr_apply_row(&cdr, row, geo->out_w);
-        dither_row(&dither, row);
-        geometry_repaint_background(geo, y, row);
-        err = sink(sink_ctx, y, row);
+        err = run_stream_row(geo, &cdr, &dither, row, y, sink, sink_ctx);
 
         // Yield periodically so the IDLE task can feed the watchdog; dense
         // enough that the sleep windows overlap with other busy tasks'
@@ -982,6 +1009,546 @@ static esp_err_t decode_jpg_buffer(const uint8_t *jpg_data, size_t jpg_size, uin
     *width = outimg.width;
     *height = outimg.height;
     return ESP_OK;
+}
+
+// ---- Streamed JPEG source ----
+//
+// esp_jpeg_decode() (used by decode_jpg_buffer() above) requires the WHOLE
+// compressed file in one contiguous buffer before decoding anything - fine
+// for most Telegram photos (Telegram re-encodes those to a modest size),
+// but a "document" upload keeps its original size verbatim, which can
+// exceed the largest contiguous free PSRAM block even though the chip
+// nominally has plenty of total heap (WiFi/TLS/etc. already fragment a lot
+// of it mid-poll-cycle). This bypasses that wrapper and drives tjpgd's own
+// low-level streaming API (jd_prepare()/jd_decomp()) directly: the
+// compressed bitstream is read through a small infunc() reading straight
+// from the still-open file (not a preloaded buffer), removing the
+// encoded-size ceiling entirely.
+//
+// Two tiers, both used only as a fallback when image_processor_process()'s
+// normal read-whole-file-then-decode fails with ESP_ERR_NO_MEM (fewer,
+// larger reads are more efficient, so the buffered path stays primary):
+//
+// - jpg_stream_run() (Tier 1): ALSO streams the decoded output, one MCU row
+//   band at a time, straight into the existing row-streaming pipeline
+//   (run_stream_row(), shared with run_stream() above) - never
+//   materializes the decoded image either. Non-rotated sources only: like
+//   png_stream_open()'s own "native_row_order && rotated" restriction,
+//   rotating means each OUTPUT row reads across nearly the FULL source
+//   height (see geometry_fill_row()'s rotated branch), not a small nearby
+//   window, which breaks the small-ring assumption this tier depends on.
+// - decode_jpg_streaming_buffer() (Tier 2): only removes the encoded-input
+//   ceiling; the decoded output is still one contiguous buffer (sized to
+//   tjpgd's own built-in descaling, same heuristic decode_jpg_buffer() uses
+//   - usually far smaller than the original file). Used for rotated
+//   sources, where Tier 1 doesn't apply.
+
+// tjpgd's own fixed-size scratch pool (Huffman tables, IDCT workspace, MCU
+// pixel buffer) - NOT proportional to image/file size, just to chroma
+// subsampling mode; matches jpeg_decoder.c's own sizing exactly (the
+// wrapper this bypasses). jd_prepare()/jd_decomp() report JDR_MEM1 if this
+// is ever too small - checked explicitly below, never assumed sufficient.
+#if defined(JD_FASTDECODE) && (JD_FASTDECODE == 2)
+#define JPG_STREAM_POOL_SIZE 65472
+#else
+#define JPG_STREAM_POOL_SIZE 3100
+#endif
+
+typedef struct {
+    FILE *fp;
+    bool io_error;
+} jpg_stream_io_t;
+
+// Shared by both tiers' infunc callbacks. Per TJpgDec's documented infunc
+// contract: buf == NULL means "skip nbyte bytes" (used to bypass large
+// APPn/EXIF segments without ever reading them into memory at all).
+// unsigned int (not size_t) to exactly match jd_prepare()'s infunc
+// parameter type in both the ROM and vendored tjpgd headers - jpeg_decoder.c
+// (the wrapper this bypasses) uses the same type for the same reason.
+static unsigned int jpg_stream_io_read(jpg_stream_io_t *io, uint8_t *buf, unsigned int nbyte)
+{
+    if (!buf) {
+        if (fseek(io->fp, (long) nbyte, SEEK_CUR) != 0) {
+            io->io_error = true;
+            return 0;
+        }
+        return nbyte;
+    }
+    size_t got = fread(buf, 1, nbyte, io->fp);
+    if (got < nbyte && ferror(io->fp)) {
+        io->io_error = true;
+    }
+    return got;
+}
+
+// Maps tjpgd's reported (pre-scale) dimensions to a descale factor, using
+// the exact same thresholds decode_jpg_buffer() already uses. Returns
+// tjpgd's scale argument (0..3, i.e. 1/1/2/4/8).
+static uint8_t jpg_stream_pick_scale(int width, int height)
+{
+    if (width > BOARD_HAL_DISPLAY_WIDTH * 4 || height > BOARD_HAL_DISPLAY_HEIGHT * 4) {
+        return 2;  // 1/4
+    }
+    if (width > BOARD_HAL_DISPLAY_WIDTH * 2 || height > BOARD_HAL_DISPLAY_HEIGHT * 2) {
+        return 1;  // 1/2
+    }
+    return 0;
+}
+
+// ---- Tier 2: streamed input, single (descaled) output buffer ----
+
+typedef struct {
+    jpg_stream_io_t io;
+    uint8_t *out_buf;
+    size_t out_buf_size;
+    int out_width;  // post-descale - output buffer's row stride, in pixels
+} jpg_stream_buffer_ctx_t;
+
+static unsigned int jpg_stream_buffer_infunc(JDEC *jd, uint8_t *buf, unsigned int nbyte)
+{
+    return jpg_stream_io_read(&((jpg_stream_buffer_ctx_t *) jd->device)->io, buf, nbyte);
+}
+
+// Copies one decoded MCU tile into its place in the flat output buffer -
+// mirrors jpeg_decoder.c's own jpeg_decode_out_cb() (the reference this
+// bypasses), RGB888-only (the only format this codebase ever requests).
+// Bounds-checked against the buffer's actual allocated size: tjpgd clips
+// MCUs to the image edge itself, so this should never trip, but a
+// corrupt/unexpected decoder state must fail cleanly here rather than
+// write past the allocation.
+static jpg_stream_out_t jpg_stream_buffer_outfunc(JDEC *jd, void *bitmap, JRECT *rect)
+{
+    jpg_stream_buffer_ctx_t *ctx = (jpg_stream_buffer_ctx_t *) jd->device;
+    const uint8_t *in = (const uint8_t *) bitmap;
+    size_t tile_w = (size_t) (rect->right - rect->left + 1);
+
+    for (int y = rect->top; y <= rect->bottom; y++) {
+        size_t row_off = (size_t) y * ctx->out_width * 3 + (size_t) rect->left * 3;
+        if (row_off + tile_w * 3 > ctx->out_buf_size) {
+            ESP_LOGE(TAG, "JPG streaming output buffer overflow (row %d)", y);
+            return 0;  // abort jd_decomp() immediately
+        }
+        memcpy(ctx->out_buf + row_off, in, tile_w * 3);
+        in += tile_w * 3;
+    }
+    return 1;
+}
+
+// Streamed-input counterpart to decode_jpg_buffer(): same descale heuristic
+// and single-buffer output, but reads the compressed bitstream directly
+// from `path` in small chunks instead of requiring it all in one buffer
+// first. Used for rotated sources, where jpg_stream_run() (Tier 1, fully
+// streamed) can't apply - see this section's header comment.
+static esp_err_t decode_jpg_streaming_buffer(const char *path, uint8_t **rgb_buffer, int *width,
+                                             int *height)
+{
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        ESP_LOGE(TAG, "Failed to open %s for streaming JPEG decode", path);
+        return ESP_FAIL;
+    }
+
+    void *pool = heap_caps_malloc(JPG_STREAM_POOL_SIZE, MALLOC_CAP_DEFAULT);
+    if (!pool) {
+        ESP_LOGE(TAG, "Failed to allocate tjpgd working buffer (%d bytes)", JPG_STREAM_POOL_SIZE);
+        fclose(fp);
+        return ESP_ERR_NO_MEM;
+    }
+
+    jpg_stream_buffer_ctx_t ctx = {.io = {.fp = fp, .io_error = false}};
+    JDEC jd;
+    JRESULT jr = jd_prepare(&jd, jpg_stream_buffer_infunc, pool, JPG_STREAM_POOL_SIZE, &ctx);
+    if (jr != JDR_OK) {
+        ESP_LOGE(TAG, "tjpgd jd_prepare failed (jr=%d)%s", jr,
+                 jr == JDR_MEM1 ? " - working buffer too small" : "");
+        heap_caps_free(pool);
+        fclose(fp);
+        return ESP_FAIL;
+    }
+
+    uint8_t scale = jpg_stream_pick_scale(jd.width, jd.height);
+    int scale_div = 1 << scale;
+    ctx.out_width = jd.width / scale_div;
+    int out_height = jd.height / scale_div;
+    ctx.out_buf_size = (size_t) ctx.out_width * out_height * 3;
+
+    ESP_LOGI(TAG, "JPG (streaming) scaled from %dx%d to %dx%d (scale: 1/%d)", jd.width, jd.height,
+             ctx.out_width, out_height, scale_div);
+
+    ctx.out_buf = (uint8_t *) heap_caps_malloc(ctx.out_buf_size, MALLOC_CAP_SPIRAM);
+    if (!ctx.out_buf) {
+        ESP_LOGE(TAG, "Failed to allocate JPG RGB buffer of %zu bytes (streaming)",
+                 ctx.out_buf_size);
+        heap_caps_free(pool);
+        fclose(fp);
+        return ESP_ERR_NO_MEM;
+    }
+
+    jr = jd_decomp(&jd, jpg_stream_buffer_outfunc, scale);
+    bool io_error = ctx.io.io_error;
+    heap_caps_free(pool);
+    fclose(fp);
+
+    if (jr != JDR_OK || io_error) {
+        ESP_LOGE(TAG, "tjpgd jd_decomp failed (jr=%d, io_error=%d)", jr, io_error);
+        set_last_error("JPG decoding failed");
+        heap_caps_free(ctx.out_buf);
+        return ESP_FAIL;
+    }
+
+    *rgb_buffer = ctx.out_buf;
+    *width = ctx.out_width;
+    *height = out_height;
+    return ESP_OK;
+}
+
+// ---- Tier 1: fully streamed (input AND output), non-rotated sources only ----
+
+typedef struct {
+    jpg_stream_io_t io;
+
+    uint8_t *ring;  // ring_rows full-width (post-descale) source rows
+    int ring_rows;
+    int width;   // post-descale
+    int height;  // post-descale
+    int mcu_h;   // post-descale MCU tile height (row-band granularity)
+    int rows_decoded;  // highest source row index with valid ring data, + 1
+    bool overflow;  // ring capacity would have been exceeded - kept distinct
+                    // from `error` so the failure is diagnosable
+    bool error;     // any other decode-time failure (sink, or the checks above)
+
+    geometry_t geo;
+    cdr_state_t cdr;
+    dither_state_t dither;
+    uint8_t *out_row;  // one output row scratch buffer, geo.out_w * 3 bytes
+    int next_out_row;
+    row_sink_fn sink;
+    void *sink_ctx;
+} jpg_stream_ring_ctx_t;
+
+static unsigned int jpg_stream_ring_infunc(JDEC *jd, uint8_t *buf, unsigned int nbyte)
+{
+    return jpg_stream_io_read(&((jpg_stream_ring_ctx_t *) jd->device)->io, buf, nbyte);
+}
+
+// Conservative (never-underestimating) upper bound on the highest source
+// row geometry_fill_row() might read to produce output row `out_y` -
+// mirrors that function's own box/bilinear resample math (including the
+// off_y crop/letterbox offset) plus a flat safety margin for rounding.
+// Producing a row before its bound is satisfied would read stale/
+// uninitialized ring data (silent corruption) - worse than the explicit,
+// clean ring-overflow failure below, so this must never come up short.
+static int jpg_stream_max_needed_src_row(const geometry_t *geo, int out_y)
+{
+    float bound;
+    if (geo->box) {
+        bound = (out_y + 1 + geo->off_y) / geo->scale;
+    } else {
+        float fy = (out_y + 0.5f + geo->off_y) / geo->scale - 0.5f;
+        bound = fy + 1.0f;
+    }
+    int needed = (int) ceilf(bound) + 2;
+    if (needed < 0) {
+        needed = 0;
+    }
+    if (needed >= geo->src_h) {
+        needed = geo->src_h - 1;
+    }
+    return needed;
+}
+
+// Symmetric lower-bound counterpart, used only to size the ring-overflow
+// check below (how far back the ring still needs to retain data) - erring
+// conservative here means "assume more is still needed than strictly is",
+// which can only make the overflow check trip earlier/more often, never
+// later (so it can never mask an actual overflow).
+static int jpg_stream_min_needed_src_row(const geometry_t *geo, int out_y)
+{
+    float bound;
+    if (geo->box) {
+        bound = (out_y + geo->off_y) / geo->scale;
+    } else {
+        bound = (out_y + 0.5f + geo->off_y) / geo->scale - 0.5f;
+    }
+    int needed = (int) floorf(bound) - 2;
+    if (needed < 0) {
+        needed = 0;
+    }
+    if (needed >= geo->src_h) {
+        needed = geo->src_h - 1;
+    }
+    return needed;
+}
+
+// Feeds every output row that's now computable given rows_decoded, via the
+// exact same per-row sequence run_stream()'s own loop uses
+// (run_stream_row()) - just driven by row-band arrival instead of a fixed
+// range.
+static void jpg_stream_produce_ready_rows(jpg_stream_ring_ctx_t *ctx)
+{
+    while (ctx->next_out_row < ctx->geo.out_h && !ctx->error) {
+        if (jpg_stream_max_needed_src_row(&ctx->geo, ctx->next_out_row) >= ctx->rows_decoded) {
+            break;  // not enough source data yet - wait for the next row-band
+        }
+
+        if (run_stream_row(&ctx->geo, &ctx->cdr, &ctx->dither, ctx->out_row, ctx->next_out_row,
+                           ctx->sink, ctx->sink_ctx) != ESP_OK) {
+            ctx->error = true;
+            break;
+        }
+        ctx->next_out_row++;
+
+        if ((ctx->next_out_row & 7) == 0) {
+            vTaskDelay(1);
+        }
+    }
+}
+
+static const uint8_t *jpg_stream_ring_get_row(void *row_ctx, int src_y)
+{
+    jpg_stream_ring_ctx_t *ctx = (jpg_stream_ring_ctx_t *) row_ctx;
+    // By construction, jpg_stream_produce_ready_rows() only calls
+    // run_stream_row() (and therefore geometry_fill_row(), which is what
+    // ultimately calls this via geo->get_row) for output rows whose full
+    // source dependency (jpg_stream_max_needed_src_row()) is already
+    // decoded - src_y is always < ctx->rows_decoded here.
+    return ctx->ring + (size_t) (src_y % ctx->ring_rows) * ctx->width * 3;
+}
+
+static jpg_stream_out_t jpg_stream_ring_outfunc(JDEC *jd, void *bitmap, JRECT *rect)
+{
+    jpg_stream_ring_ctx_t *ctx = (jpg_stream_ring_ctx_t *) jd->device;
+    const uint8_t *in = (const uint8_t *) bitmap;
+    int tile_w = rect->right - rect->left + 1;
+
+    if (rect->right >= ctx->width || rect->bottom >= ctx->height) {
+        ESP_LOGE(TAG, "JPG streaming: MCU rect (%d,%d)-(%d,%d) exceeds %dx%d image", rect->left,
+                 rect->top, rect->right, rect->bottom, ctx->width, ctx->height);
+        ctx->error = true;
+        return 0;
+    }
+
+    int oldest_needed = jpg_stream_min_needed_src_row(&ctx->geo, ctx->next_out_row);
+
+    for (int y = rect->top; y <= rect->bottom; y++) {
+        // Ring-capacity guard: writing row `y` must not stomp on a row the
+        // pipeline hasn't consumed yet. The window sizing in
+        // jpg_stream_run() is meant to guarantee this never trips, but an
+        // image/geometry combination outside what that sizing accounted
+        // for must fail cleanly here instead of silently overwriting
+        // not-yet-read rows.
+        if (y - oldest_needed >= ctx->ring_rows) {
+            ESP_LOGE(TAG,
+                     "JPG streaming row buffer would overflow (row %d, oldest still-needed %d, "
+                     "ring %d rows)",
+                     y, oldest_needed, ctx->ring_rows);
+            ctx->overflow = true;
+            ctx->error = true;
+            return 0;  // abort jd_decomp() immediately
+        }
+
+        uint8_t *slot =
+            ctx->ring + (size_t) (y % ctx->ring_rows) * ctx->width * 3 + (size_t) rect->left * 3;
+        memcpy(slot, in, (size_t) tile_w * 3);
+        in += (size_t) tile_w * 3;
+
+        if (y >= ctx->rows_decoded) {
+            ctx->rows_decoded = y + 1;
+        }
+    }
+
+    // A full row-band just completed once the last MCU column of this band
+    // was written (rect->right reaches the image's right edge) - tjpgd
+    // always decodes MCUs left-to-right within a band before moving down,
+    // so this is the first point at which any NEW output row's full width
+    // is actually available.
+    if (rect->right >= ctx->width - 1) {
+        jpg_stream_produce_ready_rows(ctx);
+    }
+
+    return ctx->error ? 0 : 1;
+}
+
+// Fully streamed JPEG decode: reads `path` in small chunks and feeds
+// decoded rows directly into `sink` as they become available, never
+// materializing the compressed file OR the decoded image as a whole.
+// Non-rotated sources only (see this section's header comment) - always
+// native row order (the only order this codebase's JPEG call site needs).
+static esp_err_t jpg_stream_run(const char *path, dither_algorithm_t dither_algorithm,
+                                row_sink_fn sink, void *sink_ctx)
+{
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        ESP_LOGE(TAG, "Failed to open %s for streaming JPEG decode", path);
+        return ESP_FAIL;
+    }
+
+    void *pool = heap_caps_malloc(JPG_STREAM_POOL_SIZE, MALLOC_CAP_DEFAULT);
+    if (!pool) {
+        ESP_LOGE(TAG, "Failed to allocate tjpgd working buffer (%d bytes)", JPG_STREAM_POOL_SIZE);
+        fclose(fp);
+        return ESP_ERR_NO_MEM;
+    }
+
+    jpg_stream_ring_ctx_t ctx = {0};
+    ctx.io.fp = fp;
+
+    JDEC jd;
+    JRESULT jr = jd_prepare(&jd, jpg_stream_ring_infunc, pool, JPG_STREAM_POOL_SIZE, &ctx);
+    if (jr != JDR_OK) {
+        ESP_LOGE(TAG, "tjpgd jd_prepare failed (jr=%d)%s", jr,
+                 jr == JDR_MEM1 ? " - working buffer too small" : "");
+        heap_caps_free(pool);
+        fclose(fp);
+        return ESP_FAIL;
+    }
+
+    uint8_t scale = jpg_stream_pick_scale(jd.width, jd.height);
+    int scale_div = 1 << scale;
+    ctx.width = jd.width / scale_div;
+    ctx.height = jd.height / scale_div;
+    ctx.mcu_h = (jd.msy * 8) >> scale;
+    if (ctx.mcu_h < 1) {
+        ctx.mcu_h = 1;
+    }
+
+    ESP_LOGI(TAG, "JPG (streaming, row-pipelined) scaled from %dx%d to %dx%d (scale: 1/%d)",
+             jd.width, jd.height, ctx.width, ctx.height, scale_div);
+
+    geometry_init(&ctx.geo, NULL, ctx.width, ctx.height, false);
+    cdr_init(&ctx.cdr);
+    esp_err_t err = dither_init(&ctx.dither, ctx.geo.out_w, dither_algorithm);
+    if (err != ESP_OK) {
+        heap_caps_free(pool);
+        fclose(fp);
+        return err;
+    }
+
+    // Ring sized generously against the same resample-window rationale
+    // png_stream_open() uses (see its comment) - the off_y crop/letterbox
+    // offset doesn't widen this (it shifts which absolute rows are needed,
+    // not how many are needed at once), rounded up to whole MCU row-bands
+    // so a band's write is never split across the ring's wrap point.
+    int window = (ctx.geo.scale < 1.0f) ? (int) ceilf(1.0f / ctx.geo.scale) + 4 : 6;
+    if (window > ctx.height) {
+        window = ctx.height;
+    }
+    ctx.ring_rows = ((window + ctx.mcu_h - 1) / ctx.mcu_h) * ctx.mcu_h;
+    if (ctx.ring_rows > ctx.height) {
+        ctx.ring_rows = ctx.height;
+    }
+
+    ctx.ring = (uint8_t *) heap_caps_malloc((size_t) ctx.ring_rows * ctx.width * 3,
+                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ctx.out_row = (uint8_t *) heap_caps_malloc((size_t) ctx.geo.out_w * 3, MALLOC_CAP_SPIRAM);
+    if (!ctx.ring || !ctx.out_row) {
+        ESP_LOGE(TAG, "Failed to allocate JPG streaming ring/row buffer");
+        heap_caps_free(ctx.ring);
+        heap_caps_free(ctx.out_row);
+        dither_free(&ctx.dither);
+        heap_caps_free(pool);
+        fclose(fp);
+        return ESP_ERR_NO_MEM;
+    }
+
+    ctx.geo.get_row = jpg_stream_ring_get_row;
+    ctx.geo.row_ctx = &ctx;
+    ctx.sink = sink;
+    ctx.sink_ctx = sink_ctx;
+
+    ESP_LOGI(TAG, "Streaming JPEG: %dx%d (%d-row window)", ctx.width, ctx.height, ctx.ring_rows);
+
+    jr = jd_decomp(&jd, jpg_stream_ring_outfunc, scale);
+
+    // jd_decomp() returning JDR_OK means every MCU (including the final
+    // row-band) was processed, which already triggered
+    // jpg_stream_produce_ready_rows() as far as it could go - this is a
+    // harmless no-op safety net for the (expected-empty) remainder.
+    bool io_error = ctx.io.io_error;
+    if (jr == JDR_OK && !ctx.error) {
+        ctx.rows_decoded = ctx.height;
+        jpg_stream_produce_ready_rows(&ctx);
+    }
+
+    heap_caps_free(ctx.ring);
+    heap_caps_free(ctx.out_row);
+    dither_free(&ctx.dither);
+    heap_caps_free(pool);
+    fclose(fp);
+
+    if (jr != JDR_OK) {
+        ESP_LOGE(TAG, "tjpgd jd_decomp failed (jr=%d)", jr);
+        set_last_error("JPG decoding failed");
+        return ESP_FAIL;
+    }
+    if (ctx.overflow) {
+        set_last_error("JPG decoding failed (internal buffer overflow)");
+        return ESP_FAIL;
+    }
+    if (ctx.error || io_error) {
+        ESP_LOGE(TAG, "JPG streaming decode failed (sink or I/O error)");
+        return ESP_FAIL;
+    }
+    if (ctx.next_out_row != ctx.geo.out_h) {
+        ESP_LOGE(TAG, "JPG streaming decode incomplete (%d/%d rows produced)", ctx.next_out_row,
+                 ctx.geo.out_h);
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+// Fallback for image_processor_process() below, used only when the initial
+// whole-file read fails with ESP_ERR_NO_MEM and the source is a JPEG - see
+// the "Streamed JPEG source" section above for the two tiers this picks
+// between (jpg_stream_run() when possible, decode_jpg_streaming_buffer()
+// otherwise).
+static esp_err_t process_jpg_streaming_fallback(const char *input_path, const char *output_path,
+                                                dither_algorithm_t dither_algorithm, bool rotated)
+{
+    esp_err_t err;
+
+    if (!rotated) {
+        ESP_LOGI(TAG, "Writing PNG output to %s (streaming fallback)", output_path);
+        png_writer_t writer;
+        err = png_writer_open(&writer, output_path, BOARD_HAL_DISPLAY_WIDTH,
+                              BOARD_HAL_DISPLAY_HEIGHT);
+        if (err == ESP_OK) {
+            err = jpg_stream_run(input_path, dither_algorithm, png_writer_row_sink, &writer);
+            esp_err_t close_err = png_writer_close(&writer, err == ESP_OK);
+            if (err == ESP_OK) {
+                err = close_err;
+            }
+        }
+    } else {
+        uint8_t *rgb_buffer = NULL;
+        int width = 0, height = 0;
+        err = decode_jpg_streaming_buffer(input_path, &rgb_buffer, &width, &height);
+        if (err != ESP_OK) {
+            return err;
+        }
+        ESP_LOGI(TAG, "Decoded image (streaming fallback): %dx%d", width, height);
+        ESP_LOGI(TAG, "Writing PNG output to %s (streaming fallback)", output_path);
+        png_writer_t writer;
+        err = png_writer_open(&writer, output_path, BOARD_HAL_DISPLAY_WIDTH,
+                              BOARD_HAL_DISPLAY_HEIGHT);
+        if (err == ESP_OK) {
+            err = process_rgb_stream(rgb_buffer, width, height, dither_algorithm,
+                                     png_writer_row_sink, &writer, false, rotated);
+            esp_err_t close_err = png_writer_close(&writer, err == ESP_OK);
+            if (err == ESP_OK) {
+                err = close_err;
+            }
+        }
+        heap_caps_free(rgb_buffer);
+    }
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Successfully wrote PNG to %s (streaming fallback)", output_path);
+    } else {
+        unlink(output_path);
+    }
+    return err;
 }
 
 // PNG memory read callback structure
@@ -1467,10 +2034,25 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
     long file_size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
 
+    bool rotated = orientation_needs_rotation();
+
     uint8_t *file_buffer = heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
     if (!file_buffer) {
-        ESP_LOGE(TAG, "Failed to allocate file buffer of %ld bytes", file_size);
         fclose(fp);
+        // A large "document" upload (Telegram doesn't re-encode/downscale
+        // those the way it does "photo" messages) can exceed the largest
+        // contiguous free PSRAM block even though the chip nominally has
+        // plenty of total heap - only JPEG has a streaming fallback for
+        // this (see the "Streamed JPEG source" section above); PNG has no
+        // equivalent yet, so this stays a hard failure for that format.
+        if (format == IMAGE_FORMAT_JPG) {
+            ESP_LOGW(TAG,
+                     "Failed to allocate file buffer of %ld bytes - falling back to streaming JPEG "
+                     "decode",
+                     file_size);
+            return process_jpg_streaming_fallback(input_path, output_path, dither_algorithm, rotated);
+        }
+        ESP_LOGE(TAG, "Failed to allocate file buffer of %ld bytes", file_size);
         return ESP_ERR_NO_MEM;
     }
 
@@ -1484,7 +2066,6 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
     }
 
     esp_err_t err;
-    bool rotated = orientation_needs_rotation();
 
     // Non-rotated PNGs stream straight from the decoder into the output PNG
     if (format == IMAGE_FORMAT_PNG) {
