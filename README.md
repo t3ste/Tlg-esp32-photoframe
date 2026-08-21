@@ -7,6 +7,7 @@ A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently 
 ## Key Features
 
 - 🎨 **Superior Image Quality**: Measured color palette with automatic calibration produces significantly better results than stock firmware
+- 🖼️ **Crop or Letterbox**: Choose whether mismatched-aspect-ratio images are cropped to fill the screen or shown in full with letterbox bars ([docs](docs/SCALE_MODE.md))
 - 🔋 **Smart Power Management**: Deep sleep mode for weeks of battery life, or always-on for Home Assistant
 - 📁 **Flexible Image Sources**: SD card rotation, URL-based fetching (weather, news, random images from image server)
 - 🤖 **Telegram Bot**: Send photos straight to the frame via a Telegram bot, no extra server required ([docs](docs/TELEGRAM.md))
