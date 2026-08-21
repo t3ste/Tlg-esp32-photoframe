@@ -555,21 +555,29 @@ static esp_err_t make_unique_telegram_path(const char *ext, char *out, size_t ou
 // original) per photo.
 #define TELEGRAM_MAX_PHOTO_SIZES 8
 
-// Pre-download size gate: image_processor.c has no streaming-input JPEG
-// decoder (esp_jpeg's wrapper requires the WHOLE compressed file in one
-// contiguous heap_caps_malloc(..., MALLOC_CAP_SPIRAM) block before it can
-// decode anything - see image_processor_process()), and
-// preserve_telegram_original() below reads the same file whole a second
-// time. A multi-MB "document" upload (Telegram doesn't re-encode/downscale
-// files sent as a raw file, unlike a normal "photo" message) can exceed the
+// Pre-download size gate for formats WITHOUT a streaming decoder (PNG, BMP
+// documents - see document_pick_extension()): image_processor.c's PNG/BMP
+// paths still require the WHOLE compressed file in one contiguous
+// heap_caps_malloc(..., MALLOC_CAP_SPIRAM) block before decoding anything.
+// A multi-MB "document" upload (Telegram doesn't re-encode/downscale files
+// sent as a raw file, unlike a normal "photo" message) can exceed the
 // largest free PSRAM block despite the chip nominally having plenty of
-// total heap, since WiFi/TLS/other buffers already active during a poll cycle
-// fragment and consume much of it. Checking BEFORE downloading avoids
+// total heap, since WiFi/TLS/other buffers already active during a poll
+// cycle fragment and consume much of it. Checking BEFORE downloading avoids
 // wasting the transfer (and battery) on a file that's going to fail deep in
-// the pipeline anyway. 1.5x the file size as a threshold is a rough, best-effort
-// margin for the separate decoded RGB output buffer needed afterward and
-// whatever the network stack has already reserved - not a hard guarantee
-// (fragmentation can still surprise), but catches the common case.
+// the pipeline anyway. 1.5x the file size as a threshold is a rough,
+// best-effort margin for the separate decoded RGB output buffer needed
+// afterward and whatever the network stack has already reserved - not a
+// hard guarantee (fragmentation can still surprise), but catches the
+// common case.
+//
+// NOT applied to JPEG (photo array entries, or a "document" whose extension
+// is .jpg): image_processor.c has a streaming JPEG decode fallback
+// (jpg_stream_run() / decode_jpg_streaming_buffer()) specifically so a
+// large JPEG no longer needs this whole-file buffer, and
+// preserve_telegram_original() also streams its archival copy rather than
+// reading the file whole. Gating JPEG downloads on this check would reject
+// files the pipeline can now actually handle just fine.
 static bool have_enough_memory_for_download(long file_size)
 {
     if (file_size <= 0) {
@@ -670,11 +678,10 @@ static esp_err_t download_photo_with_fallback(cJSON *photo_array, char *out_path
         ESP_LOGI(TAG, "Trying Telegram photo size %d/%d (%lldpx area, ~%d KB)", rank + 1, n,
                  area[idx], approx_kb);
 
-        if (!have_enough_memory_for_download(fsize_bytes)) {
-            ESP_LOGW(TAG, "Size %d/%d (~%d KB) too large for available memory, falling back to smaller",
-                     rank + 1, n, approx_kb);
-            continue;
-        }
+        // No have_enough_memory_for_download() check here - every "photo"
+        // array entry is JPEG, which has a streaming decode fallback (see
+        // that function's comment) that doesn't need this file's bytes to
+        // fit in one contiguous buffer at all.
 
         if (make_unique_telegram_path("jpg", out_path, out_path_len) != ESP_OK) {
             return ESP_FAIL;
@@ -774,10 +781,13 @@ static esp_err_t download_document_image(cJSON *document, char *out_path, size_t
     // Unlike a "photo" message (always re-encoded by Telegram into several
     // modest-sized options), a document keeps its original size verbatim -
     // there's no smaller fallback to reach for, so an oversized one is
-    // rejected outright rather than downloaded and left to fail later.
+    // rejected outright rather than downloaded and left to fail later. Only
+    // for PNG/BMP, though - a .jpg document has the same streaming decode
+    // fallback a "photo" does (see have_enough_memory_for_download()'s
+    // comment), so this gate doesn't apply to it.
     cJSON *fsize_item = cJSON_GetObjectItem(document, "file_size");
     long fsize_bytes = (fsize_item && cJSON_IsNumber(fsize_item)) ? (long) fsize_item->valuedouble : -1;
-    if (!have_enough_memory_for_download(fsize_bytes)) {
+    if (strcmp(ext, "jpg") != 0 && !have_enough_memory_for_download(fsize_bytes)) {
         ESP_LOGW(TAG, "Document (~%ld KB) too large for available memory, skipping",
                  fsize_bytes / 1024);
         return ESP_FAIL;
