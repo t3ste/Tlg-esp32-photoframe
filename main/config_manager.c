@@ -90,6 +90,7 @@ static char weather_lat[WEATHER_LATLON_MAX_LEN] = {0};
 static char weather_lon[WEATHER_LATLON_MAX_LEN] = {0};
 static char weather_geocoded_name[WEATHER_LOCATION_NAME_MAX_LEN] = {0};
 static char weather_provider[WEATHER_PROVIDER_MAX_LEN] = WEATHER_PROVIDER_DEFAULT;
+static char weather_last_source[WEATHER_PROVIDER_MAX_LEN] = {0};
 static bool headlines_overlay_enabled = false;
 static char headlines_rss_url[HEADLINES_RSS_URL_MAX_LEN] = {0};
 static uint8_t headlines_count = HEADLINES_COUNT_DEFAULT;
@@ -597,6 +598,9 @@ esp_err_t config_manager_init(void)
              strcmp(stored_provider, WEATHER_PROVIDER_YR_NO) == 0)) {
             strncpy(weather_provider, stored_provider, sizeof(weather_provider) - 1);
         }
+        size_t weather_last_source_len = sizeof(weather_last_source);
+        nvs_get_str(nvs_handle, NVS_WEATHER_LAST_SOURCE_KEY, weather_last_source,
+                    &weather_last_source_len);
 
         uint8_t stored_headlines_overlay = 0;
         if (nvs_get_u8(nvs_handle, NVS_HEADLINES_OVERLAY_ENABLED_KEY, &stored_headlines_overlay) ==
@@ -1859,6 +1863,25 @@ void config_manager_set_weather_provider(const char *provider)
 const char *config_manager_get_weather_provider(void)
 {
     return weather_provider;
+}
+
+void config_manager_set_weather_last_source(const char *provider)
+{
+    const char *new_source = provider ? provider : "";
+    strncpy(weather_last_source, new_source, sizeof(weather_last_source) - 1);
+    weather_last_source[sizeof(weather_last_source) - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_WEATHER_LAST_SOURCE_KEY, weather_last_source);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_weather_last_source(void)
+{
+    return weather_last_source;
 }
 
 void config_manager_set_headlines_overlay_enabled(bool enabled)

@@ -44,6 +44,12 @@ typedef struct {
  * last successful geocode); a match reuses the cached lat/lon, so geocoding
  * only costs a request once per location-name change, not every call.
  *
+ * On success, also records the provider used via
+ * config_manager_set_weather_last_source() - lets /status (telegram_bot.c)
+ * report which service actually produced the currently-displayed data,
+ * distinct from config_manager_get_weather_provider() (the configured
+ * preference, which may not match if the last attempt against it failed).
+ *
  * Best-effort: any network/parse failure returns an error and leaves *out
  * zeroed (valid = false) - callers should treat this as "no weather this
  * cycle", never fatal to the caller's own flow.

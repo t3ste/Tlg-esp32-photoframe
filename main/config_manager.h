@@ -252,6 +252,11 @@ const char *config_manager_get_weather_geocoded_name(void);
 // else is coerced to WEATHER_PROVIDER_DEFAULT.
 void config_manager_set_weather_provider(const char *provider);
 const char *config_manager_get_weather_provider(void);
+// The provider that actually produced the currently-displayed weather data -
+// updated by weather.c on every successful fetch, regardless of which
+// provider is configured. Empty string if no fetch has ever succeeded.
+void config_manager_set_weather_last_source(const char *provider);
+const char *config_manager_get_weather_last_source(void);
 
 void config_manager_set_headlines_overlay_enabled(bool enabled);
 bool config_manager_get_headlines_overlay_enabled(void);

@@ -273,6 +273,14 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define WEATHER_PROVIDER_YR_NO "yr.no"
 #define WEATHER_PROVIDER_DEFAULT WEATHER_PROVIDER_OPEN_METEO
 
+// The provider that actually produced the currently-displayed weather data
+// (updated on every successful weather_fetch_forecast(), regardless of
+// which of the three providers above is configured) - persisted so
+// /status and the wake notification can report it even when queried in a
+// later wake than the one that last actually refreshed the overlay. Empty
+// until the first successful fetch.
+#define NVS_WEATHER_LAST_SOURCE_KEY "wthr_last_src"
+
 #define NVS_HEADLINES_OVERLAY_ENABLED_KEY "hdln_overlay_en"
 // Any RSS/Atom feed URL (Tagesschau, Spiegel, BBC, ...) - no API key, no
 // rate limit, works with essentially any news outlet.

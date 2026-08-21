@@ -527,6 +527,7 @@ esp_err_t weather_fetch_forecast(weather_forecast_t *out)
         return ESP_FAIL;
     }
     out->valid = true;
+    config_manager_set_weather_last_source(provider);
     return ESP_OK;
 }
 

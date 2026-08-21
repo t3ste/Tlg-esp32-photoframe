@@ -1991,6 +1991,38 @@ static void format_rotation_schedule(char *out, size_t out_len)
     }
 }
 
+static const char *weather_provider_label(const char *provider)
+{
+    if (strcmp(provider, WEATHER_PROVIDER_WTTR_IN) == 0) {
+        return "wttr.in";
+    }
+    if (strcmp(provider, WEATHER_PROVIDER_YR_NO) == 0) {
+        return "yr.no (MET Norway)";
+    }
+    return "Open-Meteo";
+}
+
+// Empty string if the weather overlay is off - otherwise one line (with its
+// own trailing newline) reporting which service actually produced the
+// currently-displayed forecast. Deliberately reports
+// config_manager_get_weather_last_source() (updated by weather.c on every
+// successful fetch), not config_manager_get_weather_provider() (the
+// configured preference) - the two can differ if the last attempt against
+// the configured provider failed and an older fetch is still on display.
+static void format_weather_source(char *out, size_t out_len)
+{
+    out[0] = '\0';
+    if (!config_manager_get_weather_overlay_enabled()) {
+        return;
+    }
+    const char *last_source = config_manager_get_weather_last_source();
+    if (last_source[0] == '\0') {
+        snprintf(out, out_len, "Weather source: none yet (no successful fetch)\n");
+    } else {
+        snprintf(out, out_len, "Weather source: %s\n", weather_provider_label(last_source));
+    }
+}
+
 // Shared by /status and the optional wake-up notification - `title` is the
 // only thing that differs between the two use sites.
 static void format_battery_estimate(char *out, size_t out_len)
@@ -2029,6 +2061,9 @@ static void build_status_message(const char *title, char *out, size_t out_len)
     char schedule[160];
     format_rotation_schedule(schedule, sizeof(schedule));
 
+    char weather_source[64];
+    format_weather_source(weather_source, sizeof(weather_source));
+
     char toggles[384];
     format_toggles(toggles, sizeof(toggles));
 
@@ -2047,11 +2082,13 @@ static void build_status_message(const char *title, char *out, size_t out_len)
              "Heap: %s\n"
              "\n"
              "Rotation schedule: %s\n"
+             "%s"
              "\n"
              "Settings:\n"
              "%s",
              title, app_desc->version, BOARD_HAL_NAME, reset_reason_string(), battery,
-             battery_estimate, ssid ? ssid : "n/a", ip_str, storage, heap, schedule, toggles);
+             battery_estimate, ssid ? ssid : "n/a", ip_str, storage, heap, schedule, weather_source,
+             toggles);
 }
 
 // Executes one queued "/"-command and sends a sendMessage reply. Strips an
