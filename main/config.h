@@ -301,10 +301,11 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // whenever headlines are also enabled, regardless of this setting.
 #define NVS_WEATHER_MULTILINE_KEY "wthr_multiline"
 
-// On battery, WiFi association draws a brief high-current TX burst; capping
-// TX power lowers that peak (at some cost to range). Value is in units of
-// 0.25 dBm (esp_wifi_set_max_tx_power() convention) - 60 = 15 dBm, versus the
-// factory default of up to ~20 dBm (80).
+// WiFi association draws a brief high-current TX burst; whenever a battery
+// is in the loop (battery-only, or USB+battery together - see
+// wifi_manager.c), capping TX power lowers that peak (at some cost to
+// range). Value is in units of 0.25 dBm (esp_wifi_set_max_tx_power()
+// convention) - 60 = 15 dBm, versus the factory default of up to ~20 dBm (80).
 #define WIFI_BATTERY_MAX_TX_POWER_QUARTER_DBM 60
 
 // AI API Keys (for webapp client use)

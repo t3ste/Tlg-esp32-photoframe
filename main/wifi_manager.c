@@ -223,15 +223,22 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    // On battery, associating with an AP draws a brief high-current TX burst
-    // that a marginal battery/PMIC rail may not sustain without a voltage dip
-    // severe enough to glitch a concurrent SPI flash/PSRAM read (a real ESP32
-    // failure mode: it can trigger a CPU exception without ever tripping the
-    // brownout detector's own reset). Capping TX power measurably lowers that
-    // peak, at some cost to range - only applied off USB, where the extra
-    // headroom isn't needed. Best-effort: failure here shouldn't block
-    // connecting at default power.
-    if (!board_hal_is_usb_connected()) {
+    // Associating with an AP draws a brief high-current TX burst that a
+    // marginal battery/PMIC rail may not sustain without a voltage dip severe
+    // enough to glitch a concurrent SPI flash/PSRAM read (a real ESP32 failure
+    // mode: it can trigger a CPU exception without ever tripping the brownout
+    // detector's own reset) - or, on Waveshare PhotoPainter boards with the
+    // original AXP2101 PMIC, contribute to the well-documented brownout/reset
+    // loop specifically seen when USB and battery are both connected at once
+    // (see waveshareteam/ESP32-S3-PhotoPainter#5 - fixed in the v2 hardware
+    // revision, which replaced the AXP2101 with a TG28 PMIC). Gated on
+    // battery presence rather than "USB absent": the risky case is any state
+    // with a battery in the loop, including USB+battery together, not just
+    // battery-only - USB-only (no battery at all) has no rail to protect and
+    // keeps full TX power/range. Capping measurably lowers that peak, at some
+    // cost to range. Best-effort: failure here shouldn't block connecting at
+    // default power.
+    if (board_hal_is_battery_connected()) {
         esp_err_t tx_err = esp_wifi_set_max_tx_power(WIFI_BATTERY_MAX_TX_POWER_QUARTER_DBM);
         if (tx_err != ESP_OK) {
             ESP_LOGW(TAG, "Failed to cap TX power for battery operation: %s",
