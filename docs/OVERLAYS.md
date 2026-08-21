@@ -21,17 +21,25 @@ Both share two appearance settings (Web UI only):
 
 ### Line-width limits
 
-The display fits roughly 46 characters per overlay line. A single day's weather segment
-(`Wed sunny 16/24`) always fits comfortably, even in the worst case (a long condition word plus
-3-digit negative temperatures on both ends, e.g. `Wed hvy.storm+hail -10/-11` ≈ 27 characters).
-**Three days combined onto one line generally does not fit every combination**, even after
-abbreviating condition words as far as reasonably legible (`Gewitter` → `Gew.`, `hvy. storm + hail`
-→ `hvy.storm+hail`, etc.) — worst case is still well over twice the line budget. There is no
-reliable way to guarantee all three days on one line with text alone; the options are: accept that
-some combinations truncate on the single-line layout, or use the 3-line layout below, which always
-fits. (Small fixed-size icons instead of condition words would also solve this, but weren't
-implemented — the 3-line layout already solves the fitting problem completely at much lower cost
-than authoring a new bitmap icon set.)
+This firmware targets several boards with very different panel widths (see `boards/boards.json`) -
+from 800px (Waveshare PhotoPainter, Seeed XIAO EE04, reTerminal E1002) up to 1872px (Seeed XIAO
+EE03, reTerminal E1003). The overlay text uses a fixed-width 17px-per-character bitmap font
+regardless of panel size, so the character budget scales with it: roughly `(panel_width_px - 8) /
+17` characters per line - about **46** on the narrowest (800px) boards, ~70 on the 1200px boards,
+and ~109 on the widest (1872px) ones.
+
+A single day's weather segment (`Wed sunny 16/24`) fits comfortably on every supported board, even
+in the worst case (a long condition word plus 3-digit negative temperatures on both ends, e.g.
+`Wed hvy.storm+hail -10/-11` ≈ 27 characters). **Three days combined onto one line** is the case
+that varies by board: on the widest boards (~109 chars) every combination fits; on the narrowest
+800px boards (~46 chars) it generally does not, even after abbreviating condition words as far as
+reasonably legible (`Gewitter` → `Gew.`, `hvy. storm + hail` → `hvy.storm+hail`, etc.) - worst case
+there is still well over twice the line budget. There is no way to guarantee all three days on one
+line with text alone on the narrower boards; the options are: accept that some combinations
+truncate on the single-line layout, or use the 3-line layout below, which always fits regardless of
+panel width. (Small fixed-size icons instead of condition words would also help on narrow boards,
+but weren't implemented - the 3-line layout already solves the fitting problem completely there, at
+much lower cost than authoring a new bitmap icon set.)
 
 - **Weather as 3 lines**: when the headlines overlay is off, an option renders the weather as one
   line per day instead of one combined line — reliably fits every combination. Not offered while
