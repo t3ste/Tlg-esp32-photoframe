@@ -13,6 +13,25 @@ BOARDS = list(SUPPORTED_BOARDS.keys())
 STEPS = ["webapp", "splash", "firmware"]
 
 
+def idf_py_command():
+    """Locate the real idf.py script via $IDF_PATH instead of relying on the
+    bare "idf.py" command. On Windows, the official ESP-IDF installer's
+    PowerShell activation profile defines "idf.py" as a PowerShell alias/
+    function (`New-Alias idf.py -> Invoke-idfpy`) - that works when typed
+    interactively, but subprocess.run() bypasses the shell entirely and
+    launches processes directly, so it can never see a shell alias and fails
+    with FileNotFoundError. Resolving the real script file sidesteps that.
+    Falls back to the bare command if IDF_PATH isn't set or doesn't contain
+    it (e.g. an environment where idf.py is already a real, PATH-resolvable
+    script/symlink, as with a typical Linux/Mac `export.sh` setup)."""
+    idf_path = os.environ.get("IDF_PATH")
+    if idf_path:
+        candidate = os.path.join(idf_path, "tools", "idf.py")
+        if os.path.isfile(candidate):
+            return [sys.executable, candidate]
+    return ["idf.py"]
+
+
 def build_webapp():
     """Build the webapp (npm install + npm run build)."""
     print("\n=== Building webapp ===")
@@ -66,8 +85,7 @@ def build_firmware(board, extra_args, debug=False):
         # for release or demo builds.
         sdkconfig_defaults += ";sdkconfig.defaults.debug"
 
-    idf_base = [
-        "idf.py",
+    idf_base = idf_py_command() + [
         f"-DSDKCONFIG_DEFAULTS={sdkconfig_defaults}",
     ]
 
