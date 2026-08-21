@@ -747,7 +747,15 @@ void app_main(void)
         esp_restart();
     }
 
-    xTaskCreate(button_task, "button_task", 8192, NULL, 5, NULL);
+    // 12288, not 8192: the KEY button calls trigger_image_rotation() directly
+    // on this task - the same heavy rotation pipeline (Telegram fetch/JPEG
+    // decode/processing) that deep_sleep_wake_task() needed a 12288-byte
+    // stack for (see main.c's WAKEUP_SOURCE_TIMER/_ROTATE_BUTTON case and
+    // commit d8c9896). 8192 was never enough for that pipeline; button_task
+    // is long-lived (not a one-shot task), so unlike the main-task fix this
+    // is a straightforward stack bump rather than moving the work off onto
+    // its own task.
+    xTaskCreate(button_task, "button_task", 12288, NULL, 5, NULL);
 
     ESP_ERROR_CHECK(http_server_init());
     http_server_set_ready();
