@@ -629,7 +629,14 @@ void app_main(void)
     case WAKEUP_SOURCE_TIMER:
     case WAKEUP_SOURCE_ROTATE_BUTTON:
         ESP_LOGI(TAG, "Entering deep sleep wake path (timer or rotate button)");
-        xTaskCreate(deep_sleep_wake_task, "deep_sleep_wake", 12288,
+        // 16384, not 12288: a live coredump showed button_task overflowing at
+        // 12288 running this same pipeline (trigger_image_rotation(), even
+        // for a small ~23KB photo - the overflow tracks call depth, not
+        // image size) - matched here to rotation_timer_task's own
+        // (apparently sufficient) 16384 for the identical call, see
+        // power_manager.c. See trigger_image_rotation()'s own stack
+        // high-water-mark log (utils.c) for real numbers on this build.
+        xTaskCreate(deep_sleep_wake_task, "deep_sleep_wake", 16384,
                     (void *) (intptr_t) wakeup_src, 5, NULL);
         // Returning (rather than `break`) hands off exclusively to the new
         // task - falling through to the cold-boot/BOOT_BUTTON setup code
@@ -747,15 +754,20 @@ void app_main(void)
         esp_restart();
     }
 
-    // 12288, not 8192: the KEY button calls trigger_image_rotation() directly
-    // on this task - the same heavy rotation pipeline (Telegram fetch/JPEG
-    // decode/processing) that deep_sleep_wake_task() needed a 12288-byte
-    // stack for (see main.c's WAKEUP_SOURCE_TIMER/_ROTATE_BUTTON case and
-    // commit d8c9896). 8192 was never enough for that pipeline; button_task
-    // is long-lived (not a one-shot task), so unlike the main-task fix this
-    // is a straightforward stack bump rather than moving the work off onto
-    // its own task.
-    xTaskCreate(button_task, "button_task", 12288, NULL, 5, NULL);
+    // 16384: the KEY button calls trigger_image_rotation() directly on this
+    // task - the same heavy rotation pipeline (Telegram fetch/JPEG decode/
+    // processing/overlay compositing) also run from deep_sleep_wake_task()
+    // and rotation_timer_task(). 8192 (the original value) and 12288 (a
+    // first attempt, see commit 6c8a5ac) both overflowed in practice - a
+    // live coredump caught 12288 overflowing on a ~23KB photo, so this
+    // clearly isn't about image size. Matched to rotation_timer_task's own
+    // 16384 for the identical call (power_manager.c), the one value with
+    // any actual evidence of being enough. button_task is long-lived (not
+    // a one-shot task), so unlike the main-task fix this is a straightforward
+    // stack bump rather than moving the work off onto its own task. See
+    // trigger_image_rotation()'s own stack high-water-mark log (utils.c) for
+    // real numbers on this build.
+    xTaskCreate(button_task, "button_task", 16384, NULL, 5, NULL);
 
     ESP_ERROR_CHECK(http_server_init());
     http_server_set_ready();

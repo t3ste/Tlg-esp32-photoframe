@@ -1546,6 +1546,17 @@ esp_err_t trigger_image_rotation(void)
         result = ESP_OK;
     }
 
+    // This runs on whichever task called us (button_task, deep_sleep_wake_task,
+    // rotation_timer_task, or the HTTP server's worker task via /api/rotate) -
+    // several of those have needed their stack size bumped for this same
+    // pipeline (Telegram fetch/JPEG decode/processing/overlay compositing)
+    // more than once, most recently over-confidently. Logging the actual
+    // high-water mark here (words remaining, not bytes - see
+    // uxTaskGetStackHighWaterMark()'s own units) turns the next "was that
+    // enough?" into a real measurement instead of another guess.
+    ESP_LOGI(TAG, "trigger_image_rotation() stack headroom remaining: %u words",
+             (unsigned) uxTaskGetStackHighWaterMark(NULL));
+
     return result;
 }
 

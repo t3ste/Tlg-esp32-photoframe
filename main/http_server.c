@@ -2459,7 +2459,11 @@ esp_err_t http_server_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 50;
-    config.stack_size = 12288;       // Increased from 8192 to 12KB
+    // 16384: rotate_handler() (/api/rotate) calls trigger_image_rotation()
+    // synchronously on this worker task - the same heavy pipeline that's
+    // needed the same bump on button_task/deep_sleep_wake_task (12288 wasn't
+    // enough there either, confirmed by a live coredump - see main.c).
+    config.stack_size = 16384;
     config.max_open_sockets = 10;    // Limit concurrent connections to prevent memory exhaustion
     config.lru_purge_enable = true;  // Enable LRU purging of connections
 
