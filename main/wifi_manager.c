@@ -237,8 +237,9 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password)
     // battery-only - USB-only (no battery at all) has no rail to protect and
     // keeps full TX power/range. Capping measurably lowers that peak, at some
     // cost to range. Best-effort: failure here shouldn't block connecting at
-    // default power.
-    if (board_hal_is_battery_connected()) {
+    // default power. User-facing on/off switch (default on) for boards/users
+    // that would rather keep full range - see NVS_WIFI_TX_POWER_CAP_ENABLED_KEY.
+    if (config_manager_get_wifi_tx_power_cap_enabled() && board_hal_is_battery_connected()) {
         esp_err_t tx_err = esp_wifi_set_max_tx_power(WIFI_BATTERY_MAX_TX_POWER_QUARTER_DBM);
         if (tx_err != ESP_OK) {
             ESP_LOGW(TAG, "Failed to cap TX power for battery operation: %s",

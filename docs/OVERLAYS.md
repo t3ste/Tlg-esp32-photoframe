@@ -81,12 +81,34 @@ Configure a location one of two ways:
 - **Location name** (e.g. "Berlin"): geocoded once via Open-Meteo's free geocoding API on first
   use (in the overlay language, so results match German or English place names), then cached —
   subsequent wakes reuse the cached coordinates and only re-geocode if you change the name.
+  Geocoding always goes through Open-Meteo, regardless of which forecast provider (below) is
+  selected.
 - **Latitude/Longitude**: set both directly to skip geocoding entirely.
 
 Day boundaries (which calendar day each forecast entry belongs to) use Open-Meteo's
 `timezone=auto`, which resolves the correct local timezone from the coordinates server-side —
 independent of the device's own configured timezone (a POSIX TZ string like `UTC0`, not directly
 usable as an Open-Meteo timezone parameter).
+
+### Weather data source
+
+Three free, keyless providers are available (Web UI: Settings → Auto Rotate → Weather + Headline
+Overlays → "Weather data source"):
+
+- **Open-Meteo** (default) — the source described above.
+- **[wttr.in](https://wttr.in/)** — no setup, pulls from a mix of free weather sources in the
+  background.
+- **[yr.no](https://api.met.no/)** (MET Norway) — globally accurate, widely used as a fallback by
+  other open-source projects; requests must include an identifying User-Agent, which the firmware
+  sends automatically.
+
+wttr.in and yr.no exist as manual alternatives to switch to if Open-Meteo isn't reachable or
+reliable for your network/region — there's no automatic runtime fallback between the three, so
+only one is ever queried per cycle. Each provider's own condition codes are approximated into the
+same short condition vocabulary described above, so the displayed text looks the same regardless of
+source; day-boundary handling differs slightly per provider (yr.no in particular buckets by UTC
+calendar date rather than local time, since it has no per-location timezone parameter — see
+`weather.c`'s `fetch_yrno()` for specifics).
 
 ## Headlines setup
 

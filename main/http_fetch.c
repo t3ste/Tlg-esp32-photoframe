@@ -68,7 +68,8 @@ static esp_err_t body_capture_handler(esp_http_client_event_t *evt)
 }
 
 esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_bytes,
-                         char **out_body, size_t *out_len, bool *out_truncated)
+                         char **out_body, size_t *out_len, bool *out_truncated,
+                         const char *user_agent)
 {
     *out_body = NULL;
     if (out_len) {
@@ -96,6 +97,7 @@ esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_by
             .user_data = &ctx,
             .buffer_size = 2048,
             .crt_bundle_attach = esp_crt_bundle_attach,
+            .user_agent = user_agent,
         };
 
         esp_http_client_handle_t client = esp_http_client_init(&config);

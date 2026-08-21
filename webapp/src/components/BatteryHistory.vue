@@ -4,6 +4,8 @@ import { ref, computed, onMounted } from "vue";
 const API_BASE = "";
 
 const loading = ref(true);
+const resetting = ref(false);
+const confirmingReset = ref(false);
 const entries = ref([]); // [{ t: unixSeconds, p: 0-100, c: boolean }]
 const daysRemaining = ref(null);
 
@@ -21,6 +23,19 @@ async function loadHistory() {
     console.log("Battery history not available (standalone mode)");
   } finally {
     loading.value = false;
+  }
+}
+
+async function resetHistory() {
+  resetting.value = true;
+  try {
+    await fetch(`${API_BASE}/api/battery-history`, { method: "DELETE" });
+    await loadHistory();
+  } catch (_error) {
+    console.log("Failed to reset battery history");
+  } finally {
+    resetting.value = false;
+    confirmingReset.value = false;
   }
 }
 
@@ -96,6 +111,17 @@ function pointTitle(e) {
     <v-card-title class="d-flex align-center">
       <v-icon icon="mdi-battery-clock-outline" class="mr-2" />
       Battery History
+      <v-spacer />
+      <v-btn
+        v-if="entries.length > 0"
+        variant="text"
+        size="small"
+        color="error"
+        @click="confirmingReset = true"
+      >
+        <v-icon icon="mdi-delete-outline" start />
+        Reset
+      </v-btn>
     </v-card-title>
 
     <v-card-text>
@@ -211,6 +237,26 @@ function pointTitle(e) {
         </div>
       </template>
     </v-card-text>
+
+    <v-dialog v-model="confirmingReset" max-width="440">
+      <v-card>
+        <v-card-title class="text-error">
+          <v-icon icon="mdi-alert" class="mr-2" />
+          Reset Battery History?
+        </v-card-title>
+        <v-card-text>
+          This permanently deletes all recorded battery readings and the drain-rate estimate above.
+          This cannot be undone.
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="confirmingReset = false">Cancel</v-btn>
+          <v-btn color="error" variant="flat" :loading="resetting" @click="resetHistory">
+            Reset
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-card>
 </template>
 

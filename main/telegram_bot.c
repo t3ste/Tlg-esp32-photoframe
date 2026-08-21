@@ -25,6 +25,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_vfs_fat.h"
+#include "exif_reader.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "history_manager.h"
@@ -327,6 +328,14 @@ static esp_err_t telegram_api_post(const char *method, cJSON *body)
 
         if (err != ESP_OK || status != 200) {
             ESP_LOGW(TAG, "%s failed (err=%s, status=%d)", method, esp_err_to_name(err), status);
+            // A 4xx is Telegram rejecting the request itself (bad/expired
+            // file_id, malformed body, etc.) - identical on every retry, so
+            // retrying only wastes time/battery. Retry only genuine
+            // transient failures: a local/network error (err != ESP_OK,
+            // status still 0) or a 5xx server-side error.
+            if (err == ESP_OK && status >= 400 && status < 500) {
+                break;
+            }
             continue;
         }
         result = ESP_OK;
@@ -546,6 +555,30 @@ static esp_err_t make_unique_telegram_path(const char *ext, char *out, size_t ou
 // original) per photo.
 #define TELEGRAM_MAX_PHOTO_SIZES 8
 
+// Pre-download size gate: image_processor.c has no streaming-input JPEG
+// decoder (esp_jpeg's wrapper requires the WHOLE compressed file in one
+// contiguous heap_caps_malloc(..., MALLOC_CAP_SPIRAM) block before it can
+// decode anything - see image_processor_process()), and
+// preserve_telegram_original() below reads the same file whole a second
+// time. A multi-MB "document" upload (Telegram doesn't re-encode/downscale
+// files sent as a raw file, unlike a normal "photo" message) can exceed the
+// largest free PSRAM block despite the chip nominally having plenty of
+// total heap, since WiFi/TLS/other buffers already active during a poll cycle
+// fragment and consume much of it. Checking BEFORE downloading avoids
+// wasting the transfer (and battery) on a file that's going to fail deep in
+// the pipeline anyway. 1.5x the file size as a threshold is a rough, best-effort
+// margin for the separate decoded RGB output buffer needed afterward and
+// whatever the network stack has already reserved - not a hard guarantee
+// (fragmentation can still surprise), but catches the common case.
+static bool have_enough_memory_for_download(long file_size)
+{
+    if (file_size <= 0) {
+        return true;  // size unknown - let it proceed, existing error handling catches real failures
+    }
+    size_t largest_free = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    return (size_t) file_size + (size_t) file_size / 2 <= largest_free;
+}
+
 // Downloads a Telegram "photo" (multiple re-encoded resolutions of the same
 // image), trying the largest by pixel area first. Falls back to the next
 // smaller size when the current one is too large for getFile, fails to
@@ -631,10 +664,17 @@ static esp_err_t download_photo_with_fallback(cJSON *photo_array, char *out_path
         }
 
         cJSON *fsize_item = cJSON_GetObjectItem(size_obj, "file_size");
-        int approx_kb =
-            (fsize_item && cJSON_IsNumber(fsize_item)) ? (int) (fsize_item->valuedouble / 1024) : -1;
+        long fsize_bytes =
+            (fsize_item && cJSON_IsNumber(fsize_item)) ? (long) fsize_item->valuedouble : -1;
+        int approx_kb = (fsize_bytes >= 0) ? (int) (fsize_bytes / 1024) : -1;
         ESP_LOGI(TAG, "Trying Telegram photo size %d/%d (%lldpx area, ~%d KB)", rank + 1, n,
                  area[idx], approx_kb);
+
+        if (!have_enough_memory_for_download(fsize_bytes)) {
+            ESP_LOGW(TAG, "Size %d/%d (~%d KB) too large for available memory, falling back to smaller",
+                     rank + 1, n, approx_kb);
+            continue;
+        }
 
         if (make_unique_telegram_path("jpg", out_path, out_path_len) != ESP_OK) {
             return ESP_FAIL;
@@ -731,6 +771,18 @@ static esp_err_t download_document_image(cJSON *document, char *out_path, size_t
         return ESP_FAIL;
     }
 
+    // Unlike a "photo" message (always re-encoded by Telegram into several
+    // modest-sized options), a document keeps its original size verbatim -
+    // there's no smaller fallback to reach for, so an oversized one is
+    // rejected outright rather than downloaded and left to fail later.
+    cJSON *fsize_item = cJSON_GetObjectItem(document, "file_size");
+    long fsize_bytes = (fsize_item && cJSON_IsNumber(fsize_item)) ? (long) fsize_item->valuedouble : -1;
+    if (!have_enough_memory_for_download(fsize_bytes)) {
+        ESP_LOGW(TAG, "Document (~%ld KB) too large for available memory, skipping",
+                 fsize_bytes / 1024);
+        return ESP_FAIL;
+    }
+
     if (make_unique_telegram_path(ext, out_path, out_path_len) != ESP_OK) {
         return ESP_FAIL;
     }
@@ -767,7 +819,12 @@ static bool telegram_caption_invert_colors(void)
 //
 // If `caption` is non-empty, it's overlaid as a caption bar on the displayed
 // image (only supported for the PNG/JPG path - EPDGZ/BMP are already
-// display-ready blobs with no RGB buffer to draw into).
+// display-ready blobs with no RGB buffer to draw into). If `caption` is
+// empty and config_manager_get_show_exif_datetime_enabled() is on, falls
+// back to the photo's own EXIF capture date as the caption instead - only
+// possible when `path` is still the original JPEG as received (the common
+// case for a Telegram photo message), since PNG here has already been
+// processed for e-paper display and never carries EXIF.
 static esp_err_t process_and_display_telegram_image(const char *path, const char *caption)
 {
     image_format_t format = image_processor_detect_format(path);
@@ -781,9 +838,17 @@ static esp_err_t process_and_display_telegram_image(const char *path, const char
         return ESP_FAIL;
     }
 
+    char exif_caption[32] = {0};
+    const char *effective_caption = caption;
+    if ((!caption || caption[0] == '\0') && format == IMAGE_FORMAT_JPG &&
+        config_manager_get_show_exif_datetime_enabled() &&
+        exif_reader_get_datetime_original(path, exif_caption, sizeof(exif_caption))) {
+        effective_caption = exif_caption;
+    }
+
     if (format == IMAGE_FORMAT_PNG && image_processor_is_processed(path)) {
-        if (caption && caption[0] != '\0') {
-            image_processor_add_caption_to_file(path, caption, telegram_caption_invert_colors());
+        if (effective_caption && effective_caption[0] != '\0') {
+            image_processor_add_caption_to_file(path, effective_caption, telegram_caption_invert_colors());
         }
         const char *shown = overlay_manager_apply(path);
         esp_err_t show_err = display_manager_show_image(shown);
@@ -803,8 +868,9 @@ static esp_err_t process_and_display_telegram_image(const char *path, const char
         return err;
     }
 
-    if (caption && caption[0] != '\0') {
-        image_processor_add_caption_to_file(CURRENT_PNG_PATH, caption, telegram_caption_invert_colors());
+    if (effective_caption && effective_caption[0] != '\0') {
+        image_processor_add_caption_to_file(CURRENT_PNG_PATH, effective_caption,
+                                            telegram_caption_invert_colors());
     }
 
     const char *shown = overlay_manager_apply(CURRENT_PNG_PATH);
@@ -1133,6 +1199,12 @@ static esp_err_t telegram_bot_send_photo_file(const char *file_path, const char 
         if (err != ESP_OK || status != 200) {
             ESP_LOGW(TAG, "sendPhoto upload failed (err=%s, status=%d)", esp_err_to_name(err),
                      status);
+            // See telegram_api_post()'s identical check - a 4xx is Telegram
+            // rejecting the request itself, not a transient failure, so
+            // retrying is pointless.
+            if (err == ESP_OK && status >= 400 && status < 500) {
+                break;
+            }
             continue;
         }
         result = ESP_OK;
@@ -1877,7 +1949,8 @@ static void format_toggles(char *out, size_t out_len)
              "[%c] Rotation notify (thumbnail on fallback display)\n"
              "[%c] Keep originals (pre-processing copies)\n"
              "[%c] Weather overlay\n"
-             "[%c] Headlines overlay",
+             "[%c] Headlines overlay\n"
+             "[%c] EXIF date as fallback caption",
              config_manager_get_telegram_pairing_enabled() ? 'x' : ' ',
              config_manager_get_deep_sleep_enabled() ? 'x' : ' ',
              config_manager_get_auto_rotate() ? 'x' : ' ',
@@ -1888,7 +1961,8 @@ static void format_toggles(char *out, size_t out_len)
              config_manager_get_telegram_rotation_notify_enabled() ? 'x' : ' ',
              config_manager_get_telegram_keep_originals_enabled() ? 'x' : ' ',
              config_manager_get_weather_overlay_enabled() ? 'x' : ' ',
-             config_manager_get_headlines_overlay_enabled() ? 'x' : ' ');
+             config_manager_get_headlines_overlay_enabled() ? 'x' : ' ',
+             config_manager_get_show_exif_datetime_enabled() ? 'x' : ' ');
 }
 
 static void format_rotation_schedule(char *out, size_t out_len)
@@ -2150,6 +2224,18 @@ static void execute_command(const char *raw_text)
         } else {
             telegram_bot_send_message("[i] Usage: /keep_originals on|off");
         }
+    } else if (strcmp(cmd, "/exif_date") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_show_exif_datetime_enabled(true);
+            telegram_bot_send_message(
+                "[x] EXIF date fallback enabled\n"
+                "(a photo received with no caption shows its EXIF capture date instead, if present).");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_show_exif_datetime_enabled(false);
+            telegram_bot_send_message("[ ] EXIF date fallback disabled.");
+        } else {
+            telegram_bot_send_message("[i] Usage: /exif_date on|off");
+        }
     } else if (strcmp(cmd, "/weather") == 0) {
         if (args && strcasecmp(args, "on") == 0) {
             config_manager_set_weather_overlay_enabled(true);
@@ -2270,6 +2356,8 @@ static void execute_command(const char *raw_text)
             "  image that didn't come from Telegram (i.e. fallback rotation)\n"
             "/keep_originals on|off - Save each Telegram photo as received,\n"
             "  before e-paper processing, under Telegram/Originals\n"
+            "/exif_date on|off - Show a photo's EXIF capture date as a caption\n"
+            "  when it's received with no caption of its own\n"
             "/weather on|off - Weather overlay (configure location in Web UI)\n"
             "/headlines on|off - Headline overlay (configure RSS feed in Web UI)\n"
             "\n"

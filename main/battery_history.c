@@ -132,6 +132,13 @@ cJSON *battery_history_build_json(void)
     return root;
 }
 
+void battery_history_reset(void)
+{
+    if (remove(BATTERY_HISTORY_PATH) == 0) {
+        ESP_LOGI(TAG, "Battery history reset (user-requested)");
+    }
+}
+
 bool battery_history_estimate_days_remaining(double *out_days)
 {
     if (!storage_has_persistent_storage()) {

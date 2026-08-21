@@ -88,6 +88,7 @@ rotation cursor too).
 | `/rotation_pairing on\|off` | Toggles auto-rotate orientation pairing (random mode only) |
 | `/rotation_notify on\|off` | Sends a thumbnail when a wake displays an image via fallback rotation |
 | `/keep_originals on\|off` | Keeps a copy of each photo as received, before e-paper processing |
+| `/exif_date on\|off` | Shows a photo's EXIF capture date as caption when it has none (experimental) |
 | `/help` | Lists all commands |
 | `/telegram_reset` | **Emergency**: clears the queue immediately, highest priority |
 
@@ -206,6 +207,19 @@ Telegram's largest available size for that photo — even if the size actually u
 conversion above had to fall back to a smaller one because the largest turned out to be a
 progressive JPEG the firmware's decoder can't read. Decoding isn't required to archive raw bytes, so
 the best quality available is kept regardless of that display-side limitation.
+
+### EXIF capture date as fallback caption (experimental)
+
+When a received photo has no caption of its own, optionally falls back to its EXIF
+"DateTimeOriginal" tag (the camera's capture date) as the caption instead — shown as
+`YYYY-MM-DD HH:MM`. If the photo has no EXIF data (or the tag is missing), no caption is shown at
+all; nothing is guessed or approximated. Off by default; toggle via Web UI or `/exif_date on|off`.
+
+**Experimental / Telegram-only**: parsing is a small hand-written JPEG/TIFF reader (no external
+library), tested against a limited set of real-world camera/phone JPEGs — atypical EXIF encodings
+may not parse. Only applies to Telegram photos: the original JPEG (with EXIF intact) reaches the
+device directly, whereas Storage/album images are processed client-side in the browser before
+upload, so no EXIF data is ever available for those on the device side.
 
 ### Error overlay test
 

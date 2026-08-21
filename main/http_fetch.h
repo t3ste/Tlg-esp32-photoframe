@@ -28,8 +28,12 @@
  * if not needed.
  * @param out_truncated Set to true if the response was cut off at
  * max_response_bytes, false otherwise. May be NULL if not needed.
+ * @param user_agent Custom User-Agent header value, or NULL for ESP-IDF's
+ * default. Some free APIs (e.g. MET Norway's yr.no) require a real,
+ * identifying User-Agent and reject/throttle requests without one.
  */
 esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_bytes,
-                         char **out_body, size_t *out_len, bool *out_truncated);
+                         char **out_body, size_t *out_len, bool *out_truncated,
+                         const char *user_agent);
 
 #endif

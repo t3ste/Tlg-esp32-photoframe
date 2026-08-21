@@ -23,16 +23,23 @@ typedef struct {
 
 /**
  * @brief Fetches a WEATHER_FORECAST_DAYS-day forecast (daily min/max
- * temperature + condition) from Open-Meteo (free, no API key) for the
- * configured location. The response's per-day bucketing uses
- * Open-Meteo's "timezone=auto" (resolves the correct local timezone from
- * the coordinates server-side) rather than the device's own configured
- * timezone, which is a POSIX TZ string (e.g. "UTC0") incompatible with
- * Open-Meteo's IANA-style timezone parameter.
+ * temperature + condition) for the configured location, from whichever
+ * provider config_manager_get_weather_provider() selects - Open-Meteo
+ * (default), wttr.in, or yr.no (MET Norway). All three are free/keyless;
+ * wttr.in and yr.no exist as user-selectable alternatives if Open-Meteo isn't
+ * reachable/reliable for a given network/region - there is no automatic
+ * runtime failover between them. Each provider's own condition
+ * code/text is approximated into the same WMO-code vocabulary
+ * condition_text() understands, so callers/formatting are provider-agnostic.
+ * Open-Meteo's response uses "timezone=auto" (resolves the correct local
+ * timezone from the coordinates server-side); yr.no has no such parameter
+ * and buckets by UTC calendar date instead (see fetch_yrno() in weather.c
+ * for the specific trade-offs that implies).
  *
  * Resolution order: if both config_manager_get_weather_lat()/_lon() are set,
  * uses them directly. Otherwise, geocodes config_manager_get_weather_location_name()
- * via Open-Meteo's free geocoding endpoint - but only when that name differs
+ * via Open-Meteo's free geocoding endpoint (used for geocoding regardless of
+ * the selected forecast provider) - but only when that name differs
  * from config_manager_get_weather_geocoded_name() (the cached result of the
  * last successful geocode); a match reuses the cached lat/lon, so geocoding
  * only costs a request once per location-name change, not every call.

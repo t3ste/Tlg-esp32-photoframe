@@ -78,6 +78,7 @@ static int wifi_fail_count = 0;
 
 // WiFi
 static bool wifi_performance_mode_enabled = true;
+static bool wifi_tx_power_cap_enabled = true;
 static bool rotation_pairing_enabled = false;
 static bool telegram_rotation_notify_enabled = false;
 static bool telegram_keep_originals_enabled = false;
@@ -88,6 +89,7 @@ static char weather_location_name[WEATHER_LOCATION_NAME_MAX_LEN] = {0};
 static char weather_lat[WEATHER_LATLON_MAX_LEN] = {0};
 static char weather_lon[WEATHER_LATLON_MAX_LEN] = {0};
 static char weather_geocoded_name[WEATHER_LOCATION_NAME_MAX_LEN] = {0};
+static char weather_provider[WEATHER_PROVIDER_MAX_LEN] = WEATHER_PROVIDER_DEFAULT;
 static bool headlines_overlay_enabled = false;
 static char headlines_rss_url[HEADLINES_RSS_URL_MAX_LEN] = {0};
 static uint8_t headlines_count = HEADLINES_COUNT_DEFAULT;
@@ -96,6 +98,7 @@ static bool overlay_invert_colors = false;
 static char overlay_language[OVERLAY_LANGUAGE_MAX_LEN] = OVERLAY_LANGUAGE_DEFAULT;
 static bool caption_invert_colors_enabled = false;
 static bool weather_multiline_enabled = false;
+static bool show_exif_datetime_enabled = false;
 
 // OTA
 static bool ota_check_enabled = true;
@@ -546,6 +549,12 @@ esp_err_t config_manager_init(void)
             wifi_performance_mode_enabled = (stored_wifi_perf != 0);
         }
 
+        uint8_t stored_tx_power_cap = 1;  // Default to enabled
+        if (nvs_get_u8(nvs_handle, NVS_WIFI_TX_POWER_CAP_ENABLED_KEY, &stored_tx_power_cap) ==
+            ESP_OK) {
+            wifi_tx_power_cap_enabled = (stored_tx_power_cap != 0);
+        }
+
         uint8_t stored_rotation_pairing = 0;
         if (nvs_get_u8(nvs_handle, NVS_ROTATION_PAIRING_ENABLED_KEY, &stored_rotation_pairing) ==
             ESP_OK) {
@@ -579,6 +588,15 @@ esp_err_t config_manager_init(void)
         size_t weather_geo_len = sizeof(weather_geocoded_name);
         nvs_get_str(nvs_handle, NVS_WEATHER_GEOCODED_NAME_KEY, weather_geocoded_name,
                     &weather_geo_len);
+        char stored_provider[WEATHER_PROVIDER_MAX_LEN] = {0};
+        size_t weather_provider_len = sizeof(stored_provider);
+        if (nvs_get_str(nvs_handle, NVS_WEATHER_PROVIDER_KEY, stored_provider,
+                         &weather_provider_len) == ESP_OK &&
+            (strcmp(stored_provider, WEATHER_PROVIDER_OPEN_METEO) == 0 ||
+             strcmp(stored_provider, WEATHER_PROVIDER_WTTR_IN) == 0 ||
+             strcmp(stored_provider, WEATHER_PROVIDER_YR_NO) == 0)) {
+            strncpy(weather_provider, stored_provider, sizeof(weather_provider) - 1);
+        }
 
         uint8_t stored_headlines_overlay = 0;
         if (nvs_get_u8(nvs_handle, NVS_HEADLINES_OVERLAY_ENABLED_KEY, &stored_headlines_overlay) ==
@@ -618,6 +636,11 @@ esp_err_t config_manager_init(void)
         uint8_t stored_weather_multiline = 0;
         if (nvs_get_u8(nvs_handle, NVS_WEATHER_MULTILINE_KEY, &stored_weather_multiline) == ESP_OK) {
             weather_multiline_enabled = (stored_weather_multiline != 0);
+        }
+        uint8_t stored_show_exif_datetime = 0;
+        if (nvs_get_u8(nvs_handle, NVS_SHOW_EXIF_DATETIME_KEY, &stored_show_exif_datetime) ==
+            ESP_OK) {
+            show_exif_datetime_enabled = (stored_show_exif_datetime != 0);
         }
 
         {
@@ -1622,6 +1645,25 @@ bool config_manager_get_wifi_performance_mode_enabled(void)
     return wifi_performance_mode_enabled;
 }
 
+void config_manager_set_wifi_tx_power_cap_enabled(bool enabled)
+{
+    wifi_tx_power_cap_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_WIFI_TX_POWER_CAP_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "WiFi TX power cap %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_wifi_tx_power_cap_enabled(void)
+{
+    return wifi_tx_power_cap_enabled;
+}
+
 void config_manager_set_rotation_pairing_enabled(bool enabled)
 {
     rotation_pairing_enabled = enabled;
@@ -1794,6 +1836,31 @@ const char *config_manager_get_weather_geocoded_name(void)
     return weather_geocoded_name;
 }
 
+void config_manager_set_weather_provider(const char *provider)
+{
+    if (!provider || (strcmp(provider, WEATHER_PROVIDER_OPEN_METEO) != 0 &&
+                      strcmp(provider, WEATHER_PROVIDER_WTTR_IN) != 0 &&
+                      strcmp(provider, WEATHER_PROVIDER_YR_NO) != 0)) {
+        provider = WEATHER_PROVIDER_DEFAULT;
+    }
+    strncpy(weather_provider, provider, sizeof(weather_provider) - 1);
+    weather_provider[sizeof(weather_provider) - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_WEATHER_PROVIDER_KEY, weather_provider);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Weather provider set to %s", weather_provider);
+}
+
+const char *config_manager_get_weather_provider(void)
+{
+    return weather_provider;
+}
+
 void config_manager_set_headlines_overlay_enabled(bool enabled)
 {
     headlines_overlay_enabled = enabled;
@@ -1950,6 +2017,25 @@ void config_manager_set_weather_multiline_enabled(bool enabled)
 bool config_manager_get_weather_multiline_enabled(void)
 {
     return weather_multiline_enabled;
+}
+
+void config_manager_set_show_exif_datetime_enabled(bool enabled)
+{
+    show_exif_datetime_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_SHOW_EXIF_DATETIME_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Show EXIF capture date as fallback caption %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_show_exif_datetime_enabled(void)
+{
+    return show_exif_datetime_enabled;
 }
 
 // ============================================================================

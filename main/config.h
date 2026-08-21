@@ -260,6 +260,19 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define WEATHER_LOCATION_NAME_MAX_LEN 64
 #define WEATHER_LATLON_MAX_LEN 16
 
+// Which weather data source to use. All three are free/keyless; wttr.in and
+// yr.no exist as user-selectable alternatives to fall back to manually if
+// Open-Meteo doesn't work reliably for a given network/region - there is no
+// automatic runtime failover between them (predictable behavior over silent
+// retries against a different provider). Same resolved lat/lon (see
+// resolve_lat_lon() in weather.c) is used regardless of provider.
+#define NVS_WEATHER_PROVIDER_KEY "wthr_provider"
+#define WEATHER_PROVIDER_MAX_LEN 16
+#define WEATHER_PROVIDER_OPEN_METEO "open-meteo"
+#define WEATHER_PROVIDER_WTTR_IN "wttr.in"
+#define WEATHER_PROVIDER_YR_NO "yr.no"
+#define WEATHER_PROVIDER_DEFAULT WEATHER_PROVIDER_OPEN_METEO
+
 #define NVS_HEADLINES_OVERLAY_ENABLED_KEY "hdln_overlay_en"
 // Any RSS/Atom feed URL (Tagesschau, Spiegel, BBC, ...) - no API key, no
 // rate limit, works with essentially any news outlet.
@@ -292,6 +305,13 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // bar/white text, as before this setting existed).
 #define NVS_CAPTION_INVERT_COLORS_KEY "cap_invert_col"
 
+// Falls back to the photo's own EXIF "DateTimeOriginal" (capture date) as a
+// caption, for a Telegram photo received with no caption text. Off by
+// default. Only meaningful for Telegram - the original JPEG (with EXIF
+// intact) never reaches the device for Storage/album uploads, which are
+// processed client-side in the browser before upload (see exif_reader.h).
+#define NVS_SHOW_EXIF_DATETIME_KEY "exif_dt_en"
+
 // 46 characters/line is comfortably below what any single condition+temps
 // segment needs (see docs/OVERLAYS.md), but three of them on ONE line can
 // still overflow for longer condition words even after abbreviation - this
@@ -307,6 +327,11 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // range). Value is in units of 0.25 dBm (esp_wifi_set_max_tx_power()
 // convention) - 60 = 15 dBm, versus the factory default of up to ~20 dBm (80).
 #define WIFI_BATTERY_MAX_TX_POWER_QUARTER_DBM 60
+// User-facing on/off switch for the cap above. Defaults to enabled (the
+// PhotoPainter's original AXP2101 PMIC is the board this mitigates); boards
+// without a marginal battery rail, or users who'd rather trade the small
+// brownout-risk reduction back for full WiFi range, can turn it off.
+#define NVS_WIFI_TX_POWER_CAP_ENABLED_KEY "tx_pwr_cap_en"
 
 // AI API Keys (for webapp client use)
 #define AI_API_KEY_MAX_LEN 256

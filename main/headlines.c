@@ -233,7 +233,7 @@ esp_err_t headlines_fetch(const char *feed_url, int max_count, headlines_result_
     size_t body_len = 0;
     bool truncated = false;
     esp_err_t err = http_fetch_get(feed_url, HEADLINES_HTTP_TIMEOUT_MS, HEADLINES_MAX_RESPONSE_BYTES,
-                                   &body, &body_len, &truncated);
+                                   &body, &body_len, &truncated, NULL);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Feed request failed: %s", esp_err_to_name(err));
         return err;

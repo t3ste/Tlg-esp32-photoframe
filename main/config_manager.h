@@ -209,6 +209,11 @@ int config_manager_get_wifi_fail_count(void);
 void config_manager_set_wifi_performance_mode_enabled(bool enabled);
 bool config_manager_get_wifi_performance_mode_enabled(void);
 
+// Whether wifi_manager.c caps TX power while a battery is present (see
+// WIFI_BATTERY_MAX_TX_POWER_QUARTER_DBM in config.h). Defaults to true.
+void config_manager_set_wifi_tx_power_cap_enabled(bool enabled);
+bool config_manager_get_wifi_tx_power_cap_enabled(void);
+
 // Orientation pairing during normal (non-Telegram) auto-rotation - random
 // mode only. Defaults to false. See NVS_ROTATION_PAIRING_ENABLED_KEY in
 // config.h.
@@ -243,6 +248,10 @@ const char *config_manager_get_weather_lon(void);
 // Internal cache-invalidation marker (weather.c only, not user-facing).
 void config_manager_set_weather_geocoded_name(const char *name);
 const char *config_manager_get_weather_geocoded_name(void);
+// One of WEATHER_PROVIDER_OPEN_METEO/_WTTR_IN/_YR_NO (config.h); anything
+// else is coerced to WEATHER_PROVIDER_DEFAULT.
+void config_manager_set_weather_provider(const char *provider);
+const char *config_manager_get_weather_provider(void);
 
 void config_manager_set_headlines_overlay_enabled(bool enabled);
 bool config_manager_get_headlines_overlay_enabled(void);
@@ -268,6 +277,10 @@ const char *config_manager_get_overlay_language(void);
 // default (captions keep the fixed black-bar/white-text look).
 void config_manager_set_caption_invert_colors_enabled(bool enabled);
 bool config_manager_get_caption_invert_colors_enabled(void);
+// Telegram-only (see NVS_SHOW_EXIF_DATETIME_KEY in config.h for why). Off by
+// default.
+void config_manager_set_show_exif_datetime_enabled(bool enabled);
+bool config_manager_get_show_exif_datetime_enabled(void);
 // Render the weather overlay as 3 lines (one per day) instead of one
 // combined line - only takes effect while headlines_overlay is disabled;
 // weather always renders as one line whenever headlines are also enabled.

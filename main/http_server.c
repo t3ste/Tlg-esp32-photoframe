@@ -1115,6 +1115,13 @@ static esp_err_t battery_history_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    if (req->method == HTTP_DELETE) {
+        battery_history_reset();
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+        return ESP_OK;
+    }
+
     cJSON *response = battery_history_build_json();
     if (response == NULL) {
         httpd_resp_set_status(req, HTTPD_500);
@@ -1488,6 +1495,8 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_error_overlay_enabled());
         cJSON_AddBoolToObject(root, "wifi_performance_mode_enabled",
                               config_manager_get_wifi_performance_mode_enabled());
+        cJSON_AddBoolToObject(root, "wifi_tx_power_cap_enabled",
+                              config_manager_get_wifi_tx_power_cap_enabled());
         cJSON_AddBoolToObject(root, "rotation_pairing_enabled",
                               config_manager_get_rotation_pairing_enabled());
         cJSON_AddBoolToObject(root, "telegram_rotation_notify_enabled",
@@ -1500,6 +1509,7 @@ static esp_err_t config_handler(httpd_req_t *req)
                                 config_manager_get_weather_location_name());
         cJSON_AddStringToObject(root, "weather_lat", config_manager_get_weather_lat());
         cJSON_AddStringToObject(root, "weather_lon", config_manager_get_weather_lon());
+        cJSON_AddStringToObject(root, "weather_provider", config_manager_get_weather_provider());
         cJSON_AddBoolToObject(root, "headlines_overlay_enabled",
                               config_manager_get_headlines_overlay_enabled());
         cJSON_AddStringToObject(root, "headlines_rss_url", config_manager_get_headlines_rss_url());
@@ -1512,6 +1522,8 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_caption_invert_colors_enabled());
         cJSON_AddBoolToObject(root, "weather_multiline_enabled",
                               config_manager_get_weather_multiline_enabled());
+        cJSON_AddBoolToObject(root, "show_exif_datetime_enabled",
+                              config_manager_get_show_exif_datetime_enabled());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -2540,6 +2552,12 @@ esp_err_t http_server_init(void)
                                            .handler = battery_history_handler,
                                            .user_ctx = NULL};
         httpd_register_uri_handler(server, &battery_history_uri);
+
+        httpd_uri_t battery_history_reset_uri = {.uri = "/api/battery-history",
+                                                 .method = HTTP_DELETE,
+                                                 .handler = battery_history_handler,
+                                                 .user_ctx = NULL};
+        httpd_register_uri_handler(server, &battery_history_reset_uri);
 
         httpd_uri_t sensor_uri = {
             .uri = "/api/sensor", .method = HTTP_GET, .handler = sensor_handler, .user_ctx = NULL};

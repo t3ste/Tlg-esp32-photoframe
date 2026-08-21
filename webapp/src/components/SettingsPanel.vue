@@ -873,6 +873,22 @@ async function performFactoryReset() {
                       "/keep_originals" bot command.
                     </div>
 
+                    <v-switch
+                      v-model="settingsStore.deviceSettings.showExifDatetimeEnabled"
+                      label="Show capture date as caption when a photo has none"
+                      color="primary"
+                      class="mb-2"
+                      hide-details
+                    />
+                    <div class="text-caption text-medium-emphasis mb-4">
+                      When a received photo has no caption of its own, falls back to its EXIF
+                      "DateTimeOriginal" (the camera's capture date), if present - otherwise no
+                      caption is shown. Telegram photos only (an original JPEG with EXIF intact
+                      reaches the device directly; Storage/album uploads are processed in the
+                      browser first, before any EXIF data would reach the device). Also togglable
+                      via the "/exif_date" bot command.
+                    </div>
+
                     <v-alert
                       v-if="settingsStore.deviceSettings.lastFetchError"
                       type="error"
@@ -942,6 +958,20 @@ async function performFactoryReset() {
               looking - an interactive wake or USB power - and drops back to WiFi power-save
               otherwise. Turn off to always stay in power-save, even during interactive use,
               trading web UI responsiveness for lower battery draw.
+            </div>
+
+            <v-switch
+              v-model="settingsStore.deviceSettings.wifiTxPowerCapEnabled"
+              label="Cap WiFi TX power while a battery is present"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              On (default). Associating with an AP draws a brief high-current TX burst that a
+              marginal battery/PMIC rail (e.g. the PhotoPainter's original AXP2101) may not
+              sustain cleanly - capping TX power lowers that peak, at some cost to WiFi range.
+              Turn off if you'd rather keep full range and haven't seen any instability.
             </div>
 
             <v-switch
@@ -1029,8 +1059,7 @@ async function performFactoryReset() {
             <div class="text-caption text-medium-emphasis mb-2">
               3-day forecast (today + next 2 days), e.g.
               "Wed sunny 16/24 | Thu partly cloudy 17/25 | Fri rain -5/3" (min/max °C). Free, no API
-              key (<a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>).
-              Also togglable via the "/weather" bot command.
+              key. Also togglable via the "/weather" bot command.
             </div>
             <v-row dense class="mb-2">
               <v-col cols="12" sm="6">
@@ -1066,6 +1095,30 @@ async function performFactoryReset() {
                 />
               </v-col>
             </v-row>
+            <v-row dense class="mb-2">
+              <v-col cols="12" sm="6">
+                <v-select
+                  v-model="settingsStore.deviceSettings.weatherProvider"
+                  :items="[
+                    { title: 'Open-Meteo (default)', value: 'open-meteo' },
+                    { title: 'wttr.in', value: 'wttr.in' },
+                    { title: 'yr.no (MET Norway)', value: 'yr.no' },
+                  ]"
+                  label="Weather data source"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  :disabled="!settingsStore.deviceSettings.weatherOverlayEnabled"
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> is the
+              default. <a href="https://wttr.in/" target="_blank" rel="noopener">wttr.in</a> and
+              <a href="https://api.met.no/" target="_blank" rel="noopener">yr.no</a> are free
+              alternatives to switch to manually if Open-Meteo isn't reachable or reliable for your
+              network/region - there's no automatic fallback between them, so pick one at a time.
+            </div>
             <v-checkbox
               v-model="settingsStore.deviceSettings.weatherMultilineEnabled"
               label="Show as 3 lines (one per day) instead of one combined line"

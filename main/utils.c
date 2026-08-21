@@ -540,6 +540,11 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_wifi_performance_mode_enabled(cJSON_IsTrue(item));
     }
 
+    item = cJSON_GetObjectItem(root, "wifi_tx_power_cap_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_wifi_tx_power_cap_enabled(cJSON_IsTrue(item));
+    }
+
     // Auto-rotate orientation pairing (random mode only)
     item = cJSON_GetObjectItem(root, "rotation_pairing_enabled");
     if (item && cJSON_IsBool(item)) {
@@ -575,6 +580,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsString(item)) {
         config_manager_set_weather_lon(cJSON_GetStringValue(item));
     }
+    item = cJSON_GetObjectItem(root, "weather_provider");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_weather_provider(cJSON_GetStringValue(item));
+    }
     item = cJSON_GetObjectItem(root, "headlines_overlay_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_headlines_overlay_enabled(cJSON_IsTrue(item));
@@ -606,6 +615,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "weather_multiline_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_weather_multiline_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "show_exif_datetime_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_show_exif_datetime_enabled(cJSON_IsTrue(item));
     }
 
     return ESP_OK;

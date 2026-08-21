@@ -14,11 +14,13 @@ const char *esp_err_to_name(esp_err_t code)
 }
 
 esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_bytes,
-                         char **out_body, size_t *out_len, bool *out_truncated)
+                         char **out_body, size_t *out_len, bool *out_truncated,
+                         const char *user_agent)
 {
     (void) url;
     (void) timeout_ms;
     (void) max_response_bytes;
+    (void) user_agent;
     *out_body = NULL;
     if (out_len) {
         *out_len = 0;

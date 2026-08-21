@@ -783,9 +783,15 @@ void app_main(void)
 
     // Notify HA that device is online (HA will poll for all data via REST API).
     // This is the always-on / cold-boot path, so the rotation-gate response
-    // isn't used here.
-    ESP_LOGI(TAG, "Sending online notification to Home Assistant");
-    ha_notify_online(NULL);
+    // isn't used here. Gated on ha_is_configured() so a disabled/unconfigured
+    // integration doesn't even log an intent to notify - ha_notify_online()
+    // itself already no-ops in that case, but logging "Sending..." beforehand
+    // regardless was misleading (see the deep-sleep-wake path above, which
+    // already gates this correctly via the cached ha_configured flag).
+    if (ha_is_configured()) {
+        ESP_LOGI(TAG, "Sending online notification to Home Assistant");
+        ha_notify_online(NULL);
+    }
 
     ESP_LOGI(TAG, "PhotoFrame started successfully");
 

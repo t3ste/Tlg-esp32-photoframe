@@ -30,4 +30,10 @@ cJSON *battery_history_build_json(void);
 // measurable drain, or currently charging with no prior battery-only data).
 bool battery_history_estimate_days_remaining(double *out_days);
 
+// Deletes the persisted history log (user-requested reset from the Web UI's
+// Battery History card). No-op if no log exists yet. The next
+// battery_history_record() call starts a fresh log, same as the automatic
+// reset conditions above.
+void battery_history_reset(void);
+
 #endif

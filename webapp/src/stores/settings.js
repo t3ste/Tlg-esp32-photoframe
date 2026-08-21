@@ -59,6 +59,7 @@ export const useSettingsStore = defineStore("settings", () => {
     deepSleepEnabled: true,
     otaCheckEnabled: true,
     wifiPerformanceModeEnabled: true,
+    wifiTxPowerCapEnabled: true,
     rotationPairingEnabled: false,
     telegramRotationNotifyEnabled: false,
     telegramKeepOriginalsEnabled: false,
@@ -67,6 +68,7 @@ export const useSettingsStore = defineStore("settings", () => {
     weatherLocationName: "",
     weatherLat: "",
     weatherLon: "",
+    weatherProvider: "open-meteo",
     headlinesOverlayEnabled: false,
     headlinesRssUrl: "",
     headlinesCount: 3,
@@ -75,6 +77,7 @@ export const useSettingsStore = defineStore("settings", () => {
     overlayLanguage: "en",
     captionInvertColorsEnabled: false,
     weatherMultilineEnabled: false,
+    showExifDatetimeEnabled: false,
     // Debugging
     debugLogEnabled: false,
     errorOverlayEnabled: false,
@@ -219,6 +222,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.deepSleepEnabled = data.deep_sleep_enabled !== false;
       deviceSettings.value.otaCheckEnabled = data.ota_check_enabled !== false;
       deviceSettings.value.wifiPerformanceModeEnabled = data.wifi_performance_mode_enabled !== false;
+      deviceSettings.value.wifiTxPowerCapEnabled = data.wifi_tx_power_cap_enabled !== false;
       deviceSettings.value.rotationPairingEnabled = data.rotation_pairing_enabled === true;
       deviceSettings.value.telegramRotationNotifyEnabled =
         data.telegram_rotation_notify_enabled === true;
@@ -228,6 +232,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.weatherLocationName = data.weather_location_name || "";
       deviceSettings.value.weatherLat = data.weather_lat || "";
       deviceSettings.value.weatherLon = data.weather_lon || "";
+      deviceSettings.value.weatherProvider = data.weather_provider || "open-meteo";
       deviceSettings.value.headlinesOverlayEnabled = data.headlines_overlay_enabled === true;
       deviceSettings.value.headlinesRssUrl = data.headlines_rss_url || "";
       deviceSettings.value.headlinesCount = data.headlines_count ?? 3;
@@ -236,6 +241,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.overlayLanguage = data.overlay_language || "en";
       deviceSettings.value.captionInvertColorsEnabled = data.caption_invert_colors_enabled === true;
       deviceSettings.value.weatherMultilineEnabled = data.weather_multiline_enabled === true;
+      deviceSettings.value.showExifDatetimeEnabled = data.show_exif_datetime_enabled === true;
       deviceSettings.value.debugLogEnabled = data.debug_log_enabled === true;
       deviceSettings.value.errorOverlayEnabled = data.error_overlay_enabled === true;
       deviceSettings.value.haUrl = data.ha_url || "";
@@ -317,6 +323,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deep_sleep_enabled: deviceSettings.value.deepSleepEnabled,
       ota_check_enabled: deviceSettings.value.otaCheckEnabled,
       wifi_performance_mode_enabled: deviceSettings.value.wifiPerformanceModeEnabled,
+      wifi_tx_power_cap_enabled: deviceSettings.value.wifiTxPowerCapEnabled,
       rotation_pairing_enabled: deviceSettings.value.rotationPairingEnabled,
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,
       telegram_keep_originals_enabled: deviceSettings.value.telegramKeepOriginalsEnabled,
@@ -324,6 +331,7 @@ export const useSettingsStore = defineStore("settings", () => {
       weather_location_name: deviceSettings.value.weatherLocationName,
       weather_lat: deviceSettings.value.weatherLat,
       weather_lon: deviceSettings.value.weatherLon,
+      weather_provider: deviceSettings.value.weatherProvider,
       headlines_overlay_enabled: deviceSettings.value.headlinesOverlayEnabled,
       headlines_rss_url: deviceSettings.value.headlinesRssUrl,
       headlines_count: deviceSettings.value.headlinesCount,
@@ -332,6 +340,7 @@ export const useSettingsStore = defineStore("settings", () => {
       overlay_language: deviceSettings.value.overlayLanguage,
       caption_invert_colors_enabled: deviceSettings.value.captionInvertColorsEnabled,
       weather_multiline_enabled: deviceSettings.value.weatherMultilineEnabled,
+      show_exif_datetime_enabled: deviceSettings.value.showExifDatetimeEnabled,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,
       error_overlay_enabled: deviceSettings.value.errorOverlayEnabled,
       save_downloaded_images: deviceSettings.value.saveDownloadedImages,
