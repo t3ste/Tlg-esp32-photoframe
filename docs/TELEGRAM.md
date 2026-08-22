@@ -247,3 +247,16 @@ WiFi-failure case on a device that's never displayed anything yet - always has s
    enable the integration.
 4. Send the bot a photo. It will be processed on the next wake (or trigger one immediately,
    depending on your rotation-timer settings).
+
+### Using the bot in a group: disable Privacy Mode
+
+If the bot is added to a **group** chat (rather than messaged 1:1), Telegram's own
+[Privacy Mode](https://core.telegram.org/bots/features#privacy-mode) applies: by default, a bot in
+a group only receives `/`-commands, not regular messages - **including photos**. This is entirely
+on Telegram's side (the message never reaches the device at all, so nothing is logged about it) and
+looks exactly like "the bot responds to commands but ignores photos".
+
+Fix via [@BotFather](https://t.me/BotFather): `/mybots` → select your bot → **Bot Settings** →
+**Group Privacy** → turn it **off**. This lets the bot see every message in groups it's a member
+of, not just commands. (Alternative: message the bot 1:1 instead of via a group - Privacy Mode only
+applies to groups.)

@@ -73,6 +73,17 @@ pairing](TELEGRAM.md#auto-rotate-orientation-pairing) in the Telegram docs.
 5. **Not available in URL rotation mode**: that mode streams pixels row-by-row straight to the
    panel and never produces a processed image file to draw an overlay onto (the same reason the
    error-overlay feature can't use it either). Storage and Telegram rotation modes are unaffected.
+6. **Only applies to processed PNG album images - not BMP or EPDGZ.** Storage-mode albums can
+   contain `.bmp` or `.epdgz` files too (nothing filters them out), but those formats are read
+   directly into the panel's display buffer without ever passing through a decodable RGB step -
+   there's no image data our own code can draw an overlay onto. The overlay (both the visual bar
+   **and** the weather/headline fetch behind it) is skipped entirely for those files, silently and
+   without an error - if weather/headlines seem to never be fetched at all even though everything
+   is configured correctly, check whether the images actually being shown are BMP/EPDGZ rather than
+   PNG (the device log shows "Skipping overlay for `<path>`: not a processed PNG" when this
+   happens). BMP support is planned but not yet implemented.
+
+
 
 ## Weather setup
 

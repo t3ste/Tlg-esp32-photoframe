@@ -44,3 +44,6 @@ _BuildCMD.txt
 # Local editor/tool configs - not project-wide settings
 .claude/
 .vscode/
+bmp_overlay_plan.txt
+coredump_report.txt
+sd_card_locking_plan.txt
