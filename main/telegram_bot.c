@@ -2386,7 +2386,11 @@ static void execute_command(const char *raw_text)
         // start a fresh cycle, not just the random-mode history set.
         config_manager_set_last_index(-1);
         telegram_bot_send_message("[OK] Display history cleared.");
-    } else if (strcmp(cmd, "/help") == 0) {
+    } else if (strcmp(cmd, "/help") == 0 || strcmp(cmd, "/start") == 0) {
+        // "/start" is Telegram's own convention for a new user's first
+        // message to a bot (sent automatically by Telegram clients when
+        // someone opens the bot for the first time) - treated as a plain
+        // alias for /help rather than a distinct onboarding flow.
         telegram_bot_send_message(
             "=== Available commands ===\n"
             "\n"
