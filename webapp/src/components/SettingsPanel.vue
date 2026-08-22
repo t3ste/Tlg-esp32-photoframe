@@ -128,6 +128,7 @@ onMounted(() => {
   fetchDeviceTime();
   // Tick every second to update display
   tickInterval = setInterval(updateDisplayTime, 1000);
+  loadDisplayHistoryCount();
 });
 
 onUnmounted(() => {
@@ -198,6 +199,36 @@ const resetting = ref(false);
 const showImportDialog = ref(false);
 const importData = ref(null);
 const importFileName = ref("");
+
+const displayHistoryCount = ref(null);
+const confirmingHistoryReset = ref(false);
+const resettingHistory = ref(false);
+
+async function loadDisplayHistoryCount() {
+  try {
+    const response = await fetch("/api/history");
+    if (!response.ok || response.headers.get("content-type")?.includes("text/html")) {
+      return;
+    }
+    const data = await response.json();
+    displayHistoryCount.value = data.count ?? null;
+  } catch (_error) {
+    console.log("Display history API not available (standalone mode)");
+  }
+}
+
+async function resetDisplayHistory() {
+  resettingHistory.value = true;
+  try {
+    await fetch("/api/history", { method: "DELETE" });
+    await loadDisplayHistoryCount();
+  } catch (_error) {
+    console.log("Failed to reset display history");
+  } finally {
+    resettingHistory.value = false;
+    confirmingHistoryReset.value = false;
+  }
+}
 
 async function exportConfig() {
   try {
@@ -634,6 +665,32 @@ async function performFactoryReset() {
                 class="mt-8 mb-4"
                 :disabled="!settingsStore.deviceSettings.autoRotate"
               />
+
+              <div class="d-flex align-center flex-wrap ga-3 mb-4">
+                <span class="text-caption text-medium-emphasis">
+                  <template v-if="displayHistoryCount !== null">
+                    {{ displayHistoryCount }} image{{ displayHistoryCount === 1 ? "" : "s" }} shown
+                    this cycle
+                  </template>
+                  <template v-else>Display history unavailable</template>
+                </span>
+                <v-btn
+                  v-if="displayHistoryCount"
+                  variant="outlined"
+                  size="small"
+                  color="error"
+                  @click="confirmingHistoryReset = true"
+                >
+                  <v-icon icon="mdi-history" start />
+                  Reset History
+                </v-btn>
+              </div>
+              <div class="text-caption text-medium-emphasis mb-4">
+                Random rotation (and the Telegram-mode fallback) tracks which images have already
+                been shown so it can cycle through every one once before repeating - this is that
+                count. Resetting starts a fresh cycle immediately. Also available via the
+                "/clear_history" Telegram bot command.
+              </div>
 
               <v-expand-transition>
                 <v-card
@@ -1404,6 +1461,32 @@ async function performFactoryReset() {
         </v-tooltip>
       </v-card-actions>
     </v-card>
+
+    <!-- Display History Reset Confirmation Dialog -->
+    <v-dialog v-model="confirmingHistoryReset" max-width="440">
+      <v-card>
+        <v-card-title class="text-error">
+          <v-icon icon="mdi-alert" class="mr-2" />
+          Reset Display History?
+        </v-card-title>
+        <v-card-text>
+          This clears the "already shown" tracking for random rotation and the Telegram-mode
+          fallback, starting a fresh no-repeat cycle immediately. This cannot be undone.
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="confirmingHistoryReset = false">Cancel</v-btn>
+          <v-btn
+            color="error"
+            variant="flat"
+            :loading="resettingHistory"
+            @click="resetDisplayHistory"
+          >
+            Reset
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- Factory Reset Confirmation Dialog -->
     <v-dialog v-model="showFactoryResetDialog" max-width="500">

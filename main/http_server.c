@@ -28,6 +28,7 @@
 #include "esp_vfs.h"
 #include "esp_vfs_fat.h"
 #include "freertos/task.h"
+#include "history_manager.h"
 #include "ha_integration.h"
 #include "image_processor.h"
 #include "nvs_flash.h"
@@ -1137,6 +1138,45 @@ static esp_err_t battery_history_handler(httpd_req_t *req)
         httpd_resp_sendstr(req, "Failed to build battery history JSON");
         return ESP_FAIL;
     }
+
+    char *json_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(response);
+
+    return ESP_OK;
+}
+
+// GET returns how many images have been marked shown in the current
+// no-repeat cycle (history_manager.h); DELETE clears it and restarts the
+// cycle - same effect as the "/clear_history" Telegram command, including
+// resetting the sequential-rotation cursor so both rotation modes start
+// fresh, not just the random-mode history set.
+static esp_err_t display_history_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    if (req->method == HTTP_DELETE) {
+        history_manager_clear();
+        config_manager_set_last_index(-1);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+        return ESP_OK;
+    }
+
+    cJSON *response = cJSON_CreateObject();
+    if (response == NULL) {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "Failed to build display history JSON");
+        return ESP_FAIL;
+    }
+    cJSON_AddNumberToObject(response, "count", history_manager_count());
 
     char *json_str = cJSON_Print(response);
     httpd_resp_set_type(req, "application/json");
@@ -2571,6 +2611,18 @@ esp_err_t http_server_init(void)
                                                  .handler = battery_history_handler,
                                                  .user_ctx = NULL};
         httpd_register_uri_handler(server, &battery_history_reset_uri);
+
+        httpd_uri_t display_history_uri = {.uri = "/api/history",
+                                           .method = HTTP_GET,
+                                           .handler = display_history_handler,
+                                           .user_ctx = NULL};
+        httpd_register_uri_handler(server, &display_history_uri);
+
+        httpd_uri_t display_history_reset_uri = {.uri = "/api/history",
+                                                 .method = HTTP_DELETE,
+                                                 .handler = display_history_handler,
+                                                 .user_ctx = NULL};
+        httpd_register_uri_handler(server, &display_history_reset_uri);
 
         httpd_uri_t sensor_uri = {
             .uri = "/api/sensor", .method = HTTP_GET, .handler = sensor_handler, .user_ctx = NULL};
