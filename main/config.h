@@ -230,6 +230,16 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // only - sequential mode's deterministic index cursor is left untouched.
 #define NVS_ROTATION_PAIRING_ENABLED_KEY "rot_pairing_en"
 
+// Cover/Fit pre-rendered variant selection during Storage/SD rotation (see
+// docs/FACE_CROP.md): recognizes process-cli's --crop-output both output
+// ("<name>.fit.<ext>" next to the original, "<name>.cover.<ext>" in a
+// "crop" subdirectory, plus an optional "<name>.facecrop.json" sidecar) and
+// picks whichever variant matches the device's own current Cover/Fit
+// scale_mode setting, rendering the missing one on-device (once, then
+// cached) only when the anchor is a genuine still-undecoded original.
+// Opt-in, off by default - purely additive over existing albums either way.
+#define NVS_VARIANT_SELECTION_ENABLED_KEY "variant_sel_en"
+
 // When a Telegram-mode wake falls back to normal album rotation (no new
 // Telegram image this cycle), send a thumbnail of whatever got displayed to
 // the chat, so it stays visible what the frame is showing even without a

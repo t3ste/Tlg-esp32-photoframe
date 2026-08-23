@@ -551,6 +551,12 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_rotation_pairing_enabled(cJSON_IsTrue(item));
     }
 
+    // Cover/Fit pre-rendered variant selection during Storage/SD rotation
+    item = cJSON_GetObjectItem(root, "variant_selection_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_variant_selection_enabled(cJSON_IsTrue(item));
+    }
+
     // Telegram notification on fallback-rotation display changes
     item = cJSON_GetObjectItem(root, "telegram_rotation_notify_enabled");
     if (item && cJSON_IsBool(item)) {

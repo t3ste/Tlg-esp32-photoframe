@@ -737,6 +737,23 @@ async function performFactoryReset() {
                       Only takes effect in Random rotation logic - Sequential mode ignores this
                       setting.
                     </v-alert>
+
+                    <v-switch
+                      v-model="settingsStore.deviceSettings.variantSelectionEnabled"
+                      label="Use pre-rendered Cover/Fit variants"
+                      color="primary"
+                      hide-details
+                      class="mt-2"
+                    />
+                    <div class="text-caption text-medium-emphasis">
+                      For albums produced by process-cli's <code>--crop-output both</code> (a
+                      "&lt;name&gt;.fit.&lt;ext&gt;" next to the original, "&lt;name&gt;.cover.&lt;ext&gt;"
+                      in a "crop" subfolder, plus an optional "&lt;name&gt;.facecrop.json"): picks
+                      whichever file matches the Scale Mode setting (Processing tab) instead of
+                      re-rendering it on the device. Renders and caches the missing one on-device
+                      if needed (only for a genuine, not-yet-processed original). Ordinary albums
+                      are unaffected either way.
+                    </div>
                   </v-card-text>
                 </v-card>
               </v-expand-transition>

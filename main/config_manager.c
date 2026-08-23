@@ -80,6 +80,7 @@ static int wifi_fail_count = 0;
 static bool wifi_performance_mode_enabled = true;
 static bool wifi_tx_power_cap_enabled = true;
 static bool rotation_pairing_enabled = false;
+static bool variant_selection_enabled = false;
 static bool telegram_rotation_notify_enabled = false;
 static bool telegram_keep_originals_enabled = false;
 static char telegram_image_format[TELEGRAM_IMAGE_FORMAT_MAX_LEN] = TELEGRAM_IMAGE_FORMAT_DEFAULT;
@@ -561,6 +562,12 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_ROTATION_PAIRING_ENABLED_KEY, &stored_rotation_pairing) ==
             ESP_OK) {
             rotation_pairing_enabled = (stored_rotation_pairing != 0);
+        }
+
+        uint8_t stored_variant_selection = 0;
+        if (nvs_get_u8(nvs_handle, NVS_VARIANT_SELECTION_ENABLED_KEY, &stored_variant_selection) ==
+            ESP_OK) {
+            variant_selection_enabled = (stored_variant_selection != 0);
         }
 
         uint8_t stored_rotation_notify = 0;
@@ -1695,6 +1702,25 @@ void config_manager_set_rotation_pairing_enabled(bool enabled)
 bool config_manager_get_rotation_pairing_enabled(void)
 {
     return rotation_pairing_enabled;
+}
+
+void config_manager_set_variant_selection_enabled(bool enabled)
+{
+    variant_selection_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_VARIANT_SELECTION_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Cover/Fit variant selection %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_variant_selection_enabled(void)
+{
+    return variant_selection_enabled;
 }
 
 void config_manager_set_telegram_rotation_notify_enabled(bool enabled)

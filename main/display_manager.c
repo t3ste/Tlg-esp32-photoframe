@@ -26,6 +26,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "facecrop_metadata.h"
 #include "history_manager.h"
 #include "image_processor.h"
 #include "nvs.h"
@@ -506,27 +507,241 @@ const char *display_manager_get_current_image(void)
     return current_image;
 }
 
-// NOTE (planned, not implemented): process-cli's optional --detect-faces
-// --crop-output=both mode (see docs/FACE_CROP.md) can write TWO rendered
-// files per source photo into an album folder - "<name>.cover.<ext>" (cropped
-// to fill, using the face-aware recommended crop) and "<name>.fit.<ext>"
-// (full image, letterboxed, no crop) - plus a "<name>.facecrop.json"
-// sidecar. Today, every *_sequential()/*_random() album listing loop in this
-// file (see the DT_REG + strcasecmp(ext, ...) scans below) treats each file
-// extension-filtered file as an independent, unrelated photo - so dropping a
-// "both" output directly into a rotation album would show the same source
-// photo twice per cycle (once as each variant), which is NOT what this
-// feature is for.
+// Face-aware crop variant selection (config_manager_get_variant_selection_enabled(),
+// opt-in, off by default - see docs/FACE_CROP.md). process-cli's
+// --detect-faces --crop-output=both can produce, per source photo:
+// "<name>.fit.<ext>" (full image, letterboxed, no crop - same album
+// directory as the original) and "<name>.cover.<ext>" (cropped to fill,
+// using the face-aware recommended crop - in a "crop" SUBDIRECTORY of the
+// album, so it's invisible to the plain directory walks below and never
+// needs same-directory pairing logic the way ".fit." does), plus a
+// "<name>.facecrop.json" metadata sidecar (same directory as the original).
 //
-// The intended future enhancement: before/while listing an album's files,
-// detect "<name>.cover.<ext>" / "<name>.fit.<ext>" pairs (same base name,
-// same directory) and collapse each pair into a single logical entry, then
-// pick whichever variant matches processing_settings_get_scale_mode()
-// (SCALE_MODE_FIT -> the ".fit" file, otherwise -> the ".cover" file) instead
-// of decoding/cropping/dithering anything on-device. A photo with only one
-// variant (no pairing) displays exactly as it does today. This lets a
-// pre-processed album fully avoid ESP32-side rendering for photos where the
-// user wants Cover on some devices and Fit on others without re-exporting.
+// is_rotation_anchor() below - used by both *_sequential() and *_random()'s
+// directory walks - collapses a bare "<name>.<ext>" / "<name>.fit.<ext>"
+// pair into a single logical photo entry (favoring the ".fit." one, since
+// its existence confirms --crop-output both was used) so neither rotation
+// mode ever double-counts or re-shows the same source photo as two entries.
+// resolve_display_variant() then, only once a specific anchor has already
+// been picked for display, resolves it to whichever concrete file matches
+// the device's CURRENT Cover/Fit scale_mode setting - an already-existing
+// pre-rendered variant if one is on disk, or (only when the anchor is
+// itself a genuine, still-undecoded original - checked exactly the way
+// telegram_bot.c's finalize_telegram_image() already does: JPG, or a PNG
+// image_processor_is_processed() says isn't display-ready yet) a freshly
+// on-device-rendered one, cached under its final name for next time. An
+// ordinary already-processed single-mode file (the common case today) has
+// nothing else to render from and is left completely alone - this feature
+// is purely additive on top of existing albums.
+static bool is_rotation_anchor(const char *album_path, const char *d_name)
+{
+    if (!config_manager_get_variant_selection_enabled()) {
+        return true;  // feature off - every matched file is its own anchor, as always
+    }
+
+    const char *ext = strrchr(d_name, '.');
+    if (!ext) {
+        return true;
+    }
+    size_t base_len = (size_t) (ext - d_name);
+    if (base_len >= 4 && strncasecmp(d_name + base_len - 4, ".fit", 4) == 0) {
+        return true;  // ".fit.<ext>" files are always their own anchor
+    }
+
+    // Bare "<name>.<ext>" - skip it (in favor of its ".fit.<ext>" sibling
+    // becoming this logical photo's anchor instead) only if that sibling
+    // actually exists.
+    char fit_path[600];
+    snprintf(fit_path, sizeof(fit_path), "%s/%.*s.fit%s", album_path, (int) base_len, d_name, ext);
+    struct stat st;
+    return stat(fit_path, &st) != 0;
+}
+
+// Extensions any process-cli-rendered display file (or a firmware-cached
+// render) can carry, checked in likelihood order.
+static const char *VARIANT_EXTS[] = {".png", ".epdgz", ".bmp"};
+#define VARIANT_EXTS_COUNT (sizeof(VARIANT_EXTS) / sizeof(VARIANT_EXTS[0]))
+
+// Fills out_path with "dir[/subdir]/base+suffix+ext" for whichever of
+// VARIANT_EXTS actually exists on disk first; returns false if none do.
+static bool find_existing_variant(char *out_path, size_t out_size, const char *dir,
+                                  const char *subdir_or_null, const char *base, const char *suffix)
+{
+    for (size_t i = 0; i < VARIANT_EXTS_COUNT; i++) {
+        if (subdir_or_null) {
+            snprintf(out_path, out_size, "%s/%s/%s%s%s", dir, subdir_or_null, base, suffix,
+                    VARIANT_EXTS[i]);
+        } else {
+            snprintf(out_path, out_size, "%s/%s%s%s", dir, base, suffix, VARIANT_EXTS[i]);
+        }
+        struct stat st;
+        if (stat(out_path, &st) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Same "needs on-device processing" check as telegram_bot.c's
+// finalize_telegram_image() - a JPG, or a PNG image_processor_is_processed()
+// says isn't already display-ready, is a genuine original; anything else
+// (an already-processed PNG, or a BMP/EPDGZ display file) has nothing
+// further to render from.
+static bool is_decodable_original(const char *path)
+{
+    image_format_t fmt = image_processor_detect_format(path);
+    return fmt == IMAGE_FORMAT_JPG || (fmt == IMAGE_FORMAT_PNG && !image_processor_is_processed(path));
+}
+
+// Renders `original_path` at `forced_scale_mode` (optionally applying
+// `crop`) into a temp file next to (or under, for a "crop" subdir) the
+// final name, then atomically renames into place only once fully written -
+// unlike image_processor_render_variant()'s own direct-write pattern, this
+// specific cache is trusted by *later, unrelated* rotation passes purely by
+// "does this file exist", so a half-written file must never be visible
+// under its final name.
+static bool render_and_cache_variant(const char *original_path, const char *dir,
+                                     const char *subdir_or_null, const char *base,
+                                     const char *suffix, int forced_scale_mode,
+                                     const image_crop_rect_t *crop, char *resolved_path,
+                                     size_t resolved_path_size)
+{
+    bool want_epdgz =
+        strcmp(config_manager_get_telegram_image_format(), TELEGRAM_IMAGE_FORMAT_EPDGZ) == 0;
+    const char *render_ext = want_epdgz ? ".epdgz" : ".png";
+    image_format_t render_fmt = want_epdgz ? IMAGE_FORMAT_EPD_GZ : IMAGE_FORMAT_PNG;
+
+    char dest_dir[420];
+    if (subdir_or_null) {
+        snprintf(dest_dir, sizeof(dest_dir), "%s/%s", dir, subdir_or_null);
+        mkdir(dest_dir, 0755);  // ignore EEXIST - failure surfaces via fopen() below anyway
+    } else {
+        strncpy(dest_dir, dir, sizeof(dest_dir) - 1);
+        dest_dir[sizeof(dest_dir) - 1] = '\0';
+    }
+
+    char tmp_path[700];
+    snprintf(tmp_path, sizeof(tmp_path), "%s/%s%s.tmp%s", dest_dir, base, suffix, render_ext);
+
+    dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
+    image_format_t actual_fmt = render_fmt;
+    esp_err_t err = image_processor_render_variant(original_path, tmp_path, algo, render_fmt,
+                                                   &actual_fmt, forced_scale_mode, crop);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to render variant for %s: %s", original_path, esp_err_to_name(err));
+        unlink(tmp_path);
+        return false;
+    }
+
+    const char *actual_ext = (actual_fmt == render_fmt) ? render_ext : ".png";
+    char actual_tmp_path[700];
+    snprintf(actual_tmp_path, sizeof(actual_tmp_path), "%s/%s%s.tmp%s", dest_dir, base, suffix,
+            actual_ext);
+    char final_path[700];
+    snprintf(final_path, sizeof(final_path), "%s/%s%s%s", dest_dir, base, suffix, actual_ext);
+
+    if (rename(actual_tmp_path, final_path) != 0) {
+        ESP_LOGW(TAG, "Failed to finalize rendered variant for %s", original_path);
+        unlink(actual_tmp_path);
+        return false;
+    }
+
+    strncpy(resolved_path, final_path, resolved_path_size - 1);
+    resolved_path[resolved_path_size - 1] = '\0';
+    return true;
+}
+
+static bool resolve_display_variant(const char *anchor_path, char *resolved_path,
+                                    size_t resolved_path_size)
+{
+    if (!config_manager_get_variant_selection_enabled()) {
+        return false;
+    }
+
+    char dir[300] = "";
+    const char *slash = strrchr(anchor_path, '/');
+    const char *filename = anchor_path;
+    if (slash) {
+        size_t dir_len = (size_t) (slash - anchor_path);
+        if (dir_len >= sizeof(dir)) {
+            return false;
+        }
+        memcpy(dir, anchor_path, dir_len);
+        dir[dir_len] = '\0';
+        filename = slash + 1;
+    }
+
+    const char *dot = strrchr(filename, '.');
+    if (!dot) {
+        return false;
+    }
+    size_t name_len = (size_t) (dot - filename);
+
+    bool is_fit_anchor = (name_len > 4 && strncasecmp(filename + name_len - 4, ".fit", 4) == 0);
+    if (is_fit_anchor) {
+        name_len -= 4;
+    }
+    if (name_len == 0 || name_len >= 128) {
+        return false;
+    }
+    char base[128];
+    memcpy(base, filename, name_len);
+    base[name_len] = '\0';
+
+    if (processing_settings_get_scale_mode() == SCALE_MODE_FIT) {
+        if (is_fit_anchor) {
+            return false;  // anchor_path already IS the fit file
+        }
+        if (find_existing_variant(resolved_path, resolved_path_size, dir, NULL, base, ".fit")) {
+            return true;
+        }
+        if (!is_decodable_original(anchor_path)) {
+            return false;
+        }
+        return render_and_cache_variant(anchor_path, dir, NULL, base, ".fit", SCALE_MODE_FIT, NULL,
+                                        resolved_path, resolved_path_size);
+    }
+
+    // SCALE_MODE_COVER
+    if (find_existing_variant(resolved_path, resolved_path_size, dir, "crop", base, ".cover")) {
+        return true;
+    }
+
+    // A ".fit." anchor is itself a rendered variant, never the original -
+    // --crop-output both's own output never includes a separate bare
+    // original alongside it, but a user may have manually placed one too
+    // (it can coexist without a name collision, since the ".fit." infix
+    // keeps the two names distinct).
+    char original_path[700];
+    if (is_fit_anchor) {
+        static const char *ORIGINAL_EXTS[] = {".jpg", ".jpeg", ".png", ".bmp", ".epdgz"};
+        bool found = false;
+        for (size_t i = 0; i < sizeof(ORIGINAL_EXTS) / sizeof(ORIGINAL_EXTS[0]); i++) {
+            snprintf(original_path, sizeof(original_path), "%s/%s%s", dir, base, ORIGINAL_EXTS[i]);
+            struct stat st;
+            if (stat(original_path, &st) == 0) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return false;  // nothing to render Cover from - show the .fit. anchor as-is
+        }
+    } else {
+        strncpy(original_path, anchor_path, sizeof(original_path) - 1);
+        original_path[sizeof(original_path) - 1] = '\0';
+    }
+
+    if (!is_decodable_original(original_path)) {
+        return false;
+    }
+
+    image_crop_rect_t crop;
+    bool have_crop = facecrop_read_recommended_crop(original_path, &crop);
+
+    return render_and_cache_variant(original_path, dir, "crop", base, ".cover", SCALE_MODE_COVER,
+                                    have_crop ? &crop : NULL, resolved_path, resolved_path_size);
+}
 
 static void rotate_sequential(char **enabled_albums, int album_count)
 {
@@ -554,8 +769,10 @@ static void rotate_sequential(char **enabled_albums, int album_count)
                 }
 
                 const char *ext = strrchr(entry->d_name, '.');
-                if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
-                            strcasecmp(ext, ".epdgz") == 0)) {
+                if (ext &&
+                    (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
+                     strcasecmp(ext, ".epdgz") == 0) &&
+                    is_rotation_anchor(album_path, entry->d_name)) {
                     char fullpath[512];
                     snprintf(fullpath, sizeof(fullpath), "%s/%s", album_path, entry->d_name);
                     ESP_LOGD(TAG, "  Found image [%ld]: %s", (long) current_idx, fullpath);
@@ -567,15 +784,22 @@ static void rotate_sequential(char **enabled_albums, int album_count)
 
                     if (current_idx == target_idx) {
                         ESP_LOGI(TAG, "Found target index %ld: %s", (long) target_idx, fullpath);
-                        const char *shown = overlay_manager_apply(fullpath);
+                        char variant_path[700];
+                        const char *display_source =
+                            resolve_display_variant(fullpath, variant_path, sizeof(variant_path))
+                                ? variant_path
+                                : fullpath;
+                        const char *shown = overlay_manager_apply(display_source);
                         display_manager_show_image(shown);
                         if (strcmp(shown, fullpath) != 0) {
-                            // The overlay was drawn onto a scratch copy - see
+                            // The displayed file is a resolved Cover/Fit
+                            // variant and/or an overlay scratch copy - see
                             // display_manager_show_image()'s own
                             // history_manager_mark_shown(filename) call above:
                             // it just (harmlessly, per its own comment)
-                            // recorded the scratch path, so re-mark the real
-                            // one too.
+                            // recorded whatever path was actually shown, so
+                            // re-mark the real source (this rotation's
+                            // stable anchor identity) too.
                             history_manager_mark_shown(fullpath);
                         }
                         save_last_displayed_image(fullpath);
@@ -601,7 +825,12 @@ static void rotate_sequential(char **enabled_albums, int album_count)
     if (!found_target) {
         if (first_image[0] != '\0') {
             ESP_LOGI(TAG, "Wrapping around to start. Displaying: %s", first_image);
-            const char *shown = overlay_manager_apply(first_image);
+            char variant_path[700];
+            const char *display_source =
+                resolve_display_variant(first_image, variant_path, sizeof(variant_path))
+                    ? variant_path
+                    : first_image;
+            const char *shown = overlay_manager_apply(display_source);
             display_manager_show_image(shown);
             if (strcmp(shown, first_image) != 0) {
                 history_manager_mark_shown(first_image);
@@ -751,8 +980,10 @@ static void rotate_random(char **enabled_albums, int album_count)
                     continue;
                 }
                 const char *ext = strrchr(entry->d_name, '.');
-                if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
-                            strcasecmp(ext, ".epdgz") == 0)) {
+                if (ext &&
+                    (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
+                     strcasecmp(ext, ".epdgz") == 0) &&
+                    is_rotation_anchor(album_path, entry->d_name)) {
                     total_image_count++;
                 }
             }
@@ -790,8 +1021,10 @@ static void rotate_random(char **enabled_albums, int album_count)
                 }
 
                 const char *ext = strrchr(entry->d_name, '.');
-                if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
-                            strcasecmp(ext, ".epdgz") == 0)) {
+                if (ext &&
+                    (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
+                     strcasecmp(ext, ".epdgz") == 0) &&
+                    is_rotation_anchor(album_path, entry->d_name)) {
                     char *fullpath = malloc(512);
                     if (!fullpath) {
                         ESP_LOGE(TAG, "Failed to allocate path buffer");
@@ -907,7 +1140,11 @@ static void rotate_random(char **enabled_albums, int album_count)
     // Display random image
     ESP_LOGI(TAG, "Auto-rotate: Displaying random image %d/%d (unseen this cycle: %d): %s",
              random_index + 1, total_image_count, unseen_count, final_path);
-    const char *shown = overlay_manager_apply(final_path);
+    char variant_path[700];
+    const char *display_source =
+        resolve_display_variant(final_path, variant_path, sizeof(variant_path)) ? variant_path
+                                                                                : final_path;
+    const char *shown = overlay_manager_apply(display_source);
     display_manager_show_image(shown);
     if (strcmp(shown, final_path) != 0) {
         history_manager_mark_shown(final_path);

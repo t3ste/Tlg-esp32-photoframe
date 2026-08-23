@@ -1548,6 +1548,8 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_wifi_tx_power_cap_enabled());
         cJSON_AddBoolToObject(root, "rotation_pairing_enabled",
                               config_manager_get_rotation_pairing_enabled());
+        cJSON_AddBoolToObject(root, "variant_selection_enabled",
+                              config_manager_get_variant_selection_enabled());
         cJSON_AddBoolToObject(root, "telegram_rotation_notify_enabled",
                               config_manager_get_telegram_rotation_notify_enabled());
         cJSON_AddBoolToObject(root, "telegram_keep_originals_enabled",

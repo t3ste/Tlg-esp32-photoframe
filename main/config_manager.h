@@ -220,6 +220,11 @@ bool config_manager_get_wifi_tx_power_cap_enabled(void);
 void config_manager_set_rotation_pairing_enabled(bool enabled);
 bool config_manager_get_rotation_pairing_enabled(void);
 
+// Cover/Fit pre-rendered variant selection during Storage/SD rotation.
+// Defaults to false. See NVS_VARIANT_SELECTION_ENABLED_KEY in config.h.
+void config_manager_set_variant_selection_enabled(bool enabled);
+bool config_manager_get_variant_selection_enabled(void);
+
 // Send a thumbnail to Telegram whenever a Telegram-mode wake falls back to
 // album rotation (no new Telegram image). Defaults to false. See
 // NVS_TELEGRAM_ROTATION_NOTIFY_KEY in config.h.

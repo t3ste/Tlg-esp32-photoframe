@@ -77,6 +77,7 @@ export const useSettingsStore = defineStore("settings", () => {
     wifiPerformanceModeEnabled: true,
     wifiTxPowerCapEnabled: true,
     rotationPairingEnabled: false,
+    variantSelectionEnabled: false,
     telegramRotationNotifyEnabled: false,
     telegramKeepOriginalsEnabled: false,
     telegramImageFormat: "epdgz",
@@ -241,6 +242,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.wifiPerformanceModeEnabled = data.wifi_performance_mode_enabled !== false;
       deviceSettings.value.wifiTxPowerCapEnabled = data.wifi_tx_power_cap_enabled !== false;
       deviceSettings.value.rotationPairingEnabled = data.rotation_pairing_enabled === true;
+      deviceSettings.value.variantSelectionEnabled = data.variant_selection_enabled === true;
       deviceSettings.value.telegramRotationNotifyEnabled =
         data.telegram_rotation_notify_enabled === true;
       deviceSettings.value.telegramKeepOriginalsEnabled =
@@ -343,6 +345,7 @@ export const useSettingsStore = defineStore("settings", () => {
       wifi_performance_mode_enabled: deviceSettings.value.wifiPerformanceModeEnabled,
       wifi_tx_power_cap_enabled: deviceSettings.value.wifiTxPowerCapEnabled,
       rotation_pairing_enabled: deviceSettings.value.rotationPairingEnabled,
+      variant_selection_enabled: deviceSettings.value.variantSelectionEnabled,
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,
       telegram_keep_originals_enabled: deviceSettings.value.telegramKeepOriginalsEnabled,
       telegram_image_format: deviceSettings.value.telegramImageFormat,
