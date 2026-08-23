@@ -713,20 +713,21 @@ static bool resolve_display_variant(const char *anchor_path, char *resolved_path
     // --crop-output both's own output never includes a separate bare
     // original alongside it, but a user may have manually placed one too
     // (it can coexist without a name collision, since the ".fit." infix
-    // keeps the two names distinct).
+    // keeps the two names distinct). A bare "<base>.jpg" is deliberately NOT
+    // probed here: per the documented album convention it's the optional
+    // reference thumbnail (small, always JPEG, written by both process-cli
+    // and the firmware's own thumbnail generators), never a full-resolution
+    // render source - and unlike PNG, is_decodable_original() has no size
+    // check for JPEG, so treating it as a candidate would silently render
+    // the Cover variant from a low-res thumbnail instead of correctly
+    // falling back to "nothing to render from". ".bmp"/".epdgz" siblings are
+    // skipped too - they can never pass is_decodable_original() below, so
+    // probing for them would only ever waste a stat() call.
     char original_path[700];
     if (is_fit_anchor) {
-        static const char *ORIGINAL_EXTS[] = {".jpg", ".jpeg", ".png", ".bmp", ".epdgz"};
-        bool found = false;
-        for (size_t i = 0; i < sizeof(ORIGINAL_EXTS) / sizeof(ORIGINAL_EXTS[0]); i++) {
-            snprintf(original_path, sizeof(original_path), "%s/%s%s", dir, base, ORIGINAL_EXTS[i]);
-            struct stat st;
-            if (stat(original_path, &st) == 0) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
+        snprintf(original_path, sizeof(original_path), "%s/%s.png", dir, base);
+        struct stat st;
+        if (stat(original_path, &st) != 0) {
             return false;  // nothing to render Cover from - show the .fit. anchor as-is
         }
     } else {

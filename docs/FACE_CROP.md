@@ -137,13 +137,16 @@ subdirectory instead:
 
 ```
 Albums/MyAlbum/
-  photo1.jpg                 <- original (only meaningful if this is a genuine,
-                                 still-undecoded photo - see below)
-  photo1.fit.<ext>            <- rendered, no crop - same directory as the original
-  photo1.facecrop.json        <- metadata sidecar - same directory as the original
+  photo1.jpg                 <- OPTIONAL reference thumbnail (small, always a real JPEG -
+                                 see "About photo1.jpg" below) - NOT a render source
+  photo1.fit.<ext>            <- rendered, no crop - same directory as the thumbnail
+  photo1.facecrop.json        <- metadata sidecar - same directory as the thumbnail
   crop/
     photo1.cover.<ext>         <- rendered, cropped to fill - in the "crop" subdirectory
 ```
+
+(`photo1.fit.<ext>` may equally be a bare `photo1.<ext>` instead - see the `cropped`/`uncropped`
+table above; `<ext>` here is never `.jpg`, since the device can't display raw JPEG.)
 
 Putting the Cover variant in a subdirectory (rather than the album root) means the firmware's
 existing directory-listing loops don't need any pairing logic for it at all - they already only
@@ -154,39 +157,80 @@ Use **Settings → Maintenance → "Organize Crop Folders"** to retrofit this la
 `--crop-output both` output: it creates each album's `crop/` subdirectory (if missing) and moves any
 `<name>.cover.<ext>` files sitting loose in an album root into it.
 
-**Important**: users are expected to only place already-rendered display files on the SD card - a
-bare `<name>.<ext>` there is itself process-cli's already-rendered output (Cover- *or* Fit-style,
-whichever mode was run - the filename alone can't tell which), same as `<name>.cover.<ext>` and
-`<name>.fit.<ext>` always are. Re-rendering the *other* mode from an already-cropped `<name>.<ext>`
-would often be destructively impossible anyway (cropping permanently discards pixels), so the
-firmware **never assumes** any of these three are a valid render source from their filename or
-position alone. Whether an on-device render is even attempted is decided purely by inspecting the
-file's actual content - the identical check `finalize_telegram_image()` in `main/telegram_bot.c`
-already uses for incoming Telegram photos, reused verbatim here as `is_decodable_original()`:
+#### About `photo1.jpg`
+
+Users are instructed to only ever place already-rendered display files on the SD card - the frame
+never receives a full-resolution camera original at all. The only thing named `<name>.jpg` that
+legitimately shows up in an album is the small **reference thumbnail**: both `process-cli`
+(`renderVariant()` in `process-cli/cli.js`, written unconditionally whenever thumbnail generation is
+on) and the firmware's own Telegram/Web-UI ingestion path always write it as a real JPEG, downscaled
+to a preview size, under exactly `<name>.jpg` - it is never a candidate for on-device rendering, only
+ever a small preview image for the Web UI gallery.
+
+Because of this, the firmware's fallback lookup (used only when a `.fit.<ext>` anchor exists but its
+`crop/.cover.<ext>` counterpart is still missing) deliberately does **not** treat a `<name>.jpg`
+sibling as something to render Cover from, even though `.jpg` is a format the on-device decoder
+otherwise accepts. It only looks for a bare `<name>.png` sibling - and even that is admitted as a
+render source only if it fails the same "already display-ready" content check described next, so a
+same-named already-rendered PNG (the `cropped`/`uncropped`-without-`both` case) is correctly excluded
+too.
+
+**Important**: none of `<name>.<ext>`, `<name>.cover.<ext>`, or `<name>.fit.<ext>` are ever assumed
+to be a valid on-device render source just from their filename or position - the firmware decides
+purely by inspecting the file's actual content, the identical check `finalize_telegram_image()` in
+`main/telegram_bot.c` already uses for incoming Telegram photos, reused verbatim here as
+`is_decodable_original()`:
 
 - `image_processor_detect_format()` reads the file's first bytes (PNG signature / `BM` / JPEG SOI
-  marker / gzip magic) - a `.bmp`/`.epdgz` file, or anything whose *content* isn't actually a JPEG,
-  is immediately excluded, regardless of what it's named.
+  marker / gzip magic) - a `.bmp`/`.epdgz` file, or anything whose *content* isn't actually a JPEG or
+  PNG, is immediately excluded, regardless of what it's named.
 - A PNG additionally has to pass `image_processor_is_processed()`, which opens it and requires its
   *actual* `IHDR` width/height to exactly match this board's display resolution and 3 RGB channels -
   an already-rendered PNG always satisfies this and is excluded too.
 
 Only a file whose content is genuinely still a JPEG, or a PNG that fails that exact-resolution
 check, is treated as "not yet rendered." Under the stated SD-card policy above, every legitimately
-placed file - bare, `.cover.`, or `.fit.` - will always be BMP/EPDGZ/exact-resolution-PNG, so this
-check will always exclude it and the on-device render path (step 3 below) simply never fires; it
-only matters as a harmless fallback if a genuine unprocessed photo ends up there by mistake.
+placed rendered file will always be BMP/EPDGZ/exact-resolution-PNG, so this check will always exclude
+it and the on-device render path (step 3 below) simply never fires in normal operation - see
+[When does the firmware actually render a PNG on-device?](#when-does-the-firmware-actually-render-a-png-on-device)
+for the concrete scenarios where it does.
 
 Selection algorithm, per photo, each time it's about to be displayed:
 
 1. **Cover** active: use `<name>.cover.<ext>` from `crop/` if it already exists.
 2. **Fit** active: use `<name>.fit.<ext>` from the album root if it already exists.
-3. If the wanted variant is missing **and** the original is a genuine, still-undecoded photo (per
-   the check above): render it on-device - Cover reads `<name>.facecrop.json`'s `recommended_crop`
-   if present (plain center-crop otherwise), Fit never crops - and cache the result under its final
-   name (written to a temp file and atomically renamed into place only once complete, so a crash or
-   power loss mid-render can never leave a half-written file trusted as "already there" next time).
+3. If the wanted variant is missing **and** a genuine, still-undecoded source is found (per the check
+   above - for Cover from a `.fit.` anchor, only a bare `<name>.png` sibling is ever considered, never
+   `<name>.jpg`): render it on-device - Cover reads `<name>.facecrop.json`'s `recommended_crop` if
+   present (plain center-crop otherwise), Fit never crops - and cache the result under its final name
+   (written to a temp file and atomically renamed into place only once complete, so a crash or power
+   loss mid-render can never leave a half-written file trusted as "already there" next time).
 4. Otherwise: display `<name>.<ext>` exactly as today - no change at all.
+
+### When does the firmware actually render a PNG on-device?
+
+Given the SD-card policy above (only already-rendered files get placed there), this on-device path
+is a dormant safety net in normal use, not something that fires routinely. It only actually triggers
+when a PNG genuinely fails the exact-resolution/3-channel check, which happens in scenarios like:
+
+- **A photo was copied over from a different board's album** (or the display resolution/orientation
+  was changed after the photo was rendered) - the PNG's real `IHDR` dimensions no longer match this
+  board's current display resolution, so `image_processor_is_processed()` returns false and the
+  firmware (correctly) treats it as not-yet-rendered-for-this-board and re-renders it at the right
+  size.
+- **A user manually drops a real, unprocessed source PNG onto the SD card** (against the stated
+  policy, e.g. a screenshot or a PNG export from photo-editing software) next to a `.fit.<ext>` anchor
+  whose `crop/.cover.<ext>` variant is missing - the bare `<name>.png` sibling check picks it up as a
+  genuine original and renders the missing Cover variant from it.
+
+Note this can also happen in **Fit** mode without a `.cover.`/`.fit.` split at all: if a PNG anchor in
+an album root simply isn't a display-ready render for *this* board yet (either of the two cases
+above, applied to the anchor file itself rather than a sibling), `resolve_display_variant()`'s
+`SCALE_MODE_FIT` branch renders and caches a `.fit.<ext>` from it the same way.
+
+None of these are expected under the documented workflow - they're intentionally left as a graceful
+fallback (a correct, if slower, on-device render) rather than a hard error, so a misplaced or
+stale/board-mismatched file never breaks display of that photo.
 
 The on-device render (`image_processor_render_variant()` in `main/image_processor.c`) reuses the
 exact same decode/tone-map/dither pipeline every other on-device conversion already goes through,
