@@ -19,8 +19,10 @@
 #include "fonts.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "GUI_ColorMap.h"
 #include "jpeg_decoder.h"
 #include "processing_settings.h"
+#include "zlib.h"
 
 // Same header choice as jpeg_decoder.c (the wrapper the streaming JPEG
 // decode below bypasses): this chip's ROM has TJpgDec built in
@@ -933,6 +935,150 @@ static esp_err_t png_writer_close(png_writer_t *pw, bool success)
         fclose(pw->fp);
     }
     memset(pw, 0, sizeof(*pw));
+
+    return err;
+}
+
+// Streaming EPDGZ writer -- an alternative row_sink_fn to png_writer_*, for
+// callers that want the smaller, faster-to-display format instead (EPDGZ
+// stores the already-resolved 4-bit palette index, gzip-compressed, so a
+// future display is a plain gzip-inflate + nibble read with no per-pixel
+// RGB->palette re-matching, unlike reading a "processed" PNG back - see
+// GUI_PNGfile.c's read_png_mapped()). Same gzip framing and 4-bit packing as
+// display_save_frame_epdgz() in display_manager.c (which snapshots the
+// already-rendered panel framebuffer for the URL-streaming display path) but
+// driven by the row_sink_fn interface instead, so it can sit anywhere
+// png_writer_row_sink does today.
+typedef struct {
+    FILE *fp;
+    z_stream strm;
+    bool zready;
+    int width;
+    int height;
+    uint8_t *packed_row;  // row_bytes, reused every row
+    uint8_t *out_chunk;   // deflate output scratch
+    GUI_RGBMapFn map_rgb;
+} epdgz_writer_t;
+
+#define EPDGZ_WRITER_CHUNK 4096
+
+// Separate from display_manager.c's zalloc_psram/zfree_psram (which aren't
+// exported) - same ~10-line shape, not worth cross-module coupling for.
+static voidpf epdgz_zalloc_psram(voidpf opaque, uInt items, uInt size)
+{
+    (void) opaque;
+    return heap_caps_malloc((size_t) items * size, MALLOC_CAP_SPIRAM);
+}
+
+static void epdgz_zfree_psram(voidpf opaque, voidpf address)
+{
+    (void) opaque;
+    heap_caps_free(address);
+}
+
+// Returns ESP_ERR_NO_MEM (quietly, no ESP_LOGE) if the ~260 KB of deflate
+// state can't be allocated - callers treat that as an expected "fall back to
+// PNG instead" signal, not a hard error.
+static esp_err_t epdgz_writer_open(epdgz_writer_t *ew, const char *filename, int width, int height)
+{
+    memset(ew, 0, sizeof(*ew));
+    ew->width = width;
+    ew->height = height;
+    ew->map_rgb = board_is_grayscale() ? GUI_RGBToGray16 : GUI_RGBToSpectra6;
+
+    ew->fp = fopen(filename, "wb");
+    if (!ew->fp) {
+        ESP_LOGE(TAG, "Failed to open file for writing: %s", filename);
+        return ESP_FAIL;
+    }
+
+    size_t row_bytes = ((size_t) width + 1) / 2;
+    ew->packed_row = (uint8_t *) heap_caps_malloc(row_bytes, MALLOC_CAP_SPIRAM);
+    ew->out_chunk = (uint8_t *) heap_caps_malloc(EPDGZ_WRITER_CHUNK, MALLOC_CAP_SPIRAM);
+
+    ew->strm.zalloc = epdgz_zalloc_psram;
+    ew->strm.zfree = epdgz_zfree_psram;
+    ew->strm.opaque = Z_NULL;
+    // windowBits 15+16 selects the gzip wrapper GUI_ReadEPDGZ expects
+    ew->zready = ew->packed_row && ew->out_chunk &&
+                deflateInit2(&ew->strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8,
+                             Z_DEFAULT_STRATEGY) == Z_OK;
+
+    if (!ew->zready) {
+        if (ew->packed_row) {
+            heap_caps_free(ew->packed_row);
+        }
+        if (ew->out_chunk) {
+            heap_caps_free(ew->out_chunk);
+        }
+        fclose(ew->fp);
+        memset(ew, 0, sizeof(*ew));
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t epdgz_writer_row_sink(void *ctx, int y, const uint8_t *row)
+{
+    epdgz_writer_t *ew = (epdgz_writer_t *) ctx;
+    int width = ew->width;
+
+    for (int x = 0; x < width; x += 2) {
+        UBYTE p1 = ew->map_rgb(row[x * 3], row[x * 3 + 1], row[x * 3 + 2]);
+        UBYTE p2 = (x + 1 < width) ? ew->map_rgb(row[(x + 1) * 3], row[(x + 1) * 3 + 1],
+                                                  row[(x + 1) * 3 + 2])
+                                   : 0;
+        ew->packed_row[x / 2] = (uint8_t) ((p1 << 4) | p2);
+    }
+
+    size_t row_bytes = ((size_t) width + 1) / 2;
+    ew->strm.next_in = ew->packed_row;
+    ew->strm.avail_in = row_bytes;
+    int flush = (y == ew->height - 1) ? Z_FINISH : Z_NO_FLUSH;
+    do {
+        ew->strm.next_out = ew->out_chunk;
+        ew->strm.avail_out = EPDGZ_WRITER_CHUNK;
+        if (deflate(&ew->strm, flush) == Z_STREAM_ERROR) {
+            return ESP_FAIL;
+        }
+        size_t have = EPDGZ_WRITER_CHUNK - ew->strm.avail_out;
+        if (have > 0 && fwrite(ew->out_chunk, 1, have, ew->fp) != have) {
+            ESP_LOGE(TAG, "Failed to write EPDGZ row data");
+            return ESP_FAIL;
+        }
+    } while (ew->strm.avail_out == 0);
+
+    // Yield periodically so the IDLE task can feed the watchdog, matching
+    // display_save_frame_epdgz()'s same precaution for the same CPU-heavy
+    // per-row deflate work
+    if ((y & 63) == 0) {
+        vTaskDelay(1);
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t epdgz_writer_close(epdgz_writer_t *ew, bool success)
+{
+    esp_err_t err = success ? ESP_OK : ESP_FAIL;
+
+    if (ew->zready) {
+        deflateEnd(&ew->strm);
+    }
+    if (ew->packed_row) {
+        heap_caps_free(ew->packed_row);
+    }
+    if (ew->out_chunk) {
+        heap_caps_free(ew->out_chunk);
+    }
+    if (ew->fp) {
+        if (fclose(ew->fp) != 0 && err == ESP_OK) {
+            ESP_LOGE(TAG, "Failed to finalize EPDGZ file");
+            err = ESP_FAIL;
+        }
+    }
+    memset(ew, 0, sizeof(*ew));
 
     return err;
 }
@@ -2007,14 +2153,31 @@ esp_err_t image_processor_process_to_display(const uint8_t *input_data, size_t i
     return err;
 }
 
-esp_err_t image_processor_process(const char *input_path, const char *output_path,
-                                  dither_algorithm_t dither_algorithm)
+// Derives the "same path, but .png" fallback name used when an EPDGZ
+// encode can't get the memory it needs - always safe in place, since
+// ".epdgz" (6 chars) is never shorter than ".png" (4 chars).
+static void with_png_extension(const char *path, char *out, size_t out_size)
+{
+    strncpy(out, path, out_size - 1);
+    out[out_size - 1] = '\0';
+    char *ext = strrchr(out, '.');
+    if (ext) {
+        strcpy(ext, ".png");
+    }
+}
+
+esp_err_t image_processor_process_fmt(const char *input_path, const char *output_path,
+                                      dither_algorithm_t dither_algorithm, image_format_t out_format,
+                                      image_format_t *out_actual_format)
 {
     const char *algo_names[] = {"floyd-steinberg", "stucki", "burkes", "sierra"};
-    ESP_LOGI(TAG, "Processing %s -> %s (dither: %s)", input_path, output_path,
-             algo_names[dither_algorithm]);
+    ESP_LOGI(TAG, "Processing %s -> %s (dither: %s, format: %s)", input_path, output_path,
+             algo_names[dither_algorithm], out_format == IMAGE_FORMAT_EPD_GZ ? "epdgz" : "png");
 
     last_error_msg[0] = '\0';
+    if (out_actual_format) {
+        *out_actual_format = IMAGE_FORMAT_PNG;
+    }
 
     // Detect format first
     image_format_t format = image_processor_detect_format(input_path);
@@ -2044,7 +2207,9 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
         // contiguous free PSRAM block even though the chip nominally has
         // plenty of total heap - only JPEG has a streaming fallback for
         // this (see the "Streamed JPEG source" section above); PNG has no
-        // equivalent yet, so this stays a hard failure for that format.
+        // equivalent yet, so this stays a hard failure for that format. The
+        // streaming fallback also stays PNG-only regardless of out_format -
+        // not worth teaching EPDGZ-encoding to this already-exotic tier.
         if (format == IMAGE_FORMAT_JPG) {
             ESP_LOGW(TAG,
                      "Failed to allocate file buffer of %ld bytes - falling back to streaming JPEG "
@@ -2066,8 +2231,9 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
     }
 
     esp_err_t err;
+    char png_fallback_path[320];
 
-    // Non-rotated PNGs stream straight from the decoder into the output PNG
+    // Non-rotated PNGs stream straight from the decoder into the output
     if (format == IMAGE_FORMAT_PNG) {
         png_stream_src_t stream;
         bool streamable = false;
@@ -2077,25 +2243,55 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
             return err;
         }
         if (streamable) {
-            ESP_LOGI(TAG, "Writing PNG output to %s", output_path);
-            png_writer_t writer;
-            err = png_writer_open(&writer, output_path, BOARD_HAL_DISPLAY_WIDTH,
-                                  BOARD_HAL_DISPLAY_HEIGHT);
+            const char *actual_output_path = output_path;
+            image_format_t actual_format = out_format;
+            png_writer_t png_writer;
+            epdgz_writer_t epdgz_writer;
+
+            if (out_format == IMAGE_FORMAT_EPD_GZ) {
+                err = epdgz_writer_open(&epdgz_writer, output_path, BOARD_HAL_DISPLAY_WIDTH,
+                                        BOARD_HAL_DISPLAY_HEIGHT);
+                if (err == ESP_ERR_NO_MEM) {
+                    ESP_LOGW(TAG, "Not enough memory for EPDGZ encoding - falling back to PNG");
+                    with_png_extension(output_path, png_fallback_path, sizeof(png_fallback_path));
+                    actual_output_path = png_fallback_path;
+                    actual_format = IMAGE_FORMAT_PNG;
+                    err = png_writer_open(&png_writer, actual_output_path, BOARD_HAL_DISPLAY_WIDTH,
+                                          BOARD_HAL_DISPLAY_HEIGHT);
+                }
+            } else {
+                err = png_writer_open(&png_writer, output_path, BOARD_HAL_DISPLAY_WIDTH,
+                                      BOARD_HAL_DISPLAY_HEIGHT);
+            }
+
             if (err == ESP_OK) {
-                err = png_stream_run(&stream, dither_algorithm, png_writer_row_sink, &writer, false,
-                                     rotated);
-                esp_err_t close_err = png_writer_close(&writer, err == ESP_OK);
-                if (err == ESP_OK) {
-                    err = close_err;
+                if (actual_format == IMAGE_FORMAT_EPD_GZ) {
+                    err = png_stream_run(&stream, dither_algorithm, epdgz_writer_row_sink,
+                                         &epdgz_writer, false, rotated);
+                    esp_err_t close_err = epdgz_writer_close(&epdgz_writer, err == ESP_OK);
+                    if (err == ESP_OK) {
+                        err = close_err;
+                    }
+                } else {
+                    err = png_stream_run(&stream, dither_algorithm, png_writer_row_sink, &png_writer,
+                                         false, rotated);
+                    esp_err_t close_err = png_writer_close(&png_writer, err == ESP_OK);
+                    if (err == ESP_OK) {
+                        err = close_err;
+                    }
                 }
             }
             png_stream_close(&stream);
             heap_caps_free(file_buffer);
 
             if (err == ESP_OK) {
-                ESP_LOGI(TAG, "Successfully wrote PNG to %s", output_path);
+                ESP_LOGI(TAG, "Successfully wrote %s to %s",
+                        actual_format == IMAGE_FORMAT_EPD_GZ ? "EPDGZ" : "PNG", actual_output_path);
+                if (out_actual_format) {
+                    *out_actual_format = actual_format;
+                }
             } else {
-                unlink(output_path);
+                unlink(actual_output_path);
             }
             return err;
         }
@@ -2124,31 +2320,68 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
 
     ESP_LOGI(TAG, "Decoded image: %dx%d", width, height);
 
-    // Stream processed rows straight into the output PNG
-    ESP_LOGI(TAG, "Writing PNG output to %s", output_path);
-    png_writer_t writer;
-    err = png_writer_open(&writer, output_path, BOARD_HAL_DISPLAY_WIDTH, BOARD_HAL_DISPLAY_HEIGHT);
+    const char *actual_output_path = output_path;
+    image_format_t actual_format = out_format;
+    png_writer_t png_writer;
+    epdgz_writer_t epdgz_writer;
+
+    if (out_format == IMAGE_FORMAT_EPD_GZ) {
+        err = epdgz_writer_open(&epdgz_writer, output_path, BOARD_HAL_DISPLAY_WIDTH,
+                                BOARD_HAL_DISPLAY_HEIGHT);
+        if (err == ESP_ERR_NO_MEM) {
+            ESP_LOGW(TAG, "Not enough memory for EPDGZ encoding - falling back to PNG");
+            with_png_extension(output_path, png_fallback_path, sizeof(png_fallback_path));
+            actual_output_path = png_fallback_path;
+            actual_format = IMAGE_FORMAT_PNG;
+            err = png_writer_open(&png_writer, actual_output_path, BOARD_HAL_DISPLAY_WIDTH,
+                                  BOARD_HAL_DISPLAY_HEIGHT);
+        }
+    } else {
+        err = png_writer_open(&png_writer, output_path, BOARD_HAL_DISPLAY_WIDTH,
+                              BOARD_HAL_DISPLAY_HEIGHT);
+    }
+
     if (err == ESP_OK) {
-        err = process_rgb_stream(rgb_buffer, width, height, dither_algorithm, png_writer_row_sink,
-                                 &writer, false, rotated);
-        // Keep the processing error (e.g. ESP_ERR_NO_MEM, which callers map
-        // to a specific response); only a failed finalize of an otherwise
-        // successful write becomes the result.
-        esp_err_t close_err = png_writer_close(&writer, err == ESP_OK);
-        if (err == ESP_OK) {
-            err = close_err;
+        if (actual_format == IMAGE_FORMAT_EPD_GZ) {
+            err = process_rgb_stream(rgb_buffer, width, height, dither_algorithm,
+                                     epdgz_writer_row_sink, &epdgz_writer, false, rotated);
+            esp_err_t close_err = epdgz_writer_close(&epdgz_writer, err == ESP_OK);
+            if (err == ESP_OK) {
+                err = close_err;
+            }
+        } else {
+            // Keep the processing error (e.g. ESP_ERR_NO_MEM, which callers
+            // map to a specific response); only a failed finalize of an
+            // otherwise successful write becomes the result.
+            err = process_rgb_stream(rgb_buffer, width, height, dither_algorithm, png_writer_row_sink,
+                                     &png_writer, false, rotated);
+            esp_err_t close_err = png_writer_close(&png_writer, err == ESP_OK);
+            if (err == ESP_OK) {
+                err = close_err;
+            }
         }
     }
 
     heap_caps_free(rgb_buffer);
 
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Successfully wrote PNG to %s", output_path);
+        ESP_LOGI(TAG, "Successfully wrote %s to %s",
+                actual_format == IMAGE_FORMAT_EPD_GZ ? "EPDGZ" : "PNG", actual_output_path);
+        if (out_actual_format) {
+            *out_actual_format = actual_format;
+        }
     } else {
-        unlink(output_path);
+        unlink(actual_output_path);
     }
 
     return err;
+}
+
+esp_err_t image_processor_process(const char *input_path, const char *output_path,
+                                  dither_algorithm_t dither_algorithm)
+{
+    return image_processor_process_fmt(input_path, output_path, dither_algorithm, IMAGE_FORMAT_PNG,
+                                       NULL);
 }
 
 // True when (r,g,b) is one of the theoretical output colors the processing

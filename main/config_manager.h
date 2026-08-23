@@ -232,6 +232,12 @@ bool config_manager_get_telegram_rotation_notify_enabled(void);
 void config_manager_set_telegram_keep_originals_enabled(bool enabled);
 bool config_manager_get_telegram_keep_originals_enabled(void);
 
+// On-device output format for Telegram-ingested photos: "png" or "epdgz".
+// Defaults to TELEGRAM_IMAGE_FORMAT_DEFAULT ("epdgz"). See
+// NVS_TELEGRAM_IMAGE_FORMAT_KEY in config.h.
+void config_manager_set_telegram_image_format(const char *format);
+const char *config_manager_get_telegram_image_format(void);
+
 // Weather + headline overlays: composited on-device, no companion server
 // needed. Both default to false. See NVS_WEATHER_*/NVS_HEADLINES_* in
 // config.h.

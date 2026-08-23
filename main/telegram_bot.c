@@ -1102,35 +1102,54 @@ static void finalize_telegram_image(char *path, size_t path_len, const char *arc
         preserve_telegram_original(path, archival_file_id);
     }
 
-    char png_path[320];
-    strncpy(png_path, path, sizeof(png_path) - 1);
-    png_path[sizeof(png_path) - 1] = '\0';
-    char *ext = strrchr(png_path, '.');
-    if (!ext || (size_t) (ext - png_path) + 4 >= sizeof(png_path)) {
+    // telegram_image_format picks PNG vs EPDGZ for this on-device conversion
+    // (EPDGZ recommended: already palette-indexed and gzip-compressed, no
+    // per-pixel RGB->palette re-matching needed on every future display the
+    // way reading a "processed" PNG back still requires).
+    bool want_epdgz =
+        strcmp(config_manager_get_telegram_image_format(), TELEGRAM_IMAGE_FORMAT_EPDGZ) == 0;
+    const char *want_ext = want_epdgz ? ".epdgz" : ".png";
+    image_format_t requested_format = want_epdgz ? IMAGE_FORMAT_EPD_GZ : IMAGE_FORMAT_PNG;
+
+    char out_path[320];
+    strncpy(out_path, path, sizeof(out_path) - 1);
+    out_path[sizeof(out_path) - 1] = '\0';
+    char *ext = strrchr(out_path, '.');
+    if (!ext || (size_t) (ext - out_path) + strlen(want_ext) + 1 > sizeof(out_path)) {
         return;
     }
-    strcpy(ext, ".png");
+    strcpy(ext, want_ext);
 
     dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
-    esp_err_t err = image_processor_process(path, png_path, algo);
+    image_format_t actual_format = requested_format;
+    esp_err_t err = image_processor_process_fmt(path, out_path, algo, requested_format, &actual_format);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to persist %s as PNG, keeping original: %s", path,
-                 esp_err_to_name(err));
+        ESP_LOGW(TAG, "Failed to persist %s, keeping original: %s", path, esp_err_to_name(err));
         return;
+    }
+    if (actual_format != requested_format) {
+        // image_processor_process_fmt() fell back to PNG (e.g. not enough
+        // memory for EPDGZ) and already wrote the file under a
+        // ".png"-extensioned path - match that here too.
+        ext = strrchr(out_path, '.');
+        if (ext) {
+            strcpy(ext, ".png");
+        }
     }
 
     // The raw download (still holding valid, undamaged bytes at this point -
-    // both the optional preserved original and the display PNG above were
-    // already produced from it) is recycled in place into the display PNG's
-    // ".jpg" thumbnail sidecar: generate_original_thumbnail() derives that
-    // exact filename from png_path, which - since `path` and png_path share
-    // a basename and only differ by extension - is exactly `path` itself. On
-    // thumbnail failure there's nothing worth keeping at `path` any more, so
-    // it's deleted instead (matching the old unconditional cleanup).
-    if (generate_original_thumbnail(path, format, png_path) != ESP_OK) {
+    // both the optional preserved original and the display file above were
+    // already produced from it) is recycled in place into the display
+    // file's ".jpg" thumbnail sidecar: generate_original_thumbnail() derives
+    // that exact filename from out_path, which - since `path` and out_path
+    // share a basename and only differ by extension - is exactly `path`
+    // itself. On thumbnail failure there's nothing worth keeping at `path`
+    // any more, so it's deleted instead (matching the old unconditional
+    // cleanup).
+    if (generate_original_thumbnail(path, format, out_path) != ESP_OK) {
         unlink(path);
     }
-    strncpy(path, png_path, path_len - 1);
+    strncpy(path, out_path, path_len - 1);
     path[path_len - 1] = '\0';
 }
 

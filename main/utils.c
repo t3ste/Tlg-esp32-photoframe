@@ -562,6 +562,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_telegram_keep_originals_enabled(cJSON_IsTrue(item));
     }
+    item = cJSON_GetObjectItem(root, "telegram_image_format");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_telegram_image_format(cJSON_GetStringValue(item));
+    }
 
     // Weather + headline overlays (on-device, no companion server needed)
     item = cJSON_GetObjectItem(root, "weather_overlay_enabled");

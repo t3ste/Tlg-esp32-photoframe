@@ -50,6 +50,28 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
                                   dither_algorithm_t dither_algorithm);
 
 /**
+ * @brief Process image from file to file, choosing the output format
+ *
+ * Same as image_processor_process(), but lets the caller request EPDGZ
+ * instead of PNG (image_processor_process() is a thin wrapper always
+ * requesting IMAGE_FORMAT_PNG). If EPDGZ is requested but its ~260 KB of
+ * deflate state can't be allocated, this falls back to writing PNG instead -
+ * @p output_path is expected to already carry the extension matching
+ * @p out_format; on a PNG fallback, the file is written under the same path
+ * with its extension replaced by ".png".
+ *
+ * @param out_format IMAGE_FORMAT_PNG or IMAGE_FORMAT_EPD_GZ - any other
+ *   value is treated as IMAGE_FORMAT_PNG.
+ * @param out_actual_format Optional (may be NULL) - set to the format that
+ *   was actually written (differs from @p out_format only on the OOM
+ *   fallback above), so the caller can adjust the path/extension it uses
+ *   afterward.
+ */
+esp_err_t image_processor_process_fmt(const char *input_path, const char *output_path,
+                                      dither_algorithm_t dither_algorithm, image_format_t out_format,
+                                      image_format_t *out_actual_format);
+
+/**
  * @brief Process image from memory buffer and show it on the display
  *
  * This function takes raw image data (PNG or JPG), processes it, and streams

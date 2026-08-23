@@ -930,6 +930,24 @@ async function performFactoryReset() {
                       "/keep_originals" bot command.
                     </div>
 
+                    <v-select
+                      v-model="settingsStore.deviceSettings.telegramImageFormat"
+                      :items="[
+                        { title: 'EPDGZ (recommended - smaller, faster to display)', value: 'epdgz' },
+                        { title: 'PNG (larger, for compatibility/inspection)', value: 'png' },
+                      ]"
+                      label="On-device image format"
+                      variant="outlined"
+                      density="compact"
+                      hide-details
+                      class="mb-2"
+                    />
+                    <div class="text-caption text-medium-emphasis mb-4">
+                      Format used when the device itself converts a received Telegram photo for the
+                      album. EPDGZ stores the already-resolved palette index, gzip-compressed - no
+                      per-pixel color re-matching needed on every future display, unlike PNG.
+                    </div>
+
                     <v-switch
                       v-model="settingsStore.deviceSettings.showExifDatetimeEnabled"
                       label="Show capture date as caption when a photo has none"
@@ -1286,6 +1304,25 @@ async function performFactoryReset() {
           <!-- Processing Tab -->
           <v-tabs-window-item value="processing">
             <div class="pa-4">
+              <v-select
+                v-model="settingsStore.uploadImageFormat"
+                :items="[
+                  { title: 'EPDGZ (recommended - smaller, faster to display)', value: 'epdgz' },
+                  { title: 'PNG (larger, for compatibility/inspection)', value: 'png' },
+                ]"
+                label="Web UI upload format"
+                variant="outlined"
+                density="compact"
+                hide-details
+                class="mb-2"
+              />
+              <div class="text-caption text-medium-emphasis mb-4">
+                Format this browser encodes to before uploading a photo (Web UI uploads only - this
+                is a local browser preference, not saved to the device). EPDGZ stores the
+                already-resolved palette index, gzip-compressed - no per-pixel color re-matching
+                needed on every future display, unlike PNG.
+              </div>
+
               <v-alert v-if="wideEdit" type="info" variant="tonal" density="compact">
                 Processing controls are shown next to the preview in wide-edit mode. Turn wide edit
                 off (the split icon on the Upload card) to edit them here.

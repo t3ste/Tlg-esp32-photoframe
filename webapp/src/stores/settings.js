@@ -16,6 +16,22 @@ export const useSettingsStore = defineStore("settings", () => {
   // Processing parameters
   const params = ref(getDefaultParams());
 
+  // Web UI upload format - client-side only (this browser's own preference,
+  // never sent to /api/config or the device): which format ImageUpload.vue's
+  // client-side conversion produces before uploading. EPDGZ (default) is
+  // already the recommended format - already-resolved palette index,
+  // gzip-compressed, no per-pixel re-matching needed at display time. PNG
+  // remains selectable for compatibility/inspection.
+  const uploadImageFormat = ref(localStorage.getItem("uploadImageFormat") || "epdgz");
+  watch(uploadImageFormat, (value) => {
+    try {
+      localStorage.setItem("uploadImageFormat", value);
+    } catch (_error) {
+      // Storage unavailable (private browsing, quota) - preference just
+      // won't survive a reload, nothing else depends on it persisting
+    }
+  });
+
   // Device settings (UI representation)
   const deviceSettings = ref({
     // General
@@ -63,6 +79,7 @@ export const useSettingsStore = defineStore("settings", () => {
     rotationPairingEnabled: false,
     telegramRotationNotifyEnabled: false,
     telegramKeepOriginalsEnabled: false,
+    telegramImageFormat: "epdgz",
     // Weather + headline overlays (on-device, no companion server needed)
     weatherOverlayEnabled: false,
     weatherLocationName: "",
@@ -228,6 +245,7 @@ export const useSettingsStore = defineStore("settings", () => {
         data.telegram_rotation_notify_enabled === true;
       deviceSettings.value.telegramKeepOriginalsEnabled =
         data.telegram_keep_originals_enabled === true;
+      deviceSettings.value.telegramImageFormat = data.telegram_image_format || "epdgz";
       deviceSettings.value.weatherOverlayEnabled = data.weather_overlay_enabled === true;
       deviceSettings.value.weatherLocationName = data.weather_location_name || "";
       deviceSettings.value.weatherLat = data.weather_lat || "";
@@ -327,6 +345,7 @@ export const useSettingsStore = defineStore("settings", () => {
       rotation_pairing_enabled: deviceSettings.value.rotationPairingEnabled,
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,
       telegram_keep_originals_enabled: deviceSettings.value.telegramKeepOriginalsEnabled,
+      telegram_image_format: deviceSettings.value.telegramImageFormat,
       weather_overlay_enabled: deviceSettings.value.weatherOverlayEnabled,
       weather_location_name: deviceSettings.value.weatherLocationName,
       weather_lat: deviceSettings.value.weatherLat,
@@ -569,6 +588,7 @@ export const useSettingsStore = defineStore("settings", () => {
   return {
     activeSettingsTab,
     params,
+    uploadImageFormat,
     deviceSettings,
     appliedOrientation,
     palette,

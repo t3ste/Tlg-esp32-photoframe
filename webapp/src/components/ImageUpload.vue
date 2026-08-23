@@ -166,11 +166,25 @@ async function uploadImage(mode = "upload") {
       usePerceivedOutput: false, // Use theoretical palette
     });
 
-    // Convert dithered canvas to gzip-compressed 4-bit EPD format using the library
-    const compressedBuffer = await imageProcessor.createEPDGZ(result.canvas, {
-      grayscale: appStore.isGrayscale,
-    });
-    const rawBlob = new Blob([compressedBuffer], { type: "application/gzip" });
+    // Encode the dithered canvas in the user's preferred upload format
+    // (client-side-only preference, see settingsStore.uploadImageFormat) -
+    // EPDGZ (default, recommended) is already palette-indexed and
+    // gzip-compressed, no per-pixel re-matching needed on every future
+    // display the way PNG still requires; PNG remains available for
+    // compatibility/inspection.
+    const useEpdgz = settingsStore.uploadImageFormat !== "png";
+    let rawBlob, rawFilenameExt;
+    if (useEpdgz) {
+      const compressedBuffer = await imageProcessor.createEPDGZ(result.canvas, {
+        grayscale: appStore.isGrayscale,
+      });
+      rawBlob = new Blob([compressedBuffer], { type: "application/gzip" });
+      rawFilenameExt = "epdgz";
+    } else {
+      const pngBuffer = await imageProcessor.createPNG(result.canvas);
+      rawBlob = new Blob([pngBuffer], { type: "image/png" });
+      rawFilenameExt = "png";
+    }
 
     // Derive a short, unique basename from (filename + upload timestamp)
     // so two photos that share a name (e.g. "IMG_1234.jpg" from different
@@ -188,7 +202,7 @@ async function uploadImage(mode = "upload") {
       fnv = Math.imul(fnv, 0x01000193);
     }
     const baseName = (fnv >>> 0).toString(16).padStart(8, "0") + uploadTs.toString(36).slice(-4);
-    const rawFilename = `${baseName}.epdgz`;
+    const rawFilename = `${baseName}.${rawFilenameExt}`;
 
     // Generate thumbnail from the post-layout, pre-dither canvas returned by
     // processImage so the gallery preview matches what the device actually

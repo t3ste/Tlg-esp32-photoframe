@@ -82,6 +82,7 @@ static bool wifi_tx_power_cap_enabled = true;
 static bool rotation_pairing_enabled = false;
 static bool telegram_rotation_notify_enabled = false;
 static bool telegram_keep_originals_enabled = false;
+static char telegram_image_format[TELEGRAM_IMAGE_FORMAT_MAX_LEN] = TELEGRAM_IMAGE_FORMAT_DEFAULT;
 
 // Weather + headline overlays
 static bool weather_overlay_enabled = false;
@@ -572,6 +573,15 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_TELEGRAM_KEEP_ORIGINALS_KEY, &stored_keep_originals) ==
             ESP_OK) {
             telegram_keep_originals_enabled = (stored_keep_originals != 0);
+        }
+
+        char stored_image_format[TELEGRAM_IMAGE_FORMAT_MAX_LEN] = {0};
+        size_t telegram_image_format_len = sizeof(stored_image_format);
+        if (nvs_get_str(nvs_handle, NVS_TELEGRAM_IMAGE_FORMAT_KEY, stored_image_format,
+                        &telegram_image_format_len) == ESP_OK &&
+            (strcmp(stored_image_format, TELEGRAM_IMAGE_FORMAT_PNG) == 0 ||
+             strcmp(stored_image_format, TELEGRAM_IMAGE_FORMAT_EPDGZ) == 0)) {
+            strncpy(telegram_image_format, stored_image_format, sizeof(telegram_image_format) - 1);
         }
 
         uint8_t stored_weather_overlay = 0;
@@ -1723,6 +1733,30 @@ void config_manager_set_telegram_keep_originals_enabled(bool enabled)
 bool config_manager_get_telegram_keep_originals_enabled(void)
 {
     return telegram_keep_originals_enabled;
+}
+
+void config_manager_set_telegram_image_format(const char *format)
+{
+    if (!format || (strcmp(format, TELEGRAM_IMAGE_FORMAT_PNG) != 0 &&
+                    strcmp(format, TELEGRAM_IMAGE_FORMAT_EPDGZ) != 0)) {
+        format = TELEGRAM_IMAGE_FORMAT_DEFAULT;
+    }
+    strncpy(telegram_image_format, format, sizeof(telegram_image_format) - 1);
+    telegram_image_format[sizeof(telegram_image_format) - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_TELEGRAM_IMAGE_FORMAT_KEY, telegram_image_format);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Telegram image format set to %s", telegram_image_format);
+}
+
+const char *config_manager_get_telegram_image_format(void)
+{
+    return telegram_image_format;
 }
 
 void config_manager_set_weather_overlay_enabled(bool enabled)

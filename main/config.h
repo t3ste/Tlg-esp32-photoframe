@@ -240,6 +240,18 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // TELEGRAM_ORIGINALS_DIRECTORY. Opt-in, off by default.
 #define NVS_TELEGRAM_KEEP_ORIGINALS_KEY "tg_keep_orig"
 
+// On-device output format for Telegram-ingested photos. EPDGZ is the
+// recommended default: it stores the already-resolved 4-bit palette index,
+// gzip-compressed, so every future display is a plain gzip-inflate + nibble
+// read - no per-pixel RGB->palette re-matching the way reading a "processed"
+// PNG back still requires (see GUI_PNGfile.c's read_png_mapped()). PNG
+// remains selectable for compatibility/inspection.
+#define NVS_TELEGRAM_IMAGE_FORMAT_KEY "tg_img_fmt"
+#define TELEGRAM_IMAGE_FORMAT_MAX_LEN 8
+#define TELEGRAM_IMAGE_FORMAT_PNG "png"
+#define TELEGRAM_IMAGE_FORMAT_EPDGZ "epdgz"
+#define TELEGRAM_IMAGE_FORMAT_DEFAULT TELEGRAM_IMAGE_FORMAT_EPDGZ
+
 // Weather + headline overlays: composited as a text bar across the TOP of
 // whatever image a rotation is about to show (see CURRENT_OVERLAY_PNG_PATH) -
 // on-device alternative to esp32-photoframe-server's weather overlay, no
