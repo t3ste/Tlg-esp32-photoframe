@@ -51,6 +51,55 @@ function getExifOrientation(imagePath) {
 }
 
 /**
+ * Loads an image (with HEIC support), applies its EXIF orientation, and
+ * optionally auto-rotates it 90° to match the target orientation. This is
+ * the "upright, ready to crop/resize" canvas - the same coordinate space
+ * face detection runs against for face-aware cropping (see face-crop/).
+ *
+ * @param {string} imagePath - Path to image file
+ * @param {Object} [options]
+ * @param {boolean} [options.autoOrient=false] - Rotate 90° to match target orientation
+ * @param {number} [options.displayWidth] - Target width, used by autoOrient
+ * @param {number} [options.displayHeight] - Target height, used by autoOrient
+ * @param {boolean} [options.verbose=false]
+ * @returns {Promise<Canvas>}
+ */
+export async function loadOrientedCanvas(imagePath, options = {}) {
+  const { autoOrient = false, displayWidth, displayHeight, verbose = false } = options;
+
+  const img = await loadImageWithHeicSupport(imagePath);
+  let canvas = createCanvas(img.width, img.height);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  const exifOrientation = getExifOrientation(imagePath);
+  if (exifOrientation > 1) {
+    if (verbose) {
+      console.log(`  Applying EXIF orientation: ${exifOrientation}`);
+    }
+    canvas = applyExifOrientation(canvas, exifOrientation, createCanvas);
+    if (verbose) {
+      console.log(`  After EXIF correction: ${canvas.width}x${canvas.height}`);
+    }
+  }
+
+  if (autoOrient) {
+    const isSourcePortrait = canvas.height > canvas.width;
+    const isTargetPortrait = displayHeight > displayWidth;
+    if (isSourcePortrait !== isTargetPortrait) {
+      canvas = rotateImage(canvas, 90, createCanvas);
+      if (verbose) {
+        console.log(
+          `  Auto-oriented: rotated 90° to match ${isTargetPortrait ? "portrait" : "landscape"} target`,
+        );
+      }
+    }
+  }
+
+  return canvas;
+}
+
+/**
  * Process image pipeline: load, apply EXIF, process, return canvas
  * @param {string} imagePath - Path to image file
  * @param {Object} processingParams - Processing parameters
@@ -64,6 +113,11 @@ function getExifOrientation(imagePath) {
  *   - orientation {string} - Display orientation: "landscape" or "portrait"
  *   - scaleMode {string} - Scale mode: "cover" or "fit" (default: "cover")
  *   - backgroundColor {string} - Palette color name for fit mode background (default: "white")
+ *   - cropRect {{x:number,y:number,w:number,h:number}} - Optional pre-crop
+ *     (in this function's own upright canvas pixel space, i.e. after EXIF
+ *     correction and autoOrient) applied before resizing - used by the
+ *     face-aware crop feature (face-crop/) to steer "cover" mode's crop
+ *     instead of its default center-crop. Ignored if not given.
  * @returns {Promise<Object>} { canvas, originalCanvas, thumbnail }
  */
 export async function processImagePipeline(
@@ -83,38 +137,24 @@ export async function processImagePipeline(
     backgroundColor = "white",
     usePerceivedOutput = false,
     grayscale = false,
+    cropRect = null,
   } = options;
 
-  // Load image (with HEIC conversion if needed)
-  const img = await loadImageWithHeicSupport(imagePath);
-  let canvas = createCanvas(img.width, img.height);
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(img, 0, 0);
+  let canvas = await loadOrientedCanvas(imagePath, {
+    autoOrient,
+    displayWidth,
+    displayHeight,
+    verbose,
+  });
 
-  // Apply EXIF orientation
-  const exifOrientation = getExifOrientation(imagePath);
-  if (exifOrientation > 1) {
+  if (cropRect) {
+    const { x, y, w, h } = cropRect;
+    const cropped = createCanvas(w, h);
+    cropped.getContext("2d").drawImage(canvas, x, y, w, h, 0, 0, w, h);
     if (verbose) {
-      console.log(`  Applying EXIF orientation: ${exifOrientation}`);
+      console.log(`  Applying face-aware crop: ${w}x${h} at (${x},${y})`);
     }
-    canvas = applyExifOrientation(canvas, exifOrientation, createCanvas);
-    if (verbose) {
-      console.log(`  After EXIF correction: ${canvas.width}x${canvas.height}`);
-    }
-  }
-
-  // Auto-orient: rotate to match target orientation if they differ
-  if (autoOrient) {
-    const isSourcePortrait = canvas.height > canvas.width;
-    const isTargetPortrait = displayHeight > displayWidth;
-    if (isSourcePortrait !== isTargetPortrait) {
-      canvas = rotateImage(canvas, 90, createCanvas);
-      if (verbose) {
-        console.log(
-          `  Auto-oriented: rotated 90° to match ${isTargetPortrait ? "portrait" : "landscape"} target`,
-        );
-      }
-    }
+    canvas = cropped;
   }
 
   // Build palette object for the library

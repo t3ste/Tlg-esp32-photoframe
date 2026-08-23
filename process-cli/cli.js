@@ -16,13 +16,24 @@ import {
   getPresetNames,
   getDefaultParams,
 } from "@aitjcize/epaper-image-convert";
-import { processImagePipeline } from "./utils.js";
+import { processImagePipeline, loadOrientedCanvas } from "./utils.js";
 import { createImageServer } from "./server.js";
+import {
+  normalizeTargetGeometry,
+  getBoardProfile,
+  getFaceDetector,
+  analyzeFaceCrop,
+  buildMetadata,
+  writeMetadataFile,
+  metadataPathFor,
+} from "./face-crop/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const THUMBNAIL_MAX_DIM = 400;
+const CLI_VERSION = "1.0.0";
+const GENERATOR_VERSION = `esp32-photoframe-cli@${CLI_VERSION}`;
 
 // Get default parameters from the library
 const DEFAULT_PARAMS = {
@@ -670,6 +681,51 @@ async function processImageFile(
 ) {
   console.log(`Processing: ${inputPath}`);
 
+  let cropRect = null;
+  if (processingOptions.faceCrop?.enabled) {
+    const { target, marginPercent, detector, engineName, metadataOnly } = processingOptions.faceCrop;
+
+    const orientedCanvas = await loadOrientedCanvas(inputPath, {
+      autoOrient: processingOptions.autoOrient || false,
+      displayWidth: processingOptions.displayWidth,
+      displayHeight: processingOptions.displayHeight,
+      verbose: processingOptions.verbose || true,
+    });
+    const imageData = orientedCanvas
+      .getContext("2d")
+      .getImageData(0, 0, orientedCanvas.width, orientedCanvas.height);
+
+    console.log(`  Detecting faces (${engineName})...`);
+    const { faces, recommendedCrop, strategy } = await analyzeFaceCrop({
+      detector,
+      imageData,
+      target,
+      marginPercent,
+      engineName,
+    });
+    console.log(`  Found ${faces.length} face(s)`);
+
+    const metadata = buildMetadata({
+      sourcePath: path.basename(inputPath),
+      image: { width: orientedCanvas.width, height: orientedCanvas.height },
+      target,
+      faces,
+      recommendedCrop,
+      strategy,
+      generatorVersion: GENERATOR_VERSION,
+    });
+    const metadataPath = metadataPathFor(outputBmp);
+    writeMetadataFile(metadataPath, metadata);
+    console.log(`  Wrote face-crop metadata: ${metadataPath}`);
+
+    if (metadataOnly) {
+      console.log(`Done! (metadata only)`);
+      return;
+    }
+
+    cropRect = recommendedCrop;
+  }
+
   // Use shared processing pipeline with verbose logging (library handles parameter logging)
   // Skip rotation when rendering measured palette for easier preview viewing
   const { canvas, originalCanvas } = await processImagePipeline(
@@ -686,6 +742,7 @@ async function processImageFile(
       backgroundColor: processingOptions.backgroundColor || "white",
       usePerceivedOutput: processingOptions.usePerceivedOutput || false,
       grayscale: processingOptions.grayscale || false,
+      cropRect,
     },
   );
 
@@ -738,7 +795,7 @@ const program = new Command();
 program
   .name("photoframe-process")
   .description("ESP32 PhotoFrame image processing CLI")
-  .version("1.0.0")
+  .version(CLI_VERSION)
   .argument(
     "<input>",
     "Input image file or directory with album subdirectories",
@@ -857,6 +914,44 @@ program
   )
   .option("--compress-dynamic-range", "Compress dynamic range to display range")
   .option("--no-compress-dynamic-range", "Disable dynamic range compression")
+  .option(
+    "--detect-faces",
+    "Detect faces and write a <name>.facecrop.json metadata file next to the output " +
+      "(see docs/FACE_CROP.md); also steers the rendered image's crop toward keeping large faces visible",
+  )
+  .option(
+    "--metadata-only",
+    "With --detect-faces: write only the <name>.facecrop.json file, skip generating the rendered output image",
+  )
+  .option(
+    "--board <id>",
+    "Target board id for face-crop geometry (see boards/boards.json); also sets " +
+      "the display resolution unless --resolution/--dimension/--display-width/--display-height override it",
+  )
+  .option(
+    "--resolution <WxH>",
+    "Target display resolution in pixels, e.g. 800x480 (alias of --dimension, also used as the face-crop target)",
+  )
+  .option(
+    "--display-size-mm <WxH>",
+    "Physical display size in mm, e.g. 160x96 - used only to help auto-derive orientation for face-crop",
+  )
+  .option(
+    "--face-margin <percent>",
+    "Safety margin added around each detected face, as a fraction of its own size",
+    parseFloat,
+    0.12,
+  )
+  .option(
+    "--face-min-score <value>",
+    "Minimum face detection confidence to keep a face (0.0-1.0)",
+    parseFloat,
+    0.75,
+  )
+  .option(
+    "--face-model-dir <dir>",
+    "Local directory with a previously downloaded face detection model, for fully offline use (see docs/FACE_CROP.md)",
+  )
   .action(async (input, options) => {
     let outputDir;
     let useTmpDir = false;
@@ -884,6 +979,7 @@ program
       }
 
       // Parse dimension if provided
+      const dimensionExplicit = program.getOptionValueSource("dimension") === "cli";
       if (options.dimension) {
         const match = options.dimension.match(/^(\d+)x(\d+)$/);
         if (match) {
@@ -894,6 +990,40 @@ program
             `Error: Invalid dimension format "${options.dimension}". Use WxH (e.g. 800x480)`,
           );
           process.exit(1);
+        }
+      }
+
+      // --resolution is an alias of --dimension (also the face-crop target's
+      // pixel size) - parsed the same way, applied after --dimension so it
+      // wins if both happen to be given.
+      const resolutionExplicit = program.getOptionValueSource("resolution") === "cli";
+      if (options.resolution) {
+        const match = options.resolution.match(/^(\d+)x(\d+)$/);
+        if (match) {
+          options.displayWidth = parseInt(match[1]);
+          options.displayHeight = parseInt(match[2]);
+        } else {
+          console.error(
+            `Error: Invalid resolution format "${options.resolution}". Use WxH (e.g. 800x480)`,
+          );
+          process.exit(1);
+        }
+      }
+
+      // --board provides default display dimensions, but only when no more
+      // specific sizing flag was explicitly given (--resolution/--dimension/
+      // --display-width/--display-height all take precedence).
+      if (options.board && !dimensionExplicit && !resolutionExplicit) {
+        const displayWidthExplicit = program.getOptionValueSource("displayWidth") === "cli";
+        const displayHeightExplicit = program.getOptionValueSource("displayHeight") === "cli";
+        if (!displayWidthExplicit && !displayHeightExplicit) {
+          const profile = getBoardProfile(options.board);
+          if (!profile) {
+            console.error(`Error: Unknown --board "${options.board}"`);
+            process.exit(1);
+          }
+          options.displayWidth = profile.width;
+          options.displayHeight = profile.height;
         }
       }
 
@@ -1075,6 +1205,56 @@ program
             grayscale: options.grayscale || false,
           };
 
+      // Face-aware crop metadata setup (opt-in via --detect-faces). Loading
+      // the detector happens once here, before any per-image work, so a
+      // batch run only pays the model-load cost once.
+      let faceCropContext = null;
+      if (options.metadataOnly && !options.detectFaces) {
+        console.error("Error: --metadata-only requires --detect-faces");
+        process.exit(1);
+      }
+      if (options.detectFaces) {
+        let target;
+        try {
+          const orientationExplicit = program.getOptionValueSource("orientation") === "cli";
+          target = normalizeTargetGeometry({
+            board: options.board,
+            resolution: options.resolution,
+            displaySizeMm: options.displaySizeMm,
+            orientation: orientationExplicit ? options.orientation : "auto",
+            fallbackWidth: options.displayWidth,
+            fallbackHeight: options.displayHeight,
+          });
+        } catch (error) {
+          console.error(`Error: ${error.message}`);
+          process.exit(1);
+        }
+        for (const warning of target.warnings) {
+          console.warn(`Warning: ${warning}`);
+        }
+        console.log(
+          `Face-aware crop target: ${target.width}x${target.height} (${target.orientation})` +
+            (target.board ? `, board=${target.board}` : ""),
+        );
+
+        console.log("Loading face detection model (blazeface)...");
+        const detector = await getFaceDetector("blazeface", {
+          scoreThreshold: options.faceMinScore,
+          modelDir: options.faceModelDir,
+        });
+        console.log("Face detection model ready");
+
+        faceCropContext = {
+          enabled: true,
+          metadataOnly: !!options.metadataOnly,
+          target,
+          marginPercent: options.faceMargin,
+          detector,
+          engineName: "blazeface",
+        };
+      }
+      processOptions.faceCrop = faceCropContext;
+
       // Check if --serve mode is enabled
       if (options.serve) {
         const inputStats = fs.statSync(inputPath);
@@ -1122,6 +1302,12 @@ program
       }
 
       if (options.upload || options.direct) {
+        if (faceCropContext) {
+          console.warn(
+            "Warning: --detect-faces metadata is written into the temporary directory used by " +
+              "--upload/--direct and will be deleted with it afterward, not uploaded to the device",
+          );
+        }
         outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "photoframe-"));
         useTmpDir = true;
         console.log(`Using temporary directory: ${outputDir}`);
