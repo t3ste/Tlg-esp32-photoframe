@@ -154,18 +154,28 @@ Use **Settings → Maintenance → "Organize Crop Folders"** to retrofit this la
 `--crop-output both` output: it creates each album's `crop/` subdirectory (if missing) and moves any
 `<name>.cover.<ext>` files sitting loose in an album root into it.
 
-**Important**: `<name>.<ext>` sitting in an album is **not** generally the raw camera original - in
-the ordinary, already-established workflow it's itself process-cli's already-rendered display file (Cover- *or* Fit-style, whichever mode was run -
-the filename alone can't tell which), and the true camera original is typically never copied onto
-the SD card at all. Re-rendering the *other* mode from an already-cropped `<name>.<ext>` would often
-be destructively impossible (cropping permanently discards pixels), so the firmware never assumes a
-bare `<name>.<ext>` is a valid render source. It only attempts an on-device render when the file is
-verifiably still a genuine, undecoded original - a JPG, or a PNG that isn't already an exact
-display-resolution, already-dithered file (the identical check `finalize_telegram_image()` in
-`main/telegram_bot.c` already uses for incoming Telegram photos) - which in practice means: only
-photos placed on the SD card as real, unprocessed originals (optionally alongside a
-`--detect-faces`-produced `.facecrop.json`) get this treatment; an ordinary already-rendered
-single-mode file is left completely untouched, exactly as it displays today.
+**Important**: users are expected to only place already-rendered display files on the SD card - a
+bare `<name>.<ext>` there is itself process-cli's already-rendered output (Cover- *or* Fit-style,
+whichever mode was run - the filename alone can't tell which), same as `<name>.cover.<ext>` and
+`<name>.fit.<ext>` always are. Re-rendering the *other* mode from an already-cropped `<name>.<ext>`
+would often be destructively impossible anyway (cropping permanently discards pixels), so the
+firmware **never assumes** any of these three are a valid render source from their filename or
+position alone. Whether an on-device render is even attempted is decided purely by inspecting the
+file's actual content - the identical check `finalize_telegram_image()` in `main/telegram_bot.c`
+already uses for incoming Telegram photos, reused verbatim here as `is_decodable_original()`:
+
+- `image_processor_detect_format()` reads the file's first bytes (PNG signature / `BM` / JPEG SOI
+  marker / gzip magic) - a `.bmp`/`.epdgz` file, or anything whose *content* isn't actually a JPEG,
+  is immediately excluded, regardless of what it's named.
+- A PNG additionally has to pass `image_processor_is_processed()`, which opens it and requires its
+  *actual* `IHDR` width/height to exactly match this board's display resolution and 3 RGB channels -
+  an already-rendered PNG always satisfies this and is excluded too.
+
+Only a file whose content is genuinely still a JPEG, or a PNG that fails that exact-resolution
+check, is treated as "not yet rendered." Under the stated SD-card policy above, every legitimately
+placed file - bare, `.cover.`, or `.fit.` - will always be BMP/EPDGZ/exact-resolution-PNG, so this
+check will always exclude it and the on-device render path (step 3 below) simply never fires; it
+only matters as a harmless fallback if a genuine unprocessed photo ends up there by mistake.
 
 Selection algorithm, per photo, each time it's about to be displayed:
 
