@@ -1,0 +1,298 @@
+@startuml process-cli-flow-legend
+'==============================================================================
+' process-cli (photoframe-process) - complete CLI flow, all options.
+' Companion diagram for process-cli/README.md and docs/FACE_CROP.md.
+'
+' This file has THREE diagrams (render each @startuml/@enduml block
+' separately, e.g. with the PlantUML VS Code extension, plantuml.jar, or
+' https://www.plantuml.com/plantuml):
+'   1. process-cli-flow-legend - every CLI option, grouped by concern
+'   2. process-cli-flow-main   - the top-level `.action(...)` control flow
+'   3. process-cli-flow-image  - the per-image processImageFile() detail,
+'                                 invoked once per photo from diagram 2
+'==============================================================================
+title process-cli (photoframe-process) - option legend
+
+legend top left
+  |= Group |= Options |
+  | Input / output | ``<input>`` (file or album directory), ``-o/--output-dir``, ``--suffix`` (single-file only), ``-v/--verbose`` |
+  | Output format | ``--format`` (epdgz\|png\|bmp), ``--grayscale`` |
+  | Preset | ``--preset`` |
+  | Tone mapping / color (pass-through into the pipeline, don't branch control flow) | ``--exposure``, ``--saturation``, ``--tone-mode``, ``--contrast``, ``--scurve-strength``, ``--scurve-shadow``, ``--scurve-highlight``, ``--scurve-midpoint``, ``--color-method``, ``--use-perceived-output``, ``--dither-algorithm``, ``--compress-dynamic-range`` / ``--no-compress-dynamic-range`` |
+  | Geometry / orientation | ``--auto-orient``, ``--orientation``, ``--scale-mode``, ``--background-color``, ``--display-width``, ``--display-height``, ``-d/--dimension`` |
+  | Device sync | ``--device-parameters``, ``--host`` |
+  | Transfer modes | ``--upload``, ``--direct``, ``--serve``, ``--serve-port``, ``--serve-format`` |
+  | Face-aware crop (see docs/FACE_CROP.md) | ``--detect-faces``, ``--metadata-only``, ``--crop-output``, ``--board``, ``--resolution``, ``--display-size-mm``, ``--face-margin``, ``--face-min-score``, ``--face-model-dir`` |
+endlegend
+@enduml
+
+@startuml process-cli-flow-main
+'==============================================================================
+' Top-level control flow of cli.js's .action(async (input, options) => {...}).
+'==============================================================================
+title process-cli (photoframe-process) - main CLI flow
+
+start
+:Kommandozeile parsen (commander);
+note right
+  <input> = Bilddatei oder Album-Verzeichnis
+  Alle Optionen: siehe Legende (process-cli-flow-legend)
+end note
+
+if (--device-parameters?) then (ja)
+  :fetchDeviceSettings(--host);
+  :fetchDevicePalette(--host);
+  :fetchDeviceOrientation(--host)\n-> überschreibt --orientation;
+  if (Fehler beim Abruf?) then (ja)
+    :Error ausgeben;
+    stop
+  endif
+endif
+
+:Eingabepfad auflösen (path.resolve);
+if (Pfad existiert nicht?) then (ja)
+  :Error: "Input path not found";
+  stop
+endif
+
+partition "Ziel-Auflösung (displayWidth/displayHeight)" {
+  if (-d/--dimension gesetzt?) then (ja)
+    :"WxH" parsen;
+    if (Format ungültig?) then (ja)
+      :Error;
+      stop
+    endif
+    :displayWidth/displayHeight setzen;
+  endif
+
+  if (--resolution gesetzt?) then (ja)
+    :"WxH" parsen (überschreibt --dimension);
+    if (Format ungültig?) then (ja)
+      :Error;
+      stop
+    endif
+    :displayWidth/displayHeight setzen;
+  endif
+
+  if (--board gesetzt UND\n--dimension/--resolution/\n--display-width/--display-height\nNICHT explizit gesetzt?) then (ja)
+    :Board-Profil laden (boards/boards.json\noder eingebettete Kopie);
+    if (unbekanntes --board?) then (ja)
+      :Error;
+      stop
+    endif
+    :displayWidth/displayHeight = Board-Auflösung;
+  endif
+
+  if (--host explizit gesetzt?) then (ja)
+    :fetchDeviceSystemInfo(--host)\n-> displayWidth/displayHeight, Firmware-Version;
+    note right: Fehler nur als Warnung -\nbisherige Werte bleiben erhalten
+  endif
+}
+
+if (--format NICHT explizit UND\n--upload ODER --direct gesetzt?) then (ja)
+  if (Firmware unterstützt EPDGZ nicht,\nVersion kleiner 2.6.1?) then (ja)
+    :format = "png";
+  endif
+endif
+
+:Preset auflösen (--preset, Default "balanced");
+if (--preset unbekannt?) then (ja)
+  :Error;
+  stop
+endif
+
+:Verarbeitungsoptionen zusammenbauen;
+note right
+  Priorität: Geräte-Settings (--device-parameters)
+  > CLI-Option > Preset > Bibliotheks-Default
+  --exposure, --saturation, --tone-mode, --contrast,
+  --scurve-strength/-shadow/-highlight/-midpoint,
+  --color-method, --use-perceived-output,
+  --dither-algorithm, --auto-orient, --orientation,
+  --scale-mode, --background-color, --grayscale,
+  --compress-dynamic-range/--no-compress-dynamic-range
+end note
+
+partition "Face-Aware Crop Setup (--detect-faces)" #LightYellow {
+  if (--metadata-only ohne --detect-faces?) then (ja)
+    :Error;
+    stop
+  endif
+  if (--crop-output explizit\nohne --detect-faces?) then (ja)
+    :Error;
+    stop
+  endif
+  if (--crop-output ungültig,\nnicht cropped/uncropped/both?) then (ja)
+    :Error;
+    stop
+  endif
+  if (--crop-output explizit\nUND --metadata-only?) then (ja)
+    :Warnung: --crop-output wird ignoriert;
+  endif
+
+  if (--detect-faces?) then (ja)
+    :normalizeTargetGeometry(\n  --board, --resolution, --display-size-mm,\n  --orientation nur falls explizit gesetzt);
+    if (Fehler, z.B. unbekanntes --board\noder ungültiges WxH?) then (ja)
+      :Error;
+      stop
+    endif
+    :Warnungen ausgeben\n(z.B. widersprüchliche Geometrie-Hinweise);
+    :BlazeFace-Modell laden\n(einmalig, gecacht)\n(--face-min-score, --face-model-dir);
+    :faceCropContext = {\n  target, marginPercent (--face-margin),\n  metadataOnly, cropOutput, detector };
+  else (nein)
+    :faceCropContext = null;
+  endif
+
+  if (faceCropContext vorhanden UND\ncropOutput == "both" UND NICHT metadataOnly\nUND --upload ODER --direct gesetzt?) then (ja)
+    :Error: "both" liefert 2 Bilder,\nnicht mit --upload/--direct kombinierbar;
+    stop
+  endif
+}
+
+if (--serve?) then (ja)
+  if (Eingabe ist kein Verzeichnis?) then (ja)
+    :Error;
+    stop
+  endif
+  if (--serve-port ungültig?) then (ja)
+    :Error;
+    stop
+  endif
+  :createImageServer()\n(--serve-format, Geräte-Palette, Prozess-Optionen);
+  :HTTP-Server läuft dauerhaft\n(GET /image liefert zufälliges Bild);
+  stop
+endif
+
+if (--direct UND --upload\ngleichzeitig gesetzt?) then (ja)
+  :Error;
+  stop
+endif
+
+:Eingabetyp prüfen (Datei oder Verzeichnis);
+
+if (--direct UND Eingabe\nist ein Verzeichnis?) then (ja)
+  :Error: "--direct erfordert Einzeldatei";
+  stop
+endif
+
+if (--upload ODER --direct?) then (ja)
+  if (faceCropContext vorhanden?) then (ja)
+    :Warnung: Metadaten liegen im Temp-Verzeichnis\nund werden mit ihm gelöscht, nicht hochgeladen;
+  endif
+  :Temporäres Ausgabeverzeichnis anlegen;
+else (nein)
+  :Ausgabeverzeichnis = -o/--output-dir\n(anlegen, falls nicht vorhanden);
+endif
+
+if (Eingabe ist ein Verzeichnis?) then (ja)
+  partition "processFolderStructure() - Batch/Album" {
+    :Unterordner (Alben) auflisten;
+    if (keine Alben gefunden?) then (ja)
+      :Hinweis ausgeben;
+      stop
+    endif
+    while (weitere Alben?) is (ja)
+      :Ausgabe-Unterordner fürs Album anlegen;
+      :Bilddateien im Album auflisten\n(.jpg/.jpeg/.png/.gif/.bmp/.webp/.heic/.heif);
+      while (weiteres Bild im Album?) is (ja)
+        :**processImageFile()**\n(siehe Diagramm process-cli-flow-image);
+        if (--upload gesetzt UND\nmindestens 1 Variante gerendert?) then (ja)
+          :uploadToDevice(erste Variante);
+        endif
+      endwhile (nein - Album fertig)
+    endwhile (nein - alle Alben fertig)
+    :Zusammenfassung ausgeben\n(verarbeitet/hochgeladen/Fehler);
+  }
+else (nein)
+  partition "Einzeldatei-Verarbeitung" {
+    :**processImageFile()**\n(siehe Diagramm process-cli-flow-image);
+    if (--upload ODER --direct?) then (ja)
+      if (format == "bmp"?) then (ja)
+        :Error: Upload/Direct unterstützt\nkein BMP;
+        stop
+      endif
+      if (keine Variante gerendert -\nUrsache: --metadata-only?) then (ja)
+        :Error;
+        stop
+      endif
+      if (Ausgabedatei oder Thumbnail fehlt?) then (ja)
+        :Error;
+        stop
+      endif
+      if (--direct?) then (ja)
+        :displayDirectly(--host)\n(POST /api/display-image, 3 Versuche);
+      else (nein)
+        :uploadToDevice(--host)\n(POST /api/upload, 3 Versuche);
+      endif
+    endif
+  }
+endif
+
+if (temporäres Verzeichnis verwendet -\n--upload oder --direct gesetzt?) then (ja)
+  :Temporäres Verzeichnis löschen;
+endif
+
+stop
+
+@enduml
+
+@startuml process-cli-flow-image
+'==============================================================================
+' processImageFile(inputPath, outputBasePath, ext, processingOptions, ...)
+' - called once per source photo, from either processFolderStructure() or
+'   the single-file branch in diagram process-cli-flow-main.
+'==============================================================================
+title processImageFile() - pro Bild (inkl. Face-Aware Crop)
+
+start
+:Bild verarbeiten (console.log "Processing: ...");
+
+if (processingOptions.faceCrop.enabled -\n--detect-faces war gesetzt?) then (ja)
+  partition "Gesichtserkennung + Metadaten" #LightYellow {
+    :loadOrientedCanvas()\n- EXIF-Orientierung korrigieren\n- ggf. 90°-Rotation (--auto-orient);
+    :BlazeFace: detectFaces()\nauf dem aufgerichteten Bild;
+    :computeRecommendedCrop()\n- größte Gesichter zuerst (+ --face-margin)\n- Fallback: Center-Crop falls keine Gesichter\n  (oder keins über --face-min-score);
+    :"<name>.facecrop.json" schreiben\n(schema, image, target, faces,\nrecommended_crop, strategy, timestamp);
+  }
+  if (--metadata-only?) then (ja)
+    :"Done! (metadata only)";
+    stop
+  endif
+else (nein)
+endif
+
+partition "Varianten bestimmen" {
+  if (faceCrop NICHT aktiv -\nkein --detect-faces?) then (ja)
+    :1 Variante:\nscaleMode = --scale-mode, kein Crop\n(unverändertes Alt-Verhalten);
+  else (faceCrop aktiv)
+    if (--crop-output == "uncropped"?) then (ja)
+      :1 Variante: "" Suffix\nscaleMode = fit, kein Crop;
+    elseif (--crop-output == "both"?) then (ja)
+      :2 Varianten:\n".cover" Suffix - scaleMode=cover + recommendedCrop\n".fit" Suffix   - scaleMode=fit, kein Crop;
+    else (--crop-output == "cropped", Default)
+      :1 Variante: "" Suffix\nscaleMode = cover + recommendedCrop;
+    endif
+  endif
+}
+
+while (weitere Variante offen?) is (ja)
+  partition "renderVariant()" {
+    :processImagePipeline()\n- Bild laden + EXIF + --auto-orient\n- ggf. Crop-Rechteck anwenden\n- Resize (cover=Zuschnitt / fit=Letterbox,\n  --background-color)\n- Tonwert-Mapping, Sättigung, Dithering\n  (--dither-algorithm, ...);
+    if (--format == "epdgz"?) then (ja)
+      :EPDGZ schreiben (--grayscale\n-> 16-Stufen-Graustufen);
+    elseif (--format == "png"?) then (ja)
+      :PNG schreiben;
+    else (--format == "bmp")
+      :BMP schreiben (24-bit);
+    endif
+    if (generateThumbnail?) then (ja)
+      :Thumbnail erzeugen (max. 400px)\naus der SAUBEREN Quelle dieser Variante;
+    endif
+  }
+endwhile (nein - alle Varianten fertig)
+
+:"Done!" ausgeben;
+:rendered[] zurückgeben\n(leer bei --metadata-only,\n1 Eintrag normal, 2 bei --crop-output both);
+stop
+
+@enduml

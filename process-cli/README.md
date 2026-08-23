@@ -98,6 +98,10 @@ Opt-in (off unless `--detect-faces` is given) - see [docs/FACE_CROP.md](../docs/
 full option list, the JSON schema, and how `--board`/`--resolution`/`--display-size-mm`/`--orientation`
 combine to pick the crop's target geometry.
 
+A complete flowchart of this CLI's entire option set and control flow (not just face-crop) is in
+[docs/diagrams/process-cli-flow.puml](../docs/diagrams/process-cli-flow.puml) (PlantUML - render with
+the PlantUML VS Code extension, `plantuml.jar`, or https://www.plantuml.com/plantuml).
+
 ### Image Server Mode
 
 ```bash
