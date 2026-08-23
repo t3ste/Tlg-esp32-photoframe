@@ -9,6 +9,7 @@ set(SOURCES
     "display_manager.c"
     "dns_server.c"
     "exif_reader.c"
+    "facecrop_metadata.c"
     "ha_integration.c"
     "headlines.c"
     "history_manager.c"
