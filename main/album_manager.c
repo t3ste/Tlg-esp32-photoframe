@@ -152,6 +152,39 @@ esp_err_t album_manager_create_album(const char *album_name)
     return ESP_OK;
 }
 
+// Empties and removes `path` (a directory - e.g. an album's "crop"
+// subdirectory, see docs/FACE_CROP.md). One level of recursion is enough for
+// every directory shape this project ever creates, but this recurses
+// generally rather than assuming that, so any subdirectory - not just
+// "crop" - empties correctly instead of silently blocking the parent's own
+// rmdir() the way a flat unlink()-every-entry loop does.
+static esp_err_t remove_directory_recursive(const char *path)
+{
+    DIR *dir = opendir(path);
+    if (!dir) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+
+        char entry_path[512];
+        snprintf(entry_path, sizeof(entry_path), "%s/%s", path, entry->d_name);
+
+        if (entry->d_type == DT_DIR) {
+            remove_directory_recursive(entry_path);
+        } else {
+            unlink(entry_path);
+        }
+    }
+    closedir(dir);
+
+    return (rmdir(path) == 0) ? ESP_OK : ESP_FAIL;
+}
+
 esp_err_t album_manager_delete_album(const char *album_name)
 {
     if (!album_name || strlen(album_name) == 0) {
@@ -166,24 +199,7 @@ esp_err_t album_manager_delete_album(const char *album_name)
     char album_path[256];
     snprintf(album_path, sizeof(album_path), "%s/%s", IMAGE_DIRECTORY, album_name);
 
-    DIR *dir = opendir(album_path);
-    if (!dir) {
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') {
-            continue;
-        }
-
-        char filepath[512];
-        snprintf(filepath, sizeof(filepath), "%s/%s", album_path, entry->d_name);
-        unlink(filepath);
-    }
-    closedir(dir);
-
-    if (rmdir(album_path) != 0) {
+    if (remove_directory_recursive(album_path) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to delete album directory: %s", album_name);
         return ESP_FAIL;
     }
