@@ -7,8 +7,8 @@ invocations without the new flags behave exactly as before.
 
 Face detection runs entirely on the machine running `process-cli` (your PC), never on the ESP32
 itself - the firmware only ever sees the finished crop, either baked into the image `process-cli`
-already renders, or (later - see [Firmware usage (planned)](#firmware-usage-planned---not-implemented)) read from the
-metadata file for original photos that haven't been rendered yet.
+already renders, or - opt-in, see [Firmware usage](#firmware-usage-implemented-opt-in) - read from
+the metadata file for original photos that haven't been rendered yet.
 
 This is about *where* faces are and *how big* they are - nothing about *who* they are. No face
 recognition/identification, no embeddings, no name/identity tracking of any kind.
@@ -122,36 +122,75 @@ the metadata), while keeping a full, uncropped fallback image on hand in the mea
 
 `--crop-output both` exists so a whole album can be pre-rendered for *either* firmware display
 setting without re-processing later or rendering anything on the ESP32 itself: drop both files plus
-the metadata onto the SD card, and (once the planned firmware enhancement below ships) the frame
-picks whichever file matches its own Cover/Fit setting per source photo.
+the metadata onto the SD card, and the frame picks whichever file matches its own Cover/Fit setting
+per source photo - see below.
 
-> **Not yet plug-and-play with a normal rotation album.** Today's firmware has no concept of
-> `<name>.cover.<ext>` / `<name>.fit.<ext>` being two renders of the *same* photo - every album
-> listing loop just treats each matching file extension as its own independent picture. Dropping
-> `--crop-output both`'s output straight into a Storage-rotation album **today** would show the same
-> photo twice per cycle, once per variant - not the intended use. Use `both` mode to stage files for
-> the planned firmware pairing below, or to inspect/pick manually, not (yet) as a normal album.
+### Firmware: picking Cover vs. Fit automatically (implemented, opt-in)
 
-### Firmware: picking Cover vs. Fit automatically (planned - not implemented)
+**Enable via Web UI: Settings → Auto Rotate → "Use pre-rendered Cover/Fit variants"** (default
+**off** - purely additive over existing albums either way; toggling it off restores byte-for-byte
+identical behavior to before this feature existed).
 
-Concept for whoever implements this later - also noted as a source comment right above
-`rotate_sequential()` in `main/display_manager.c`:
+**Directory layout** - `--crop-output both`'s two files are *not* both placed in the album's root.
+Only `<name>.fit.<ext>` sits there, next to the original; `<name>.cover.<ext>` goes in a `crop`
+subdirectory instead:
 
-1. Before/while listing an album directory's image files, recognize `<name>.cover.<ext>` /
-   `<name>.fit.<ext>` pairs (same base name, same folder) and treat each pair as **one** logical
-   photo entry instead of two - every `*_sequential()`/`*_random()` listing loop in
-   `main/display_manager.c` (`strcasecmp(ext, ...)` scans) would need this.
-2. When about to display a paired entry, pick the file matching the device's own
-   `processing_settings_get_scale_mode()` (`SCALE_MODE_FIT` → the `.fit` file, otherwise → the
-   `.cover` file) and display it directly - already fully rendered, so no on-device
-   decode/crop/dither work at all for these photos.
-3. A file with no pairing partner (an ordinary single-render photo, or one from `--crop-output
-   cropped`/`uncropped`) displays exactly as it does today - this is purely additive.
+```
+Albums/MyAlbum/
+  photo1.jpg                 <- original (only meaningful if this is a genuine,
+                                 still-undecoded photo - see below)
+  photo1.fit.<ext>            <- rendered, no crop - same directory as the original
+  photo1.facecrop.json        <- metadata sidecar - same directory as the original
+  crop/
+    photo1.cover.<ext>         <- rendered, cropped to fill - in the "crop" subdirectory
+```
 
-This is a different (simpler) mechanism than the [original-photo firmware
-flow](#firmware-usage-planned---not-implemented) described below: here, both candidate renders
-already exist on disk - the firmware only ever picks between two pre-rendered files, never renders
-anything itself.
+Putting the Cover variant in a subdirectory (rather than the album root) means the firmware's
+existing directory-listing loops don't need any pairing logic for it at all - they already only
+ever look at regular files (`crop/` is invisible to them as a subdirectory) - only the Fit variant,
+which does sit in the album root, needs same-directory pairing awareness.
+
+Use **Settings → Maintenance → "Organize Crop Folders"** to retrofit this layout onto existing
+`--crop-output both` output: it creates each album's `crop/` subdirectory (if missing) and moves any
+`<name>.cover.<ext>` files sitting loose in an album root into it.
+
+**Important**: `<name>.<ext>` sitting in an album is **not** generally the raw camera original - in
+the ordinary, already-established workflow it's itself process-cli's already-rendered display file (Cover- *or* Fit-style, whichever mode was run -
+the filename alone can't tell which), and the true camera original is typically never copied onto
+the SD card at all. Re-rendering the *other* mode from an already-cropped `<name>.<ext>` would often
+be destructively impossible (cropping permanently discards pixels), so the firmware never assumes a
+bare `<name>.<ext>` is a valid render source. It only attempts an on-device render when the file is
+verifiably still a genuine, undecoded original - a JPG, or a PNG that isn't already an exact
+display-resolution, already-dithered file (the identical check `finalize_telegram_image()` in
+`main/telegram_bot.c` already uses for incoming Telegram photos) - which in practice means: only
+photos placed on the SD card as real, unprocessed originals (optionally alongside a
+`--detect-faces`-produced `.facecrop.json`) get this treatment; an ordinary already-rendered
+single-mode file is left completely untouched, exactly as it displays today.
+
+Selection algorithm, per photo, each time it's about to be displayed:
+
+1. **Cover** active: use `<name>.cover.<ext>` from `crop/` if it already exists.
+2. **Fit** active: use `<name>.fit.<ext>` from the album root if it already exists.
+3. If the wanted variant is missing **and** the original is a genuine, still-undecoded photo (per
+   the check above): render it on-device - Cover reads `<name>.facecrop.json`'s `recommended_crop`
+   if present (plain center-crop otherwise), Fit never crops - and cache the result under its final
+   name (written to a temp file and atomically renamed into place only once complete, so a crash or
+   power loss mid-render can never leave a half-written file trusted as "already there" next time).
+4. Otherwise: display `<name>.<ext>` exactly as today - no change at all.
+
+The on-device render (`image_processor_render_variant()` in `main/image_processor.c`) reuses the
+exact same decode/tone-map/dither pipeline every other on-device conversion already goes through,
+just with the target scale mode forced (rather than read from the device's own current setting) and,
+for Cover, an optional pre-crop applied right after decode - the same idea as this CLI's own
+`cropRect` handling in `process-cli/utils.js`, just in C. Output format follows the same
+[on-device image format](TELEGRAM.md#on-device-image-format) setting Telegram ingestion uses -
+EPDGZ by default, falling back to PNG if EPDGZ can't get the memory it needs at that moment.
+
+**Known limitation**: the Web UI gallery correctly shows one entry per photo now (a `<name>.<ext>` /
+`<name>.fit.<ext>` pair is deduplicated the same way the rotation loops are), but its delete action
+still only removes the one listed file - deleting a paired photo's `.fit.` entry currently leaves its
+`crop/.cover.<ext>` sibling (and any `.facecrop.json`/original) behind as orphaned files. Proper
+multi-file delete semantics for paired photos is left for a future pass.
 
 ## Crop heuristic
 
@@ -268,24 +307,16 @@ app-side integration later, the shape to build toward:
 5. **Upload/export** - send both the original photo and its `<name>.facecrop.json` (this doc's
    exact schema) to the device/server, so the firmware-side flow below can use it verbatim.
 
-## Firmware usage (planned - not implemented)
+## Firmware usage (implemented, opt-in)
 
 The firmware itself does **not** run face detection (out of scope for the ESP32, and explicitly not
-wanted for this feature) and does not read `.facecrop.json` files today - `process-cli` currently
-only *produces* them for external tooling/curation and the future app flow above. The intended
-later firmware flow, for the case where only an original photo (not yet a rendered display file)
-ends up on the SD card:
-
-1. When about to display an album entry, check whether a already-processed display file exists
-   for it (as today).
-2. If not, check whether a `<name>.facecrop.json` sits next to the original.
-3. If present (and its `schema` field is a version the firmware understands), read
-   `recommended_crop` and apply it before the existing resize/dither pipeline, instead of that
-   pipeline's own default center-crop.
-4. Render the display file once, exactly as for any other new photo.
-5. Cache the rendered result on SD, same as the existing pipeline already does - the metadata file
-   is only consulted on this first render, never on subsequent displays of the same cached image.
-6. Display normally from there on, unchanged.
+wanted for this feature) - it only ever *reads* a `.facecrop.json` that `process-cli` already
+produced. See [Firmware: picking Cover vs. Fit automatically](#firmware-picking-cover-vs-fit-automatically-implemented-opt-in)
+above for the full mechanism: `main/facecrop_metadata.c`'s `facecrop_read_recommended_crop()` reads
+the sidecar, and `main/display_manager.c`'s `resolve_display_variant()` applies it (Cover mode only -
+Fit never crops) via `image_processor_render_variant()`, caching the rendered result on SD exactly
+once - the metadata file is only consulted on that first render, never on subsequent displays of the
+same cached file. This is the schema version 1 originally defined below, unchanged.
 
 This keeps the firmware's job simple (read one small JSON, apply one crop rectangle) and never
 requires it to run any ML inference itself.

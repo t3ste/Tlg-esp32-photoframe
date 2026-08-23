@@ -35,6 +35,20 @@ zoom, letting you manually frame one specific photo differently from the global 
 affects that single upload — it's baked into the processed image at upload time, not a persistent
 setting.
 
+## Web UI upload format
+
+Separate from Scale Mode, but configured in the same **Processing** tab: which format this
+*browser* encodes to before uploading a photo (Web UI album/display uploads only - a local browser
+preference, stored in the browser itself, never sent to the device or synced across browsers/tabs).
+
+- **EPDGZ** (default, recommended) — already stores the resolved 4-bit palette index,
+  gzip-compressed, no per-pixel color re-matching needed at display time.
+- **PNG** — kept for compatibility/inspection.
+
+This mirrors the equivalent on-device setting for Telegram-ingested photos - see
+[docs/TELEGRAM.md → On-device image format](TELEGRAM.md#on-device-image-format) - the two are
+independent settings for two different ingestion paths, not the same toggle.
+
 ## Interaction with orientation pairing
 
 Cover/Fit only come into play for an image shown **alone**. If **Telegram pairing**

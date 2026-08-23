@@ -154,6 +154,7 @@ All default to preserving existing behavior for users who don't configure Telegr
 | Auto-rotate orientation pairing | **off** | See [below](#auto-rotate-orientation-pairing) - random mode only |
 | Fallback-rotation notification | **off** | See [below](#fallback-rotation-notification) |
 | Thumbnail gallery (Web UI) | **off** | Client-side toggle; large galleries slow down the device's HTTP server |
+| On-device image format | **EPDGZ** | See [below](#on-device-image-format) |
 
 ### WiFi performance mode
 
@@ -197,10 +198,26 @@ when rotation was a no-op, e.g. no enabled albums). Off by default; toggle via W
 
 ### Keep originals
 
-Each incoming Telegram photo is normally converted straight to a display-ready PNG and the raw
-download is deleted. When enabled, a copy of the raw file is instead kept under `Telegram/Originals`
-on the SD card — a plain archive path, not an album, so it's invisible to the gallery and rotation.
-Off by default; toggle via Web UI or `/keep_originals on|off`.
+Each incoming Telegram photo is normally converted straight to a display-ready image (PNG or EPDGZ,
+see below) and the raw download is deleted. When enabled, a copy of the raw file is instead kept
+under `Telegram/Originals` on the SD card — a plain archive path, not an album, so it's invisible to
+the gallery and rotation. Off by default; toggle via Web UI or `/keep_originals on|off`.
+
+### On-device image format
+
+Which format the device itself produces when converting an incoming Telegram photo for the album:
+
+- **EPDGZ** (default, recommended) — already stores the resolved 4-bit palette index,
+  gzip-compressed. Every future display of that photo is then just a gzip-inflate and a direct
+  nibble read — no per-pixel color re-matching, unlike reading a "processed" PNG back (which still
+  needs a full decode plus a fresh nearest-palette lookup per pixel every time). Smaller file, faster
+  display, same as [process-cli](../process-cli/README.md)'s own recommended default.
+- **PNG** — kept for compatibility/inspection (e.g. opening the file directly on a computer).
+
+If EPDGZ encoding can't get the ~260 KB of memory it needs at that moment, the device falls back to
+PNG for that photo automatically (logged as a warning) — this is a graceful degradation, not a
+failure, and doesn't require re-sending the photo. Configure via Web UI (Telegram settings); no
+Telegram command for this one, since it's an infrastructure choice rather than a per-use toggle.
 
 For "photo" messages (not files sent as a document), the archived copy is always re-fetched at
 Telegram's largest available size for that photo — even if the size actually used for the display
