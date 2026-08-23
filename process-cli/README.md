@@ -84,6 +84,20 @@ photoframe-process ~/Photos/Albums --upload --device-parameters --host photofram
 
 Processes in temp directory, uploads via HTTP API, auto-cleans up.
 
+### Face-Aware Crop Metadata
+
+```bash
+# Detect faces, write photo.facecrop.json, and steer the rendered crop to keep them visible
+photoframe-process photo.jpg --detect-faces --board waveshare_photopainter_73 -o output/
+
+# Metadata only - no rendered image, just the JSON sidecar
+photoframe-process photo.jpg --detect-faces --metadata-only --board waveshare_photopainter_73
+```
+
+Opt-in (off unless `--detect-faces` is given) - see [docs/FACE_CROP.md](../docs/FACE_CROP.md) for the
+full option list, the JSON schema, and how `--board`/`--resolution`/`--display-size-mm`/`--orientation`
+combine to pick the crop's target geometry.
+
 ### Image Server Mode
 
 ```bash
