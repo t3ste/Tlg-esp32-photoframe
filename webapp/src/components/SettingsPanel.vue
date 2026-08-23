@@ -314,6 +314,32 @@ async function clearDebugLog() {
   }
 }
 
+const organizingCropVariants = ref(false);
+
+async function organizeCropVariants() {
+  organizingCropVariants.value = true;
+  try {
+    const response = await fetch("/api/albums/organize-crop", { method: "POST" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    saveSuccess.value = true;
+    saveMessage.value =
+      data.moved > 0
+        ? `Moved ${data.moved} file(s) into crop/ folders`
+        : "Every album's crop/ folder is already up to date";
+    setTimeout(() => (saveSuccess.value = false), 3000);
+  } catch (error) {
+    console.error("Failed to organize crop/ folders:", error);
+    saveError.value = true;
+    saveMessage.value = "Failed to organize crop/ folders";
+    setTimeout(() => (saveError.value = false), 5000);
+  } finally {
+    organizingCropVariants.value = false;
+  }
+}
+
 function onImportFileSelected(event) {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -1463,6 +1489,29 @@ async function performFactoryReset() {
                 <v-btn variant="outlined" :loading="clearingLog" @click="clearDebugLog">
                   <v-icon start>mdi-delete</v-icon>
                   Clear Logs
+                </v-btn>
+              </v-col>
+            </v-row>
+
+            <v-divider class="my-6" />
+
+            <div class="text-subtitle-1 mb-4">Cover/Fit Variant Folders</div>
+            <v-row>
+              <v-col cols="12">
+                <div class="text-caption text-medium-emphasis mb-2">
+                  For "Use pre-rendered Cover/Fit variants" (Auto Rotate tab): creates a "crop"
+                  subfolder in every album (if missing) and moves any loose
+                  "&lt;name&gt;.cover.&lt;ext&gt;" files there. Only relevant for albums produced by
+                  process-cli's <code>--crop-output both</code> - safe to run any time, a no-op for
+                  ordinary albums.
+                </div>
+                <v-btn
+                  variant="outlined"
+                  :loading="organizingCropVariants"
+                  @click="organizeCropVariants"
+                >
+                  <v-icon start>mdi-folder-move</v-icon>
+                  Organize Crop Folders
                 </v-btn>
               </v-col>
             </v-row>

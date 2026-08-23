@@ -1188,6 +1188,37 @@ static esp_err_t display_history_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Web UI maintenance action for the Cover/Fit variant-selection feature
+// (see docs/FACE_CROP.md) - moves every loose "<name>.cover.<ext>" across
+// every album into that album's "crop" subdirectory. Global, no per-album
+// parameter (applies to every album, matching the button's own "organize
+// every album" scope).
+static esp_err_t organize_crop_variants_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    int moved_count = 0;
+    esp_err_t err = album_manager_organize_crop_variants(&moved_count);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to organize crop/ folders");
+        return ESP_FAIL;
+    }
+
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "status", "success");
+    cJSON_AddNumberToObject(response, "moved", moved_count);
+    char *json_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(response);
+    return ESP_OK;
+}
+
 static esp_err_t sensor_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -2629,6 +2660,12 @@ esp_err_t http_server_init(void)
                                                  .handler = display_history_handler,
                                                  .user_ctx = NULL};
         httpd_register_uri_handler(server, &display_history_reset_uri);
+
+        httpd_uri_t organize_crop_uri = {.uri = "/api/albums/organize-crop",
+                                        .method = HTTP_POST,
+                                        .handler = organize_crop_variants_handler,
+                                        .user_ctx = NULL};
+        httpd_register_uri_handler(server, &organize_crop_uri);
 
         httpd_uri_t sensor_uri = {
             .uri = "/api/sensor", .method = HTTP_GET, .handler = sensor_handler, .user_ctx = NULL};

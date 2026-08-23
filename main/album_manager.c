@@ -210,6 +210,78 @@ esp_err_t album_manager_delete_album(const char *album_name)
     return ESP_OK;
 }
 
+// Web UI maintenance action supporting the Cover/Fit variant-selection
+// feature (see docs/FACE_CROP.md): for every album, creates a "crop"
+// subdirectory if missing and moves any "<name>.cover.<ext>" files
+// currently sitting loose in the album root into it - the layout
+// display_manager.c's resolve_display_variant() expects. A photo already
+// laid out correctly (or with no Cover variant at all) is untouched.
+esp_err_t album_manager_organize_crop_variants(int *out_moved_count)
+{
+    int moved = 0;
+    char **albums = NULL;
+    int album_count = 0;
+
+    esp_err_t err = album_manager_list_albums(&albums, &album_count);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    for (int i = 0; i < album_count; i++) {
+        char album_path[256];
+        if (album_manager_get_album_path(albums[i], album_path, sizeof(album_path)) != ESP_OK) {
+            continue;
+        }
+
+        char crop_dir[300];
+        snprintf(crop_dir, sizeof(crop_dir), "%s/crop", album_path);
+        bool crop_dir_ready = false;
+
+        DIR *dir = opendir(album_path);
+        if (!dir) {
+            continue;
+        }
+
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_type != DT_REG) {
+                continue;
+            }
+            const char *ext = strrchr(entry->d_name, '.');
+            if (!ext) {
+                continue;
+            }
+            size_t base_len = (size_t) (ext - entry->d_name);
+            if (base_len < 6 || strncasecmp(entry->d_name + base_len - 6, ".cover", 6) != 0) {
+                continue;
+            }
+
+            if (!crop_dir_ready) {
+                mkdir(crop_dir, 0755);  // ignore EEXIST - failure surfaces via rename() below
+                crop_dir_ready = true;
+            }
+
+            char src_path[700], dest_path[700];
+            snprintf(src_path, sizeof(src_path), "%s/%s", album_path, entry->d_name);
+            snprintf(dest_path, sizeof(dest_path), "%s/%s", crop_dir, entry->d_name);
+
+            if (rename(src_path, dest_path) == 0) {
+                moved++;
+            } else {
+                ESP_LOGW(TAG, "Failed to move %s into crop/", src_path);
+            }
+        }
+        closedir(dir);
+    }
+
+    album_manager_free_album_list(albums, album_count);
+    if (out_moved_count) {
+        *out_moved_count = moved;
+    }
+    ESP_LOGI(TAG, "Organized crop/ folders: moved %d file(s)", moved);
+    return ESP_OK;
+}
+
 esp_err_t album_manager_set_album_enabled(const char *album_name, bool enabled)
 {
     if (!album_name || strlen(album_name) == 0) {
