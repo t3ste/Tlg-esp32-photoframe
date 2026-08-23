@@ -24,6 +24,18 @@ typedef enum {
 } image_format_t;
 
 /**
+ * @brief A crop rectangle in the source image's own pixel space (before any
+ * resizing) - e.g. a face-crop metadata sidecar's "recommended_crop" (see
+ * docs/FACE_CROP.md). Used by image_processor_render_variant() below.
+ */
+typedef struct {
+    int x;
+    int y;
+    int w;
+    int h;
+} image_crop_rect_t;
+
+/**
  * @brief Result structure for raw RGB buffer output (no PNG encoding)
  *
  * Only used by the Telegram-pairing/thumbnail helpers below, which need an
@@ -70,6 +82,36 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
 esp_err_t image_processor_process_fmt(const char *input_path, const char *output_path,
                                       dither_algorithm_t dither_algorithm, image_format_t out_format,
                                       image_format_t *out_actual_format);
+
+/**
+ * @brief Render a specific Cover or Fit variant of an image on demand
+ *
+ * Used by the firmware's on-device fallback when a wanted pre-rendered
+ * Cover/Fit variant is missing (see docs/FACE_CROP.md) - decodes
+ * @p input_path (JPG or PNG only - the oversized-document streaming
+ * fallback tier is not supported here, since it can't apply a crop) and
+ * renders it at a SPECIFIC scale mode regardless of the device's own
+ * current setting, optionally pre-cropping to @p crop (in the source
+ * image's own pixel space, before any resizing - e.g. a face-crop
+ * metadata sidecar's recommended_crop) before the resize/dither pipeline
+ * runs, so the crop is applied losslessly rather than as a second,
+ * lossy crop on top of an already-resized image.
+ *
+ * Same format-selection/fallback contract as image_processor_process_fmt():
+ * @p output_path must already carry the extension matching @p out_format,
+ * falls back to PNG (renaming to ".png") if EPDGZ can't be allocated, and
+ * reports the format actually written via @p out_actual_format.
+ *
+ * @param forced_scale_mode SCALE_MODE_COVER or SCALE_MODE_FIT (processing_settings.h)
+ * @param crop Optional (may be NULL) - a crop rectangle in the source
+ *   image's own pixel space. Bounds-clamped against the decoded image
+ *   size; NULL (or an empty/invalid rect) renders the plain, uncropped
+ *   source at @p forced_scale_mode.
+ */
+esp_err_t image_processor_render_variant(const char *input_path, const char *output_path,
+                                         dither_algorithm_t dither_algorithm, image_format_t out_format,
+                                         image_format_t *out_actual_format, int forced_scale_mode,
+                                         const image_crop_rect_t *crop);
 
 /**
  * @brief Process image from memory buffer and show it on the display
