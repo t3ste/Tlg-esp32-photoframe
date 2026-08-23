@@ -1929,8 +1929,10 @@ static esp_err_t album_images_handler(httpd_req_t *req)
                 continue;
             }
             const char *ext = strrchr(entry->d_name, '.');
-            if (ext && (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
-                        strcasecmp(ext, ".epdgz") == 0)) {
+            if (ext &&
+                (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
+                 strcasecmp(ext, ".epdgz") == 0) &&
+                display_manager_is_photo_anchor(album_path, entry->d_name)) {
                 cJSON *image_obj = cJSON_CreateObject();
                 cJSON_AddStringToObject(image_obj, "filename", entry->d_name);
                 cJSON_AddStringToObject(image_obj, "album", decoded_album_name);

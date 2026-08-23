@@ -517,7 +517,9 @@ const char *display_manager_get_current_image(void)
 // needs same-directory pairing logic the way ".fit." does), plus a
 // "<name>.facecrop.json" metadata sidecar (same directory as the original).
 //
-// is_rotation_anchor() below - used by both *_sequential() and *_random()'s
+// display_manager_is_photo_anchor() below (declared in display_manager.h,
+// also reused by http_server.c's album_images_handler() for the Web UI
+// gallery listing) - used by both *_sequential() and *_random()'s
 // directory walks - collapses a bare "<name>.<ext>" / "<name>.fit.<ext>"
 // pair into a single logical photo entry (favoring the ".fit." one, since
 // its existence confirms --crop-output both was used) so neither rotation
@@ -533,7 +535,7 @@ const char *display_manager_get_current_image(void)
 // ordinary already-processed single-mode file (the common case today) has
 // nothing else to render from and is left completely alone - this feature
 // is purely additive on top of existing albums.
-static bool is_rotation_anchor(const char *album_path, const char *d_name)
+bool display_manager_is_photo_anchor(const char *album_path, const char *d_name)
 {
     if (!config_manager_get_variant_selection_enabled()) {
         return true;  // feature off - every matched file is its own anchor, as always
@@ -772,7 +774,7 @@ static void rotate_sequential(char **enabled_albums, int album_count)
                 if (ext &&
                     (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
                      strcasecmp(ext, ".epdgz") == 0) &&
-                    is_rotation_anchor(album_path, entry->d_name)) {
+                    display_manager_is_photo_anchor(album_path, entry->d_name)) {
                     char fullpath[512];
                     snprintf(fullpath, sizeof(fullpath), "%s/%s", album_path, entry->d_name);
                     ESP_LOGD(TAG, "  Found image [%ld]: %s", (long) current_idx, fullpath);
@@ -983,7 +985,7 @@ static void rotate_random(char **enabled_albums, int album_count)
                 if (ext &&
                     (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
                      strcasecmp(ext, ".epdgz") == 0) &&
-                    is_rotation_anchor(album_path, entry->d_name)) {
+                    display_manager_is_photo_anchor(album_path, entry->d_name)) {
                     total_image_count++;
                 }
             }
@@ -1024,7 +1026,7 @@ static void rotate_random(char **enabled_albums, int album_count)
                 if (ext &&
                     (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
                      strcasecmp(ext, ".epdgz") == 0) &&
-                    is_rotation_anchor(album_path, entry->d_name)) {
+                    display_manager_is_photo_anchor(album_path, entry->d_name)) {
                     char *fullpath = malloc(512);
                     if (!fullpath) {
                         ESP_LOGE(TAG, "Failed to allocate path buffer");
