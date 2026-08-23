@@ -1,0 +1,44 @@
+{
+  "waveshare_photopainter_73": {
+    "width": 800,
+    "height": 480,
+    "orientation": "landscape",
+    "displaySizeMm": { "width": 159.0, "height": 95.4 }
+  },
+  "seeedstudio_xiao_ee02": {
+    "width": 1200,
+    "height": 1600,
+    "orientation": "portrait",
+    "displaySizeMm": { "width": 202.7, "height": 270.3 }
+  },
+  "seeedstudio_xiao_ee04": {
+    "width": 800,
+    "height": 480,
+    "orientation": "landscape",
+    "displaySizeMm": { "width": 159.0, "height": 95.4 }
+  },
+  "seeedstudio_xiao_ee03": {
+    "width": 1872,
+    "height": 1404,
+    "orientation": "landscape",
+    "displaySizeMm": { "width": 209.3, "height": 157.0 }
+  },
+  "seeedstudio_reterminal_e1002": {
+    "width": 800,
+    "height": 480,
+    "orientation": "landscape",
+    "displaySizeMm": { "width": 159.0, "height": 95.4 }
+  },
+  "seeedstudio_reterminal_e1003": {
+    "width": 1872,
+    "height": 1404,
+    "orientation": "landscape",
+    "displaySizeMm": { "width": 209.3, "height": 157.0 }
+  },
+  "seeedstudio_reterminal_e1004": {
+    "width": 1200,
+    "height": 1600,
+    "orientation": "portrait",
+    "displaySizeMm": { "width": 202.7, "height": 270.3 }
+  }
+}
