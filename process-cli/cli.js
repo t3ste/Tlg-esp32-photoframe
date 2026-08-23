@@ -623,24 +623,26 @@ async function processFolderStructure(
       const baseName = path.basename(imageFile, path.extname(imageFile));
       const fmt = options.format || "epdgz";
       const ext = fmt === "bmp" ? ".bmp" : fmt === "png" ? ".png" : ".epdgz";
-      const outputFile = path.join(albumOutputPath, `${baseName}${ext}`);
-      const outputThumb = path.join(albumOutputPath, `${baseName}.jpg`);
+      const outputBasePath = path.join(albumOutputPath, baseName);
 
       try {
         console.log(
           `  [${i + 1}/${imageFiles.length}] Processing: ${imageFile}`,
         );
-        await processImageFile(
+        const rendered = await processImageFile(
           inputPath,
-          outputFile,
-          outputThumb,
+          outputBasePath,
+          ext,
           options,
           devicePalette,
         );
         totalProcessed++;
 
-        // Upload if requested
-        if (uploadHost) {
+        // Upload if requested (rendered is empty for --metadata-only, and
+        // never has more than one entry here - --crop-output both is
+        // rejected together with --upload earlier)
+        if (uploadHost && rendered.length > 0) {
+          const { outputFile, outputThumb } = rendered[0];
           try {
             await uploadToDevice(
               uploadHost,
@@ -672,16 +674,87 @@ async function processFolderStructure(
   console.log(`Output directory: ${outputDir}`);
 }
 
-async function processImageFile(
+// Renders one variant (a specific scaleMode/cropRect combination) to
+// `outputFile` (+ its thumbnail at `outputThumb`), via the shared library
+// pipeline.
+async function renderVariant(
   inputPath,
-  outputBmp,
+  outputFile,
   outputThumb,
   processingOptions,
-  devicePalette = null,
+  devicePalette,
+  { scaleMode, cropRect },
 ) {
+  const { canvas, originalCanvas } = await processImagePipeline(
+    inputPath,
+    processingOptions,
+    processingOptions.displayWidth,
+    processingOptions.displayHeight,
+    devicePalette,
+    {
+      verbose: processingOptions.verbose || true,
+      autoOrient: processingOptions.autoOrient || false,
+      orientation: processingOptions.orientation || "landscape",
+      scaleMode,
+      backgroundColor: processingOptions.backgroundColor || "white",
+      usePerceivedOutput: processingOptions.usePerceivedOutput || false,
+      grayscale: processingOptions.grayscale || false,
+      cropRect,
+    },
+  );
+
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  const format = processingOptions.format || "epdgz";
+  if (format === "epdgz") {
+    console.log(`  Writing EPDGZ: ${outputFile}`);
+    const epdBuffer = await createEPDGZ(canvas, {
+      grayscale: processingOptions.grayscale || false,
+    });
+    fs.writeFileSync(outputFile, epdBuffer);
+  } else if (format === "png") {
+    console.log(`  Writing PNG: ${outputFile}`);
+    const pngBuffer = await createPNG(canvas);
+    fs.writeFileSync(outputFile, pngBuffer);
+  } else if (format === "bmp") {
+    console.log(`  Writing BMP: ${outputFile}`);
+    writeBMP(imageData, outputFile);
+  } else {
+    throw new Error(`Unsupported format: ${format}. Use 'epdgz', 'png', or 'bmp'`);
+  }
+
+  if (processingOptions.generateThumbnail && outputThumb) {
+    console.log(`  Generating thumbnail: ${outputThumb}`);
+    // Generate thumbnail from this variant's own clean, unprocessed source -
+    // e.g. the "fit" variant's thumbnail correctly shows the full letterboxed
+    // photo, not the "cover" variant's crop.
+    const thumbCanvas = generateThumbnail(originalCanvas, THUMBNAIL_MAX_DIM, createCanvas);
+    const buffer = thumbCanvas.toBuffer("image/jpeg", { quality: 0.8 });
+    fs.writeFileSync(outputThumb, buffer);
+  }
+}
+
+/**
+ * Processes one source image: optional face detection + metadata, then one
+ * or more rendered variants depending on processingOptions.faceCrop.cropOutput
+ * ("cropped" | "uncropped" | "both") - or a single plain render, unchanged
+ * from before this feature existed, when face-crop isn't enabled at all.
+ *
+ * @param {string} inputPath
+ * @param {string} outputBasePath - Output path with no extension (directory +
+ *   basename + any user --suffix already applied) - variant suffixes
+ *   (".cover"/".fit") and the metadata's ".facecrop.json" are appended here.
+ * @param {string} ext - Output image extension, e.g. ".png".
+ * @param {Object} processingOptions
+ * @param {Object} [devicePalette]
+ * @returns {Promise<Array<{outputFile: string, outputThumb: string}>>} The
+ *   rendered variant(s) - empty when --metadata-only skipped rendering.
+ */
+async function processImageFile(inputPath, outputBasePath, ext, processingOptions, devicePalette = null) {
   console.log(`Processing: ${inputPath}`);
 
-  let cropRect = null;
+  let recommendedCrop = null;
   if (processingOptions.faceCrop?.enabled) {
     const { target, marginPercent, detector, engineName, metadataOnly } = processingOptions.faceCrop;
 
@@ -696,97 +769,64 @@ async function processImageFile(
       .getImageData(0, 0, orientedCanvas.width, orientedCanvas.height);
 
     console.log(`  Detecting faces (${engineName})...`);
-    const { faces, recommendedCrop, strategy } = await analyzeFaceCrop({
-      detector,
-      imageData,
-      target,
-      marginPercent,
-      engineName,
-    });
-    console.log(`  Found ${faces.length} face(s)`);
+    const analyzed = await analyzeFaceCrop({ detector, imageData, target, marginPercent, engineName });
+    console.log(`  Found ${analyzed.faces.length} face(s)`);
 
     const metadata = buildMetadata({
       sourcePath: path.basename(inputPath),
       image: { width: orientedCanvas.width, height: orientedCanvas.height },
       target,
-      faces,
-      recommendedCrop,
-      strategy,
+      faces: analyzed.faces,
+      recommendedCrop: analyzed.recommendedCrop,
+      strategy: analyzed.strategy,
       generatorVersion: GENERATOR_VERSION,
     });
-    const metadataPath = metadataPathFor(outputBmp);
+    // Always named after the plain base path (never a .cover/.fit variant
+    // suffix) - one metadata file describes the source image regardless of
+    // how many rendered variants exist for it.
+    const metadataPath = metadataPathFor(`${outputBasePath}${ext}`);
     writeMetadataFile(metadataPath, metadata);
     console.log(`  Wrote face-crop metadata: ${metadataPath}`);
 
     if (metadataOnly) {
       console.log(`Done! (metadata only)`);
-      return;
+      return [];
     }
 
-    cropRect = recommendedCrop;
+    recommendedCrop = analyzed.recommendedCrop;
   }
 
-  // Use shared processing pipeline with verbose logging (library handles parameter logging)
-  // Skip rotation when rendering measured palette for easier preview viewing
-  const { canvas, originalCanvas } = await processImagePipeline(
-    inputPath,
-    processingOptions,
-    processingOptions.displayWidth,
-    processingOptions.displayHeight,
-    devicePalette,
-    {
-      verbose: processingOptions.verbose || true,
-      autoOrient: processingOptions.autoOrient || false,
-      orientation: processingOptions.orientation || "landscape",
-      scaleMode: processingOptions.scaleMode || "cover",
-      backgroundColor: processingOptions.backgroundColor || "white",
-      usePerceivedOutput: processingOptions.usePerceivedOutput || false,
-      grayscale: processingOptions.grayscale || false,
-      cropRect,
-    },
-  );
-
-  const ctx = canvas.getContext("2d");
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-  // 5. Write output file
-  const format = processingOptions.format || "epdgz";
-  if (format === "epdgz") {
-    console.log(`  Writing EPDGZ: ${outputBmp}`);
-    const epdBuffer = await createEPDGZ(canvas, {
-      grayscale: processingOptions.grayscale || false,
-    });
-    fs.writeFileSync(outputBmp, epdBuffer);
-  } else if (format === "png") {
-    const outputPng = outputBmp.replace(/\.bmp$/, ".png");
-    console.log(`  Writing PNG: ${outputPng}`);
-    const pngBuffer = await createPNG(canvas);
-    fs.writeFileSync(outputPng, pngBuffer);
-  } else if (format === "bmp") {
-    console.log(`  Writing BMP: ${outputBmp}`);
-    writeBMP(imageData, outputBmp);
+  // Which variant(s) to render. Without --detect-faces, this is exactly the
+  // single render this CLI has always produced - scaleMode/cropRect
+  // untouched, zero behavior change.
+  let variants;
+  if (!processingOptions.faceCrop?.enabled) {
+    variants = [{ suffix: "", scaleMode: processingOptions.scaleMode || "cover", cropRect: null }];
   } else {
-    throw new Error(
-      `Unsupported format: ${format}. Use 'epdgz', 'png', or 'bmp'`,
-    );
+    const cropOutput = processingOptions.faceCrop.cropOutput;
+    if (cropOutput === "uncropped") {
+      variants = [{ suffix: "", scaleMode: "fit", cropRect: null }];
+    } else if (cropOutput === "both") {
+      variants = [
+        { suffix: ".cover", scaleMode: "cover", cropRect: recommendedCrop },
+        { suffix: ".fit", scaleMode: "fit", cropRect: null },
+      ];
+    } else {
+      // "cropped" (default)
+      variants = [{ suffix: "", scaleMode: "cover", cropRect: recommendedCrop }];
+    }
   }
 
-  // 6. Generate thumbnail if requested (from EXIF-corrected source, not processed image)
-  if (processingOptions.generateThumbnail && outputThumb) {
-    console.log(`  Generating thumbnail: ${outputThumb}`);
-
-    // Generate thumbnail from original source (clean, unprocessed)
-    const thumbCanvas = generateThumbnail(
-      originalCanvas,
-      THUMBNAIL_MAX_DIM,
-      createCanvas,
-    );
-
-    const buffer = thumbCanvas.toBuffer("image/jpeg", { quality: 0.8 });
-    fs.writeFileSync(outputThumb, buffer);
+  const rendered = [];
+  for (const variant of variants) {
+    const outputFile = `${outputBasePath}${variant.suffix}${ext}`;
+    const outputThumb = `${outputBasePath}${variant.suffix}.jpg`;
+    await renderVariant(inputPath, outputFile, outputThumb, processingOptions, devicePalette, variant);
+    rendered.push({ outputFile, outputThumb });
   }
 
   console.log(`Done!`);
+  return rendered;
 }
 
 // CLI setup
@@ -922,6 +962,15 @@ program
   .option(
     "--metadata-only",
     "With --detect-faces: write only the <name>.facecrop.json file, skip generating the rendered output image",
+  )
+  .option(
+    "--crop-output <mode>",
+    "With --detect-faces (ignored if --metadata-only is also given): which rendered image(s) to " +
+      "produce - 'cropped' (default: one face-aware-cropped image, cover mode), 'uncropped' (one " +
+      "full/letterboxed image, fit mode, no crop applied - metadata is still written), or 'both' " +
+      "(<name>.cover.<ext> and <name>.fit.<ext> side by side, so the firmware can later pick the " +
+      "right one for its Cover/Fit setting without rendering anything itself - see docs/FACE_CROP.md)",
+    "cropped",
   )
   .option(
     "--board <id>",
@@ -1213,6 +1262,22 @@ program
         console.error("Error: --metadata-only requires --detect-faces");
         process.exit(1);
       }
+      const cropOutputExplicit = program.getOptionValueSource("cropOutput") === "cli";
+      if (cropOutputExplicit && !options.detectFaces) {
+        console.error("Error: --crop-output requires --detect-faces");
+        process.exit(1);
+      }
+      if (!["cropped", "uncropped", "both"].includes(options.cropOutput)) {
+        console.error(
+          `Error: Invalid --crop-output "${options.cropOutput}". Use 'cropped', 'uncropped', or 'both'`,
+        );
+        process.exit(1);
+      }
+      if (cropOutputExplicit && options.metadataOnly) {
+        console.warn(
+          "Warning: --crop-output is ignored because --metadata-only skips all rendered images",
+        );
+      }
       if (options.detectFaces) {
         let target;
         try {
@@ -1247,6 +1312,7 @@ program
         faceCropContext = {
           enabled: true,
           metadataOnly: !!options.metadataOnly,
+          cropOutput: options.cropOutput,
           target,
           marginPercent: options.faceMargin,
           detector,
@@ -1254,6 +1320,23 @@ program
         };
       }
       processOptions.faceCrop = faceCropContext;
+
+      // --crop-output both produces two images (<name>.cover.<ext> and
+      // <name>.fit.<ext>) - --upload/--direct only ever send one image, so
+      // reject the ambiguous combination up front rather than silently
+      // picking one.
+      if (
+        faceCropContext &&
+        !faceCropContext.metadataOnly &&
+        faceCropContext.cropOutput === "both" &&
+        (options.upload || options.direct)
+      ) {
+        console.error(
+          "Error: --crop-output both produces two images and can't be used with --upload/--direct " +
+            "(process to disk with -o instead, then upload the file you want manually)",
+        );
+        process.exit(1);
+      }
 
       // Check if --serve mode is enabled
       if (options.serve) {
@@ -1344,13 +1427,12 @@ program
         const format = processOptions.format || "epdgz";
         const ext =
           format === "bmp" ? ".bmp" : format === "png" ? ".png" : ".epdgz";
-        const outputFile = path.join(outputDir, `${baseName}${suffix}${ext}`);
-        const outputThumb = path.join(outputDir, `${baseName}${suffix}.jpg`);
+        const outputBasePath = path.join(outputDir, `${baseName}${suffix}`);
 
-        await processImageFile(
+        const rendered = await processImageFile(
           inputPath,
-          outputFile,
-          outputThumb,
+          outputBasePath,
+          ext,
           processOptions,
           devicePalette,
         );
@@ -1363,6 +1445,15 @@ program
             );
             process.exit(1);
           }
+          if (rendered.length === 0) {
+            console.error(
+              `Error: --metadata-only produced no image to ${options.direct ? "display" : "upload"}`,
+            );
+            process.exit(1);
+          }
+          // --crop-output both was already rejected together with --upload/
+          // --direct earlier, so exactly one variant exists here.
+          const { outputFile, outputThumb } = rendered[0];
           if (!fs.existsSync(outputFile)) {
             console.error(`Error: Output file not found: ${outputFile}`);
             process.exit(1);
