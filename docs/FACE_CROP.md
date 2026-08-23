@@ -7,7 +7,7 @@ invocations without the new flags behave exactly as before.
 
 Face detection runs entirely on the machine running `process-cli` (your PC), never on the ESP32
 itself - the firmware only ever sees the finished crop, either baked into the image `process-cli`
-already renders, or (later - see [Firmware usage (planned)](#firmware-usage-planned)) read from the
+already renders, or (later - see [Firmware usage (planned)](#firmware-usage-planned---not-implemented)) read from the
 metadata file for original photos that haven't been rendered yet.
 
 This is about *where* faces are and *how big* they are - nothing about *who* they are. No face
@@ -22,11 +22,18 @@ photoframe-process photo.jpg --detect-faces --metadata-only --board waveshare_ph
 # Metadata + a face-aware-cropped rendered image (the normal case)
 photoframe-process photo.jpg --detect-faces --board waveshare_photopainter_73 -o output/
 
+# Metadata + the full image rendered WITHOUT cropping (letterboxed, "as before")
+photoframe-process photo.jpg --detect-faces --crop-output uncropped --board waveshare_photopainter_73 -o output/
+
+# Metadata + BOTH renders (<name>.cover.<ext> and <name>.fit.<ext>) - avoids
+# needing to decide Cover vs Fit (or re-render) later, see "Cover vs. Fit" below
+photoframe-process photo.jpg --detect-faces --crop-output both --board waveshare_photopainter_73 -o output/
+
 # Batch process a whole album folder - one .facecrop.json per photo
-photoframe-process ~/Photos/Albums --detect-faces --board waveshare_photopainter_73 -o output/
+photoframe-process ~/Photos/Albums --detect-faces --crop-output both --board waveshare_photopainter_73 -o output/
 
 # Windows (PowerShell) - identical flags, just a different path style
-photoframe-process C:\Photos\Albums --detect-faces --board waveshare_photopainter_73 -o C:\output
+photoframe-process C:\Photos\Albums --detect-faces --crop-output both --board waveshare_photopainter_73 -o C:\output
 ```
 
 Without `--detect-faces`, nothing changes: no model is loaded, no metadata is written, and the
@@ -37,7 +44,8 @@ rendered image uses the exact same center-crop it always has.
 | Option | Effect |
 |---|---|
 | `--detect-faces` | Enables face detection. Writes `<name>.facecrop.json` next to the output, and steers the rendered image's "cover" crop toward the recommended crop instead of a plain center-crop. |
-| `--metadata-only` | Combined with `--detect-faces`: write only the metadata file, skip rendering the image entirely (fast - skips dithering/encoding). Errors if used without `--detect-faces`. |
+| `--metadata-only` | Combined with `--detect-faces`: write only the metadata file, skip rendering any image entirely (fast - skips dithering/encoding). Errors if used without `--detect-faces`. Takes priority over `--crop-output` (which is then ignored, with a warning). |
+| `--crop-output <mode>` | Combined with `--detect-faces`: which rendered image(s) to produce - `cropped` (default), `uncropped`, or `both`. See [Cover vs. Fit: rendering one, the other, or both](#cover-vs-fit-rendering-one-the-other-or-both) below. Errors if used without `--detect-faces`. |
 | `--board <id>` | Target board id (see [Target geometry](#target-geometry-board--resolution--display-size-mm--orientation) below). |
 | `--resolution <WxH>` | Target resolution in pixels, e.g. `800x480`. Alias of the existing `--dimension`/`--display-width`+`--display-height` - all four ultimately set the same thing. |
 | `--display-size-mm <WxH>` | Physical panel size in mm, e.g. `160x96`. Only used to help auto-derive orientation - it cannot by itself supply a pixel resolution. |
@@ -86,6 +94,57 @@ photoframe-process photo.jpg --detect-faces --resolution 800x480 --orientation p
 photoframe-process photo.jpg --detect-faces --display-size-mm 160x96
 photoframe-process photo.jpg --detect-faces --display-size-mm 160x96 --orientation portrait
 ```
+
+## Cover vs. Fit: rendering one, the other, or both
+
+The firmware has two display modes for a mismatched-aspect-ratio photo (see
+[docs/SCALE_MODE.md](SCALE_MODE.md)): **Cover** (crop to fill) and **Fit** (letterbox, full image,
+no crop). `--crop-output` controls which of these `--detect-faces` renders:
+
+| `--crop-output` | Renders | Filename(s) |
+|---|---|---|
+| `cropped` (default) | One image, Cover-style, using the face-aware recommended crop | `<name>.<ext>` |
+| `uncropped` | One image, Fit-style, the full photo letterboxed - no crop applied at all, faces or not | `<name>.<ext>` |
+| `both` | Both of the above | `<name>.cover.<ext>` and `<name>.fit.<ext>` |
+
+Metadata is written in all three cases (unless `--metadata-only` is also given, which then skips
+every rendered image regardless of `--crop-output`) - `uncropped` is exactly the "process like
+before this feature existed, but still tell me where the faces are" mode: useful when you want to
+decide the crop later (by hand, or by re-running with `--crop-output cropped` once you've reviewed
+the metadata), while keeping a full, uncropped fallback image on hand in the meantime.
+
+`--crop-output both` exists so a whole album can be pre-rendered for *either* firmware display
+setting without re-processing later or rendering anything on the ESP32 itself: drop both files plus
+the metadata onto the SD card, and (once the planned firmware enhancement below ships) the frame
+picks whichever file matches its own Cover/Fit setting per source photo.
+
+> **Not yet plug-and-play with a normal rotation album.** Today's firmware has no concept of
+> `<name>.cover.<ext>` / `<name>.fit.<ext>` being two renders of the *same* photo - every album
+> listing loop just treats each matching file extension as its own independent picture. Dropping
+> `--crop-output both`'s output straight into a Storage-rotation album **today** would show the same
+> photo twice per cycle, once per variant - not the intended use. Use `both` mode to stage files for
+> the planned firmware pairing below, or to inspect/pick manually, not (yet) as a normal album.
+
+### Firmware: picking Cover vs. Fit automatically (planned - not implemented)
+
+Concept for whoever implements this later - also noted as a source comment right above
+`rotate_sequential()` in `main/display_manager.c`:
+
+1. Before/while listing an album directory's image files, recognize `<name>.cover.<ext>` /
+   `<name>.fit.<ext>` pairs (same base name, same folder) and treat each pair as **one** logical
+   photo entry instead of two - every `*_sequential()`/`*_random()` listing loop in
+   `main/display_manager.c` (`strcasecmp(ext, ...)` scans) would need this.
+2. When about to display a paired entry, pick the file matching the device's own
+   `processing_settings_get_scale_mode()` (`SCALE_MODE_FIT` → the `.fit` file, otherwise → the
+   `.cover` file) and display it directly - already fully rendered, so no on-device
+   decode/crop/dither work at all for these photos.
+3. A file with no pairing partner (an ordinary single-render photo, or one from `--crop-output
+   cropped`/`uncropped`) displays exactly as it does today - this is purely additive.
+
+This is a different (simpler) mechanism than the [original-photo firmware
+flow](#firmware-usage-planned---not-implemented) described below: here, both candidate renders
+already exist on disk - the firmware only ever picks between two pre-rendered files, never renders
+anything itself.
 
 ## Crop heuristic
 

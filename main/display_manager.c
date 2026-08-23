@@ -506,6 +506,28 @@ const char *display_manager_get_current_image(void)
     return current_image;
 }
 
+// NOTE (planned, not implemented): process-cli's optional --detect-faces
+// --crop-output=both mode (see docs/FACE_CROP.md) can write TWO rendered
+// files per source photo into an album folder - "<name>.cover.<ext>" (cropped
+// to fill, using the face-aware recommended crop) and "<name>.fit.<ext>"
+// (full image, letterboxed, no crop) - plus a "<name>.facecrop.json"
+// sidecar. Today, every *_sequential()/*_random() album listing loop in this
+// file (see the DT_REG + strcasecmp(ext, ...) scans below) treats each file
+// extension-filtered file as an independent, unrelated photo - so dropping a
+// "both" output directly into a rotation album would show the same source
+// photo twice per cycle (once as each variant), which is NOT what this
+// feature is for.
+//
+// The intended future enhancement: before/while listing an album's files,
+// detect "<name>.cover.<ext>" / "<name>.fit.<ext>" pairs (same base name,
+// same directory) and collapse each pair into a single logical entry, then
+// pick whichever variant matches processing_settings_get_scale_mode()
+// (SCALE_MODE_FIT -> the ".fit" file, otherwise -> the ".cover" file) instead
+// of decoding/cropping/dithering anything on-device. A photo with only one
+// variant (no pairing) displays exactly as it does today. This lets a
+// pre-processed album fully avoid ESP32-side rendering for photos where the
+// user wants Cover on some devices and Fit on others without re-exporting.
+
 static void rotate_sequential(char **enabled_albums, int album_count)
 {
     ESP_LOGI(TAG, "Sequential rotation mode");
