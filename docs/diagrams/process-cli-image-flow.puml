@@ -1,0 +1,38 @@
+@startuml process-cli-image-flow
+title process-cli - Per-Image Flow (processImageFile)
+
+start
+:Process one source image;
+
+if (--detect-faces?) then (yes)
+  partition "Face Detection" {
+    :Load image, correct EXIF\norientation, apply --auto-orient;
+    :Detect faces (BlazeFace);
+    :Compute recommended crop\n(largest faces first, --face-margin;\ncenter-crop fallback if none found);
+    :Write <name>.facecrop.json;
+  }
+  if (--metadata-only?) then (yes)
+    :Done - metadata only;
+    stop
+  endif
+endif
+
+:Determine output variant(s)\nfrom --crop-output;
+note right
+  cropped (default): 1 image, cover crop
+  uncropped: 1 image, fit / letterboxed
+  both: 2 images, ".cover" and ".fit"
+end note
+
+while (more variants to render?) is (yes)
+  partition "Render Variant" {
+    :Resize (cover or fit),\ntone-map, dither;
+    :Write image file (--format);
+    :Write thumbnail;
+  }
+endwhile (no)
+
+:Done;
+stop
+
+@enduml

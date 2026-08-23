@@ -1,0 +1,56 @@
+@startuml process-cli-main-flow
+title process-cli - Main CLI Flow
+
+start
+:Parse CLI options;
+
+if (--device-parameters?) then (yes)
+  :Fetch processing settings, palette,\nand orientation from the device;
+endif
+
+:Resolve input path;
+if (path missing?) then (yes)
+  :Error;
+  stop
+endif
+
+:Resolve target resolution\n(--dimension, --resolution, --board,\n--host device sync);
+:Resolve output format\n(--format, auto-selected for old firmware);
+:Resolve preset and processing options\n(--preset, --exposure, --saturation, ...);
+
+partition "Face-Aware Crop Setup" {
+  if (face-crop options invalid?\ne.g. --metadata-only or --crop-output\nwithout --detect-faces, bad value) then (yes)
+    :Error;
+    stop
+  endif
+  if (--detect-faces?) then (yes)
+    :Resolve target geometry\n(--board, --resolution,\n--display-size-mm, --orientation);
+    :Load face detection model;
+  endif
+}
+
+if (--serve?) then (yes)
+  :Start image server;
+  stop
+endif
+
+if (--upload and --direct\nboth given?) then (yes)
+  :Error;
+  stop
+endif
+
+:Prepare output directory\n(temporary dir for --upload/--direct);
+
+if (input is a directory?) then (yes)
+  :Process each album's images,\none by one, via **Image Flow**;
+else (no)
+  :Process the single image\nvia **Image Flow**;
+  if (--upload or --direct?) then (yes)
+    :Upload or display on device;
+  endif
+endif
+
+:Clean up temporary directory if used;
+stop
+
+@enduml

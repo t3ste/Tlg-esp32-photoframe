@@ -1,0 +1,16 @@
+@startuml process-cli-options
+title process-cli - CLI Options Overview
+
+legend top left
+  |= Group |= Options |
+  | Input / Output | ``<input>`` (file or album directory), ``-o/--output-dir``, ``--suffix``, ``-v/--verbose`` |
+  | Format | ``--format``, ``--grayscale`` |
+  | Preset | ``--preset`` |
+  | Tone & Color | ``--exposure``, ``--saturation``, ``--tone-mode``, ``--contrast``, ``--scurve-strength/-shadow/-highlight/-midpoint``, ``--color-method``, ``--use-perceived-output``, ``--dither-algorithm``, ``--compress-dynamic-range`` |
+  | Geometry | ``--auto-orient``, ``--orientation``, ``--scale-mode``, ``--background-color``, ``--display-width``, ``--display-height``, ``-d/--dimension`` |
+  | Device Sync | ``--device-parameters``, ``--host`` |
+  | Transfer Modes | ``--upload``, ``--direct``, ``--serve``, ``--serve-port``, ``--serve-format`` |
+  | Face-Aware Crop | ``--detect-faces``, ``--metadata-only``, ``--crop-output``, ``--board``, ``--resolution``, ``--display-size-mm``, ``--face-margin``, ``--face-min-score``, ``--face-model-dir`` |
+endlegend
+
+@enduml

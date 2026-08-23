@@ -99,8 +99,12 @@ full option list, the JSON schema, and how `--board`/`--resolution`/`--display-s
 combine to pick the crop's target geometry.
 
 A complete flowchart of this CLI's entire option set and control flow (not just face-crop) is in
-[docs/diagrams/process-cli-flow.puml](../docs/diagrams/process-cli-flow.puml) (PlantUML - render with
-the PlantUML VS Code extension, `plantuml.jar`, or https://www.plantuml.com/plantuml).
+`../docs/diagrams/` as three PlantUML files - render with the PlantUML VS Code extension,
+`plantuml.jar`, or https://www.plantuml.com/plantuml:
+
+- [process-cli-options.puml](../docs/diagrams/process-cli-options.puml) - every CLI option, grouped by concern
+- [process-cli-main-flow.puml](../docs/diagrams/process-cli-main-flow.puml) - the main CLI control flow
+- [process-cli-image-flow.puml](../docs/diagrams/process-cli-image-flow.puml) - the per-image `processImageFile()` detail
 
 ### Image Server Mode
 

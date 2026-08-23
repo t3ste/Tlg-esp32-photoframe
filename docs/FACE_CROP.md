@@ -13,9 +13,11 @@ metadata file for original photos that haven't been rendered yet.
 This is about *where* faces are and *how big* they are - nothing about *who* they are. No face
 recognition/identification, no embeddings, no name/identity tracking of any kind.
 
-A complete flowchart of `process-cli`'s entire CLI - every option, not just the face-crop ones -
-is in [docs/diagrams/process-cli-flow.puml](diagrams/process-cli-flow.puml) (PlantUML; three
-diagrams in one file: an option legend, the main control flow, and the per-image
+A complete flowchart of `process-cli`'s entire CLI - every option, not just the face-crop ones - is
+in `docs/diagrams/` as three PlantUML files:
+[process-cli-options.puml](diagrams/process-cli-options.puml) (option legend),
+[process-cli-main-flow.puml](diagrams/process-cli-main-flow.puml) (main control flow), and
+[process-cli-image-flow.puml](diagrams/process-cli-image-flow.puml) (the per-image
 `processImageFile()` detail).
 
 ## Quick start
