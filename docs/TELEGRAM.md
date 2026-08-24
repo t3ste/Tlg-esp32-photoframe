@@ -30,6 +30,17 @@ firmware — no additional server required.
    normal album rotation instead of leaving the previous image up indefinitely — the frame always
    changes image on every rotation-triggering wake, same as the non-Telegram modes.
 
+**Large document uploads and the task watchdog**: a very large JPEG sent as a file/document (many
+megapixels) can take long enough to JPEG-decode that it trips the ESP-IDF task watchdog
+(`CONFIG_ESP_TASK_WDT_TIMEOUT_S`, currently 15s) — confirmed on real hardware for a ~4 MB,
+3072×4080 px document upload. This isn't fatal in this project's configuration
+(`CONFIG_ESP_TASK_WDT_PANIC` is off, so it only logs a warning and the decode finishes right after),
+but it is a real, reproducible risk if panic-on-timeout is ever enabled. Not fixed here — see the
+comment above `decode_jpg_buffer()` in `main/image_processor.c` for why (either unsubscribing the
+calling task from the watchdog for the duration of the decode, or raising the timeout further,
+would work, but each has its own trade-off worth weighing deliberately rather than doing by
+default).
+
 **Wake-up processing order** (fixed, so behavior is predictable across timer, button, and
 Telegram-triggered wakes):
 

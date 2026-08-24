@@ -1185,7 +1185,22 @@ static esp_err_t write_png_file(const char *filename, uint8_t *rgb_data, int wid
     return png_writer_close(&pw, ok);
 }
 
-// Decode JPG from buffer to RGB
+// Decode JPG from buffer to RGB.
+//
+// esp_jpeg_decode() below is one single blocking call into tjpgd (ROM) with
+// no yield points of its own - confirmed on real hardware to trip the task
+// watchdog (IDLE0 starved past CONFIG_ESP_TASK_WDT_TIMEOUT_S, currently 15s)
+// while decoding a large document upload (multi-megapixel JPEG, e.g. a
+// 3072x4080 photo sent as a Telegram "file" rather than a compressed
+// "photo"). Not fatal today - CONFIG_ESP_TASK_WDT_PANIC is off, so this
+// only logs a warning and the decode completes right after - but it is a
+// real, reproducible risk on any config/board where panic-on-timeout ends
+// up enabled. A real fix would need either unsubscribing the calling task
+// (rotation_timer_task et al.) from the watchdog for the duration of this
+// call, or raising CONFIG_ESP_TASK_WDT_TIMEOUT_S further - neither
+// implemented here since neither is free (the former risks masking a
+// genuine hang in this same call; the latter delays detecting an actually
+// wedged task).
 static esp_err_t decode_jpg_buffer(const uint8_t *jpg_data, size_t jpg_size, uint8_t **rgb_buffer,
                                    int *width, int *height)
 {
