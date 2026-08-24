@@ -1185,6 +1185,30 @@ static esp_err_t write_png_file(const char *filename, uint8_t *rgb_data, int wid
     return png_writer_close(&pw, ok);
 }
 
+// Writes a whole in-RAM RGB888 buffer to an EPDGZ file in one call - mirrors
+// write_png_file() above exactly, just through the epdgz_writer_t
+// primitives instead. Same quiet ESP_ERR_NO_MEM-on-OOM contract as
+// epdgz_writer_open() itself; image_processor_write_rgb_to_fmt() below is
+// the only caller and handles the PNG fallback.
+static esp_err_t write_epdgz_file(const char *filename, uint8_t *rgb_data, int width, int height)
+{
+    epdgz_writer_t ew;
+    esp_err_t err = epdgz_writer_open(&ew, filename, width, height);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    bool ok = true;
+    for (int y = 0; y < height; y++) {
+        if (epdgz_writer_row_sink(&ew, y, &rgb_data[(size_t) y * width * 3]) != ESP_OK) {
+            ok = false;
+            break;
+        }
+    }
+
+    return epdgz_writer_close(&ew, ok);
+}
+
 // Decode JPG from buffer to RGB.
 //
 // esp_jpeg_decode() below is one single blocking call into tjpgd (ROM) with
@@ -3758,6 +3782,35 @@ esp_err_t image_processor_write_rgb_to_png(const uint8_t *rgb_buffer, int width,
     return write_png_file(output_path, (uint8_t *) rgb_buffer, width, height);
 }
 
+esp_err_t image_processor_write_rgb_to_fmt(const uint8_t *rgb_buffer, int width, int height,
+                                           const char *output_path, image_format_t out_format,
+                                           image_format_t *out_actual_format)
+{
+    if (!rgb_buffer || !output_path || width <= 0 || height <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (out_actual_format) {
+        *out_actual_format = IMAGE_FORMAT_PNG;
+    }
+
+    if (out_format != IMAGE_FORMAT_EPD_GZ) {
+        return write_png_file(output_path, (uint8_t *) rgb_buffer, width, height);
+    }
+
+    esp_err_t err = write_epdgz_file(output_path, (uint8_t *) rgb_buffer, width, height);
+    if (err != ESP_ERR_NO_MEM) {
+        if (err == ESP_OK && out_actual_format) {
+            *out_actual_format = IMAGE_FORMAT_EPD_GZ;
+        }
+        return err;
+    }
+
+    ESP_LOGW(TAG, "Not enough memory for EPDGZ encoding - falling back to PNG");
+    char png_path[320];
+    with_png_extension(output_path, png_path, sizeof(png_path));
+    return write_png_file(png_path, (uint8_t *) rgb_buffer, width, height);
+}
+
 static esp_err_t read_file_into_buffer(const char *path, uint8_t **out_data, long *out_size)
 {
     FILE *fp = fopen(path, "rb");
@@ -3834,23 +3887,32 @@ static esp_err_t make_thumbnail_from_rgb(const uint8_t *src_rgb, int src_width, 
     return err;
 }
 
-esp_err_t image_processor_make_thumbnail(const char *source_png_path, int max_dimension,
+esp_err_t image_processor_make_thumbnail(const char *source_path, int max_dimension,
                                          const char *output_path)
 {
-    if (!source_png_path || !output_path || max_dimension <= 0) {
+    if (!source_path || !output_path || max_dimension <= 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
     uint8_t *file_buffer = NULL;
     long file_size = 0;
-    esp_err_t err = read_file_into_buffer(source_png_path, &file_buffer, &file_size);
+    esp_err_t err = read_file_into_buffer(source_path, &file_buffer, &file_size);
     if (err != ESP_OK) {
         return err;
     }
 
+    // Despite the name, the source isn't always PNG - a composed Telegram
+    // orientation pair can now be saved as EPDGZ too (telegram_image_format),
+    // so this dispatches on actual content the same way
+    // image_processor_compose_pair_to_rgb() does, rather than assuming PNG.
+    image_format_t format = image_processor_detect_format(source_path);
     uint8_t *src_rgb = NULL;
     int src_width = 0, src_height = 0;
-    err = decode_png_buffer(file_buffer, file_size, &src_rgb, &src_width, &src_height);
+    if (format == IMAGE_FORMAT_EPD_GZ) {
+        err = decode_epdgz_buffer(file_buffer, file_size, &src_rgb, &src_width, &src_height);
+    } else {
+        err = decode_png_buffer(file_buffer, file_size, &src_rgb, &src_width, &src_height);
+    }
     heap_caps_free(file_buffer);
     if (err != ESP_OK) {
         return err;

@@ -308,18 +308,32 @@ void image_processor_sanitize_ascii(const char *utf8, char *out, size_t out_len)
  * compositor) can persist a composed/captioned buffer without duplicating
  * libpng plumbing.
  */
+/**
+ * @brief Writes an already-processed RGB888 buffer to a PNG or EPDGZ file,
+ * with the same quiet OOM-fallback-to-PNG contract as
+ * image_processor_process_fmt()/image_processor_render_variant(): if EPDGZ's
+ * deflate state can't be allocated, the file is written as PNG instead,
+ * under output_path with its extension replaced by ".png" - out_actual_format
+ * reports which actually happened so the caller can correct any path it
+ * already committed to (e.g. a filename built before this call).
+ */
+esp_err_t image_processor_write_rgb_to_fmt(const uint8_t *rgb_buffer, int width, int height,
+                                           const char *output_path, image_format_t out_format,
+                                           image_format_t *out_actual_format);
+
 esp_err_t image_processor_write_rgb_to_png(const uint8_t *rgb_buffer, int width, int height,
                                            const char *output_path);
 
 /**
- * @brief Generates a small preview thumbnail from an already-processed PNG,
- * nearest-neighbor downsampled to fit within max_dimension on its longer
- * edge (aspect ratio preserved). Use for images with no un-processed
- * original available (e.g. a composed orientation-pair) - anything with an
- * original should use image_processor_make_thumbnail_from_original()
- * instead, so the preview reflects true colors, not the e-paper palette.
+ * @brief Generates a small preview thumbnail from an already-processed PNG
+ * or EPDGZ file (auto-detected by content), nearest-neighbor downsampled to
+ * fit within max_dimension on its longer edge (aspect ratio preserved). Use
+ * for images with no un-processed original available (e.g. a composed
+ * orientation-pair) - anything with an original should use
+ * image_processor_make_thumbnail_from_original() instead, so the preview
+ * reflects true colors, not the e-paper palette.
  */
-esp_err_t image_processor_make_thumbnail(const char *source_png_path, int max_dimension,
+esp_err_t image_processor_make_thumbnail(const char *source_path, int max_dimension,
                                          const char *output_path);
 
 /**

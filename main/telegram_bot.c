@@ -1337,10 +1337,10 @@ static bool wants_portrait_frame_now(void)
     return (rot == 90 || rot == 270);
 }
 
-// Composes two source images into a real PNG file under
-// TELEGRAM_DOWNLOAD_DIRECTORY (so the result becomes a normal persisted,
-// already-processed image - showable and available for storage-mode
-// rotation like any other) and returns its path.
+// Composes two source images into a real PNG or EPDGZ file (per
+// telegram_image_format) under TELEGRAM_DOWNLOAD_DIRECTORY (so the result
+// becomes a normal persisted, already-processed image - showable and
+// available for storage-mode rotation like any other) and returns its path.
 static esp_err_t compose_pair_and_save(const char *path_a, const char *caption_a,
                                        const char *path_b, const char *caption_b, char *out_path,
                                        size_t out_path_len)
@@ -1382,12 +1382,31 @@ static esp_err_t compose_pair_and_save(const char *path_a, const char *caption_a
                                      telegram_caption_invert_colors());
     }
 
-    if (make_unique_telegram_path("png", out_path, out_path_len) != ESP_OK) {
+    // Same telegram_image_format setting (Web UI: Settings -> Telegram ->
+    // "On-device image format") already used for a single Telegram photo's
+    // display conversion - one selectable format preference covering every
+    // Telegram-originated display file, paired or not.
+    bool want_epdgz =
+        strcmp(config_manager_get_telegram_image_format(), TELEGRAM_IMAGE_FORMAT_EPDGZ) == 0;
+    image_format_t requested_format = want_epdgz ? IMAGE_FORMAT_EPD_GZ : IMAGE_FORMAT_PNG;
+
+    if (make_unique_telegram_path(want_epdgz ? "epdgz" : "png", out_path, out_path_len) != ESP_OK) {
         heap_caps_free(result.rgb_data);
         return ESP_FAIL;
     }
-    err = image_processor_write_rgb_to_png(result.rgb_data, result.width, result.height, out_path);
+    image_format_t actual_format = requested_format;
+    err = image_processor_write_rgb_to_fmt(result.rgb_data, result.width, result.height, out_path,
+                                           requested_format, &actual_format);
     heap_caps_free(result.rgb_data);
+    if (err == ESP_OK && actual_format != requested_format) {
+        // Fell back to PNG (e.g. not enough memory for EPDGZ) and already
+        // wrote the file under a ".png"-extensioned path - match that here
+        // too, same as finalize_telegram_image()'s identical fallback.
+        char *ext = strrchr(out_path, '.');
+        if (ext) {
+            strcpy(ext, ".png");
+        }
+    }
     return err;
 }
 
