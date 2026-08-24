@@ -268,11 +268,16 @@ void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height
 
 /**
  * @brief Same as image_processor_draw_overlay_bar(), but reads an already
- * display-processed PNG file, draws the overlay bar, and re-writes it in
- * place (no re-dithering). No-op (returns ESP_OK) if lines is NULL/empty.
+ * display-processed PNG or EPDGZ file (auto-detected by content), draws the
+ * overlay bar, and re-writes it in place (no re-dithering, same format as the
+ * source - unless EPDGZ's deflate state can't be allocated, in which case
+ * `path`'s extension is rewritten to ".png" to match where it actually got
+ * written, mirroring image_processor_write_rgb_to_fmt()'s own contract).
+ * `path` must be a mutable buffer (not a string literal) for that reason.
+ * No-op (returns ESP_OK) if lines is NULL/empty.
  */
-esp_err_t image_processor_add_overlay_to_file(const char *png_path, const char *const *lines,
-                                              int line_count, bool invert_colors);
+esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lines, int line_count,
+                                              bool invert_colors);
 
 /**
  * @brief Greedy word-wraps `text` into up to `max_lines` lines (each written

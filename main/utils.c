@@ -614,6 +614,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_overlay_invert_colors(cJSON_IsTrue(item));
     }
+    item = cJSON_GetObjectItem(root, "overlay_epdgz_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_overlay_epdgz_enabled(cJSON_IsTrue(item));
+    }
     item = cJSON_GetObjectItem(root, "overlay_language");
     if (item && cJSON_IsString(item)) {
         config_manager_set_overlay_language(cJSON_GetStringValue(item));

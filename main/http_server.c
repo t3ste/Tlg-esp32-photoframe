@@ -1602,6 +1602,8 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddNumberToObject(root, "headlines_count", config_manager_get_headlines_count());
         cJSON_AddBoolToObject(root, "overlay_invert_colors",
                               config_manager_get_overlay_invert_colors());
+        cJSON_AddBoolToObject(root, "overlay_epdgz_enabled",
+                              config_manager_get_overlay_epdgz_enabled());
         cJSON_AddStringToObject(root, "overlay_language", config_manager_get_overlay_language());
         cJSON_AddNumberToObject(root, "headlines_wrap_lines", config_manager_get_headlines_wrap_lines());
         cJSON_AddBoolToObject(root, "caption_invert_colors_enabled",

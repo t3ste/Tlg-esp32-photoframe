@@ -59,8 +59,13 @@ const char *overlay_manager_apply(const char *source_path)
     }
 
     image_format_t format = image_processor_detect_format(source_path);
-    if (format != IMAGE_FORMAT_PNG || !image_processor_is_processed(source_path)) {
-        ESP_LOGI(TAG, "Skipping overlay for %s: not a processed PNG", source_path);
+    bool is_epdgz = (format == IMAGE_FORMAT_EPD_GZ);
+    if (is_epdgz && !config_manager_get_overlay_epdgz_enabled()) {
+        ESP_LOGI(TAG, "Skipping overlay for %s: EPDGZ overlay support is disabled", source_path);
+        return source_path;
+    }
+    if (!is_epdgz && (format != IMAGE_FORMAT_PNG || !image_processor_is_processed(source_path))) {
+        ESP_LOGI(TAG, "Skipping overlay for %s: not a processed PNG or EPDGZ", source_path);
         return source_path;
     }
 
@@ -135,17 +140,26 @@ const char *overlay_manager_apply(const char *source_path)
         return source_path;
     }
 
-    if (!copy_file(source_path, CURRENT_OVERLAY_PNG_PATH)) {
+    // Static, not a stack local: the returned pointer must stay valid after
+    // this function returns (its callers use it immediately afterward,
+    // single-threaded on the main task only, same assumption already used
+    // elsewhere in this codebase for a static scratch/persist buffer).
+    static char scratch_path[64];
+    strncpy(scratch_path, is_epdgz ? CURRENT_OVERLAY_EPDGZ_PATH : CURRENT_OVERLAY_PNG_PATH,
+            sizeof(scratch_path) - 1);
+    scratch_path[sizeof(scratch_path) - 1] = '\0';
+
+    if (!copy_file(source_path, scratch_path)) {
         return source_path;
     }
 
     bool invert_colors = config_manager_get_overlay_invert_colors();
-    esp_err_t err = image_processor_add_overlay_to_file(CURRENT_OVERLAY_PNG_PATH, lines, line_count,
-                                                         invert_colors);
+    esp_err_t err =
+        image_processor_add_overlay_to_file(scratch_path, lines, line_count, invert_colors);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to draw overlay onto scratch copy: %s", esp_err_to_name(err));
         return source_path;
     }
 
-    return CURRENT_OVERLAY_PNG_PATH;
+    return scratch_path;
 }

@@ -102,6 +102,7 @@ static char headlines_rss_url[HEADLINES_RSS_URL_MAX_LEN] = {0};
 static uint8_t headlines_count = HEADLINES_COUNT_DEFAULT;
 static uint8_t headlines_wrap_lines = HEADLINES_WRAP_LINES_DEFAULT;
 static bool overlay_invert_colors = false;
+static bool overlay_epdgz_enabled = false;
 static char overlay_language[OVERLAY_LANGUAGE_MAX_LEN] = OVERLAY_LANGUAGE_DEFAULT;
 static bool caption_invert_colors_enabled = false;
 static bool weather_multiline_enabled = false;
@@ -706,6 +707,10 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_OVERLAY_INVERT_COLORS_KEY, &stored_overlay_invert) ==
             ESP_OK) {
             overlay_invert_colors = (stored_overlay_invert != 0);
+        }
+        uint8_t stored_overlay_epdgz = 0;
+        if (nvs_get_u8(nvs_handle, NVS_OVERLAY_EPDGZ_ENABLED_KEY, &stored_overlay_epdgz) == ESP_OK) {
+            overlay_epdgz_enabled = (stored_overlay_epdgz != 0);
         }
         size_t overlay_lang_len = sizeof(overlay_language);
         if (nvs_get_str(nvs_handle, NVS_OVERLAY_LANGUAGE_KEY, overlay_language,
@@ -2181,6 +2186,23 @@ void config_manager_set_overlay_invert_colors(bool enabled)
 bool config_manager_get_overlay_invert_colors(void)
 {
     return overlay_invert_colors;
+}
+
+void config_manager_set_overlay_epdgz_enabled(bool enabled)
+{
+    overlay_epdgz_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_OVERLAY_EPDGZ_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+bool config_manager_get_overlay_epdgz_enabled(void)
+{
+    return overlay_epdgz_enabled;
 }
 
 void config_manager_set_overlay_language(const char *language)

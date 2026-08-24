@@ -300,6 +300,11 @@ int config_manager_get_headlines_wrap_lines(void);
 // Colors default to false (black bar, white text); swapped when true.
 void config_manager_set_overlay_invert_colors(bool enabled);
 bool config_manager_get_overlay_invert_colors(void);
+
+// Extends weather/headline overlays to already-rendered EPDGZ album images
+// (see NVS_OVERLAY_EPDGZ_ENABLED_KEY in config.h). Defaults to disabled.
+void config_manager_set_overlay_epdgz_enabled(bool enabled);
+bool config_manager_get_overlay_epdgz_enabled(void);
 // "en" (default) or "de" - anything else is coerced to the default.
 void config_manager_set_overlay_language(const char *language);
 const char *config_manager_get_overlay_language(void);

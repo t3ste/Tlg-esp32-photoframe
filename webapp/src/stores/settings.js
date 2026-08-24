@@ -93,6 +93,7 @@ export const useSettingsStore = defineStore("settings", () => {
     headlinesCount: 3,
     headlinesWrapLines: 1,
     overlayInvertColors: false,
+    overlayEpdgzEnabled: false,
     overlayLanguage: "en",
     captionInvertColorsEnabled: false,
     weatherMultilineEnabled: false,
@@ -260,6 +261,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.headlinesCount = data.headlines_count ?? 3;
       deviceSettings.value.headlinesWrapLines = data.headlines_wrap_lines ?? 1;
       deviceSettings.value.overlayInvertColors = data.overlay_invert_colors === true;
+      deviceSettings.value.overlayEpdgzEnabled = data.overlay_epdgz_enabled === true;
       deviceSettings.value.overlayLanguage = data.overlay_language || "en";
       deviceSettings.value.captionInvertColorsEnabled = data.caption_invert_colors_enabled === true;
       deviceSettings.value.weatherMultilineEnabled = data.weather_multiline_enabled === true;
@@ -362,6 +364,7 @@ export const useSettingsStore = defineStore("settings", () => {
       headlines_count: deviceSettings.value.headlinesCount,
       headlines_wrap_lines: deviceSettings.value.headlinesWrapLines,
       overlay_invert_colors: deviceSettings.value.overlayInvertColors,
+      overlay_epdgz_enabled: deviceSettings.value.overlayEpdgzEnabled,
       overlay_language: deviceSettings.value.overlayLanguage,
       caption_invert_colors_enabled: deviceSettings.value.captionInvertColorsEnabled,
       weather_multiline_enabled: deviceSettings.value.weatherMultilineEnabled,

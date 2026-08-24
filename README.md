@@ -57,6 +57,7 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - feat: native 3-day forecast weather overlay + RSS/Atom news headline overlay drawn on the display — no companion server or API keys needed
 - feat: selectable weather data source (Open-Meteo, wttr.in, or yr.no/MET Norway)
 - feat: overlay colors (black bar/white text, or inverted) and English/German condition wording, shared with Telegram caption styling
+- feat: opt-in overlay support for already-rendered EPDGZ Storage/Auto-Rotate album images (previously PNG-only) — decodes, draws, and re-encodes the one file being shown, off by default since it's an extra step per display
 
 **Web UI**:
 - feat: display history with a reset button (Settings → Auto Rotate) — random rotation cycles through every image once before repeating, persisted across reboots
@@ -338,7 +339,7 @@ Planned for upcoming work on this fork:
 - Update config backup/restore to cover the new settings and parameters added so far
 - Publish GitHub Releases for this fork (currently only buildable from source)
 - Adapt the OTA update mechanism, which still points at the upstream project's release feed
-- Display delta updates instead of a full refresh, where the panel/driver allows it
+- ~~Display delta updates instead of a full refresh~~ — investigated, not possible on the required `waveshare_photopainter_73` board (or any other color board this project targets): 6-color e-paper panels have no partial-refresh mode at the protocol or physical level. See [docs/OVERLAYS.md → Why there's no partial-refresh ("delta update") mode](docs/OVERLAYS.md#why-theres-no-partial-refresh-delta-update-mode) for the full explanation, including why the grayscale boards' IT8951 controller (which does support it) isn't pursued as a partial fix either.
 - Performance/resource-usage optimization — album scanning/management via lightweight index files (txt/JSON) instead of repeated directory walks, and a configurable wake-cycle time budget (e.g. "spend at most 20 seconds on network activity, then go back to sleep"), including capping how much of a wake cycle a burst of new Telegram messages can consume
 - Document the recommended course of action when a device's orientation is changed between landscape and portrait after the fact, since `process-cli`'s rendered Cover/Fit variants and face-crop metadata are generated for one specific target orientation and don't automatically adapt to a later change
 

@@ -1182,6 +1182,21 @@ async function performFactoryReset() {
             />
 
             <v-switch
+              v-model="settingsStore.deviceSettings.overlayEpdgzEnabled"
+              label="Also overlay pre-rendered EPDGZ images (Storage/Auto-Rotate)"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              Off by default. Storage/Auto-Rotate albums are typically already-rendered EPDGZ files
+              (not PNG), which the overlay otherwise skips entirely (no weather/headline fetch
+              either). Enabling this decodes/redraws/re-encodes that one file on every display - an
+              extra step not needed for anyone who doesn't use these overlays with Storage mode.
+              BMP images still aren't supported (no BMP decoder exists in the firmware).
+            </div>
+
+            <v-switch
               v-model="settingsStore.deviceSettings.weatherOverlayEnabled"
               label="Weather overlay"
               color="primary"

@@ -3760,17 +3760,68 @@ static void overlay_draw_trampoline(uint8_t *rgb_buffer, int width, int height, 
                                      a->invert_colors);
 }
 
-esp_err_t image_processor_add_overlay_to_file(const char *png_path, const char *const *lines,
-                                              int line_count, bool invert_colors)
+esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lines, int line_count,
+                                              bool invert_colors)
 {
     if (!lines || line_count <= 0) {
         return ESP_OK;
     }
-    if (!png_path) {
+    if (!path) {
         return ESP_ERR_INVALID_ARG;
     }
+
+    // Unlike apply_text_overlay_to_file() (PNG-only, used for captions -
+    // every existing caller already guarantees a PNG source), this dispatches
+    // on actual content so it also works on an already-rendered EPDGZ
+    // Storage/Auto-Rotate album image - see overlay_epdgz_enabled.
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        ESP_LOGE(TAG, "Failed to open %s for overlay", path);
+        return ESP_FAIL;
+    }
+    fseek(fp, 0, SEEK_END);
+    long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    uint8_t *file_buffer = (uint8_t *) heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
+    if (!file_buffer) {
+        fclose(fp);
+        return ESP_ERR_NO_MEM;
+    }
+    size_t read_bytes = fread(file_buffer, 1, file_size, fp);
+    fclose(fp);
+    if (read_bytes != (size_t) file_size) {
+        heap_caps_free(file_buffer);
+        return ESP_FAIL;
+    }
+
+    image_format_t format = image_processor_detect_format(path);
+    uint8_t *rgb_buffer = NULL;
+    int width = 0, height = 0;
+    esp_err_t err = (format == IMAGE_FORMAT_EPD_GZ)
+                        ? decode_epdgz_buffer(file_buffer, file_size, &rgb_buffer, &width, &height)
+                        : decode_png_buffer(file_buffer, file_size, &rgb_buffer, &width, &height);
+    heap_caps_free(file_buffer);
+    if (err != ESP_OK) {
+        return err;
+    }
+
     overlay_draw_arg_t arg = {.lines = lines, .line_count = line_count, .invert_colors = invert_colors};
-    return apply_text_overlay_to_file(png_path, overlay_draw_trampoline, &arg);
+    overlay_draw_trampoline(rgb_buffer, width, height, &arg);
+
+    image_format_t actual_format = format;
+    err = image_processor_write_rgb_to_fmt(rgb_buffer, width, height, path, format, &actual_format);
+    heap_caps_free(rgb_buffer);
+    if (err == ESP_OK && actual_format != format) {
+        // EPDGZ requested but fell back to PNG (deflate state OOM) - already
+        // written under a ".png"-extensioned path, same fallback correction
+        // telegram_bot.c's compose_pair_and_save()/finalize_telegram_image()
+        // apply for the identical contract.
+        char *ext = strrchr(path, '.');
+        if (ext) {
+            strcpy(ext, ".png");
+        }
+    }
+    return err;
 }
 
 esp_err_t image_processor_write_rgb_to_png(const uint8_t *rgb_buffer, int width, int height,

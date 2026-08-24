@@ -85,6 +85,10 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // Telegram display path and the error overlay; reusing it here risks a
 // same-cycle collision when the rotation's own source is CURRENT_PNG_PATH.
 #define CURRENT_OVERLAY_PNG_PATH FS_MOUNT_POINT "/.overlay.png"
+// Same idea, used when the source being overlaid is EPDGZ instead of PNG
+// (see NVS_OVERLAY_EPDGZ_ENABLED_KEY below) - a separate constant so the
+// scratch file's extension always matches its actual content.
+#define CURRENT_OVERLAY_EPDGZ_PATH FS_MOUNT_POINT "/.overlay.epdgz"
 
 // Display-history file (one shown image's full path per line) - lets random
 // rotation and the Telegram fallback rotation cycle through every image once
@@ -339,6 +343,18 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define NVS_OVERLAY_LANGUAGE_KEY "ovl_lang"
 #define OVERLAY_LANGUAGE_MAX_LEN 4
 #define OVERLAY_LANGUAGE_DEFAULT "en"
+// Extends the weather/headline overlay to already-rendered EPDGZ album
+// images too (Storage/Auto-Rotate's own on-disk display files, typically the
+// majority of what's actually on an SD card - see docs/FACE_CROP.md's
+// discussion of the same convention). Off by default: applying it means an
+// extra decode/redraw/re-encode round-trip per display, not needed for
+// anyone who doesn't use weather/headline overlays with Storage mode's own
+// pre-rendered EPDGZ files. PNG support needs no toggle (always on, as
+// before) - see docs/OVERLAYS.md. BMP is not supported either way - the
+// firmware has no BMP decoder (only a one-way PNG->BMP writer for boards
+// whose native display format is BMP), so there's no RGB buffer to draw an
+// overlay onto.
+#define NVS_OVERLAY_EPDGZ_ENABLED_KEY "ovl_epdgz_en"
 // Also apply the invert-colors setting above to Telegram photo captions
 // (both a plain caption and an orientation-paired composite's) - a separate
 // opt-in so turning on overlay color inversion doesn't silently change the

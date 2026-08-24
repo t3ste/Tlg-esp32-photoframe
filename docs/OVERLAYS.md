@@ -73,16 +73,52 @@ pairing](TELEGRAM.md#auto-rotate-orientation-pairing) in the Telegram docs.
 5. **Not available in URL rotation mode**: that mode streams pixels row-by-row straight to the
    panel and never produces a processed image file to draw an overlay onto (the same reason the
    error-overlay feature can't use it either). Storage and Telegram rotation modes are unaffected.
-6. **Only applies to processed PNG album images - not BMP or EPDGZ.** Storage-mode albums can
-   contain `.bmp` or `.epdgz` files too (nothing filters them out), but those formats are read
-   directly into the panel's display buffer without ever passing through a decodable RGB step -
-   there's no image data our own code can draw an overlay onto. The overlay (both the visual bar
-   **and** the weather/headline fetch behind it) is skipped entirely for those files, silently and
-   without an error - if weather/headlines seem to never be fetched at all even though everything
-   is configured correctly, check whether the images actually being shown are BMP/EPDGZ rather than
-   PNG (the device log shows "Skipping overlay for `<path>`: not a processed PNG" when this
-   happens). BMP support is planned but not yet implemented.
+6. **Applies to processed PNG album images always; EPDGZ optionally (opt-in); BMP never.**
+   Storage-mode albums are, per the SD-card convention this project otherwise assumes (see
+   [docs/FACE_CROP.md](FACE_CROP.md)), typically already-rendered **EPDGZ** files rather than PNG -
+   without the toggle below, those are skipped entirely (both the visual bar **and** the
+   weather/headline fetch behind it), silently and without an error. Enable **Settings → Weather +
+   Headline Overlays → "Also overlay pre-rendered EPDGZ images (Storage/Auto-Rotate)"** (off by
+   default) to cover them too: the file is decoded back to RGB, the overlay bar is drawn, and it's
+   re-encoded as EPDGZ (falling back to PNG if EPDGZ's ~260 KB of deflate state can't be allocated
+   at that moment) - an extra decode/redraw/re-encode round-trip on every display of that image,
+   which is why this isn't on by default. `.bmp` files remain entirely unsupported either way - the
+   firmware has no BMP *decoder* (only a one-way PNG→BMP writer, used for boards whose native
+   display format is BMP), so there's no RGB buffer for our own code to draw onto. If
+   weather/headlines seem to never be fetched at all even though everything looks configured
+   correctly, check whether the images actually being shown are BMP, or EPDGZ with this toggle off
+   (the device log shows "Skipping overlay for `<path>`: not a processed PNG or EPDGZ", or "...:
+   EPDGZ overlay support is disabled", when either applies).
 
+## Why there's no partial-refresh ("delta update") mode
+
+Investigated and **not implemented**: only a full-panel refresh is possible on every color board this
+project targets, `waveshare_photopainter_73` included, so a "redraw just the overlay bar" mode isn't
+buildable there at all.
+
+`components/epaper_driver_ed2208_gca/src/driver_ed2208_gca.c` (the Waveshare PhotoPainter's driver,
+and `epaper_driver_ed2208_nca` for the reTerminal E1002/E1004 - the same command family) exposes
+exactly one display primitive, `epaper_display(uint8_t *image)`, which always transmits the entire
+packed framebuffer (`DATA_START_TRANSMISSION`) followed by one `DISPLAY_REFRESH` covering the whole
+panel. There is no coordinate/rectangle parameter anywhere in this command set, and none of the
+2208-family commands sent during `send_init_sequence()`/`display_update_cycle()` correspond to a
+partial-window update. This isn't a driver oversight - it reflects a real limitation of 6-color
+("Spectra 6"/ACeP-style) e-paper technology itself: producing each of the 6 ink colors correctly
+requires multiple voltage-driven passes across the **entire** panel simultaneously, so there is no
+commercially available 6-color e-paper panel today with a genuine partial-refresh mode, independent
+of which controller or driver code is used.
+
+The grayscale boards (Seeed XIAO EE03, reTerminal E1003) use a different controller (IT8951,
+`components/epaper_driver_it8951`) that *does* define a windowed-update primitive
+(`it8951_display_area(x, y, w, h, mode)`, including a fast binary `IT8951_MODE_A2` mode) at the
+protocol level - IT8951 hardware genuinely supports partial updates for grayscale content. This
+driver only ever calls it with the full panel rectangle today, though, and actually wiring up a
+"redraw just the overlay bar's rows" mode (deciding the exact row range, handling A2 mode's
+ghosting/quality trade-off, threading it through `board_hal`'s per-board abstraction so PNG/EPDGZ
+boards keep their current full-refresh behavior) is a real, separate feature - not implemented here,
+since the required board (`waveshare_photopainter_73`) can't support it at all and a
+grayscale-boards-only partial implementation would leave every color board unaffected and add a
+second code path to maintain for a fraction of the supported hardware.
 
 
 ## Weather setup
