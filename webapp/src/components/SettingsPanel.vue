@@ -946,11 +946,27 @@ async function performFactoryReset() {
                     </div>
 
                     <v-switch
+                      v-model="settingsStore.deviceSettings.telegramFallbackRotationEnabled"
+                      label="Change display on a wake with no new photo"
+                      color="primary"
+                      class="mb-2"
+                      hide-details
+                    />
+                    <div class="text-caption text-medium-emphasis mb-4">
+                      On (default): a wake with no new Telegram image still falls back to normal
+                      album rotation, same as the other rotation modes. Off: the display only
+                      changes on a wake that actually receives a new Telegram photo - every other
+                      wake (timer/button) leaves the current image untouched. Also togglable via
+                      the "/fallback_rotation" bot command.
+                    </div>
+
+                    <v-switch
                       v-model="settingsStore.deviceSettings.telegramRotationNotifyEnabled"
                       label="Notify when a wake shows a non-Telegram image"
                       color="primary"
                       class="mb-2"
                       hide-details
+                      :disabled="!settingsStore.deviceSettings.telegramFallbackRotationEnabled"
                     />
                     <div class="text-caption text-medium-emphasis mb-4">
                       When a wake falls back to normal album rotation (no new Telegram image that

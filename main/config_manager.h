@@ -231,6 +231,12 @@ bool config_manager_get_variant_selection_enabled(void);
 void config_manager_set_telegram_rotation_notify_enabled(bool enabled);
 bool config_manager_get_telegram_rotation_notify_enabled(void);
 
+// Whether a Telegram-mode wake with no new image falls back to normal album
+// rotation. See NVS_TELEGRAM_FALLBACK_ROTATION_ENABLED_KEY in config.h.
+// Defaults to enabled (preserves existing behavior).
+void config_manager_set_telegram_fallback_rotation_enabled(bool enabled);
+bool config_manager_get_telegram_fallback_rotation_enabled(void);
+
 // Keep a copy of each Telegram photo exactly as received (pre-processing) in
 // TELEGRAM_ORIGINALS_DIRECTORY. Defaults to false. See
 // NVS_TELEGRAM_KEEP_ORIGINALS_KEY in config.h.

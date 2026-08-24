@@ -2107,6 +2107,7 @@ static void format_toggles(char *out, size_t out_len)
              "[%c] WiFi performance\n"
              "[%c] Rotation pairing (random mode only)\n"
              "[%c] Rotation notify (thumbnail on fallback display)\n"
+             "[%c] Fallback rotation (display change with no new photo)\n"
              "[%c] Keep originals (pre-processing copies)\n"
              "[%c] Weather overlay\n"
              "[%c] Headlines overlay\n"
@@ -2119,6 +2120,7 @@ static void format_toggles(char *out, size_t out_len)
              config_manager_get_wifi_performance_mode_enabled() ? 'x' : ' ',
              config_manager_get_rotation_pairing_enabled() ? 'x' : ' ',
              config_manager_get_telegram_rotation_notify_enabled() ? 'x' : ' ',
+             config_manager_get_telegram_fallback_rotation_enabled() ? 'x' : ' ',
              config_manager_get_telegram_keep_originals_enabled() ? 'x' : ' ',
              config_manager_get_weather_overlay_enabled() ? 'x' : ' ',
              config_manager_get_headlines_overlay_enabled() ? 'x' : ' ',
@@ -2409,6 +2411,22 @@ static void execute_command(const char *raw_text)
         } else {
             telegram_bot_send_message("[i] Usage: /rotation_notify on|off");
         }
+    } else if (strcmp(cmd, "/fallback_rotation") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_telegram_fallback_rotation_enabled(true);
+            telegram_bot_send_message(
+                "[x] Fallback rotation enabled\n"
+                "(a wake with no new Telegram image still changes the display, same as the "
+                "other rotation modes).");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_telegram_fallback_rotation_enabled(false);
+            telegram_bot_send_message(
+                "[ ] Fallback rotation disabled\n"
+                "(the display only changes on a wake that actually receives a new Telegram "
+                "image).");
+        } else {
+            telegram_bot_send_message("[i] Usage: /fallback_rotation on|off");
+        }
     } else if (strcmp(cmd, "/keep_originals") == 0) {
         if (args && strcasecmp(args, "on") == 0) {
             config_manager_set_telegram_keep_originals_enabled(true);
@@ -2555,6 +2573,9 @@ static void execute_command(const char *raw_text)
             "  during auto-rotation (random mode only, no effect in sequential mode)\n"
             "/rotation_notify on|off - Send a thumbnail when a wake displays an\n"
             "  image that didn't come from Telegram (i.e. fallback rotation)\n"
+            "/fallback_rotation on|off - Whether a wake with no new Telegram\n"
+            "  image still changes the display (on, default) or leaves it\n"
+            "  unchanged until a new photo actually arrives (off)\n"
             "/keep_originals on|off - Save each Telegram photo as received,\n"
             "  before e-paper processing, under Telegram/Originals\n"
             "/exif_date on|off - Show a photo's EXIF capture date as a caption\n"

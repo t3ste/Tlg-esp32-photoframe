@@ -79,6 +79,7 @@ export const useSettingsStore = defineStore("settings", () => {
     rotationPairingEnabled: false,
     variantSelectionEnabled: false,
     telegramRotationNotifyEnabled: false,
+    telegramFallbackRotationEnabled: true,
     telegramKeepOriginalsEnabled: false,
     telegramImageFormat: "epdgz",
     telegramDedupEnabled: false,
@@ -247,6 +248,8 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.variantSelectionEnabled = data.variant_selection_enabled === true;
       deviceSettings.value.telegramRotationNotifyEnabled =
         data.telegram_rotation_notify_enabled === true;
+      deviceSettings.value.telegramFallbackRotationEnabled =
+        data.telegram_fallback_rotation_enabled !== false;
       deviceSettings.value.telegramKeepOriginalsEnabled =
         data.telegram_keep_originals_enabled === true;
       deviceSettings.value.telegramImageFormat = data.telegram_image_format || "epdgz";
@@ -351,6 +354,7 @@ export const useSettingsStore = defineStore("settings", () => {
       rotation_pairing_enabled: deviceSettings.value.rotationPairingEnabled,
       variant_selection_enabled: deviceSettings.value.variantSelectionEnabled,
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,
+      telegram_fallback_rotation_enabled: deviceSettings.value.telegramFallbackRotationEnabled,
       telegram_keep_originals_enabled: deviceSettings.value.telegramKeepOriginalsEnabled,
       telegram_image_format: deviceSettings.value.telegramImageFormat,
       telegram_dedup_enabled: deviceSettings.value.telegramDedupEnabled,

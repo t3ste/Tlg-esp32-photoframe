@@ -562,6 +562,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_telegram_rotation_notify_enabled(cJSON_IsTrue(item));
     }
+    item = cJSON_GetObjectItem(root, "telegram_fallback_rotation_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_telegram_fallback_rotation_enabled(cJSON_IsTrue(item));
+    }
 
     // Keep a copy of each Telegram photo as received, before e-paper processing
     item = cJSON_GetObjectItem(root, "telegram_keep_originals_enabled");
@@ -1507,26 +1511,34 @@ esp_err_t trigger_image_rotation(void)
         if (poll_err == ESP_OK) {
             utils_set_last_fetch_error(NULL);
             if (poll_result == TELEGRAM_POLL_OK_NO_IMAGE) {
-                // No new Telegram image this cycle - still change the
-                // display, same as the non-Telegram rotation modes, by
-                // falling back to the active album(s) (this also covers the
-                // Telegram download folder, which shows up as a regular
-                // album - see telegram_bot_poll()).
-                ESP_LOGI(TAG, "No new Telegram image, falling back to local rotation");
+                if (!config_manager_get_telegram_fallback_rotation_enabled()) {
+                    // Fallback rotation disabled - this wake changes nothing;
+                    // the display only ever updates on a wake that actually
+                    // receives a new Telegram image.
+                    ESP_LOGI(TAG, "No new Telegram image, fallback rotation disabled - leaving "
+                                  "display unchanged");
+                } else {
+                    // No new Telegram image this cycle - still change the
+                    // display, same as the non-Telegram rotation modes, by
+                    // falling back to the active album(s) (this also covers the
+                    // Telegram download folder, which shows up as a regular
+                    // album - see telegram_bot_poll()).
+                    ESP_LOGI(TAG, "No new Telegram image, falling back to local rotation");
 
-                char prev_image[64];
-                const char *before = display_manager_get_current_image();
-                strncpy(prev_image, before ? before : "", sizeof(prev_image) - 1);
-                prev_image[sizeof(prev_image) - 1] = '\0';
+                    char prev_image[64];
+                    const char *before = display_manager_get_current_image();
+                    strncpy(prev_image, before ? before : "", sizeof(prev_image) - 1);
+                    prev_image[sizeof(prev_image) - 1] = '\0';
 
-                display_manager_rotate_from_storage();
+                    display_manager_rotate_from_storage();
 
-                // Only notify if the display actually changed - rotation is
-                // a no-op when there are no enabled albums / no images.
-                const char *after = display_manager_get_current_image();
-                if (config_manager_get_telegram_rotation_notify_enabled() && after &&
-                    after[0] != '\0' && strcmp(after, prev_image) != 0) {
-                    telegram_bot_notify_fallback_image(after);
+                    // Only notify if the display actually changed - rotation is
+                    // a no-op when there are no enabled albums / no images.
+                    const char *after = display_manager_get_current_image();
+                    if (config_manager_get_telegram_rotation_notify_enabled() && after &&
+                        after[0] != '\0' && strcmp(after, prev_image) != 0) {
+                        telegram_bot_notify_fallback_image(after);
+                    }
                 }
             }
             result = ESP_OK;

@@ -28,7 +28,8 @@ firmware — no additional server required.
 8. If a poll doesn't result in a new image being displayed (nothing new arrived, or everything in
    the batch was a command / still waiting for its pairing partner), the device falls back to
    normal album rotation instead of leaving the previous image up indefinitely — the frame always
-   changes image on every rotation-triggering wake, same as the non-Telegram modes.
+   changes image on every rotation-triggering wake, same as the non-Telegram modes. This fallback
+   itself is togglable - see [Fallback rotation](#fallback-rotation) below.
 
 **Large document uploads and the task watchdog**: a very large JPEG sent as a file/document (many
 megapixels) can take long enough to JPEG-decode that it trips the ESP-IDF task watchdog
@@ -97,6 +98,7 @@ rotation cursor too).
 | `/error_overlay on\|off` | Toggles an on-display warning banner after repeated WiFi failures |
 | `/wifi_perf on\|off` | Toggles the WiFi performance mode (see below) |
 | `/rotation_pairing on\|off` | Toggles auto-rotate orientation pairing (random mode only) |
+| `/fallback_rotation on\|off` | Whether a wake with no new Telegram image still changes the display (on, default) or leaves it unchanged (off) |
 | `/rotation_notify on\|off` | Sends a thumbnail when a wake displays an image via fallback rotation |
 | `/keep_originals on\|off` | Keeps a copy of each photo as received, before e-paper processing |
 | `/exif_date on\|off` | Shows a photo's EXIF capture date as caption when it has none (experimental) |
@@ -163,6 +165,7 @@ All default to preserving existing behavior for users who don't configure Telegr
 | Home Assistant integration | **off** | Master switch for all HA features (see below) |
 | OTA auto-check | on | Automatic update check on cold boot |
 | Auto-rotate orientation pairing | **off** | See [below](#auto-rotate-orientation-pairing) - random mode only |
+| Fallback rotation | on | See [below](#fallback-rotation) |
 | Fallback-rotation notification | **off** | See [below](#fallback-rotation-notification) |
 | Thumbnail gallery (Web UI) | **off** | Client-side toggle; large galleries slow down the device's HTTP server |
 | On-device image format | **EPDGZ** | See [below](#on-device-image-format) |
@@ -199,6 +202,26 @@ them instead of showing one letterboxed. The combined result is saved permanentl
 **Random rotation mode only** — sequential mode's deterministic image-order cursor is deliberately
 left untouched, so this setting has no effect there. The Web UI shows a warning if the toggle is
 on while Sequential mode is selected.
+
+### Fallback rotation
+
+**On by default** (preserves the original behavior): when a Telegram-mode wake polls and finds no
+new image (nothing new arrived, or everything in the batch was a command / still waiting for its
+pairing partner), the device falls back to normal album rotation instead of leaving the previous
+image up — the frame changes on every rotation-triggering wake, same as the non-Telegram rotation
+modes.
+
+Disable it (Web UI: Settings → Telegram → "Change display on a wake with no new photo", or
+`/fallback_rotation off`) to make the display change **only** on a wake that actually receives a new
+Telegram photo - every other wake (timer/button, whether or not it results in a poll finding
+nothing) leaves the current image completely untouched. Useful if you want the frame to act purely
+as a Telegram photo feed, with no interleaved album content, and don't mind it going a while without
+changing between photos.
+
+Independent of [Fallback-rotation notification](#fallback-rotation-notification) below, which only
+controls whether a fallback display change (while this setting is on) also gets announced to the
+chat - turning fallback rotation off makes that notification moot (it never fires with nothing to
+notify about), so the Web UI disables that toggle while this one is off.
 
 ### Fallback-rotation notification
 

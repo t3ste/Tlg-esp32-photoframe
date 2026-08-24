@@ -260,6 +260,15 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // the chat, so it stays visible what the frame is showing even without a
 // push. Opt-in, off by default.
 #define NVS_TELEGRAM_ROTATION_NOTIFY_KEY "tg_rot_notify"
+// Whether a Telegram-mode wake with no new image falls back to normal album
+// rotation at all (existing behavior, now toggleable). On (default,
+// preserves existing behavior): the display still changes every wake, same
+// as the non-Telegram rotation modes. Off: the display only ever changes on
+// a wake that actually receives a new Telegram image - every other wake
+// (timer/button) leaves the current image up unchanged. Independent of
+// NVS_TELEGRAM_ROTATION_NOTIFY_KEY above, which only controls whether a
+// fallback display change (when this is on) also gets announced to the chat.
+#define NVS_TELEGRAM_FALLBACK_ROTATION_ENABLED_KEY "tg_fallback_rot"
 
 // Keep a copy of each Telegram photo exactly as received (pre-processing) in
 // TELEGRAM_ORIGINALS_DIRECTORY. Opt-in, off by default.
