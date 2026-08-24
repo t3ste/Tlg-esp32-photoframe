@@ -1092,6 +1092,75 @@ static esp_err_t epdgz_writer_close(epdgz_writer_t *ew, bool success)
     return err;
 }
 
+// Decodes an in-RAM .epdgz buffer (gzip-compressed, 4-bit-per-pixel packed,
+// same framing epdgz_writer_row_sink() produces and GUI_ReadEPDGZ() already
+// reads straight to the panel) back into a fresh RGB888 buffer. Unlike a
+// JPG/PNG decode, this can only ever reconstruct the palette color each
+// pixel was already dithered to - lossy relative to the true original, but
+// exact relative to what's actually on disk, which is all
+// image_processor_compose_pair_to_rgb() needs to recombine two already-
+// rendered Telegram photos. Dimensions are always the panel's own
+// resolution (BOARD_HAL_DISPLAY_WIDTH/HEIGHT) - .epdgz never stores its own,
+// the same assumption GUI_ReadEPDGZ() makes.
+static esp_err_t decode_epdgz_buffer(const uint8_t *data, size_t size, uint8_t **rgb_buffer,
+                                     int *width, int *height)
+{
+    int w = BOARD_HAL_DISPLAY_WIDTH;
+    int h = BOARD_HAL_DISPLAY_HEIGHT;
+    size_t packed_size = ((size_t) w * h + 1) / 2;
+
+    uint8_t *packed = (uint8_t *) heap_caps_malloc(packed_size, MALLOC_CAP_SPIRAM);
+    if (!packed) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    z_stream strm = {0};
+    strm.next_in = (Bytef *) data;
+    strm.avail_in = (uInt) size;
+    strm.next_out = packed;
+    strm.avail_out = (uInt) packed_size;
+
+    if (inflateInit2(&strm, 16 + MAX_WBITS) != Z_OK) {
+        heap_caps_free(packed);
+        return ESP_FAIL;
+    }
+    int ret = inflate(&strm, Z_FINISH);
+    inflateEnd(&strm);
+    if (ret != Z_STREAM_END && ret != Z_OK) {
+        ESP_LOGE(TAG, "EPDGZ decompression failed: %d", ret);
+        heap_caps_free(packed);
+        return ESP_FAIL;
+    }
+
+    uint8_t *rgb = (uint8_t *) heap_caps_malloc((size_t) w * h * 3, MALLOC_CAP_SPIRAM);
+    if (!rgb) {
+        heap_caps_free(packed);
+        return ESP_ERR_NO_MEM;
+    }
+
+    void (*index_to_rgb)(UBYTE, uint8_t *, uint8_t *, uint8_t *) =
+        board_is_grayscale() ? GUI_Gray16ToRGB : GUI_Spectra6ToRGB;
+
+    size_t byte_idx = 0;
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x += 2) {
+            uint8_t byte = packed[byte_idx++];
+            uint8_t *px1 = &rgb[((size_t) y * w + x) * 3];
+            index_to_rgb((byte >> 4) & 0x0F, &px1[0], &px1[1], &px1[2]);
+            if (x + 1 < w) {
+                uint8_t *px2 = &rgb[((size_t) y * w + x + 1) * 3];
+                index_to_rgb(byte & 0x0F, &px2[0], &px2[1], &px2[2]);
+            }
+        }
+    }
+
+    heap_caps_free(packed);
+    *rgb_buffer = rgb;
+    *width = w;
+    *height = h;
+    return ESP_OK;
+}
+
 // Writes a whole in-RAM RGB888 buffer to a PNG file in one call, for callers
 // that already have a complete buffer (Telegram pairing/thumbnail/caption
 // helpers) rather than a row-by-row source - built on the same png_writer_t
@@ -3153,6 +3222,8 @@ esp_err_t image_processor_compose_pair_to_rgb(const uint8_t *data_a, size_t size
         err = decode_jpg_buffer(data_a, size_a, &rgb_a, &wa, &ha);
     } else if (format_a == IMAGE_FORMAT_PNG) {
         err = decode_png_buffer(data_a, size_a, &rgb_a, &wa, &ha);
+    } else if (format_a == IMAGE_FORMAT_EPD_GZ) {
+        err = decode_epdgz_buffer(data_a, size_a, &rgb_a, &wa, &ha);
     } else {
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -3164,6 +3235,8 @@ esp_err_t image_processor_compose_pair_to_rgb(const uint8_t *data_a, size_t size
         err = decode_jpg_buffer(data_b, size_b, &rgb_b, &wb, &hb);
     } else if (format_b == IMAGE_FORMAT_PNG) {
         err = decode_png_buffer(data_b, size_b, &rgb_b, &wb, &hb);
+    } else if (format_b == IMAGE_FORMAT_EPD_GZ) {
+        err = decode_epdgz_buffer(data_b, size_b, &rgb_b, &wb, &hb);
     } else {
         heap_caps_free(rgb_a);
         return ESP_ERR_NOT_SUPPORTED;

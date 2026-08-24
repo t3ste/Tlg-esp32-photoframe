@@ -205,6 +205,11 @@ esp_err_t image_processor_peek_dimensions(const uint8_t *data, size_t size, imag
  * portrait shots on a landscape frame) into one image instead of ever
  * displaying one alone.
  *
+ * format_a/format_b each accept IMAGE_FORMAT_JPG, IMAGE_FORMAT_PNG, or
+ * IMAGE_FORMAT_EPD_GZ (any other format returns ESP_ERR_NOT_SUPPORTED) - an
+ * EPDGZ source decodes back to whichever palette color each pixel was
+ * already dithered to, since that's all the format itself preserves.
+ *
  * @param stack_vertically false = side-by-side (for a landscape-mounted
  * frame receiving portrait photos), true = stacked top/bottom (for a
  * portrait-mounted frame receiving landscape photos).

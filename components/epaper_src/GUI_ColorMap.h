@@ -57,4 +57,39 @@ static inline UBYTE GUI_RGBToGray16(uint8_t r, uint8_t g, uint8_t b)
     return (UBYTE) ((y * 15u + 127u) / 255u);
 }
 
+/**
+ * @brief Reconstruct an RGB pixel from a Spectra 6-color palette index.
+ *
+ * Exact inverse of GUI_RGBToSpectra6() - lets a caller decode an already
+ * palette-indexed source (e.g. an .epdgz file) back into RGB888. Index 4 is
+ * never produced by GUI_RGBToSpectra6() (unused on this 6-color panel); it
+ * maps to white here too, matching that function's own unknown-color
+ * fallback.
+ */
+static inline void GUI_Spectra6ToRGB(UBYTE index, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    switch (index) {
+        case 0: *r = 0; *g = 0; *b = 0; break;      // Black
+        case 2: *r = 255; *g = 255; *b = 0; break;  // Yellow
+        case 3: *r = 255; *g = 0; *b = 0; break;    // Red
+        case 5: *r = 0; *g = 0; *b = 255; break;    // Blue
+        case 6: *r = 0; *g = 255; *b = 0; break;    // Green
+        default: *r = 255; *g = 255; *b = 255; break;  // White (1, and unused 4)
+    }
+}
+
+/**
+ * @brief Reconstruct a neutral-gray RGB pixel from a GC16 gray level.
+ *
+ * Exact inverse of GUI_RGBToGray16() - reproduces the same 16-level ramp
+ * (value = round(level * 255 / 15)) the converter/dither pipeline targets.
+ */
+static inline void GUI_Gray16ToRGB(UBYTE index, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    uint8_t y = (uint8_t) ((index * 255u + 7u) / 15u);
+    *r = y;
+    *g = y;
+    *b = y;
+}
+
 #endif
