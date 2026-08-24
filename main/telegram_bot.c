@@ -287,6 +287,34 @@ static void build_api_url(const char *method, char *out, size_t out_len)
     snprintf(out, out_len, TELEGRAM_API_BASE_FMT, config_manager_get_telegram_bot_token(), method);
 }
 
+// Fixed-size (no growth/malloc - Telegram's JSON error bodies are always
+// small) response-body capture for the two API call sites below, so a
+// failed call can log Telegram's own {"description": "..."} instead of just
+// a bare HTTP status - the previous blind "status=400" gave no way to tell
+// an expired file_id apart from a stale reply_to_message_id or anything else
+// Telegram might reject the request for.
+#define TELEGRAM_ERROR_BODY_CAP 256
+typedef struct {
+    char buf[TELEGRAM_ERROR_BODY_CAP];
+    size_t len;
+} telegram_body_capture_t;
+
+static esp_err_t telegram_body_capture_handler(esp_http_client_event_t *evt)
+{
+    if (evt->event_id != HTTP_EVENT_ON_DATA) {
+        return ESP_OK;
+    }
+    telegram_body_capture_t *ctx = (telegram_body_capture_t *) evt->user_data;
+    size_t space = sizeof(ctx->buf) - 1 - ctx->len;
+    size_t take = (size_t) evt->data_len < space ? (size_t) evt->data_len : space;
+    if (take > 0) {
+        memcpy(ctx->buf + ctx->len, evt->data, take);
+        ctx->len += take;
+        ctx->buf[ctx->len] = '\0';
+    }
+    return ESP_OK;
+}
+
 // POSTs a JSON body to a Telegram API method with retry on transient failure.
 // Takes ownership of `body` (always deletes it).
 static esp_err_t telegram_api_post(const char *method, cJSON *body)
@@ -308,11 +336,14 @@ static esp_err_t telegram_api_post(const char *method, cJSON *body)
             vTaskDelay(pdMS_TO_TICKS(TELEGRAM_HTTP_RETRY_DELAY_MS));
         }
 
+        telegram_body_capture_t body_ctx = {0};
         esp_http_client_config_t config = {
             .url = url,
             .method = HTTP_METHOD_POST,
             .timeout_ms = TELEGRAM_HTTP_TIMEOUT_MS,
             .crt_bundle_attach = esp_crt_bundle_attach,
+            .event_handler = telegram_body_capture_handler,
+            .user_data = &body_ctx,
         };
         esp_http_client_handle_t client = esp_http_client_init(&config);
         if (!client) {
@@ -327,7 +358,8 @@ static esp_err_t telegram_api_post(const char *method, cJSON *body)
         esp_http_client_cleanup(client);
 
         if (err != ESP_OK || status != 200) {
-            ESP_LOGW(TAG, "%s failed (err=%s, status=%d)", method, esp_err_to_name(err), status);
+            ESP_LOGW(TAG, "%s failed (err=%s, status=%d): %s", method, esp_err_to_name(err), status,
+                     body_ctx.len > 0 ? body_ctx.buf : "(no response body)");
             // A 4xx is Telegram rejecting the request itself (bad/expired
             // file_id, malformed body, etc.) - identical on every retry, so
             // retrying only wastes time/battery. Retry only genuine
@@ -1221,11 +1253,14 @@ static esp_err_t telegram_bot_send_photo_file(const char *file_path, const char 
             vTaskDelay(pdMS_TO_TICKS(TELEGRAM_HTTP_RETRY_DELAY_MS));
         }
 
+        telegram_body_capture_t body_ctx = {0};
         esp_http_client_config_t config = {
             .url = url,
             .method = HTTP_METHOD_POST,
             .timeout_ms = TELEGRAM_HTTP_TIMEOUT_MS,
             .crt_bundle_attach = esp_crt_bundle_attach,
+            .event_handler = telegram_body_capture_handler,
+            .user_data = &body_ctx,
         };
         esp_http_client_handle_t client = esp_http_client_init(&config);
         if (!client) {
@@ -1240,8 +1275,8 @@ static esp_err_t telegram_bot_send_photo_file(const char *file_path, const char 
         esp_http_client_cleanup(client);
 
         if (err != ESP_OK || status != 200) {
-            ESP_LOGW(TAG, "sendPhoto upload failed (err=%s, status=%d)", esp_err_to_name(err),
-                     status);
+            ESP_LOGW(TAG, "sendPhoto upload failed (err=%s, status=%d): %s", esp_err_to_name(err),
+                     status, body_ctx.len > 0 ? body_ctx.buf : "(no response body)");
             // See telegram_api_post()'s identical check - a 4xx is Telegram
             // rejecting the request itself, not a transient failure, so
             // retrying is pointless.
