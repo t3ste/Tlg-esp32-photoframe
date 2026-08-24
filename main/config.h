@@ -203,6 +203,17 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define NVS_TELEGRAM_PAIRING_KEY "tg_pairing"
 #define NVS_TELEGRAM_PENDING_LIST_KEY "tg_pend_list"
 #define TELEGRAM_MAX_PENDING_IMAGES 6
+// Duplicate detection: skip re-downloading/re-displaying a Telegram photo or
+// document whose content the device has already received - compared via
+// Telegram's own "file_unique_id" (stable for identical file content across
+// re-sends/forwards, unlike "file_id" which can change), so no local hashing
+// of downloaded bytes is needed. Opt-in, off by default; only the last
+// TELEGRAM_DEDUP_MAX_ENTRIES ids are remembered (oldest evicted first),
+// persisted across deep sleep the same way the pending-pair list is.
+#define NVS_TELEGRAM_DEDUP_ENABLED_KEY "tg_dedup_en"
+#define NVS_TELEGRAM_SEEN_IDS_KEY "tg_seen_ids"
+#define TELEGRAM_DEDUP_MAX_ENTRIES 30
+#define TELEGRAM_UNIQUE_ID_MAX_LEN 40
 #define NVS_TELEGRAM_LOW_BATT_WARNED_KEY "tg_low_batt"
 // Wake-up status ping (SSID/IP/battery/wake reason/rotation schedule) sent to
 // Telegram every poll, even with no new updates - opt-in, off by default.

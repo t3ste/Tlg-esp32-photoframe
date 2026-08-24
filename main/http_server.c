@@ -1587,6 +1587,8 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_telegram_keep_originals_enabled());
         cJSON_AddStringToObject(root, "telegram_image_format",
                                 config_manager_get_telegram_image_format());
+        cJSON_AddBoolToObject(root, "telegram_dedup_enabled",
+                              config_manager_get_telegram_dedup_enabled());
         cJSON_AddBoolToObject(root, "weather_overlay_enabled",
                               config_manager_get_weather_overlay_enabled());
         cJSON_AddStringToObject(root, "weather_location_name",

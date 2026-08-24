@@ -166,6 +166,7 @@ All default to preserving existing behavior for users who don't configure Telegr
 | Fallback-rotation notification | **off** | See [below](#fallback-rotation-notification) |
 | Thumbnail gallery (Web UI) | **off** | Client-side toggle; large galleries slow down the device's HTTP server |
 | On-device image format | **EPDGZ** | See [below](#on-device-image-format) |
+| Duplicate detection | **off** | See [below](#duplicate-detection) |
 
 ### WiFi performance mode
 
@@ -224,6 +225,34 @@ Which format the device itself produces when converting an incoming Telegram pho
   needs a full decode plus a fresh nearest-palette lookup per pixel every time). Smaller file, faster
   display, same as [process-cli](../process-cli/README.md)'s own recommended default.
 - **PNG** — kept for compatibility/inspection (e.g. opening the file directly on a computer).
+
+This same setting also governs a **composed orientation pair** (see
+[Multi-image orientation pairing](#multi-image-orientation-pairing) and
+[Auto-rotate orientation pairing](#auto-rotate-orientation-pairing) above) — one format preference
+covers every Telegram-originated display file, paired or not. If EPDGZ's ~260 KB of deflate state
+can't be allocated at that moment, the write quietly falls back to PNG for that one file, same as
+everywhere else this format choice applies.
+
+### Duplicate detection
+
+Off by default. When enabled, the device checks each incoming photo or file against Telegram's own
+**`file_unique_id`** — a content-based identifier Telegram assigns that stays the same for identical
+file content across re-sends and forwards, unlike `file_id` (which can vary even for the same
+content). This is checked *before* downloading anything, so a detected duplicate costs no bandwidth
+or processing time — just a short reply ("Duplicate photo/file - already received before, skipped")
+instead of the usual "Saved" confirmation.
+
+The device remembers the last 30 received items (oldest dropped first), persisted across deep sleep.
+No image hashing is involved — the identifier comes from Telegram's own API response, so this adds
+no meaningful CPU or memory cost. A "photo" message's identity is taken from its largest available
+size (each resolution Telegram offers is technically a distinct file with its own id, so the largest
+is used as a stand-in for "this photo" — the same convention most Telegram bots use for this); a
+document/file upload has just one id of its own.
+
+This only catches an *exact* re-send/forward of the same underlying file — cropping, re-compressing,
+or re-exporting a photo elsewhere before sending it again produces a new, different
+`file_unique_id`, so it won't be caught (nor should it be, since it's genuinely different file
+content).
 
 If EPDGZ encoding can't get the ~260 KB of memory it needs at that moment, the device falls back to
 PNG for that photo automatically (logged as a warning) — this is a graceful degradation, not a

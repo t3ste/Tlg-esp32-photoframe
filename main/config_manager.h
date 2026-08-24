@@ -243,6 +243,20 @@ bool config_manager_get_telegram_keep_originals_enabled(void);
 void config_manager_set_telegram_image_format(const char *format);
 const char *config_manager_get_telegram_image_format(void);
 
+// Duplicate detection: skip re-downloading/re-displaying a Telegram photo or
+// document whose "file_unique_id" was already seen. See
+// NVS_TELEGRAM_DEDUP_ENABLED_KEY in config.h. Defaults to disabled.
+void config_manager_set_telegram_dedup_enabled(bool enabled);
+bool config_manager_get_telegram_dedup_enabled(void);
+
+// Returns true if `unique_id` is already in the remembered FIFO (see
+// TELEGRAM_DEDUP_MAX_ENTRIES in config.h) - independent of whether
+// duplicate detection is currently enabled, so callers decide that.
+bool config_manager_telegram_has_seen_unique_id(const char *unique_id);
+// Records `unique_id` as seen, evicting the oldest entry if the FIFO is
+// full, and persists the updated list to NVS. No-op if already recorded.
+void config_manager_telegram_mark_seen_unique_id(const char *unique_id);
+
 // Weather + headline overlays: composited on-device, no companion server
 // needed. Both default to false. See NVS_WEATHER_*/NVS_HEADLINES_* in
 // config.h.

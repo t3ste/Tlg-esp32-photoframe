@@ -81,6 +81,7 @@ export const useSettingsStore = defineStore("settings", () => {
     telegramRotationNotifyEnabled: false,
     telegramKeepOriginalsEnabled: false,
     telegramImageFormat: "epdgz",
+    telegramDedupEnabled: false,
     // Weather + headline overlays (on-device, no companion server needed)
     weatherOverlayEnabled: false,
     weatherLocationName: "",
@@ -248,6 +249,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.telegramKeepOriginalsEnabled =
         data.telegram_keep_originals_enabled === true;
       deviceSettings.value.telegramImageFormat = data.telegram_image_format || "epdgz";
+      deviceSettings.value.telegramDedupEnabled = data.telegram_dedup_enabled === true;
       deviceSettings.value.weatherOverlayEnabled = data.weather_overlay_enabled === true;
       deviceSettings.value.weatherLocationName = data.weather_location_name || "";
       deviceSettings.value.weatherLat = data.weather_lat || "";
@@ -349,6 +351,7 @@ export const useSettingsStore = defineStore("settings", () => {
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,
       telegram_keep_originals_enabled: deviceSettings.value.telegramKeepOriginalsEnabled,
       telegram_image_format: deviceSettings.value.telegramImageFormat,
+      telegram_dedup_enabled: deviceSettings.value.telegramDedupEnabled,
       weather_overlay_enabled: deviceSettings.value.weatherOverlayEnabled,
       weather_location_name: deviceSettings.value.weatherLocationName,
       weather_lat: deviceSettings.value.weatherLat,

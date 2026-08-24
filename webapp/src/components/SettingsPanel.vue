@@ -992,6 +992,20 @@ async function performFactoryReset() {
                     </div>
 
                     <v-switch
+                      v-model="settingsStore.deviceSettings.telegramDedupEnabled"
+                      label="Skip duplicate photos/files"
+                      color="primary"
+                      class="mb-2"
+                      hide-details
+                    />
+                    <div class="text-caption text-medium-emphasis mb-4">
+                      Compares Telegram's own content-based file identifier before downloading, so
+                      the same photo or file resent/forwarded again is skipped instead of downloaded
+                      and displayed a second time. Remembers the last 30 received items across deep
+                      sleep; a skipped duplicate gets a short reply instead of an error.
+                    </div>
+
+                    <v-switch
                       v-model="settingsStore.deviceSettings.showExifDatetimeEnabled"
                       label="Show capture date as caption when a photo has none"
                       color="primary"

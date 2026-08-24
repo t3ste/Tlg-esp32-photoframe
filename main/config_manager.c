@@ -69,6 +69,10 @@ typedef struct {
 static telegram_pending_image_t telegram_pending_images[TELEGRAM_MAX_PENDING_IMAGES];
 static int telegram_pending_image_count = 0;
 
+static bool telegram_dedup_enabled = false;
+static char telegram_seen_unique_ids[TELEGRAM_DEDUP_MAX_ENTRIES][TELEGRAM_UNIQUE_ID_MAX_LEN];
+static int telegram_seen_id_count = 0;
+
 // Home Assistant
 static bool ha_enabled = false;
 
@@ -250,6 +254,61 @@ static void telegram_pending_load_from_joined(const char *joined)
             break;
         }
         p = rec_end + 1;
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Telegram duplicate-detection: a small FIFO of recently seen
+// "file_unique_id" values. Newline-joined NVS encoding, like the cron rules
+// above - unique ids are plain alphanumeric (Telegram's own format), so no
+// separator collision is possible.
+// ----------------------------------------------------------------------------
+
+static void telegram_seen_ids_persist(void)
+{
+    static char joined[TELEGRAM_DEDUP_MAX_ENTRIES * (TELEGRAM_UNIQUE_ID_MAX_LEN + 1)];
+    size_t off = 0;
+    joined[0] = '\0';
+    for (int i = 0; i < telegram_seen_id_count; i++) {
+        int n = snprintf(joined + off, sizeof(joined) - off, "%s%s", i ? "\n" : "",
+                         telegram_seen_unique_ids[i]);
+        if (n < 0 || (size_t) n >= sizeof(joined) - off) {
+            break;
+        }
+        off += (size_t) n;
+    }
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (telegram_seen_id_count > 0) {
+            nvs_set_str(nvs_handle, NVS_TELEGRAM_SEEN_IDS_KEY, joined);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_TELEGRAM_SEEN_IDS_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+static void telegram_seen_ids_load_from_joined(const char *joined)
+{
+    telegram_seen_id_count = 0;
+    if (!joined) {
+        return;
+    }
+    const char *p = joined;
+    while (*p != '\0' && telegram_seen_id_count < TELEGRAM_DEDUP_MAX_ENTRIES) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t) (nl - p) : strlen(p);
+        if (len > 0 && len < TELEGRAM_UNIQUE_ID_MAX_LEN) {
+            memcpy(telegram_seen_unique_ids[telegram_seen_id_count], p, len);
+            telegram_seen_unique_ids[telegram_seen_id_count][len] = '\0';
+            telegram_seen_id_count++;
+        }
+        if (!nl) {
+            break;
+        }
+        p = nl + 1;
     }
 }
 
@@ -582,6 +641,11 @@ esp_err_t config_manager_init(void)
             telegram_keep_originals_enabled = (stored_keep_originals != 0);
         }
 
+        uint8_t stored_dedup = 0;
+        if (nvs_get_u8(nvs_handle, NVS_TELEGRAM_DEDUP_ENABLED_KEY, &stored_dedup) == ESP_OK) {
+            telegram_dedup_enabled = (stored_dedup != 0);
+        }
+
         char stored_image_format[TELEGRAM_IMAGE_FORMAT_MAX_LEN] = {0};
         size_t telegram_image_format_len = sizeof(stored_image_format);
         if (nvs_get_str(nvs_handle, NVS_TELEGRAM_IMAGE_FORMAT_KEY, stored_image_format,
@@ -673,6 +737,18 @@ esp_err_t config_manager_init(void)
                 telegram_pending_load_from_joined(pending_buf);
                 ESP_LOGI(TAG, "Loaded %d pending Telegram pair image(s) from NVS",
                          telegram_pending_image_count);
+            }
+        }
+
+        {
+            static char seen_ids_buf[TELEGRAM_DEDUP_MAX_ENTRIES * (TELEGRAM_UNIQUE_ID_MAX_LEN + 1)];
+            seen_ids_buf[0] = '\0';
+            size_t seen_ids_len = sizeof(seen_ids_buf);
+            if (nvs_get_str(nvs_handle, NVS_TELEGRAM_SEEN_IDS_KEY, seen_ids_buf, &seen_ids_len) ==
+                ESP_OK) {
+                telegram_seen_ids_load_from_joined(seen_ids_buf);
+                ESP_LOGI(TAG, "Loaded %d seen Telegram file_unique_id(s) from NVS",
+                         telegram_seen_id_count);
             }
         }
 
@@ -1783,6 +1859,66 @@ void config_manager_set_telegram_image_format(const char *format)
 const char *config_manager_get_telegram_image_format(void)
 {
     return telegram_image_format;
+}
+
+void config_manager_set_telegram_dedup_enabled(bool enabled)
+{
+    telegram_dedup_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_TELEGRAM_DEDUP_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Telegram duplicate detection %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_telegram_dedup_enabled(void)
+{
+    return telegram_dedup_enabled;
+}
+
+bool config_manager_telegram_has_seen_unique_id(const char *unique_id)
+{
+    if (!unique_id || unique_id[0] == '\0') {
+        return false;
+    }
+    for (int i = 0; i < telegram_seen_id_count; i++) {
+        if (strcmp(telegram_seen_unique_ids[i], unique_id) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void config_manager_telegram_mark_seen_unique_id(const char *unique_id)
+{
+    if (!unique_id || unique_id[0] == '\0' ||
+        strlen(unique_id) >= TELEGRAM_UNIQUE_ID_MAX_LEN) {
+        return;
+    }
+    if (config_manager_telegram_has_seen_unique_id(unique_id)) {
+        return;
+    }
+
+    if (telegram_seen_id_count >= TELEGRAM_DEDUP_MAX_ENTRIES) {
+        // FIFO: drop the oldest to make room for the newest.
+        for (int i = 1; i < telegram_seen_id_count; i++) {
+            strncpy(telegram_seen_unique_ids[i - 1], telegram_seen_unique_ids[i],
+                    TELEGRAM_UNIQUE_ID_MAX_LEN - 1);
+            telegram_seen_unique_ids[i - 1][TELEGRAM_UNIQUE_ID_MAX_LEN - 1] = '\0';
+        }
+        telegram_seen_id_count--;
+    }
+
+    strncpy(telegram_seen_unique_ids[telegram_seen_id_count], unique_id,
+            TELEGRAM_UNIQUE_ID_MAX_LEN - 1);
+    telegram_seen_unique_ids[telegram_seen_id_count][TELEGRAM_UNIQUE_ID_MAX_LEN - 1] = '\0';
+    telegram_seen_id_count++;
+
+    telegram_seen_ids_persist();
 }
 
 void config_manager_set_weather_overlay_enabled(bool enabled)

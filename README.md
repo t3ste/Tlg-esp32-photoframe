@@ -37,8 +37,11 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - feat: experimental EXIF capture-date fallback caption when a received photo has no caption of its own
 - feat: low-battery Telegram warning (below 20%, debounced per discharge cycle)
 - feat: reports the actually-used weather source in `/status` (the configured provider and the one that last actually succeeded can differ)
+- feat: opt-in duplicate detection via Telegram's own content-based `file_unique_id` — a re-sent/forwarded photo or file is skipped before downloading anything, no local hashing needed
+- feat: EPDGZ output for composed orientation pairs, following the same on-device image format setting used for a single photo
 - fix: Telegram thumbnail generation could silently overwrite/corrupt the just-downloaded original photo before it was ever converted or archived
 - fix: don't reject large Telegram JPEGs before download now that the streaming decoder can actually handle them
+- fix: a document upload's "saved" confirmation tried to echo back its thumbnail file as a photo, which Telegram categorically rejects — falls back to a text-only confirmation now
 
 **Face-Aware Crop** ([docs](docs/FACE_CROP.md)):
 - feat: offline face detection in `process-cli` (BlazeFace, fully offline-capable) recommends a crop that keeps faces fully visible, saved as a versioned `<name>.facecrop.json` sidecar (39 unit tests, pure-logic coverage)

@@ -637,12 +637,23 @@ static bool have_enough_memory_for_download(long file_size)
 // display. Callers that want the best possible archival copy (not a
 // decode-capable one) can re-fetch this file_id directly; no decode is
 // needed to just save raw bytes to disk.
+//
+// out_is_duplicate is set true (and this function returns ESP_FAIL without
+// downloading anything) when telegram_dedup_enabled is on and the largest
+// size's "file_unique_id" - stable for identical file content across
+// re-sends/forwards, unlike "file_id" - was already recorded by a previous
+// poll. On a successful download (ESP_OK return), that id is recorded so a
+// future duplicate is caught too.
 static esp_err_t download_photo_with_fallback(cJSON *photo_array, char *out_path,
                                                size_t out_path_len, char *out_thumb_file_id,
                                                size_t out_thumb_file_id_len,
                                                char *out_largest_file_id,
-                                               size_t out_largest_file_id_len)
+                                               size_t out_largest_file_id_len,
+                                               bool *out_is_duplicate)
 {
+    if (out_is_duplicate) {
+        *out_is_duplicate = false;
+    }
     int n = cJSON_GetArraySize(photo_array);
     if (n <= 0) {
         return ESP_FAIL;
@@ -695,6 +706,27 @@ static esp_err_t download_photo_with_fallback(cJSON *photo_array, char *out_path
         }
     }
 
+    // Deduplication identity: the largest size's file_unique_id (each
+    // PhotoSize is a genuinely distinct Telegram-hosted file, so this is
+    // only ever a proxy for "this photo", not a per-size fingerprint - the
+    // same proxy every practical Telegram bot dedup implementation uses).
+    char unique_id[TELEGRAM_UNIQUE_ID_MAX_LEN] = {0};
+    bool dedup_enabled = config_manager_get_telegram_dedup_enabled();
+    if (dedup_enabled) {
+        cJSON *largest = cJSON_GetArrayItem(photo_array, order[0]);
+        cJSON *uid_item = largest ? cJSON_GetObjectItem(largest, "file_unique_id") : NULL;
+        if (uid_item && cJSON_IsString(uid_item)) {
+            strncpy(unique_id, uid_item->valuestring, sizeof(unique_id) - 1);
+        }
+        if (unique_id[0] != '\0' && config_manager_telegram_has_seen_unique_id(unique_id)) {
+            ESP_LOGI(TAG, "Duplicate photo (file_unique_id=%s), skipping download", unique_id);
+            if (out_is_duplicate) {
+                *out_is_duplicate = true;
+            }
+            return ESP_FAIL;
+        }
+    }
+
     for (int rank = 0; rank < n; rank++) {
         int idx = order[rank];
         cJSON *size_obj = cJSON_GetArrayItem(photo_array, idx);
@@ -733,6 +765,9 @@ static esp_err_t download_photo_with_fallback(cJSON *photo_array, char *out_path
             continue;
         }
 
+        if (dedup_enabled && unique_id[0] != '\0') {
+            config_manager_telegram_mark_seen_unique_id(unique_id);
+        }
         return ESP_OK;
     }
 
@@ -785,9 +820,16 @@ static bool document_pick_extension(cJSON *document, const char **out_ext)
 // sendPhoto's `photo` parameter ("Bad Request: can't use file of type
 // Thumbnail as Photo" - confirmed on real hardware), so there is no working
 // lightweight photo-reply option for a document upload.
+// out_is_duplicate: see download_photo_with_fallback()'s identical
+// parameter - a document has just one file_unique_id of its own (no size
+// ladder to pick a "largest" from).
 static esp_err_t download_document_image(cJSON *document, char *out_path, size_t out_path_len,
-                                          char *out_thumb_file_id, size_t out_thumb_file_id_len)
+                                          char *out_thumb_file_id, size_t out_thumb_file_id_len,
+                                          bool *out_is_duplicate)
 {
+    if (out_is_duplicate) {
+        *out_is_duplicate = false;
+    }
     if (out_thumb_file_id && out_thumb_file_id_len > 0) {
         out_thumb_file_id[0] = '\0';
     }
@@ -795,6 +837,22 @@ static esp_err_t download_document_image(cJSON *document, char *out_path, size_t
     cJSON *file_id_item = cJSON_GetObjectItem(document, "file_id");
     if (!file_id_item || !cJSON_IsString(file_id_item)) {
         return ESP_FAIL;
+    }
+
+    char unique_id[TELEGRAM_UNIQUE_ID_MAX_LEN] = {0};
+    bool dedup_enabled = config_manager_get_telegram_dedup_enabled();
+    if (dedup_enabled) {
+        cJSON *uid_item = cJSON_GetObjectItem(document, "file_unique_id");
+        if (uid_item && cJSON_IsString(uid_item)) {
+            strncpy(unique_id, uid_item->valuestring, sizeof(unique_id) - 1);
+        }
+        if (unique_id[0] != '\0' && config_manager_telegram_has_seen_unique_id(unique_id)) {
+            ESP_LOGI(TAG, "Duplicate document (file_unique_id=%s), skipping download", unique_id);
+            if (out_is_duplicate) {
+                *out_is_duplicate = true;
+            }
+            return ESP_FAIL;
+        }
     }
 
     const char *ext = NULL;
@@ -832,6 +890,9 @@ static esp_err_t download_document_image(cJSON *document, char *out_path, size_t
         return ESP_FAIL;
     }
 
+    if (dedup_enabled && unique_id[0] != '\0') {
+        config_manager_telegram_mark_seen_unique_id(unique_id);
+    }
     return ESP_OK;
 }
 
@@ -1709,22 +1770,31 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
         char thumb_file_id[TELEGRAM_FILE_ID_MAX_LEN];
         char largest_file_id[TELEGRAM_FILE_ID_MAX_LEN] = {0};
         bool got_image = false;
+        bool is_duplicate = false;
 
         if (photo && cJSON_IsArray(photo) && cJSON_GetArraySize(photo) > 0) {
             got_image = (download_photo_with_fallback(photo, downloaded_path,
                                                        sizeof(downloaded_path), thumb_file_id,
                                                        sizeof(thumb_file_id), largest_file_id,
-                                                       sizeof(largest_file_id)) == ESP_OK);
-            if (!got_image) {
+                                                       sizeof(largest_file_id),
+                                                       &is_duplicate) == ESP_OK);
+            if (!got_image && !is_duplicate) {
                 image_attempt_failed = true;
             }
         } else if (document && cJSON_IsObject(document)) {
             got_image = (download_document_image(document, downloaded_path,
                                                   sizeof(downloaded_path), thumb_file_id,
-                                                  sizeof(thumb_file_id)) == ESP_OK);
-            if (!got_image) {
+                                                  sizeof(thumb_file_id), &is_duplicate) == ESP_OK);
+            if (!got_image && !is_duplicate) {
                 image_attempt_failed = true;
             }
+        }
+
+        if (is_duplicate) {
+            cJSON *mid = cJSON_GetObjectItem(message, "message_id");
+            int64_t reply_id = (mid && cJSON_IsNumber(mid)) ? (int64_t) mid->valuedouble : 0;
+            telegram_bot_send_message_reply(
+                "[i] Duplicate photo/file - already received before, skipped", reply_id);
         }
 
         const char *text = get_text(message);
