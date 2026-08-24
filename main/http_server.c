@@ -33,6 +33,7 @@
 #include "image_processor.h"
 #include "nvs_flash.h"
 #include "ota_manager.h"
+#include "overlay_manager.h"
 #include "periodic_tasks.h"
 #include "power_manager.h"
 #include "processing_settings.h"
@@ -1064,7 +1065,18 @@ static esp_err_t display_image_handler(httpd_req_t *req)
     char filepath[512];
     snprintf(filepath, sizeof(filepath), "%s/%s", IMAGE_DIRECTORY, filepath_str);
 
-    esp_err_t err = display_manager_show_image(filepath);
+    // Weather/headline overlays (if enabled) apply here too, same as the
+    // Auto-Rotate loops - previously this direct-display action bypassed
+    // overlay_manager_apply() entirely, so neither overlay ever showed up
+    // regardless of format or settings.
+    const char *shown = overlay_manager_apply(filepath);
+    esp_err_t err = display_manager_show_image(shown);
+    if (err == ESP_OK && strcmp(shown, filepath) != 0) {
+        // The overlay was drawn onto a scratch copy - display_manager_show_image()
+        // already marked *that* path as shown; re-mark the real album file too,
+        // same reasoning as the Auto-Rotate loops' identical correction.
+        history_manager_mark_shown(filepath);
+    }
 
     cJSON_Delete(root);
     if (err != ESP_OK) {

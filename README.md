@@ -58,6 +58,7 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - feat: selectable weather data source (Open-Meteo, wttr.in, or yr.no/MET Norway)
 - feat: overlay colors (black bar/white text, or inverted) and English/German condition wording, shared with Telegram caption styling
 - feat: opt-in overlay support for already-rendered EPDGZ Storage/Auto-Rotate album images (previously PNG-only) — decodes, draws, and re-encodes the one file being shown, off by default since it's an extra step per display
+- fix: the Web UI's "Display Image" gallery action never applied weather/headline overlays at all (any format, any settings) — it bypassed overlay compositing entirely, unlike the Auto-Rotate loops
 
 **Web UI**:
 - feat: display history with a reset button (Settings → Auto Rotate) — random rotation cycles through every image once before repeating, persisted across reboots

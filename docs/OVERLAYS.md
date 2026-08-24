@@ -57,11 +57,11 @@ pairing](TELEGRAM.md#auto-rotate-orientation-pairing) in the Telegram docs.
 1. Both overlays are off by default. Enable either independently via the Web UI (Settings →
    Power → Weather + Headline Overlays) or a Telegram command (`/weather on|off`,
    `/headlines on|off`).
-2. On every rotation-triggered display (Storage/SD rotation or a Telegram-received image), if
-   either overlay is enabled, the frame fetches fresh weather/headline data and draws it as one
-   bar across the top of the image **before** the single per-wake panel refresh — never a second
-   refresh, and the original saved album file on disk is never modified (the overlay is drawn onto
-   a throwaway scratch copy, re-created every time).
+2. On every rotation-triggered display (Storage/SD rotation or a Telegram-received image) **and**
+   on a Web UI "Display Image" gallery selection, if either overlay is enabled, the frame fetches
+   fresh weather/headline data and draws it as one bar across the top of the image **before** the
+   single panel refresh — never a second refresh, and the original saved album file on disk is
+   never modified (the overlay is drawn onto a throwaway scratch copy, re-created every time).
 3. If a fetch fails (no network, feed unreachable, etc.), that overlay is silently skipped for the
    cycle — never blocks the normal image display.
 4. **Refresh cadence is tied to your existing rotation schedule** — there's no separate wake timer
