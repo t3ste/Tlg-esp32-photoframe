@@ -778,25 +778,18 @@ static bool document_pick_extension(cJSON *document, const char **out_ext)
     return ext != NULL;
 }
 
-// out_thumb_file_id is filled from the document's own "thumbnail" (or the
-// older "thumb" field name), if Telegram provided one - documents have no
-// smaller sizes of their own, so this is the only lightweight option for a
-// photo-reply confirmation; left empty if unavailable (caller falls back to
-// a plain text reply).
+// out_thumb_file_id is always left empty (caller falls back to a plain text
+// reply) - a document's own "thumbnail"/"thumb" field looks like a regular
+// PhotoSize (has its own file_id), but Telegram's servers tag that specific
+// file as type "Thumbnail" internally and reject it outright if reused as
+// sendPhoto's `photo` parameter ("Bad Request: can't use file of type
+// Thumbnail as Photo" - confirmed on real hardware), so there is no working
+// lightweight photo-reply option for a document upload.
 static esp_err_t download_document_image(cJSON *document, char *out_path, size_t out_path_len,
                                           char *out_thumb_file_id, size_t out_thumb_file_id_len)
 {
     if (out_thumb_file_id && out_thumb_file_id_len > 0) {
         out_thumb_file_id[0] = '\0';
-        cJSON *thumb = cJSON_GetObjectItem(document, "thumbnail");
-        if (!thumb) {
-            thumb = cJSON_GetObjectItem(document, "thumb");
-        }
-        cJSON *thumb_id = thumb ? cJSON_GetObjectItem(thumb, "file_id") : NULL;
-        if (thumb_id && cJSON_IsString(thumb_id)) {
-            strncpy(out_thumb_file_id, thumb_id->valuestring, out_thumb_file_id_len - 1);
-            out_thumb_file_id[out_thumb_file_id_len - 1] = '\0';
-        }
     }
 
     cJSON *file_id_item = cJSON_GetObjectItem(document, "file_id");
