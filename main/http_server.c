@@ -2535,7 +2535,12 @@ static esp_err_t color_palette_handler(httpd_req_t *req)
 esp_err_t http_server_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 50;
+    // 55: 51 handlers are registered below as of this comment - keep a small
+    // margin above the exact count so the next handler added here doesn't
+    // silently fail to register (httpd_register_uri_handler() only logs a
+    // warning on overflow, never a hard error - a real esp32-photoframe bug
+    // caused by /api/albums/organize-crop pushing the old limit of 50 over).
+    config.max_uri_handlers = 55;
     // 16384: rotate_handler() (/api/rotate) calls trigger_image_rotation()
     // synchronously on this worker task - the same heavy pipeline that's
     // needed the same bump on button_task/deep_sleep_wake_task (12288 wasn't
