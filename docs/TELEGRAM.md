@@ -99,6 +99,7 @@ rotation cursor too).
 | `/wifi_perf on\|off` | Toggles the WiFi performance mode (see below) |
 | `/rotation_pairing on\|off` | Toggles auto-rotate orientation pairing (random mode only) |
 | `/fallback_rotation on\|off` | Whether a wake with no new Telegram image still changes the display (on, default) or leaves it unchanged (off) |
+| `/fallback_rotation_on_error on\|off` | Only matters while the above is off: whether a failed/unconfigured poll still falls back to album rotation (on, default) or also leaves the display unchanged (off) |
 | `/rotation_notify on\|off` | Sends a thumbnail when a wake displays an image via fallback rotation |
 | `/keep_originals on\|off` | Keeps a copy of each photo as received, before e-paper processing |
 | `/exif_date on\|off` | Shows a photo's EXIF capture date as caption when it has none (experimental) |
@@ -166,6 +167,7 @@ All default to preserving existing behavior for users who don't configure Telegr
 | OTA auto-check | on | Automatic update check on cold boot |
 | Auto-rotate orientation pairing | **off** | See [below](#auto-rotate-orientation-pairing) - random mode only |
 | Fallback rotation | on | See [below](#fallback-rotation) |
+| Fallback rotation on connection error | on | See [below](#fallback-rotation) - only matters while the above is off |
 | Fallback-rotation notification | **off** | See [below](#fallback-rotation-notification) |
 | Thumbnail gallery (Web UI) | **off** | Client-side toggle; large galleries slow down the device's HTTP server |
 | On-device image format | **EPDGZ** | See [below](#on-device-image-format) |
@@ -213,13 +215,26 @@ modes.
 
 Disable it (Web UI: Settings → Telegram → "Change display on a wake with no new photo", or
 `/fallback_rotation off`) to make the display change **only** on a wake that actually receives a new
-Telegram photo - every other wake (timer/button, whether or not it results in a poll finding
-nothing) leaves the current image completely untouched. Useful if you want the frame to act purely
-as a Telegram photo feed, with no interleaved album content, and don't mind it going a while without
-changing between photos.
+Telegram photo. Useful if you want the frame to act purely as a Telegram photo feed, with no
+interleaved album content, and don't mind it going a while without changing between photos.
+
+There are actually two distinct ways a wake can end up with "no new Telegram image": the poll
+genuinely succeeds but finds nothing new (covered above), and the poll **fails outright** - Telegram
+is unreachable, or the bot isn't configured at all. A **second, related toggle** decides what the
+disabled state above means for that second case specifically:
+
+- **"Still fall back to album rotation if the Telegram connection fails"** (Web UI, nested under the
+  toggle above; or `/fallback_rotation_on_error on|off`) - **on by default**, and only has any effect
+  while the main toggle above is off (with it on, a connection failure already always falls back,
+  unconditionally, exactly as it always has). On: a connection failure is treated as an exception to
+  the strict "Telegram-photos-only" policy and still falls back to normal album rotation - useful if
+  you want the frame to keep showing *something* even during an extended outage or before the bot
+  token is ever configured. Off: a connection failure is folded into the same strict policy as "no
+  new photo" - the display stays completely untouched on every wake until Telegram is reachable
+  again **and** actually delivers a new photo.
 
 Independent of [Fallback-rotation notification](#fallback-rotation-notification) below, which only
-controls whether a fallback display change (while this setting is on) also gets announced to the
+controls whether a fallback display change (while the main toggle is on) also gets announced to the
 chat - turning fallback rotation off makes that notification moot (it never fires with nothing to
 notify about), so the Web UI disables that toggle while this one is off.
 

@@ -566,6 +566,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_telegram_fallback_rotation_enabled(cJSON_IsTrue(item));
     }
+    item = cJSON_GetObjectItem(root, "telegram_fallback_on_error_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_telegram_fallback_on_error_enabled(cJSON_IsTrue(item));
+    }
 
     // Keep a copy of each Telegram photo as received, before e-paper processing
     item = cJSON_GetObjectItem(root, "telegram_keep_originals_enabled");
@@ -1546,9 +1550,19 @@ esp_err_t trigger_image_rotation(void)
             const char *reason = (poll_result == TELEGRAM_POLL_NOT_CONFIGURED)
                                      ? "Telegram bot not configured"
                                      : "Telegram poll failed";
-            ESP_LOGW(TAG, "%s, falling back to local rotation", reason);
             utils_set_last_fetch_error(reason);
-            display_manager_rotate_from_storage();
+
+            // The on-error fallback sub-option only matters while the main
+            // fallback-rotation toggle is off (the restrictive "only ever
+            // change display on a genuine new Telegram photo" policy) - with
+            // it on, a poll error always falls back, same as ever.
+            if (!config_manager_get_telegram_fallback_rotation_enabled() &&
+                !config_manager_get_telegram_fallback_on_error_enabled()) {
+                ESP_LOGW(TAG, "%s, fallback rotation disabled - leaving display unchanged", reason);
+            } else {
+                ESP_LOGW(TAG, "%s, falling back to local rotation", reason);
+                display_manager_rotate_from_storage();
+            }
             result = ESP_FAIL;
         }
     } else if (rotation_mode == ROTATION_MODE_URL) {

@@ -961,6 +961,22 @@ async function performFactoryReset() {
                     </div>
 
                     <v-switch
+                      v-model="settingsStore.deviceSettings.telegramFallbackOnErrorEnabled"
+                      label="Still fall back to album rotation if the Telegram connection fails"
+                      color="primary"
+                      class="mb-2 ml-4"
+                      hide-details
+                      :disabled="settingsStore.deviceSettings.telegramFallbackRotationEnabled"
+                    />
+                    <div class="text-caption text-medium-emphasis mb-4 ml-4">
+                      Only relevant while the option above is off. On (default): a poll that fails
+                      outright (Telegram unreachable, or not configured at all) is still treated as
+                      an exception and falls back to normal album rotation. Off: a failed poll also
+                      leaves the display unchanged, folded into the same strict policy as "no new
+                      photo". Also togglable via the "/fallback_rotation_on_error" bot command.
+                    </div>
+
+                    <v-switch
                       v-model="settingsStore.deviceSettings.telegramRotationNotifyEnabled"
                       label="Notify when a wake shows a non-Telegram image"
                       color="primary"

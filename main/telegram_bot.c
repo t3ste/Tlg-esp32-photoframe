@@ -2108,6 +2108,7 @@ static void format_toggles(char *out, size_t out_len)
              "[%c] Rotation pairing (random mode only)\n"
              "[%c] Rotation notify (thumbnail on fallback display)\n"
              "[%c] Fallback rotation (display change with no new photo)\n"
+             "[%c] Fallback rotation on connection error (only matters if the above is off)\n"
              "[%c] Keep originals (pre-processing copies)\n"
              "[%c] Weather overlay\n"
              "[%c] Headlines overlay\n"
@@ -2121,6 +2122,7 @@ static void format_toggles(char *out, size_t out_len)
              config_manager_get_rotation_pairing_enabled() ? 'x' : ' ',
              config_manager_get_telegram_rotation_notify_enabled() ? 'x' : ' ',
              config_manager_get_telegram_fallback_rotation_enabled() ? 'x' : ' ',
+             config_manager_get_telegram_fallback_on_error_enabled() ? 'x' : ' ',
              config_manager_get_telegram_keep_originals_enabled() ? 'x' : ' ',
              config_manager_get_weather_overlay_enabled() ? 'x' : ' ',
              config_manager_get_headlines_overlay_enabled() ? 'x' : ' ',
@@ -2427,6 +2429,22 @@ static void execute_command(const char *raw_text)
         } else {
             telegram_bot_send_message("[i] Usage: /fallback_rotation on|off");
         }
+    } else if (strcmp(cmd, "/fallback_rotation_on_error") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_telegram_fallback_on_error_enabled(true);
+            telegram_bot_send_message(
+                "[x] Fallback rotation on connection error enabled\n"
+                "(only relevant while /fallback_rotation is off - a failed/unconfigured Telegram "
+                "poll still falls back to normal album rotation).");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_telegram_fallback_on_error_enabled(false);
+            telegram_bot_send_message(
+                "[ ] Fallback rotation on connection error disabled\n"
+                "(only relevant while /fallback_rotation is off - a failed/unconfigured Telegram "
+                "poll also leaves the display unchanged).");
+        } else {
+            telegram_bot_send_message("[i] Usage: /fallback_rotation_on_error on|off");
+        }
     } else if (strcmp(cmd, "/keep_originals") == 0) {
         if (args && strcasecmp(args, "on") == 0) {
             config_manager_set_telegram_keep_originals_enabled(true);
@@ -2576,6 +2594,10 @@ static void execute_command(const char *raw_text)
             "/fallback_rotation on|off - Whether a wake with no new Telegram\n"
             "  image still changes the display (on, default) or leaves it\n"
             "  unchanged until a new photo actually arrives (off)\n"
+            "/fallback_rotation_on_error on|off - Only matters while the\n"
+            "  above is off: whether a failed/unconfigured Telegram poll\n"
+            "  still falls back to album rotation (on, default) or also\n"
+            "  leaves the display unchanged (off)\n"
             "/keep_originals on|off - Save each Telegram photo as received,\n"
             "  before e-paper processing, under Telegram/Originals\n"
             "/exif_date on|off - Show a photo's EXIF capture date as a caption\n"

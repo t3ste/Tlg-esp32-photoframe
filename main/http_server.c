@@ -1585,6 +1585,8 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_telegram_rotation_notify_enabled());
         cJSON_AddBoolToObject(root, "telegram_fallback_rotation_enabled",
                               config_manager_get_telegram_fallback_rotation_enabled());
+        cJSON_AddBoolToObject(root, "telegram_fallback_on_error_enabled",
+                              config_manager_get_telegram_fallback_on_error_enabled());
         cJSON_AddBoolToObject(root, "telegram_keep_originals_enabled",
                               config_manager_get_telegram_keep_originals_enabled());
         cJSON_AddStringToObject(root, "telegram_image_format",

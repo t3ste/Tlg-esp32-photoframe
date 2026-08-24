@@ -269,6 +269,16 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // NVS_TELEGRAM_ROTATION_NOTIFY_KEY above, which only controls whether a
 // fallback display change (when this is on) also gets announced to the chat.
 #define NVS_TELEGRAM_FALLBACK_ROTATION_ENABLED_KEY "tg_fallback_rot"
+// Only consulted while NVS_TELEGRAM_FALLBACK_ROTATION_ENABLED_KEY above is
+// off (the restrictive "only ever change display on a genuine new Telegram
+// photo" policy) - decides whether a poll that fails outright (Telegram
+// unreachable, or the bot not configured at all) is still treated as an
+// exception that falls back to normal album rotation (on, default -
+// preserves the original pre-toggle behavior, where any poll failure always
+// fell back), or is folded into that same "no display change" policy (off).
+// Has no effect while the main toggle above is on - that path already always
+// falls back on error, unconditionally, as it always has.
+#define NVS_TELEGRAM_FALLBACK_ON_ERROR_ENABLED_KEY "tg_fallback_err"
 
 // Keep a copy of each Telegram photo exactly as received (pre-processing) in
 // TELEGRAM_ORIGINALS_DIRECTORY. Opt-in, off by default.
