@@ -14,11 +14,11 @@
   },
   "dependencies": {
     "@aitjcize/epaper-image-convert": "^0.1.20",
+    "@napi-rs/canvas": "^1.0.8",
     "@tensorflow-models/blazeface": "^0.1.0",
     "@tensorflow/tfjs-backend-cpu": "^4.22.0",
     "@tensorflow/tfjs-converter": "^4.22.0",
     "@tensorflow/tfjs-core": "^4.22.0",
-    "canvas": "^3.2.1",
     "commander": "^11.1.0",
     "exif-parser": "^0.1.12",
     "form-data": "^4.0.0",

@@ -8,7 +8,7 @@ import url from "url";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createCanvas } from "canvas";
+import { createCanvas } from "@napi-rs/canvas";
 import { processImagePipeline } from "./utils.js";
 import {
   generateThumbnail,

@@ -4,7 +4,17 @@
  */
 
 import fs from "fs";
-import { loadImage, createCanvas } from "canvas";
+// @napi-rs/canvas (Skia-backed), not "canvas" (Cairo/libjpeg-turbo-backed) -
+// confirmed via a real batch run + an isolated micro-benchmark that the
+// latter leaks native memory on Windows that's invisible to Node's own
+// memoryUsage() (heapUsed/external/arrayBuffers all stayed flat while RSS
+// climbed ~50-100MB per processed photo, unrecoverable even with an explicit
+// global.gc() after nulling every reference), eventually crashing a large
+// batch (--crop-output both, --detect-faces) with "out of memory" partway
+// through. @napi-rs/canvas has the same createCanvas/loadImage/Canvas2D
+// surface this file and @aitjcize/epaper-image-convert's injected-createCanvas
+// pipeline already expect, and doesn't exhibit this leak.
+import { loadImage, createCanvas } from "@napi-rs/canvas";
 import exifParser from "exif-parser";
 import heicConvert from "heic-convert";
 import {

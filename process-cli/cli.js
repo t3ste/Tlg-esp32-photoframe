@@ -6,7 +6,7 @@ import path from "path";
 import os from "os";
 import http from "http";
 import { fileURLToPath } from "url";
-import { createCanvas } from "canvas";
+import { createCanvas } from "@napi-rs/canvas";
 import FormData from "form-data";
 import {
   generateThumbnail,

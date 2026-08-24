@@ -6,7 +6,7 @@
  * - Correct content-type headers are set
  */
 
-import { loadImage } from "canvas";
+import { loadImage } from "@napi-rs/canvas";
 import fetch from "node-fetch";
 import path from "path";
 import { fileURLToPath } from "url";
