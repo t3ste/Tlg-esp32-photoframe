@@ -36,6 +36,11 @@ photoframe-process photo.jpg --detect-faces --crop-output uncropped --board wave
 # needing to decide Cover vs Fit (or re-render) later, see "Cover vs. Fit" below
 photoframe-process photo.jpg --detect-faces --crop-output both --board waveshare_photopainter_73 -o output/
 
+# Visually check face detection + the recommended crop before committing to a
+# batch render - writes photo_test.cover.jpg/photo_test.fit.jpg (annotated,
+# uncropped copies) instead of a real render - see "Crop preview" below
+photoframe-process photo.jpg --detect-faces --crop-preview --board waveshare_photopainter_73 -o output/
+
 # Batch process a whole album folder - one .facecrop.json per photo
 photoframe-process ~/Photos/Albums --detect-faces --crop-output both --board waveshare_photopainter_73 -o output/
 
@@ -53,6 +58,7 @@ rendered image uses the exact same center-crop it always has.
 | `--detect-faces` | Enables face detection. Writes `<name>.facecrop.json` next to the output, and steers the rendered image's "cover" crop toward the recommended crop instead of a plain center-crop. |
 | `--metadata-only` | Combined with `--detect-faces`: write only the metadata file, skip rendering any image entirely (fast - skips dithering/encoding). Errors if used without `--detect-faces`. Takes priority over `--crop-output` (which is then ignored, with a warning). |
 | `--crop-output <mode>` | Combined with `--detect-faces`: which rendered image(s) to produce - `cropped` (default), `uncropped`, or `both`. See [Cover vs. Fit: rendering one, the other, or both](#cover-vs-fit-rendering-one-the-other-or-both) below. Errors if used without `--detect-faces`. |
+| `--crop-preview` | Combined with `--detect-faces`: writes annotated, uncropped debug images instead of a real render - see [Crop preview](#crop-preview-visualizing-face-detection--the-recommended-crop) below. Errors if used without `--detect-faces`; conflicts with `--metadata-only` and `--upload`/`--direct`; overrides `--crop-output` (with a warning). |
 | `--board <id>` | Target board id (see [Target geometry](#target-geometry-board--resolution--display-size-mm--orientation) below). |
 | `--resolution <WxH>` | Target resolution in pixels, e.g. `800x480`. Alias of the existing `--dimension`/`--display-width`+`--display-height` - all four ultimately set the same thing. |
 | `--display-size-mm <WxH>` | Physical panel size in mm, e.g. `160x96`. Only used to help auto-derive orientation - it cannot by itself supply a pixel resolution. |
@@ -245,6 +251,39 @@ EPDGZ by default, falling back to PNG if EPDGZ can't get the memory it needs at 
 still only removes the one listed file - deleting a paired photo's `.fit.` entry currently leaves its
 `crop/.cover.<ext>` sibling (and any `.facecrop.json`/original) behind as orphaned files. Proper
 multi-file delete semantics for paired photos is left for a future pass.
+
+## Crop preview: visualizing face detection + the recommended crop
+
+`--crop-preview` (combined with `--detect-faces`) is a debugging aid for sanity-checking face
+detection and the crop heuristic below *before* committing to a real batch render - it never
+crops/resizes/dithers the source image at all, and never writes a real `.cover.`/`.fit.` display
+file. Instead, for `photo.jpg` it writes:
+
+- `photo_test.cover.jpg` - a full, unmodified copy of the source image with every detected face
+  boxed in **blue** and the recommended cover-mode crop rectangle boxed in **red**.
+- `photo_test.fit.jpg` - the same, but with only the face boxes (no crop rectangle, since fit
+  mode never crops anything).
+- `photo.facecrop.json` - the normal metadata sidecar, written exactly as it would be without
+  `--crop-preview`.
+
+Both preview images are always JPEG, regardless of `--board`/`--resolution`/output-format
+settings - they're for a human to look at, not for the device. Box line width scales with the
+image's own resolution so it stays visible on both small and very large photos.
+
+```bash
+photoframe-process photo.jpg --detect-faces --crop-preview --board waveshare_photopainter_73 -o output/
+```
+
+Useful for spotting cases worth a closer look - e.g. a photo with several people where the
+heuristic's "grow toward the largest faces first, skip one that would push an already-included
+larger face out of frame" rule (see [Crop heuristic](#crop-heuristic) below) ends up excluding
+someone from the recommended crop, visible directly as a face box sitting entirely outside the
+red rectangle.
+
+Requires `--detect-faces` (errors otherwise); conflicts with `--metadata-only` (one skips
+rendering, the other requires it) and with `--upload`/`--direct` (these debug images are never
+meant for the device); overrides `--crop-output` if both are given (with a warning), since the
+two output shapes are mutually exclusive.
 
 ## Crop heuristic
 

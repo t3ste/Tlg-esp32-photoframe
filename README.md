@@ -46,6 +46,8 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 **Face-Aware Crop** ([docs](docs/FACE_CROP.md)):
 - feat: offline face detection in `process-cli` (BlazeFace, fully offline-capable) recommends a crop that keeps faces fully visible, saved as a versioned `<name>.facecrop.json` sidecar (39 unit tests, pure-logic coverage)
 - feat: `--crop-output cropped|uncropped|both` — render the face-aware Cover crop, the uncropped Fit letterbox, or both side by side, so an album can be pre-rendered for either firmware Scale Mode setting without re-processing
+- feat: `--crop-preview` — writes the full, unmodified source image with detected face boxes (blue) and the recommended crop rectangle (red) overlaid, for sanity-checking face detection/the crop heuristic before a real batch render
+- fix: switched process-cli's canvas library from `canvas` to `@napi-rs/canvas` (severe Windows-only native memory leak that crashed large `--detect-faces --crop-output both` batches), which surfaced a latent Canvas-vs-ImageData detection bug in the shared rendering pipeline — both fixed
 - feat: firmware-side, opt-in on-demand Cover/Fit rendering — the device recognizes pre-rendered `<name>.cover.<ext>` / `<name>.fit.<ext>` variants and picks whichever matches its own Scale Mode setting, falling back to a one-time on-device render (cached afterwards) only for a genuinely still-undecoded source, verified by content, not filename
 - feat: Web UI "Organize Crop Folders" maintenance action, and Cover/Fit variant pairs are deduplicated to one entry in the gallery listing and rotation loops
 

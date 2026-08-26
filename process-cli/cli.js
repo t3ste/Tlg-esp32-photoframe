@@ -735,6 +735,35 @@ async function renderVariant(
   }
 }
 
+// Draws face bounding boxes (blue) and, only when cropRect is given, the
+// recommended crop rectangle (red) onto a fresh full-size copy of
+// sourceCanvas - never mutates sourceCanvas itself, and never resizes/crops/
+// dithers anything, so this is purely a debug/visualization aid (--crop-preview).
+// Line width scales with image size so boxes stay visible on very large photos.
+function drawCropPreview(sourceCanvas, faces, cropRect) {
+  const preview = createCanvas(sourceCanvas.width, sourceCanvas.height);
+  const ctx = preview.getContext("2d");
+  ctx.drawImage(sourceCanvas, 0, 0);
+
+  const lineWidth = Math.max(
+    3,
+    Math.round(Math.max(sourceCanvas.width, sourceCanvas.height) / 400),
+  );
+  ctx.lineWidth = lineWidth;
+
+  if (cropRect) {
+    ctx.strokeStyle = "red";
+    ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
+  }
+
+  ctx.strokeStyle = "blue";
+  for (const face of faces) {
+    ctx.strokeRect(face.x, face.y, face.w, face.h);
+  }
+
+  return preview;
+}
+
 /**
  * Processes one source image: optional face detection + metadata, then one
  * or more rendered variants depending on processingOptions.faceCrop.cropOutput
@@ -756,7 +785,8 @@ async function processImageFile(inputPath, outputBasePath, ext, processingOption
 
   let recommendedCrop = null;
   if (processingOptions.faceCrop?.enabled) {
-    const { target, marginPercent, detector, engineName, metadataOnly } = processingOptions.faceCrop;
+    const { target, marginPercent, detector, engineName, metadataOnly, cropPreview } =
+      processingOptions.faceCrop;
 
     const orientedCanvas = await loadOrientedCanvas(inputPath, {
       autoOrient: processingOptions.autoOrient || false,
@@ -790,6 +820,19 @@ async function processImageFile(inputPath, outputBasePath, ext, processingOption
 
     if (metadataOnly) {
       console.log(`Done! (metadata only)`);
+      return [];
+    }
+
+    if (cropPreview) {
+      const coverPreview = drawCropPreview(orientedCanvas, analyzed.faces, analyzed.recommendedCrop);
+      const fitPreview = drawCropPreview(orientedCanvas, analyzed.faces, null);
+      const coverPreviewPath = `${outputBasePath}_test.cover.jpg`;
+      const fitPreviewPath = `${outputBasePath}_test.fit.jpg`;
+      fs.writeFileSync(coverPreviewPath, coverPreview.toBuffer("image/jpeg", { quality: 0.9 }));
+      fs.writeFileSync(fitPreviewPath, fitPreview.toBuffer("image/jpeg", { quality: 0.9 }));
+      console.log(`  Wrote crop preview: ${coverPreviewPath}`);
+      console.log(`  Wrote crop preview: ${fitPreviewPath}`);
+      console.log(`Done! (crop preview only)`);
       return [];
     }
 
@@ -984,6 +1027,16 @@ program
   .option(
     "--display-size-mm <WxH>",
     "Physical display size in mm, e.g. 160x96 - used only to help auto-derive orientation for face-crop",
+  )
+  .option(
+    "--crop-preview",
+    "With --detect-faces: instead of a real (cropped/dithered) render, draws the detected face " +
+      "boxes (blue) and the recommended crop rectangle (red) onto a full, unmodified copy of the " +
+      "source image, for visually sanity-checking face detection/the crop heuristic before " +
+      "committing to a batch render - <name>_test.cover.jpg (boxes + crop rectangle) and " +
+      "<name>_test.fit.jpg (boxes only, since fit mode never crops), always JPEG regardless of " +
+      "the target output format. The image itself is never actually cropped/resized/dithered. " +
+      "Overrides --crop-output; conflicts with --metadata-only and --upload/--direct.",
   )
   .option(
     "--face-margin <percent>",
@@ -1278,6 +1331,23 @@ program
           "Warning: --crop-output is ignored because --metadata-only skips all rendered images",
         );
       }
+      if (options.cropPreview && !options.detectFaces) {
+        console.error("Error: --crop-preview requires --detect-faces");
+        process.exit(1);
+      }
+      if (options.cropPreview && options.metadataOnly) {
+        console.error("Error: --crop-preview conflicts with --metadata-only (one skips rendering, the other requires it)");
+        process.exit(1);
+      }
+      if (options.cropPreview && (options.upload || options.direct)) {
+        console.error(
+          "Error: --crop-preview produces debug-only images and can't be used with --upload/--direct",
+        );
+        process.exit(1);
+      }
+      if (options.cropPreview && cropOutputExplicit) {
+        console.warn("Warning: --crop-output is ignored because --crop-preview overrides it");
+      }
       if (options.detectFaces) {
         let target;
         try {
@@ -1313,6 +1383,7 @@ program
           enabled: true,
           metadataOnly: !!options.metadataOnly,
           cropOutput: options.cropOutput,
+          cropPreview: !!options.cropPreview,
           target,
           marginPercent: options.faceMargin,
           detector,
