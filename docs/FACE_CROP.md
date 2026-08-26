@@ -295,18 +295,27 @@ two output shapes are mutually exclusive.
    so (after re-fitting the target aspect ratio and clamping to the image bounds) doesn't push any
    already-included, larger face out of frame. A face that would only fit by displacing a bigger one
    is left out; the biggest faces always win.
-3. The result is grown to the target aspect ratio and clamped to the image bounds (uniform
-   scale-down + translate only - never distorted).
+3. The result is grown to the target aspect ratio - using as much of the source image as fits, not
+   just the minimum needed to reach that ratio around the accepted faces - then clamped to the
+   image bounds (uniform scale-down + translate only - never distorted).
 
-**Note on retaining as much of the photo as possible**: step 2's "does this face still fit"
-containment check works in full sub-pixel precision internally, only rounding to whole pixels at
-the very end - confirmed on real output to matter: an earlier version rounded the intermediate
-check's box too, which could shave up to ~1px total off its right/bottom edge (x and w rounding
-down independently), occasionally rejecting a face that genuinely fit, and needlessly shrinking
-the final crop as a result (down to less than half the image's width in one observed case, with a
-person left out who should have stayed in frame). The crop is only ever as small as it needs to be
-to keep the accepted faces in frame at the target aspect ratio - never smaller than that just to
-look "tighter."
+**Retaining as much of the photo as possible, not just the minimum around the faces**: step 3
+prefers the *largest* aspect-ratio-matching box that both fits within the image and still contains
+the accepted faces, centered on them - not the smallest one that merely reaches the target aspect
+ratio. Concretely: if the source image is wider than the target ratio, only its height gets cropped
+down to reach 5:3 (no left/right loss at all, so long as the accepted faces stay in frame within
+that band); only when the image is genuinely too narrow/short relative to what the faces need does
+the crop shrink below the image's own full extent. Confirmed on real output: a 2592x1944 (4:3)
+photo of 3 people spread across nearly the full width, targeting 5:3, needs only ~389px trimmed off
+its height (2592/(5/3) ≈ 1555px tall) to fit - an earlier version instead additionally trimmed
+~600px off the left/right sides too, even though nothing about the accepted faces required it.
+
+Step 2's "does this face still fit" containment check applies the same "use as much of the image as
+possible" rule and works in full sub-pixel precision internally, only rounding to whole pixels at
+the very end (an earlier version rounded the intermediate check's box too, which could shave up to
+~1px total off its right/bottom edge and occasionally reject a face that genuinely fit). The crop is
+only ever smaller than the full image when the accepted faces truly need more room than the image's
+own aspect-fit ceiling provides - never smaller than that just to look "tighter."
 
 ## JSON schema (`<name>.facecrop.json`)
 

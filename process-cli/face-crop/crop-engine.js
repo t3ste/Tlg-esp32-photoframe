@@ -57,6 +57,52 @@ function growToAspect(box, aspectRatio) {
   return { x, y, w, h };
 }
 
+/** The largest {w,h} of aspectRatio that fits entirely within the image. */
+function maxBoxForAspect(imgWidth, imgHeight, aspectRatio) {
+  if (imgWidth / imgHeight > aspectRatio) {
+    const h = imgHeight;
+    return { w: h * aspectRatio, h };
+  }
+  const w = imgWidth;
+  return { w, h: w / aspectRatio };
+}
+
+/**
+ * Grows `box` to aspectRatio like growToAspect(), but - when the source
+ * image has room to spare - expands further to use as much of it as
+ * possible, rather than only the minimal amount growToAspect() alone would
+ * add. E.g. a source image much wider than the target aspect ratio only
+ * needs its height cropped down to reach it; growToAspect() alone would
+ * still leave the crop only as wide as `box` already was, discarding both
+ * sides of the image for no reason. Confirmed on real output: a 3-face
+ * photo wider than 5:3 had ~600px trimmed off its left/right edges even
+ * though cropping only its height (no left/right loss at all) would have
+ * fit the same 3 faces just as well.
+ *
+ * Falls back to the plain growToAspect() box when the image itself isn't
+ * big enough to contain `box` at the target aspect ratio without clipping
+ * it (i.e. `box` genuinely needs more width or height than fits, so no
+ * bigger box centered on it can help).
+ */
+function growToFillImage(box, imgWidth, imgHeight, aspectRatio) {
+  const minimal = growToAspect(box, aspectRatio);
+  const { w: maxW, h: maxH } = maxBoxForAspect(imgWidth, imgHeight, aspectRatio);
+
+  if (maxW <= minimal.w || maxH <= minimal.h) {
+    return minimal;
+  }
+
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  let x = cx - maxW / 2;
+  let y = cy - maxH / 2;
+  x = Math.max(0, Math.min(x, imgWidth - maxW));
+  y = Math.max(0, Math.min(y, imgHeight - maxH));
+  const maximal = { x, y, w: maxW, h: maxH };
+
+  return contains(maximal, box) ? maximal : minimal;
+}
+
 /**
  * Clamps a crop rectangle to lie fully within [0,imgW] x [0,imgH], preserving
  * its aspect ratio (uniform scale-down if it's bigger than the image in
@@ -107,18 +153,7 @@ function roundCrop(crop) {
 
 /** Center-crop matching target's aspect ratio - used when no faces are found. */
 export function fallbackCrop(imgWidth, imgHeight, target) {
-  const aspectRatio = target.aspectRatio;
-  const imgAspect = imgWidth / imgHeight;
-
-  let w, h;
-  if (imgAspect > aspectRatio) {
-    h = imgHeight;
-    w = h * aspectRatio;
-  } else {
-    w = imgWidth;
-    h = w / aspectRatio;
-  }
-
+  const { w, h } = maxBoxForAspect(imgWidth, imgHeight, target.aspectRatio);
   const x = (imgWidth - w) / 2;
   const y = (imgHeight - h) / 2;
   return roundCrop(clampCropToImage({ x, y, w, h }, imgWidth, imgHeight));
@@ -132,11 +167,12 @@ export function fallbackCrop(imgWidth, imgHeight, target) {
  *  1. Start from the largest face (plus a safety margin).
  *  2. Walk the remaining faces, largest to smallest, growing the working
  *     bounding box to include each one - but only accept a face if the
- *     resulting crop (grown to target's aspect ratio, then clamped to image
- *     bounds) still fully contains everything accepted so far. A face that
- *     doesn't fit without pushing an already-included, larger face out of
- *     frame is skipped (left to be cropped), never the other way around.
- *  3. Grow the final box to the target aspect ratio and clamp to the image.
+ *     resulting crop (grown to target's aspect ratio - using as much of the
+ *     source image as fits, not just the minimum needed - then clamped to
+ *     image bounds) still fully contains everything accepted so far. A face
+ *     that doesn't fit without pushing an already-included, larger face out
+ *     of frame is skipped (left to be cropped), never the other way around.
+ *  3. Grow the final box the same way and clamp to the image.
  *
  * @param {number} imgWidth
  * @param {number} imgHeight
@@ -161,7 +197,7 @@ export function computeRecommendedCrop(imgWidth, imgHeight, faces, target, optio
     const faceBox = expandWithMargin(sorted[i], marginPercent);
     const candidate = union(bbox, faceBox);
     const candidateCrop = clampCropToImage(
-      growToAspect(candidate, target.aspectRatio),
+      growToFillImage(candidate, imgWidth, imgHeight, target.aspectRatio),
       imgWidth,
       imgHeight,
     );
@@ -175,6 +211,6 @@ export function computeRecommendedCrop(imgWidth, imgHeight, faces, target, optio
     // included - skip it, per "larger faces take priority" (spec).
   }
 
-  const grown = growToAspect(bbox, target.aspectRatio);
+  const grown = growToFillImage(bbox, imgWidth, imgHeight, target.aspectRatio);
   return roundCrop(clampCropToImage(grown, imgWidth, imgHeight));
 }

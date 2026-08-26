@@ -65,15 +65,28 @@ describe("computeRecommendedCrop - single large face", () => {
     expect(crop.y + crop.h).toBeLessThanOrEqual(1000);
   });
 
-  test("applies a safety margin around the face rather than a tight fit", () => {
+  test("keeps the margin-expanded safety zone around the face inside the recommended crop", () => {
+    // Comparing raw crop *sizes* across margin values isn't a reliable
+    // signal any more now that computeRecommendedCrop prefers using as much
+    // of the source image as it can (growToFillImage): once a crop is
+    // already using the full available width/height, a bigger margin can't
+    // push it any wider - it's already at the image's own ceiling either
+    // way. What must still hold regardless is that the crop actually
+    // contains the *margin-padded* face region, not just the bare face box -
+    // that's what the margin is for.
     const face = { x: 400, y: 400, w: 200, h: 200, score: 0.95 };
-    const tight = computeRecommendedCrop(1000, 1000, [face], LANDSCAPE_TARGET, {
-      marginPercent: 0,
-    });
-    const padded = computeRecommendedCrop(1000, 1000, [face], LANDSCAPE_TARGET, {
-      marginPercent: 0.5,
-    });
-    expect(padded.w).toBeGreaterThan(tight.w);
+    const marginPercent = 0.5;
+    const crop = computeRecommendedCrop(1000, 1000, [face], LANDSCAPE_TARGET, { marginPercent });
+
+    const mx = face.w * marginPercent;
+    const my = face.h * marginPercent;
+    const paddedFace = {
+      x: face.x - mx,
+      y: face.y - my,
+      w: face.w + 2 * mx,
+      h: face.h + 2 * my,
+    };
+    expect(boxContains(crop, paddedFace)).toBe(true);
   });
 });
 
@@ -94,6 +107,33 @@ describe("computeRecommendedCrop - multiple faces, different sizes", () => {
     expect(boxContains(crop, large)).toBe(true);
     // ...even though that means the tiny distant face is left out.
     expect(boxContains(crop, farTiny)).toBe(false);
+  });
+});
+
+describe("computeRecommendedCrop - retains as much of the source image as possible", () => {
+  test("crops only the dimension that actually needs it, not both, when the image has spare room", () => {
+    // Real-world regression case: a 2592x1944 (4:3) photo of 3 people
+    // spread across nearly its full width, targeting 5:3 (800x480). Only
+    // trimming height is needed to reach 5:3 - 2592/(5/3) = 1555.2, i.e.
+    // ~389px off the height, none off the width. An earlier version of
+    // this algorithm cropped ~600px off the sides too even though nothing
+    // required it, needlessly discarding image content (and, in an even
+    // earlier version, one of the three faces along with it).
+    const faces = [
+      { x: 1548, y: 844, w: 515, h: 386, score: 0.9992 },
+      { x: 213, y: 647, w: 579, h: 434, score: 0.9785 },
+      { x: 834, y: 837, w: 385, h: 289, score: 0.7919 },
+    ];
+    const crop = computeRecommendedCrop(2592, 1944, faces, LANDSCAPE_TARGET, {
+      marginPercent: 0.12,
+    });
+
+    expect(crop.x).toBe(0);
+    expect(crop.w).toBe(2592);
+    expect(crop.h).toBeLessThan(1944);
+    for (const face of faces) {
+      expect(boxContains(crop, face)).toBe(true);
+    }
   });
 });
 
