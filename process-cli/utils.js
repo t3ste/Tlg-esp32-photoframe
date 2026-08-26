@@ -185,8 +185,25 @@ export async function processImagePipeline(
     palette = SPECTRA6;
   }
 
-  // Call shared processImage pipeline (handles rotation, resize, preprocessing, dithering)
-  return processImage(canvas, {
+  // Call shared processImage pipeline (handles rotation, resize, preprocessing, dithering).
+  //
+  // Passed as ImageData, not the raw canvas, even though processImage() accepts
+  // either: it picks between them via `source.data && source.width && source.height`
+  // (processor.js), which assumes a Canvas never has a truthy `.data` - true for
+  // node-canvas, but @napi-rs/canvas's Canvas exposes its own `.data` accessor
+  // (a `[Function: data]`, always truthy), so a raw canvas here gets misdetected
+  // as ImageData and handed to putImageData() instead of drawImage() - silently
+  // producing a blank output (all-black for "cover", all-white/background-color
+  // for "fit", since nothing ever actually got drawn: confirmed on real output,
+  // both epdgz files shrank to ~220 bytes - gzip of one solid color - and both
+  // thumbnails came back as flat black/white). Passing genuine ImageData sidesteps
+  // the ambiguity entirely - it satisfies that check unambiguously on any canvas
+  // implementation, which is exactly the codepath the check was trying to select.
+  const sourceImageData = canvas
+    .getContext("2d")
+    .getImageData(0, 0, canvas.width, canvas.height);
+
+  return processImage(sourceImageData, {
     displayWidth,
     displayHeight,
     palette,
