@@ -298,6 +298,16 @@ two output shapes are mutually exclusive.
 3. The result is grown to the target aspect ratio and clamped to the image bounds (uniform
    scale-down + translate only - never distorted).
 
+**Note on retaining as much of the photo as possible**: step 2's "does this face still fit"
+containment check works in full sub-pixel precision internally, only rounding to whole pixels at
+the very end - confirmed on real output to matter: an earlier version rounded the intermediate
+check's box too, which could shave up to ~1px total off its right/bottom edge (x and w rounding
+down independently), occasionally rejecting a face that genuinely fit, and needlessly shrinking
+the final crop as a result (down to less than half the image's width in one observed case, with a
+person left out who should have stayed in frame). The crop is only ever as small as it needs to be
+to keep the accepted faces in frame at the target aspect ratio - never smaller than that just to
+look "tighter."
+
 ## JSON schema (`<name>.facecrop.json`)
 
 One file per image, saved next to the rendered output (not a single global index) - stays correct

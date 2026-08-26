@@ -61,6 +61,18 @@ function growToAspect(box, aspectRatio) {
  * Clamps a crop rectangle to lie fully within [0,imgW] x [0,imgH], preserving
  * its aspect ratio (uniform scale-down if it's bigger than the image in
  * either dimension, then pure translation to bring it back in bounds).
+ *
+ * Deliberately returns full sub-pixel precision, not rounded to whole
+ * pixels - this is also used internally (computeRecommendedCrop's per-face
+ * "does it still fit" check) to build the box a containment test is run
+ * against. Rounding x/y/w/h independently here can shave up to ~1px total
+ * off the effective right/bottom edge (e.g. x rounds down 0.3px *and* w
+ * rounds down 0.5px), which the containment check's own EPS=0.5 tolerance
+ * doesn't always absorb - confirmed on real output: a face that
+ * legitimately fit was rejected this way, needlessly shrinking the final
+ * crop to exclude it. Callers that need whole-pixel output (the final
+ * recommended crop, ultimately used to size an actual pixel buffer) round
+ * once at their own final return - see computeRecommendedCrop/fallbackCrop.
  */
 export function clampCropToImage(crop, imgWidth, imgHeight) {
   let { x, y, w, h } = crop;
@@ -78,7 +90,19 @@ export function clampCropToImage(crop, imgWidth, imgHeight) {
   x = Math.max(0, Math.min(x, imgWidth - w));
   y = Math.max(0, Math.min(y, imgHeight - h));
 
-  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+  return { x, y, w, h };
+}
+
+// Rounds a crop's fields to whole pixels - only ever applied at the true
+// final output (see clampCropToImage's own doc comment for why intermediate
+// containment checks must not round).
+function roundCrop(crop) {
+  return {
+    x: Math.round(crop.x),
+    y: Math.round(crop.y),
+    w: Math.round(crop.w),
+    h: Math.round(crop.h),
+  };
 }
 
 /** Center-crop matching target's aspect ratio - used when no faces are found. */
@@ -97,7 +121,7 @@ export function fallbackCrop(imgWidth, imgHeight, target) {
 
   const x = (imgWidth - w) / 2;
   const y = (imgHeight - h) / 2;
-  return clampCropToImage({ x, y, w, h }, imgWidth, imgHeight);
+  return roundCrop(clampCropToImage({ x, y, w, h }, imgWidth, imgHeight));
 }
 
 /**
@@ -152,5 +176,5 @@ export function computeRecommendedCrop(imgWidth, imgHeight, faces, target, optio
   }
 
   const grown = growToAspect(bbox, target.aspectRatio);
-  return clampCropToImage(grown, imgWidth, imgHeight);
+  return roundCrop(clampCropToImage(grown, imgWidth, imgHeight));
 }
