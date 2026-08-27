@@ -137,6 +137,31 @@ describe("computeRecommendedCrop - retains as much of the source image as possib
   });
 });
 
+describe("computeRecommendedCrop - margin is applied once to the accepted set, not per-face", () => {
+  test("doesn't drop a face just because per-face margins would overflow, when the bare faces fit fine", () => {
+    // Real-world regression case: a 972x1296 (3:4) photo with 3 detected
+    // faces, targeting 5:3 (800x480), so the crop is always full image
+    // width (972) and only ~583px tall. The two largest faces' *bare*
+    // bounding boxes only span ~511px vertically - comfortably under 583 -
+    // but margin-expanding each face individually *before* unioning them
+    // pushed the union to ~585px, just barely over. That wrongly dropped
+    // the second-largest face entirely, centering the crop on the largest
+    // face alone and clipping the second face's top out of frame. Margin
+    // must only ever affect the final crop, never which faces get in.
+    const faces = [
+      { x: 307, y: 541, w: 226, h: 301, score: 0.9999 },
+      { x: 662, y: 736, w: 237, h: 316, score: 0.9932 },
+      { x: -28, y: 613, w: 185, h: 246, score: 0.8465 },
+    ];
+    const crop = computeRecommendedCrop(972, 1296, faces, LANDSCAPE_TARGET, {
+      marginPercent: 0.12,
+    });
+
+    expect(boxContains(crop, faces[0])).toBe(true);
+    expect(boxContains(crop, faces[1])).toBe(true);
+  });
+});
+
 describe("computeRecommendedCrop - clamping at image edges", () => {
   test("a face near the corner still yields an in-bounds, correctly-shaped crop", () => {
     const face = { x: 5, y: 5, w: 60, h: 60, score: 0.9 };

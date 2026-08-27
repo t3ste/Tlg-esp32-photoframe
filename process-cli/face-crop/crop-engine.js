@@ -85,22 +85,37 @@ function maxBoxForAspect(imgWidth, imgHeight, aspectRatio) {
  * bigger box centered on it can help).
  */
 function growToFillImage(box, imgWidth, imgHeight, aspectRatio) {
-  const minimal = growToAspect(box, aspectRatio);
+  // Any part of `box` that already lies outside the image can never appear
+  // in any crop anyway, so it shouldn't count against a placement being
+  // "valid" below - clip it to the image bounds first. Without this, a
+  // margin-expanded box that innocently overhangs an edge (e.g. a face near
+  // the left edge, expanded left by its margin, past x=0) could make an
+  // otherwise-perfectly-good centered placement look like it "doesn't
+  // contain box" purely because of the unreachable overhang, kicking this
+  // down to the minimal/un-filled fallback for no real reason.
+  const clipped = {
+    x: Math.max(0, box.x),
+    y: Math.max(0, box.y),
+    w: Math.min(box.x + box.w, imgWidth) - Math.max(0, box.x),
+    h: Math.min(box.y + box.h, imgHeight) - Math.max(0, box.y),
+  };
+
+  const minimal = growToAspect(clipped, aspectRatio);
   const { w: maxW, h: maxH } = maxBoxForAspect(imgWidth, imgHeight, aspectRatio);
 
   if (maxW <= minimal.w || maxH <= minimal.h) {
     return minimal;
   }
 
-  const cx = box.x + box.w / 2;
-  const cy = box.y + box.h / 2;
+  const cx = clipped.x + clipped.w / 2;
+  const cy = clipped.y + clipped.h / 2;
   let x = cx - maxW / 2;
   let y = cy - maxH / 2;
   x = Math.max(0, Math.min(x, imgWidth - maxW));
   y = Math.max(0, Math.min(y, imgHeight - maxH));
   const maximal = { x, y, w: maxW, h: maxH };
 
-  return contains(maximal, box) ? maximal : minimal;
+  return contains(maximal, clipped) ? maximal : minimal;
 }
 
 /**
@@ -164,15 +179,28 @@ export function fallbackCrop(imgWidth, imgHeight, target) {
  * `target`'s aspect ratio, prioritizing large faces staying fully visible.
  *
  * Strategy ("largest-face-priority"):
- *  1. Start from the largest face (plus a safety margin).
+ *  1. Start from the largest face's raw box (no margin yet).
  *  2. Walk the remaining faces, largest to smallest, growing the working
- *     bounding box to include each one - but only accept a face if the
- *     resulting crop (grown to target's aspect ratio - using as much of the
- *     source image as fits, not just the minimum needed - then clamped to
- *     image bounds) still fully contains everything accepted so far. A face
- *     that doesn't fit without pushing an already-included, larger face out
- *     of frame is skipped (left to be cropped), never the other way around.
- *  3. Grow the final box the same way and clamp to the image.
+ *     bounding box to include each one's raw box - but only accept a face if
+ *     the resulting crop (grown to target's aspect ratio - using as much of
+ *     the source image as fits, not just the minimum needed - then clamped
+ *     to image bounds) still fully contains everything accepted so far. A
+ *     face that doesn't fit without pushing an already-included, larger face
+ *     out of frame is skipped (left to be cropped), never the other way
+ *     around.
+ *  3. Only once that set of faces is settled, expand the union by the
+ *     safety margin, then grow/clamp the same way for the final crop.
+ *     Margin is deliberately applied once, at the end, rather than per-face
+ *     before the fit checks in step 2 - doing it per-face let the margin
+ *     buffer's own size, not the faces themselves, decide whether a face got
+ *     dropped: two faces whose bare bounding boxes fit the target with room
+ *     to spare could still fail the check once each got its own margin added
+ *     first, because the margins alone pushed the union just over the
+ *     image's available height/width. Confirmed on real output: two faces
+ *     needing only ~511px of vertical span (well inside an available 583px)
+ *     were margin-inflated to ~585px first - just barely over - so the
+ *     second face was wrongly dropped, centering the crop on the first face
+ *     alone and clipping the second one's top out of frame.
  *
  * @param {number} imgWidth
  * @param {number} imgHeight
@@ -191,11 +219,11 @@ export function computeRecommendedCrop(imgWidth, imgHeight, faces, target, optio
   }
 
   const sorted = scoreFaces(faces);
-  let bbox = expandWithMargin(sorted[0], marginPercent);
+  let bbox = { x: sorted[0].x, y: sorted[0].y, w: sorted[0].w, h: sorted[0].h };
 
   for (let i = 1; i < sorted.length; i++) {
-    const faceBox = expandWithMargin(sorted[i], marginPercent);
-    const candidate = union(bbox, faceBox);
+    const face = sorted[i];
+    const candidate = union(bbox, face);
     const candidateCrop = clampCropToImage(
       growToFillImage(candidate, imgWidth, imgHeight, target.aspectRatio),
       imgWidth,
@@ -211,6 +239,7 @@ export function computeRecommendedCrop(imgWidth, imgHeight, faces, target, optio
     // included - skip it, per "larger faces take priority" (spec).
   }
 
-  const grown = growToFillImage(bbox, imgWidth, imgHeight, target.aspectRatio);
+  const margined = expandWithMargin(bbox, marginPercent);
+  const grown = growToFillImage(margined, imgWidth, imgHeight, target.aspectRatio);
   return roundCrop(clampCropToImage(grown, imgWidth, imgHeight));
 }

@@ -290,14 +290,25 @@ two output shapes are mutually exclusive.
 1. If no faces are found (or none pass `--face-min-score`), fall back to the exact same
    aspect-ratio-matched center-crop the pipeline has always used for "cover" mode - a no-op change
    for photos without people in them.
-2. Otherwise, start from the largest detected face plus a safety margin (`--face-margin`), then walk
-   the remaining faces largest-to-smallest, growing the crop to include each one - but only if doing
-   so (after re-fitting the target aspect ratio and clamping to the image bounds) doesn't push any
-   already-included, larger face out of frame. A face that would only fit by displacing a bigger one
-   is left out; the biggest faces always win.
-3. The result is grown to the target aspect ratio - using as much of the source image as fits, not
-   just the minimum needed to reach that ratio around the accepted faces - then clamped to the
-   image bounds (uniform scale-down + translate only - never distorted).
+2. Otherwise, start from the largest detected face's bare bounding box (no margin yet), then walk
+   the remaining faces largest-to-smallest, growing the crop to include each one's bare box - but
+   only if doing so (after re-fitting the target aspect ratio and clamping to the image bounds)
+   doesn't push any already-included, larger face out of frame. A face that would only fit by
+   displacing a bigger one is left out; the biggest faces always win.
+3. Only once that set of faces is settled does the safety margin (`--face-margin`) get applied,
+   once, to their combined bounding box. The result is then grown to the target aspect ratio - using
+   as much of the source image as fits, not just the minimum needed to reach that ratio - and clamped
+   to the image bounds (uniform scale-down + translate only - never distorted).
+
+**Margin is applied once, at the end, not per-face during step 2**: an earlier version expanded each
+face by its margin *before* unioning it into the working crop, which meant the margin buffer's own
+size - not the actual faces - could decide whether a face got dropped. Confirmed on real output: two
+detected faces whose bare boxes only needed ~511px of vertical span (comfortably under an available
+583px) got margin-expanded to ~585px first, just barely over the limit, so the second face was wrongly
+excluded entirely - centering the crop on the first face alone and clipping the second one's top out
+of frame. Applying margin once, after face selection, means the margin can still shrink the final
+crop's breathing room if the image is tight, but it can never cause an otherwise-includable face to be
+dropped.
 
 **Retaining as much of the photo as possible, not just the minimum around the faces**: step 3
 prefers the *largest* aspect-ratio-matching box that both fits within the image and still contains
