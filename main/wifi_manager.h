@@ -22,8 +22,16 @@ esp_err_t wifi_manager_set_performance_mode(bool enable);
 // Called automatically by wifi_manager_connect; exposed for the provisioning
 // connection test, which drives esp_wifi directly (#43).
 esp_err_t wifi_manager_apply_ip_config(void);
-esp_err_t wifi_manager_connect(const char *ssid, const char *password);
+// Blocks until connected, definitively failed, or timeout_ms elapses - never
+// longer, unlike the old unbounded wait (see wifi_manager.c for why that
+// could hang forever on a DHCP stall). Returns ESP_ERR_TIMEOUT if neither
+// happens in time.
+esp_err_t wifi_manager_connect(const char *ssid, const char *password, int timeout_ms);
 esp_err_t wifi_manager_disconnect(void);
+// Overrides the default reconnect-attempt budget (5) used by the
+// WIFI_EVENT_STA_DISCONNECTED handler before it gives up and reports
+// WIFI_FAIL_BIT. Takes effect on the next wifi_manager_connect() call.
+void wifi_manager_set_max_retries(int max_retries);
 bool wifi_manager_is_connected(void);
 esp_err_t wifi_manager_get_ip(char *ip_str, size_t len);
 esp_err_t wifi_manager_save_credentials(const char *ssid, const char *password);

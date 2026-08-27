@@ -118,7 +118,12 @@ static esp_err_t sntp_sync_periodic_callback(void)
     return ESP_OK;
 }
 
-// Helper function to connect to WiFi with timeout
+// Helper function to connect to WiFi with timeout. wifi_manager_connect()
+// itself now blocks for at most timeout_seconds and returns a definitive
+// result, so there's no need for a separate busy-poll loop here anymore (the
+// old version discarded that return value and polled is_connected() on its
+// own, which - on a total connection failure - wasted time up to the full
+// timeout even though the failure was already known immediately).
 static bool connect_to_wifi_with_timeout(int timeout_seconds)
 {
     char wifi_ssid[WIFI_SSID_MAX_LEN] = {0};
@@ -126,24 +131,14 @@ static bool connect_to_wifi_with_timeout(int timeout_seconds)
 
     ESP_ERROR_CHECK(wifi_manager_load_credentials(wifi_ssid, wifi_password));
     ESP_LOGI(TAG, "Connecting to WiFi SSID: %s", wifi_ssid);
-    wifi_manager_connect(wifi_ssid, wifi_password);
+    esp_err_t err = wifi_manager_connect(wifi_ssid, wifi_password, timeout_seconds * 1000);
 
-    // Wait for WiFi connection (with timeout)
-    ESP_LOGI(TAG, "Waiting for WiFi connection...");
-    int retry_count = 0;
-    while (!wifi_manager_is_connected() && retry_count < timeout_seconds) {
-        if (retry_count % 10 == 0 && retry_count > 0) {
-            ESP_LOGI(TAG, "WiFi connecting... (%d seconds elapsed)", retry_count);
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        retry_count++;
-    }
-
-    if (wifi_manager_is_connected()) {
-        ESP_LOGI(TAG, "WiFi connected after %d seconds", retry_count);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi connected");
         return true;
     } else {
-        ESP_LOGE(TAG, "WiFi connection timeout after %d seconds", timeout_seconds);
+        ESP_LOGE(TAG, "WiFi connection failed after up to %d seconds: %s", timeout_seconds,
+                 esp_err_to_name(err));
         return false;
     }
 }
@@ -273,6 +268,14 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
     bool ha_configured = ha_is_configured();
     bool wifi_connected = false;
 
+    // Telegram power-save mode's fast-path optimizations (shorter WiFi
+    // connect budget, skipped hold-window) apply only to an automatic timer
+    // wake - never a manual button press, which always keeps the full retry
+    // budget/window as a deliberate escape hatch to reach the web UI.
+    bool telegram_power_save_active = (rotation_mode == ROTATION_MODE_TELEGRAM) &&
+                                       config_manager_get_telegram_power_save_enabled() &&
+                                       !is_button_wake;
+
     // Early-wake check before spending power on WiFi: on boards with an
     // external RTC the corrected time is already restored at this point, so
     // a wake that fired early due to RTC drift can go back to sleep for the
@@ -299,7 +302,11 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
                                                                 : "HA battery post"));
         ESP_ERROR_CHECK(wifi_manager_init());
 
-        bool connected_now = connect_to_wifi_with_timeout(60);
+        if (telegram_power_save_active) {
+            wifi_manager_set_max_retries(TELEGRAM_POWER_SAVE_WIFI_MAX_RETRIES);
+        }
+        bool connected_now = connect_to_wifi_with_timeout(
+            telegram_power_save_active ? TELEGRAM_POWER_SAVE_WIFI_TIMEOUT_SEC : 60);
         utils_handle_wifi_connect_result(connected_now);
 
         if (connected_now) {
@@ -383,7 +390,12 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
     // that asked us to wait (X-Post-Rotate-Wait-Sec, meaning it wants to pull our
     // config) extends it, and gets a window even without HA — URL-mode frames
     // don't start the server before rotating, so we start it on demand here.
-    int hold_sec = (wifi_connected && ha_configured) ? HA_CONFIG_WINDOW_SEC : 0;
+    // Telegram power-save mode skips this ambient baseline window entirely (it
+    // exists to let a server/HA reach the device after the fact, not to serve
+    // an active in-progress request) - but still honors an explicit
+    // server_wait below, since that reflects a real, in-progress interaction.
+    int hold_sec =
+        telegram_power_save_active ? 0 : (wifi_connected && ha_configured) ? HA_CONFIG_WINDOW_SEC : 0;
     int server_wait = utils_get_post_rotate_wait_sec();
     if (server_wait > hold_sec) {
         hold_sec = server_wait;

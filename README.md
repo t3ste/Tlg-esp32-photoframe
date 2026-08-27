@@ -42,6 +42,8 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - fix: Telegram thumbnail generation could silently overwrite/corrupt the just-downloaded original photo before it was ever converted or archived
 - fix: don't reject large Telegram JPEGs before download now that the streaming decoder can actually handle them
 - fix: a document upload's "saved" confirmation tried to echo back its thumbnail file as a photo, which Telegram categorically rejects — falls back to a text-only confirmation now
+- feat: opt-in Telegram power-save mode — minimizes wake duration/WiFi-on time on an automatic timer wake (fewer WiFi/Telegram retries, no post-rotation config-sync window, no per-photo "saved" reply), never affecting a manual button wake so the web UI always stays reachable; a nested "latest only" sub-option processes just the newest update in a batch and permanently discards the rest (other photos, captions, and "/" commands)
+- fix: `wifi_manager_connect()` could hang indefinitely if WiFi association succeeded but DHCP then stalled (no bounded wait existed); it and its callers now always return within a definite timeout — also fixes a pre-existing bug where a *known* total connection failure still wasted up to a full 60s busy-polling a result that could never change
 
 **Face-Aware Crop** ([docs](docs/FACE_CROP.md)):
 - feat: offline face detection in `process-cli` (BlazeFace, fully offline-capable) recommends a crop that keeps faces fully visible, saved as a versioned `<name>.facecrop.json` sidecar (39 unit tests, pure-logic coverage)

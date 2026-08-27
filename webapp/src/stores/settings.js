@@ -81,6 +81,8 @@ export const useSettingsStore = defineStore("settings", () => {
     telegramRotationNotifyEnabled: false,
     telegramFallbackRotationEnabled: true,
     telegramFallbackOnErrorEnabled: true,
+    telegramPowerSaveEnabled: false,
+    telegramPowerSaveLatestOnly: false,
     telegramKeepOriginalsEnabled: false,
     telegramImageFormat: "epdgz",
     telegramDedupEnabled: false,
@@ -253,6 +255,9 @@ export const useSettingsStore = defineStore("settings", () => {
         data.telegram_fallback_rotation_enabled !== false;
       deviceSettings.value.telegramFallbackOnErrorEnabled =
         data.telegram_fallback_on_error_enabled !== false;
+      deviceSettings.value.telegramPowerSaveEnabled = data.telegram_power_save_enabled === true;
+      deviceSettings.value.telegramPowerSaveLatestOnly =
+        data.telegram_power_save_latest_only === true;
       deviceSettings.value.telegramKeepOriginalsEnabled =
         data.telegram_keep_originals_enabled === true;
       deviceSettings.value.telegramImageFormat = data.telegram_image_format || "epdgz";
@@ -359,6 +364,8 @@ export const useSettingsStore = defineStore("settings", () => {
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,
       telegram_fallback_rotation_enabled: deviceSettings.value.telegramFallbackRotationEnabled,
       telegram_fallback_on_error_enabled: deviceSettings.value.telegramFallbackOnErrorEnabled,
+      telegram_power_save_enabled: deviceSettings.value.telegramPowerSaveEnabled,
+      telegram_power_save_latest_only: deviceSettings.value.telegramPowerSaveLatestOnly,
       telegram_keep_originals_enabled: deviceSettings.value.telegramKeepOriginalsEnabled,
       telegram_image_format: deviceSettings.value.telegramImageFormat,
       telegram_dedup_enabled: deviceSettings.value.telegramDedupEnabled,

@@ -27,6 +27,7 @@ static const char *TAG = "wifi_manager";
 
 static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
+static int s_max_retries = 5;
 static bool s_is_connected = false;
 static esp_netif_t *s_sta_netif = NULL;
 
@@ -44,7 +45,7 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         // before falling back to the A record.
         esp_netif_create_ip6_linklocal(s_sta_netif);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < 5) {
+        if (s_retry_num < s_max_retries) {
             esp_wifi_connect();
             s_retry_num++;
             ESP_LOGI(TAG, "retry to connect to the AP");
@@ -199,7 +200,7 @@ static void apply_dns_override(void)
     ESP_LOGI(TAG, "DNS server set to: %s", dns);
 }
 
-esp_err_t wifi_manager_connect(const char *ssid, const char *password)
+esp_err_t wifi_manager_connect(const char *ssid, const char *password, int timeout_ms)
 {
     if (!ssid || strlen(ssid) == 0) {
         ESP_LOGE(TAG, "SSID is empty");
@@ -251,8 +252,13 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password)
 
     s_retry_num = 0;
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                                           pdFALSE, pdFALSE, portMAX_DELAY);
+    // Bounded wait - previously portMAX_DELAY, which could hang forever if
+    // association succeeded but DHCP never completed (no further
+    // WIFI_EVENT_STA_DISCONNECTED to ever set WIFI_FAIL_BIT). Every caller now
+    // gets a definitive answer within timeout_ms either way.
+    EventBits_t bits =
+        xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE,
+                             pdMS_TO_TICKS(timeout_ms));
 
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected to ap SSID:%s", ssid);
@@ -261,8 +267,8 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password)
         ESP_LOGI(TAG, "Failed to connect to SSID:%s", ssid);
         return ESP_FAIL;
     } else {
-        ESP_LOGE(TAG, "UNEXPECTED EVENT");
-        return ESP_FAIL;
+        ESP_LOGE(TAG, "Timed out waiting to connect to SSID:%s (%d ms)", ssid, timeout_ms);
+        return ESP_ERR_TIMEOUT;
     }
 }
 
@@ -270,6 +276,11 @@ esp_err_t wifi_manager_disconnect(void)
 {
     s_is_connected = false;
     return esp_wifi_disconnect();
+}
+
+void wifi_manager_set_max_retries(int max_retries)
+{
+    s_max_retries = max_retries;
 }
 
 bool wifi_manager_is_connected(void)

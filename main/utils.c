@@ -272,7 +272,8 @@ esp_err_t apply_config_from_json(cJSON *root)
 
             ESP_LOGI(TAG, "WiFi credentials changed, testing connection to: %s", new_ssid);
 
-            esp_err_t err = wifi_manager_connect(new_ssid, new_password);
+            esp_err_t err =
+                wifi_manager_connect(new_ssid, new_password, WIFI_CONNECT_DEFAULT_TIMEOUT_MS);
             if (err == ESP_OK) {
                 config_manager_set_wifi_ssid(new_ssid);
                 if (wifi_password_obj && cJSON_IsString(wifi_password_obj) &&
@@ -282,7 +283,8 @@ esp_err_t apply_config_from_json(cJSON *root)
                 ESP_LOGI(TAG, "Successfully connected and saved WiFi credentials");
             } else {
                 ESP_LOGW(TAG, "Failed to connect to new WiFi, reverting to previous credentials");
-                wifi_manager_connect(current_ssid, config_manager_get_wifi_password());
+                wifi_manager_connect(current_ssid, config_manager_get_wifi_password(),
+                                     WIFI_CONNECT_DEFAULT_TIMEOUT_MS);
                 return ESP_FAIL;
             }
         }
@@ -569,6 +571,14 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "telegram_fallback_on_error_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_telegram_fallback_on_error_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "telegram_power_save_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_telegram_power_save_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "telegram_power_save_latest_only");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_telegram_power_save_latest_only(cJSON_IsTrue(item));
     }
 
     // Keep a copy of each Telegram photo as received, before e-paper processing

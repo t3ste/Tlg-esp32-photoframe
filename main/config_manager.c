@@ -90,6 +90,8 @@ static bool telegram_fallback_rotation_enabled = true;
 static bool telegram_fallback_on_error_enabled = true;
 static bool telegram_keep_originals_enabled = false;
 static char telegram_image_format[TELEGRAM_IMAGE_FORMAT_MAX_LEN] = TELEGRAM_IMAGE_FORMAT_DEFAULT;
+static bool telegram_power_save_enabled = false;
+static bool telegram_power_save_latest_only = false;
 
 // Weather + headline overlays
 static bool weather_overlay_enabled = false;
@@ -648,6 +650,18 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_TELEGRAM_FALLBACK_ON_ERROR_ENABLED_KEY,
                        &stored_fallback_on_error) == ESP_OK) {
             telegram_fallback_on_error_enabled = (stored_fallback_on_error != 0);
+        }
+
+        uint8_t stored_power_save = 0;
+        if (nvs_get_u8(nvs_handle, NVS_TELEGRAM_POWER_SAVE_ENABLED_KEY, &stored_power_save) ==
+            ESP_OK) {
+            telegram_power_save_enabled = (stored_power_save != 0);
+        }
+
+        uint8_t stored_power_save_latest = 0;
+        if (nvs_get_u8(nvs_handle, NVS_TELEGRAM_POWER_SAVE_LATEST_ONLY_KEY,
+                       &stored_power_save_latest) == ESP_OK) {
+            telegram_power_save_latest_only = (stored_power_save_latest != 0);
         }
 
         uint8_t stored_keep_originals = 0;
@@ -1874,6 +1888,44 @@ void config_manager_set_telegram_fallback_on_error_enabled(bool enabled)
 bool config_manager_get_telegram_fallback_on_error_enabled(void)
 {
     return telegram_fallback_on_error_enabled;
+}
+
+void config_manager_set_telegram_power_save_enabled(bool enabled)
+{
+    telegram_power_save_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_TELEGRAM_POWER_SAVE_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Telegram power save mode %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_telegram_power_save_enabled(void)
+{
+    return telegram_power_save_enabled;
+}
+
+void config_manager_set_telegram_power_save_latest_only(bool enabled)
+{
+    telegram_power_save_latest_only = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_TELEGRAM_POWER_SAVE_LATEST_ONLY_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Telegram power save latest-only mode %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_telegram_power_save_latest_only(void)
+{
+    return telegram_power_save_latest_only;
 }
 
 void config_manager_set_telegram_keep_originals_enabled(bool enabled)

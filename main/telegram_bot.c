@@ -107,6 +107,14 @@ static esp_err_t body_capture_handler(esp_http_client_event_t *evt)
 #define TELEGRAM_HTTP_RETRY_COUNT 3
 #define TELEGRAM_HTTP_RETRY_DELAY_MS 1500
 
+// Power save mode trades retry robustness for a faster give-up/fallback
+// decision (see NVS_TELEGRAM_POWER_SAVE_ENABLED_KEY in config.h) - applied
+// uniformly whenever it's on, regardless of what triggered this wake.
+static int telegram_max_retries(int normal_count)
+{
+    return config_manager_get_telegram_power_save_enabled() ? 1 : normal_count;
+}
+
 // Every Telegram API URL embeds the bot token as ".../bot<TOKEN>/...". NEVER
 // log a raw URL - always redact through this first (a device log, including
 // the downloadable debug log, is not a safe place for a live bot token).
@@ -147,7 +155,7 @@ static esp_err_t telegram_http_get(const char *url, int timeout_ms, char **out_b
     char safe_url[160];
     redact_url_for_log(url, safe_url, sizeof(safe_url));
 
-    for (int attempt = 1; attempt <= TELEGRAM_HTTP_RETRY_COUNT; attempt++) {
+    for (int attempt = 1; attempt <= telegram_max_retries(TELEGRAM_HTTP_RETRY_COUNT); attempt++) {
         if (attempt > 1) {
             ESP_LOGW(TAG, "Retrying GET (%d/%d) after %d ms...", attempt, TELEGRAM_HTTP_RETRY_COUNT,
                      TELEGRAM_HTTP_RETRY_DELAY_MS);
@@ -229,7 +237,7 @@ static esp_err_t file_download_handler(esp_http_client_event_t *evt)
 
 static esp_err_t telegram_download_to_file(const char *url, const char *local_path)
 {
-    for (int attempt = 1; attempt <= TELEGRAM_DOWNLOAD_RETRY_COUNT; attempt++) {
+    for (int attempt = 1; attempt <= telegram_max_retries(TELEGRAM_DOWNLOAD_RETRY_COUNT); attempt++) {
         if (attempt > 1) {
             ESP_LOGW(TAG, "Retrying download (%d/%d) after %d ms...", attempt,
                      TELEGRAM_DOWNLOAD_RETRY_COUNT, TELEGRAM_DOWNLOAD_RETRY_DELAY_MS);
@@ -329,7 +337,7 @@ static esp_err_t telegram_api_post(const char *method, cJSON *body)
     build_api_url(method, url, sizeof(url));
 
     esp_err_t result = ESP_FAIL;
-    for (int attempt = 1; attempt <= TELEGRAM_HTTP_RETRY_COUNT; attempt++) {
+    for (int attempt = 1; attempt <= telegram_max_retries(TELEGRAM_HTTP_RETRY_COUNT); attempt++) {
         if (attempt > 1) {
             ESP_LOGW(TAG, "Retrying %s (%d/%d) after %d ms...", method, attempt,
                      TELEGRAM_HTTP_RETRY_COUNT, TELEGRAM_HTTP_RETRY_DELAY_MS);
@@ -1300,7 +1308,7 @@ static esp_err_t telegram_bot_send_photo_file(const char *file_path, const char 
     snprintf(content_type, sizeof(content_type), "multipart/form-data; boundary=%s", boundary);
 
     esp_err_t result = ESP_FAIL;
-    for (int attempt = 1; attempt <= TELEGRAM_HTTP_RETRY_COUNT; attempt++) {
+    for (int attempt = 1; attempt <= telegram_max_retries(TELEGRAM_HTTP_RETRY_COUNT); attempt++) {
         if (attempt > 1) {
             ESP_LOGW(TAG, "Retrying sendPhoto upload (%d/%d) after %d ms...", attempt,
                      TELEGRAM_HTTP_RETRY_COUNT, TELEGRAM_HTTP_RETRY_DELAY_MS);
@@ -1756,6 +1764,38 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
     bool pairing_enabled = config_manager_get_telegram_pairing_enabled();
     bool wants_portrait = wants_portrait_frame_now();
 
+    // Power save's "latest only" sub-option: identify the single newest
+    // eligible update (photo or document, from the allowed chat) up front, so
+    // the main loop below can skip downloading/processing every other one -
+    // permanently discarding them, since Telegram's getUpdates offset
+    // acknowledgment (further below) is one-way. Never gates command
+    // execution (see the queue_command() call at the end of the loop) - a
+    // command-only update has no photo/document and could otherwise never be
+    // "the winning item", which would silently and permanently drop every
+    // command in a photo-bearing batch, including the command needed to turn
+    // this mode back off.
+    bool latest_only_mode = config_manager_get_telegram_power_save_enabled() &&
+                             config_manager_get_telegram_power_save_latest_only();
+    cJSON *winning_item = NULL;
+    if (latest_only_mode) {
+        cJSON *scan_item = NULL;
+        cJSON_ArrayForEach(scan_item, result_arr)
+        {
+            cJSON *scan_message = get_message(scan_item);
+            if (!message_from_allowed_chat(scan_message, allowed_chat_id)) {
+                continue;
+            }
+            cJSON *scan_photo = cJSON_GetObjectItem(scan_message, "photo");
+            cJSON *scan_document = cJSON_GetObjectItem(scan_message, "document");
+            bool has_photo =
+                scan_photo && cJSON_IsArray(scan_photo) && cJSON_GetArraySize(scan_photo) > 0;
+            bool has_document = scan_document && cJSON_IsObject(scan_document);
+            if (has_photo || has_document) {
+                winning_item = scan_item;  // last match wins - array is in arrival order
+            }
+        }
+    }
+
     cJSON_ArrayForEach(item, result_arr)
     {
         cJSON *message = get_message(item);
@@ -1764,145 +1804,163 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
             continue;
         }
 
-        cJSON *photo = cJSON_GetObjectItem(message, "photo");
-        cJSON *document = cJSON_GetObjectItem(message, "document");
-        char downloaded_path[320];
-        char thumb_file_id[TELEGRAM_FILE_ID_MAX_LEN];
-        char largest_file_id[TELEGRAM_FILE_ID_MAX_LEN] = {0};
-        bool got_image = false;
-        bool is_duplicate = false;
-
-        if (photo && cJSON_IsArray(photo) && cJSON_GetArraySize(photo) > 0) {
-            got_image = (download_photo_with_fallback(photo, downloaded_path,
-                                                       sizeof(downloaded_path), thumb_file_id,
-                                                       sizeof(thumb_file_id), largest_file_id,
-                                                       sizeof(largest_file_id),
-                                                       &is_duplicate) == ESP_OK);
-            if (!got_image && !is_duplicate) {
-                image_attempt_failed = true;
-            }
-        } else if (document && cJSON_IsObject(document)) {
-            got_image = (download_document_image(document, downloaded_path,
-                                                  sizeof(downloaded_path), thumb_file_id,
-                                                  sizeof(thumb_file_id), &is_duplicate) == ESP_OK);
-            if (!got_image && !is_duplicate) {
-                image_attempt_failed = true;
-            }
-        }
-
-        if (is_duplicate) {
-            cJSON *mid = cJSON_GetObjectItem(message, "message_id");
-            int64_t reply_id = (mid && cJSON_IsNumber(mid)) ? (int64_t) mid->valuedouble : 0;
-            telegram_bot_send_message_reply(
-                "[i] Duplicate photo/file - already received before, skipped", reply_id);
-        }
-
         const char *text = get_text(message);
         // Only a genuine caption becomes a display overlay - not a "/"
         // command that happens to be attached to the same photo.
         const char *image_caption = (text && text[0] != '/') ? text : NULL;
 
-        if (got_image) {
-            ESP_LOGI(TAG, "Saved Telegram image: %s", downloaded_path);
+        // Skips download/display/pairing entirely for every update except the
+        // winning one in latest-only mode - but never skips the command check
+        // below, which always runs regardless (see the comment above
+        // winning_item's computation).
+        if (!(latest_only_mode && item != winning_item)) {
+            cJSON *photo = cJSON_GetObjectItem(message, "photo");
+            cJSON *document = cJSON_GetObjectItem(message, "document");
+            char downloaded_path[320];
+            char thumb_file_id[TELEGRAM_FILE_ID_MAX_LEN];
+            char largest_file_id[TELEGRAM_FILE_ID_MAX_LEN] = {0};
+            bool got_image = false;
+            bool is_duplicate = false;
 
-            // Orientation mismatch must be checked against the ORIGINAL
-            // image's own aspect ratio, before finalize_telegram_image()
-            // below pads it to the panel's fixed display resolution.
-            bool mismatch = false;
-            if (pairing_enabled) {
-                image_format_t fmt = image_processor_detect_format(downloaded_path);
-                if (fmt == IMAGE_FORMAT_PNG || fmt == IMAGE_FORMAT_JPG) {
-                    int w = 0, h = 0;
-                    if (image_processor_peek_file_dimensions(downloaded_path, fmt, &w, &h) ==
-                            ESP_OK &&
-                        w > 0 && h > 0) {
-                        mismatch = ((h > w) != wants_portrait);
-                    }
+            if (photo && cJSON_IsArray(photo) && cJSON_GetArraySize(photo) > 0) {
+                got_image = (download_photo_with_fallback(photo, downloaded_path,
+                                                           sizeof(downloaded_path), thumb_file_id,
+                                                           sizeof(thumb_file_id), largest_file_id,
+                                                           sizeof(largest_file_id),
+                                                           &is_duplicate) == ESP_OK);
+                if (!got_image && !is_duplicate) {
+                    image_attempt_failed = true;
+                }
+            } else if (document && cJSON_IsObject(document)) {
+                got_image = (download_document_image(document, downloaded_path,
+                                                      sizeof(downloaded_path), thumb_file_id,
+                                                      sizeof(thumb_file_id), &is_duplicate) == ESP_OK);
+                if (!got_image && !is_duplicate) {
+                    image_attempt_failed = true;
                 }
             }
 
-            // Persist as a proper processed PNG (+ thumbnail sidecar) so
-            // this image is visible to the Web UI gallery and fallback
-            // album rotation, same as any other album image - see
-            // finalize_telegram_image() for why a raw download isn't.
-            finalize_telegram_image(downloaded_path, sizeof(downloaded_path), largest_file_id);
-
-            if (saved_image_count < TELEGRAM_MAX_TRACKED_IMAGES) {
-                telegram_saved_image_t *entry = &saved_images[saved_image_count++];
-                strncpy(entry->path, downloaded_path, sizeof(entry->path) - 1);
-                entry->path[sizeof(entry->path) - 1] = '\0';
-                strncpy(entry->caption, image_caption ? image_caption : "",
-                        sizeof(entry->caption) - 1);
-                entry->caption[sizeof(entry->caption) - 1] = '\0';
-                strncpy(entry->thumb_file_id, thumb_file_id, sizeof(entry->thumb_file_id) - 1);
-                entry->thumb_file_id[sizeof(entry->thumb_file_id) - 1] = '\0';
-                const char *fname = strrchr(downloaded_path, '/');
-                fname = fname ? fname + 1 : downloaded_path;
-                strncpy(entry->filename, fname, sizeof(entry->filename) - 1);
-                entry->filename[sizeof(entry->filename) - 1] = '\0';
+            if (is_duplicate) {
                 cJSON *mid = cJSON_GetObjectItem(message, "message_id");
-                entry->message_id = (mid && cJSON_IsNumber(mid)) ? (int64_t) mid->valuedouble : 0;
-            } else {
-                ESP_LOGW(TAG, "Too many images in this batch, skipping reply confirmation for %s",
-                         downloaded_path);
+                int64_t reply_id = (mid && cJSON_IsNumber(mid)) ? (int64_t) mid->valuedouble : 0;
+                telegram_bot_send_message_reply(
+                    "[i] Duplicate photo/file - already received before, skipped", reply_id);
             }
 
-            if (!mismatch) {
-                // Orientation already matches the frame (or pairing doesn't
-                // apply to this format) - shows normally, same as before.
-                strncpy(display_path, downloaded_path, sizeof(display_path) - 1);
-                display_path[sizeof(display_path) - 1] = '\0';
-                have_display_candidate = true;
-                combined = false;
-            } else {
-                bool paired = false;
-                if (config_manager_get_telegram_pending_image_count() > 0 &&
-                    pair_result_count < TELEGRAM_MAX_PAIR_RESULTS) {
-                    char pending_path[320], pending_cap[TELEGRAM_CAPTION_MAX_LEN];
-                    config_manager_get_telegram_pending_image_at(
-                        0, pending_path, sizeof(pending_path), pending_cap, sizeof(pending_cap));
+            if (got_image) {
+                ESP_LOGI(TAG, "Saved Telegram image: %s", downloaded_path);
 
-                    struct stat st;
-                    if (stat(pending_path, &st) != 0) {
-                        // Vanished (e.g. MemFS wiped by a deep-sleep reboot) -
-                        // drop it; current image becomes the new pending entry
-                        // below.
-                        ESP_LOGW(TAG, "Pending pair image %s vanished, dropping", pending_path);
-                        config_manager_remove_telegram_pending_image_at(0);
-                    } else {
-                        telegram_pair_result_t *pr = &pair_results[pair_result_count++];
-                        strncpy(pr->path_a, pending_path, sizeof(pr->path_a) - 1);
-                        pr->path_a[sizeof(pr->path_a) - 1] = '\0';
-                        strncpy(pr->path_b, downloaded_path, sizeof(pr->path_b) - 1);
-                        pr->path_b[sizeof(pr->path_b) - 1] = '\0';
-
-                        esp_err_t compose_err = compose_pair_and_save(
-                            pending_path, pending_cap, downloaded_path, image_caption,
-                            pr->composed_path, sizeof(pr->composed_path));
-                        pr->ok = (compose_err == ESP_OK);
-                        config_manager_remove_telegram_pending_image_at(0);
-                        paired = true;
-
-                        if (pr->ok) {
-                            generate_processed_thumbnail(pr->composed_path);
-                            ESP_LOGI(TAG, "Composed and saved paired image: %s", pr->composed_path);
-                            strncpy(display_path, pr->composed_path, sizeof(display_path) - 1);
-                            display_path[sizeof(display_path) - 1] = '\0';
-                            have_display_candidate = true;
-                            combined = true;
-                        } else {
-                            ESP_LOGE(TAG, "Failed to compose pair (%s + %s): %s", pending_path,
-                                     downloaded_path, esp_err_to_name(compose_err));
+                // Orientation mismatch must be checked against the ORIGINAL
+                // image's own aspect ratio, before finalize_telegram_image()
+                // below pads it to the panel's fixed display resolution.
+                // Latest-only mode always shows its one winning image
+                // directly, never composed/paired - forcing this false
+                // sidesteps the NVS-persisted pending-pair queue entirely,
+                // avoiding a stale cross-wake partner or shelving the
+                // winning image as "pending" instead of showing it now.
+                bool mismatch = false;
+                if (pairing_enabled && !latest_only_mode) {
+                    image_format_t fmt = image_processor_detect_format(downloaded_path);
+                    if (fmt == IMAGE_FORMAT_PNG || fmt == IMAGE_FORMAT_JPG) {
+                        int w = 0, h = 0;
+                        if (image_processor_peek_file_dimensions(downloaded_path, fmt, &w, &h) ==
+                                ESP_OK &&
+                            w > 0 && h > 0) {
+                            mismatch = ((h > w) != wants_portrait);
                         }
                     }
                 }
-                if (!paired) {
-                    config_manager_add_telegram_pending_image(downloaded_path,
-                                                              image_caption ? image_caption : "");
+
+                // Persist as a proper processed PNG (+ thumbnail sidecar) so
+                // this image is visible to the Web UI gallery and fallback
+                // album rotation, same as any other album image - see
+                // finalize_telegram_image() for why a raw download isn't.
+                finalize_telegram_image(downloaded_path, sizeof(downloaded_path), largest_file_id);
+
+                if (saved_image_count < TELEGRAM_MAX_TRACKED_IMAGES) {
+                    telegram_saved_image_t *entry = &saved_images[saved_image_count++];
+                    strncpy(entry->path, downloaded_path, sizeof(entry->path) - 1);
+                    entry->path[sizeof(entry->path) - 1] = '\0';
+                    strncpy(entry->caption, image_caption ? image_caption : "",
+                            sizeof(entry->caption) - 1);
+                    entry->caption[sizeof(entry->caption) - 1] = '\0';
+                    strncpy(entry->thumb_file_id, thumb_file_id, sizeof(entry->thumb_file_id) - 1);
+                    entry->thumb_file_id[sizeof(entry->thumb_file_id) - 1] = '\0';
+                    const char *fname = strrchr(downloaded_path, '/');
+                    fname = fname ? fname + 1 : downloaded_path;
+                    strncpy(entry->filename, fname, sizeof(entry->filename) - 1);
+                    entry->filename[sizeof(entry->filename) - 1] = '\0';
+                    cJSON *mid = cJSON_GetObjectItem(message, "message_id");
+                    entry->message_id = (mid && cJSON_IsNumber(mid)) ? (int64_t) mid->valuedouble : 0;
+                } else {
+                    ESP_LOGW(TAG, "Too many images in this batch, skipping reply confirmation for %s",
+                             downloaded_path);
+                }
+
+                if (!mismatch) {
+                    // Orientation already matches the frame (or pairing
+                    // doesn't apply to this format) - shows normally, same as
+                    // before.
+                    strncpy(display_path, downloaded_path, sizeof(display_path) - 1);
+                    display_path[sizeof(display_path) - 1] = '\0';
+                    have_display_candidate = true;
+                    combined = false;
+                } else {
+                    bool paired = false;
+                    if (config_manager_get_telegram_pending_image_count() > 0 &&
+                        pair_result_count < TELEGRAM_MAX_PAIR_RESULTS) {
+                        char pending_path[320], pending_cap[TELEGRAM_CAPTION_MAX_LEN];
+                        config_manager_get_telegram_pending_image_at(0, pending_path,
+                                                                      sizeof(pending_path),
+                                                                      pending_cap,
+                                                                      sizeof(pending_cap));
+
+                        struct stat st;
+                        if (stat(pending_path, &st) != 0) {
+                            // Vanished (e.g. MemFS wiped by a deep-sleep
+                            // reboot) - drop it; current image becomes the
+                            // new pending entry below.
+                            ESP_LOGW(TAG, "Pending pair image %s vanished, dropping", pending_path);
+                            config_manager_remove_telegram_pending_image_at(0);
+                        } else {
+                            telegram_pair_result_t *pr = &pair_results[pair_result_count++];
+                            strncpy(pr->path_a, pending_path, sizeof(pr->path_a) - 1);
+                            pr->path_a[sizeof(pr->path_a) - 1] = '\0';
+                            strncpy(pr->path_b, downloaded_path, sizeof(pr->path_b) - 1);
+                            pr->path_b[sizeof(pr->path_b) - 1] = '\0';
+
+                            esp_err_t compose_err = compose_pair_and_save(
+                                pending_path, pending_cap, downloaded_path, image_caption,
+                                pr->composed_path, sizeof(pr->composed_path));
+                            pr->ok = (compose_err == ESP_OK);
+                            config_manager_remove_telegram_pending_image_at(0);
+                            paired = true;
+
+                            if (pr->ok) {
+                                generate_processed_thumbnail(pr->composed_path);
+                                ESP_LOGI(TAG, "Composed and saved paired image: %s",
+                                         pr->composed_path);
+                                strncpy(display_path, pr->composed_path, sizeof(display_path) - 1);
+                                display_path[sizeof(display_path) - 1] = '\0';
+                                have_display_candidate = true;
+                                combined = true;
+                            } else {
+                                ESP_LOGE(TAG, "Failed to compose pair (%s + %s): %s", pending_path,
+                                         downloaded_path, esp_err_to_name(compose_err));
+                            }
+                        }
+                    }
+                    if (!paired) {
+                        config_manager_add_telegram_pending_image(
+                            downloaded_path, image_caption ? image_caption : "");
+                    }
                 }
             }
         }
 
+        // Always runs, regardless of latest_only_mode - see the comment
+        // above winning_item's computation for why command execution is
+        // never gated on it.
         if (text && text[0] == '/') {
             queue_command(text);
         }
@@ -1936,8 +1994,11 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
     // Per-image "saved" confirmations, threaded as a reply to the original
     // message and (where Telegram gave us a thumbnail file_id) attaching the
     // smallest available photo size - already hosted by Telegram, so no
-    // re-upload is needed.
-    for (int i = 0; i < saved_image_count; i++) {
+    // re-upload is needed. Skipped entirely in power save mode (the
+    // "Erfolgsnachricht" the feature explicitly drops) to save one outbound
+    // Telegram HTTP call per photo - error replies above are unaffected.
+    for (int i = 0; i < saved_image_count && !config_manager_get_telegram_power_save_enabled();
+         i++) {
         telegram_saved_image_t *entry = &saved_images[i];
         char caption_text[192];
 
@@ -2109,6 +2170,8 @@ static void format_toggles(char *out, size_t out_len)
              "[%c] Rotation notify (thumbnail on fallback display)\n"
              "[%c] Fallback rotation (display change with no new photo)\n"
              "[%c] Fallback rotation on connection error (only matters if the above is off)\n"
+             "[%c] Power save mode (automatic timer wake only)\n"
+             "[%c] Power save latest-only (only matters if the above is on)\n"
              "[%c] Keep originals (pre-processing copies)\n"
              "[%c] Weather overlay\n"
              "[%c] Headlines overlay\n"
@@ -2123,6 +2186,8 @@ static void format_toggles(char *out, size_t out_len)
              config_manager_get_telegram_rotation_notify_enabled() ? 'x' : ' ',
              config_manager_get_telegram_fallback_rotation_enabled() ? 'x' : ' ',
              config_manager_get_telegram_fallback_on_error_enabled() ? 'x' : ' ',
+             config_manager_get_telegram_power_save_enabled() ? 'x' : ' ',
+             config_manager_get_telegram_power_save_latest_only() ? 'x' : ' ',
              config_manager_get_telegram_keep_originals_enabled() ? 'x' : ' ',
              config_manager_get_weather_overlay_enabled() ? 'x' : ' ',
              config_manager_get_headlines_overlay_enabled() ? 'x' : ' ',
@@ -2445,6 +2510,32 @@ static void execute_command(const char *raw_text)
         } else {
             telegram_bot_send_message("[i] Usage: /fallback_rotation_on_error on|off");
         }
+    } else if (strcmp(cmd, "/power_save") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_telegram_power_save_enabled(true);
+            telegram_bot_send_message(
+                "[x] Power save mode enabled\n"
+                "(fewer WiFi/Telegram retries and a shorter wake on an automatic timer wake - "
+                "never affects a manual button wake).");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_telegram_power_save_enabled(false);
+            telegram_bot_send_message("[ ] Power save mode disabled.");
+        } else {
+            telegram_bot_send_message("[i] Usage: /power_save on|off");
+        }
+    } else if (strcmp(cmd, "/power_save_latest_only") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_telegram_power_save_latest_only(true);
+            telegram_bot_send_message(
+                "[x] Latest-only mode enabled\n"
+                "(only relevant while /power_save is on - processes only the newest photo/"
+                "document in a poll batch, permanently discarding everything else).");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_telegram_power_save_latest_only(false);
+            telegram_bot_send_message("[ ] Latest-only mode disabled.");
+        } else {
+            telegram_bot_send_message("[i] Usage: /power_save_latest_only on|off");
+        }
     } else if (strcmp(cmd, "/keep_originals") == 0) {
         if (args && strcasecmp(args, "on") == 0) {
             config_manager_set_telegram_keep_originals_enabled(true);
@@ -2598,6 +2689,11 @@ static void execute_command(const char *raw_text)
             "  above is off: whether a failed/unconfigured Telegram poll\n"
             "  still falls back to album rotation (on, default) or also\n"
             "  leaves the display unchanged (off)\n"
+            "/power_save on|off - Minimize wake duration/WiFi time on an\n"
+            "  automatic timer wake (never affects a manual button wake)\n"
+            "/power_save_latest_only on|off - Only matters while the above\n"
+            "  is on: process only the newest update in a batch, discarding\n"
+            "  everything else permanently\n"
             "/keep_originals on|off - Save each Telegram photo as received,\n"
             "  before e-paper processing, under Telegram/Originals\n"
             "/exif_date on|off - Show a photo's EXIF capture date as a caption\n"

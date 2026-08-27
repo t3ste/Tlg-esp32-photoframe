@@ -992,6 +992,38 @@ async function performFactoryReset() {
                     </div>
 
                     <v-switch
+                      v-model="settingsStore.deviceSettings.telegramPowerSaveEnabled"
+                      label="Power save mode"
+                      color="primary"
+                      class="mb-2"
+                      hide-details
+                    />
+                    <div class="text-caption text-medium-emphasis mb-4">
+                      Minimizes wake duration and WiFi-on time on an automatic (timer) wake: fewer
+                      WiFi/Telegram retries before giving up, skips the post-rotation config-sync
+                      window, and skips the per-photo "saved" confirmation reply. Never affects a
+                      manual button-triggered wake, which always keeps its full retry budget and
+                      window - a deliberate escape hatch to reach this page even with this on.
+                      Also togglable via the "/power_save" bot command.
+                    </div>
+
+                    <v-switch
+                      v-model="settingsStore.deviceSettings.telegramPowerSaveLatestOnly"
+                      label="Only process the newest update"
+                      color="primary"
+                      class="mb-2 ml-4"
+                      hide-details
+                      :disabled="!settingsStore.deviceSettings.telegramPowerSaveEnabled"
+                    />
+                    <div class="text-caption text-medium-emphasis mb-4 ml-4">
+                      Only relevant while the option above is on. Processes only the single newest
+                      photo/document in a poll batch and discards every other update, message, and
+                      "/" command in that batch - permanently (Telegram never redelivers them). The
+                      surviving image always displays alone, never combined via orientation-pairing.
+                      Also togglable via the "/power_save_latest_only" bot command.
+                    </div>
+
+                    <v-switch
                       v-model="settingsStore.deviceSettings.telegramKeepOriginalsEnabled"
                       label="Keep original photos as received"
                       color="primary"

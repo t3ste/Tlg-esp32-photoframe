@@ -243,6 +243,17 @@ bool config_manager_get_telegram_fallback_rotation_enabled(void);
 void config_manager_set_telegram_fallback_on_error_enabled(bool enabled);
 bool config_manager_get_telegram_fallback_on_error_enabled(void);
 
+// Minimizes wake duration and WiFi-on time on an automatic Telegram-mode
+// wake. Defaults to false. See NVS_TELEGRAM_POWER_SAVE_ENABLED_KEY in
+// config.h.
+void config_manager_set_telegram_power_save_enabled(bool enabled);
+bool config_manager_get_telegram_power_save_enabled(void);
+
+// Only consulted while the setting above is also on - see
+// NVS_TELEGRAM_POWER_SAVE_LATEST_ONLY_KEY in config.h. Defaults to false.
+void config_manager_set_telegram_power_save_latest_only(bool enabled);
+bool config_manager_get_telegram_power_save_latest_only(void);
+
 // Keep a copy of each Telegram photo exactly as received (pre-processing) in
 // TELEGRAM_ORIGINALS_DIRECTORY. Defaults to false. See
 // NVS_TELEGRAM_KEEP_ORIGINALS_KEY in config.h.

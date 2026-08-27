@@ -100,6 +100,8 @@ rotation cursor too).
 | `/rotation_pairing on\|off` | Toggles auto-rotate orientation pairing (random mode only) |
 | `/fallback_rotation on\|off` | Whether a wake with no new Telegram image still changes the display (on, default) or leaves it unchanged (off) |
 | `/fallback_rotation_on_error on\|off` | Only matters while the above is off: whether a failed/unconfigured poll still falls back to album rotation (on, default) or also leaves the display unchanged (off) |
+| `/power_save on\|off` | Minimizes wake duration/WiFi time on an automatic timer wake (see [below](#power-save-mode)) - never affects a manual button wake |
+| `/power_save_latest_only on\|off` | Only matters while the above is on: processes only the newest update in a poll batch, permanently discarding everything else |
 | `/rotation_notify on\|off` | Sends a thumbnail when a wake displays an image via fallback rotation |
 | `/keep_originals on\|off` | Keeps a copy of each photo as received, before e-paper processing |
 | `/exif_date on\|off` | Shows a photo's EXIF capture date as caption when it has none (experimental) |
@@ -169,6 +171,8 @@ All default to preserving existing behavior for users who don't configure Telegr
 | Fallback rotation | on | See [below](#fallback-rotation) |
 | Fallback rotation on connection error | on | See [below](#fallback-rotation) - only matters while the above is off |
 | Fallback-rotation notification | **off** | See [below](#fallback-rotation-notification) |
+| Power save mode | **off** | See [below](#power-save-mode) |
+| Power save latest-only | **off** | See [below](#power-save-mode) - only matters while the above is on |
 | Thumbnail gallery (Web UI) | **off** | Client-side toggle; large galleries slow down the device's HTTP server |
 | On-device image format | **EPDGZ** | See [below](#on-device-image-format) |
 | Duplicate detection | **off** | See [below](#duplicate-detection) |
@@ -245,6 +249,34 @@ sends a thumbnail of whatever got displayed instead - so the chat still shows wh
 the frame even when nothing was pushed to it. Only fires when the display actually changed (not
 when rotation was a no-op, e.g. no enabled albums). Off by default; toggle via Web UI or
 `/rotation_notify on|off`.
+
+### Power save mode
+
+**Off by default.** Minimizes wake duration and WiFi-on time on an automatic (timer-triggered)
+Telegram-mode wake:
+
+- Fewer WiFi connection retries and a shorter connect timeout before giving up (rather than the
+  normal, more patient budget).
+- Fewer retries on a Telegram HTTP request/download before giving up.
+- Skips the post-rotation config-sync window that otherwise keeps the device awake a bit longer for
+  the web UI or Home Assistant.
+- Skips the routine per-photo "saved" confirmation reply (error replies still send normally).
+
+Home Assistant's own update notification (when HA integration is configured) is unaffected and still
+fires normally - this only trims the *ambient* waiting around it, not HA integration itself.
+
+**Never applies to a manual button-triggered wake** - pressing the rotate button always gets the
+full retry budget and config-sync window, so there's always a way to reach the web UI even with this
+mode on. Enable via Web UI (Settings → Telegram → "Power save mode") or `/power_save on|off`.
+
+A **nested sub-option**, "Only process the newest update" (`/power_save_latest_only on|off`, only
+relevant while the above is on), goes further: a poll batch with multiple updates keeps only the
+single newest photo/document and discards everything else in that batch - other photos, captions,
+and any "/" commands - **permanently**, since Telegram's `getUpdates` acknowledgment can't be
+undone (nothing dropped this way is ever redelivered). The surviving image always displays alone,
+never combined via [orientation pairing](#multi-image-orientation-pairing). A command sent by itself
+(no photo attached) is never itself discarded by this option, so you always have a way to turn it
+back off from the chat.
 
 ### Keep originals
 

@@ -284,6 +284,32 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // TELEGRAM_ORIGINALS_DIRECTORY. Opt-in, off by default.
 #define NVS_TELEGRAM_KEEP_ORIGINALS_KEY "tg_keep_orig"
 
+// Minimizes wake duration and WiFi-on time on an automatic (timer-triggered)
+// Telegram-mode wake: fewer WiFi/Telegram HTTP retries before giving up, and
+// skips the post-rotation "hold window" that otherwise keeps the device
+// awake a bit longer for web UI/HA config sync. Never applies to a manual
+// button-triggered wake, which always keeps its full retry budget and hold
+// window - a deliberate, permanent escape hatch to reach the web UI even
+// while this is on. Opt-in, off by default.
+#define NVS_TELEGRAM_POWER_SAVE_ENABLED_KEY "tg_power_save"
+// Only consulted while the toggle above is also on. Processes only the
+// single newest update in a poll batch (photo or document) and discards
+// every other update, message, and "/" command in that batch - permanently,
+// since Telegram's getUpdates offset acknowledgment is one-way (nothing
+// dropped this way is ever redelivered). Also disables orientation-pairing
+// for the surviving image (it always displays alone, never composed with a
+// pending partner) and skips the per-photo "saved" confirmation reply. A
+// command-only update is never itself discarded by this - see telegram_bot.c.
+// Opt-in, off by default.
+#define NVS_TELEGRAM_POWER_SAVE_LATEST_ONLY_KEY "tg_ps_latest"
+// WiFi connect timeout used on an automatic Telegram-mode wake while power
+// save is on, in place of the normal 60s budget - a manual button wake is
+// never affected (see NVS_TELEGRAM_POWER_SAVE_ENABLED_KEY above).
+#define TELEGRAM_POWER_SAVE_WIFI_TIMEOUT_SEC 15
+// Reconnect-attempt budget used in place of the normal 5 (see
+// wifi_manager_set_max_retries()) under the same conditions.
+#define TELEGRAM_POWER_SAVE_WIFI_MAX_RETRIES 1
+
 // On-device output format for Telegram-ingested photos. EPDGZ is the
 // recommended default: it stores the already-resolved 4-bit palette index,
 // gzip-compressed, so every future display is a plain gzip-inflate + nibble
@@ -408,6 +434,12 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // without a marginal battery rail, or users who'd rather trade the small
 // brownout-risk reduction back for full WiFi range, can turn it off.
 #define NVS_WIFI_TX_POWER_CAP_ENABLED_KEY "tx_pwr_cap_en"
+
+// Default bound for wifi_manager_connect()'s wait - matches the ~60s budget
+// callers effectively relied on before that wait was made explicitly bounded
+// (see wifi_manager.c: it used to block forever via portMAX_DELAY, which
+// could hang indefinitely on a DHCP stall after a successful association).
+#define WIFI_CONNECT_DEFAULT_TIMEOUT_MS 60000
 
 // AI API Keys (for webapp client use)
 #define AI_API_KEY_MAX_LEN 256
