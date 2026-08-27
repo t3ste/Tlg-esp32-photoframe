@@ -3,7 +3,22 @@ import {
   normalizeTargetGeometry,
   getBoardProfile,
   getBoardProfiles,
+  orientationFromDims,
 } from "../face-crop/geometry.js";
+
+describe("orientationFromDims", () => {
+  test("wider than tall is landscape", () => {
+    expect(orientationFromDims(2592, 1944)).toBe("landscape");
+  });
+
+  test("taller than wide is portrait", () => {
+    expect(orientationFromDims(1944, 2592)).toBe("portrait");
+  });
+
+  test("equal width and height is square", () => {
+    expect(orientationFromDims(2880, 2880)).toBe("square");
+  });
+});
 
 describe("parseWidthHeight", () => {
   test("parses a valid WxH string", () => {

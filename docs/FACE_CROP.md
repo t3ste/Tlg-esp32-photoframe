@@ -65,6 +65,7 @@ rendered image uses the exact same center-crop it always has.
 | `--face-margin <percent>` | Safety margin added around each face, as a fraction of its own size (default `0.12`). |
 | `--face-min-score <value>` | Minimum detection confidence to keep a face, 0-1 (default `0.75`). |
 | `--face-model-dir <dir>` | Local directory with a previously-downloaded model, for fully offline use - see [Engine and offline use](#engine-and-offline-use). |
+| `--face-detect-tiles <n>` | Also run detection on an NxN grid of overlapping tiles, to catch small/distant faces (default `1` = disabled). See [Detecting small/distant faces](#detecting-smalldistant-faces) below. |
 
 ## Target geometry: `--board` / `--resolution` / `--display-size-mm` / `--orientation`
 
@@ -397,6 +398,39 @@ photoframe-process photo.jpg --detect-faces --board waveshare_photopainter_73 \
 
 (Check the actual shard filename(s) listed in the downloaded `model.json`'s `weightsManifest` -
 BlazeFace currently ships as a single shard, but this isn't guaranteed to stay that way forever.)
+
+## Detecting small/distant faces
+
+The downloaded BlazeFace model has a **frozen 128x128 input** - whatever the source photo's actual
+resolution, the whole image gets squashed down to that size before the detector ever sees it. A face
+that's only a small fraction of a multi-megapixel photo can shrink to just a few pixels and vanish
+entirely at that point - `--face-min-score` can't help here, since there's no candidate box left to
+threshold in the first place.
+
+`--face-detect-tiles <n>` works around this by additionally splitting the image into an NxN grid of
+overlapping tiles and running the same detector on each one, so a small face becomes a much larger
+fraction of whatever tile it lands in - effectively "zooming in" before the forced 128x128 downscale
+happens. Detections from all tiles (and the whole-image pass) are merged automatically, so the same
+face isn't reported twice just because it fell inside more than one tile.
+
+Confirmed on a real 5-person photo where whole-image detection (`--face-detect-tiles 1`, the default)
+found only the 3 largest/closest faces: `--face-detect-tiles 3` found the other 2 - one partly
+occluded by sunglasses (score 0.98) and one simply smaller/farther from the camera but otherwise
+perfectly clear (score 0.77-0.98 depending on which tile it fell in) - with no other setting changed.
+
+**Cost**: each tile is a full extra detection pass, so `--face-detect-tiles n` roughly multiplies
+processing time per photo by `n² + 1`. Start with `2` or `3`; there's rarely a reason to go higher.
+
+**More tiles also means more chances for a false positive** (see
+[Face detection accuracy](#face-detection-accuracy) below) - a face-like bark/foliage pattern that the
+whole-image pass would never have "seen" clearly enough to misfire on can look convincingly face-shaped
+once a tile zooms into it. Confirmed on the same real photo: alongside the 2 genuine faces it recovered,
+`--face-detect-tiles 3` also produced one false positive on tree bark at score 0.88 - well above the
+default `--face-min-score 0.75`. This didn't end up affecting the recommended crop (it was far enough
+from the real faces that the "largest face priority" heuristic rejected it, the same way it would reject
+any face that doesn't fit), but it's still worth a quick sanity check with `--crop-preview` before trusting
+a large tiled batch, and raising `--face-min-score` is the first thing to try if false positives become a
+real nuisance for a given photo set.
 
 ## Face detection accuracy
 

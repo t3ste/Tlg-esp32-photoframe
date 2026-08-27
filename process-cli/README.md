@@ -65,6 +65,23 @@ photoframe-process ~/Photos/Albums -o output/
 
 Automatically processes subdirectories as albums, preserving folder structure.
 
+### Split Output by Orientation
+
+```bash
+# Route each album's output into landscape/portrait/square subfolders, based on
+# each photo's OWN orientation (before any auto-rotation to match the display)
+photoframe-process ~/Photos/Albums --split-by-orientation -o output/
+```
+
+Folder mode only (errors on a single-file input). Produces e.g.
+`output/AlbumName/landscape/photo1.epdgz`, `output/AlbumName/portrait/photo2.epdgz`,
+`output/AlbumName/square/photo3.epdgz` instead of one flat `output/AlbumName/` - useful when
+downstream logic (firmware rotation, manual sorting) wants photos pre-grouped by shape rather than
+mixed together. A photo that can't be decoded at all (corrupt file, unsupported format) is copied
+unmodified into an `output/AlbumName/unknown/` subfolder instead of just being skipped with a
+console error, so it stays visible in a large batch rather than silently disappearing. Off by
+default - existing output layout is unchanged unless this flag is given.
+
 ### Device Parameters
 
 ```bash

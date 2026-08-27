@@ -12,6 +12,7 @@ import {
   getBoardProfiles,
   getBoardProfile,
   parseWidthHeight,
+  orientationFromDims,
 } from "./geometry.js";
 import {
   computeRecommendedCrop,
@@ -34,6 +35,7 @@ export {
   getBoardProfiles,
   getBoardProfile,
   parseWidthHeight,
+  orientationFromDims,
   computeRecommendedCrop,
   fallbackCrop,
   clampCropToImage,

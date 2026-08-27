@@ -26,6 +26,7 @@ import {
   buildMetadata,
   writeMetadataFile,
   metadataPathFor,
+  orientationFromDims,
 } from "./face-crop/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -567,6 +568,20 @@ function isImageFile(filename) {
   ].includes(ext);
 }
 
+/**
+ * Classifies a photo's OWN orientation (before any auto-rotation to match a
+ * display target) as "landscape", "portrait", or "square", based on its
+ * EXIF-corrected pixel dimensions - i.e. however a person would describe the
+ * photo looking at it, not the raw sensor dimensions before EXIF rotation is
+ * applied. Only used for --split-by-orientation's folder routing.
+ *
+ * @throws if the image can't be loaded/decoded at all.
+ */
+async function classifyOriginalOrientation(imagePath) {
+  const canvas = await loadOrientedCanvas(imagePath, { autoOrient: false });
+  return orientationFromDims(canvas.width, canvas.height);
+}
+
 // Process all images in a folder structure (albums)
 async function processFolderStructure(
   inputDir,
@@ -574,6 +589,7 @@ async function processFolderStructure(
   options,
   devicePalette,
   uploadHost = null,
+  splitByOrientation = false,
 ) {
   console.log(`\nProcessing folder structure: ${inputDir}`);
   console.log(`Output directory: ${outputDir}\n`);
@@ -623,12 +639,36 @@ async function processFolderStructure(
       const baseName = path.basename(imageFile, path.extname(imageFile));
       const fmt = options.format || "epdgz";
       const ext = fmt === "bmp" ? ".bmp" : fmt === "png" ? ".png" : ".epdgz";
-      const outputBasePath = path.join(albumOutputPath, baseName);
+
+      console.log(`  [${i + 1}/${imageFiles.length}] Processing: ${imageFile}`);
+
+      let albumSubdir = albumOutputPath;
+      if (splitByOrientation) {
+        let orientation;
+        try {
+          orientation = await classifyOriginalOrientation(inputPath);
+        } catch (error) {
+          console.warn(
+            `  WARNING: could not read ${imageFile} (${error.message}) - copying original into "unknown"`,
+          );
+          const unknownDir = path.join(albumOutputPath, "unknown");
+          fs.mkdirSync(unknownDir, { recursive: true });
+          try {
+            fs.copyFileSync(inputPath, path.join(unknownDir, imageFile));
+          } catch (copyError) {
+            console.error(
+              `  ERROR copying ${imageFile} into "unknown": ${copyError.message}`,
+            );
+          }
+          totalErrors++;
+          continue;
+        }
+        albumSubdir = path.join(albumOutputPath, orientation);
+        fs.mkdirSync(albumSubdir, { recursive: true });
+      }
+      const outputBasePath = path.join(albumSubdir, baseName);
 
       try {
-        console.log(
-          `  [${i + 1}/${imageFiles.length}] Processing: ${imageFile}`,
-        );
         const rendered = await processImageFile(
           inputPath,
           outputBasePath,
@@ -892,6 +932,15 @@ program
   .option("-v, --verbose", "Enable verbose logging")
   .option("--format <format>", "Output format: epdgz, png, or bmp", "epdgz")
   .option(
+    "--split-by-orientation",
+    "Folder mode only: route each album's output into landscape/portrait/square " +
+      "subfolders based on the ORIGINAL photo's own width vs. height (before any " +
+      "auto-rotation to match the display), e.g. album/landscape/photo1.epdgz, " +
+      "album/portrait/photo2.epdgz. A photo that can't be decoded at all is copied " +
+      "unmodified into an album/unknown/ subfolder instead of just being skipped " +
+      "with an error.",
+  )
+  .option(
     "--grayscale",
     "Pack output as 16-level grayscale (GC16 / IT8951 panels)",
   )
@@ -1053,6 +1102,17 @@ program
   .option(
     "--face-model-dir <dir>",
     "Local directory with a previously downloaded face detection model, for fully offline use (see docs/FACE_CROP.md)",
+  )
+  .option(
+    "--face-detect-tiles <n>",
+    "Split each image into an NxN grid of overlapping tiles and additionally run face detection " +
+      "on each one, to catch small/distant faces that whole-image detection misses (the detector's " +
+      "fixed input size shrinks the whole photo down regardless of resolution, so small faces can " +
+      "vanish before whole-image detection ever sees them). 1 = disabled (default, original " +
+      "behavior). Each increment roughly multiplies processing time per photo by n²+1 - try 2 or 3 " +
+      "first. Duplicate detections of the same face across tiles are merged automatically.",
+    (v) => parseInt(v, 10),
+    1,
   )
   .action(async (input, options) => {
     let outputDir;
@@ -1376,6 +1436,7 @@ program
         const detector = await getFaceDetector("blazeface", {
           scoreThreshold: options.faceMinScore,
           modelDir: options.faceModelDir,
+          tileGrid: options.faceDetectTiles,
         });
         console.log("Face detection model ready");
 
@@ -1455,6 +1516,13 @@ program
         process.exit(1);
       }
 
+      if (options.splitByOrientation && !isDirectory) {
+        console.error(
+          "Error: --split-by-orientation requires a directory input (album folder mode)",
+        );
+        process.exit(1);
+      }
+
       if (options.upload || options.direct) {
         if (faceCropContext) {
           console.warn(
@@ -1490,6 +1558,7 @@ program
           processOptions,
           devicePalette,
           options.upload ? options.host : null,
+          !!options.splitByOrientation,
         );
       } else {
         // Process single file

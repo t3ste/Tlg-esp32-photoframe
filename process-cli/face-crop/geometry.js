@@ -74,7 +74,7 @@ export function parseWidthHeight(str) {
   return { width: parseFloat(m[1]), height: parseFloat(m[2]) };
 }
 
-function orientationFromDims(w, h) {
+export function orientationFromDims(w, h) {
   if (w > h) return "landscape";
   if (h > w) return "portrait";
   return "square";
