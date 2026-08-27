@@ -14,16 +14,21 @@ import fs from "fs";
 // through. @napi-rs/canvas has the same createCanvas/loadImage/Canvas2D
 // surface this file and @aitjcize/epaper-image-convert's injected-createCanvas
 // pipeline already expect, and doesn't exhibit this leak.
+//
+// It also, unlike node-canvas, already applies EXIF orientation itself while
+// decoding a JPEG - confirmed directly against 400+ real photos (comparing
+// the raw SOF-marker pixel dimensions against loadImage()'s own reported
+// dimensions, plus two visual before/after checks) - so loadOrientedCanvas()
+// below must NOT also apply it, or it doubles up: for a 90/270 rotation
+// (EXIF Orientation 6/8) the image comes out sideways, for 180 (Orientation
+// 3) it comes out upside down. This was a real, silent regression from the
+// canvas-library swap above - the manual EXIF-correction step this file used
+// to run after loadImage() was correct and necessary for node-canvas, which
+// never touched EXIF orientation itself, but became actively harmful once
+// @napi-rs/canvas started doing that same correction internally.
 import { loadImage, createCanvas } from "@napi-rs/canvas";
-import exifParser from "exif-parser";
 import heicConvert from "heic-convert";
-import {
-  processImage,
-  applyExifOrientation,
-  rotateImage,
-  SPECTRA6,
-  GRAYSCALE16,
-} from "@aitjcize/epaper-image-convert";
+import { processImage, rotateImage, SPECTRA6, GRAYSCALE16 } from "@aitjcize/epaper-image-convert";
 
 /**
  * Load image with HEIC support
@@ -45,26 +50,15 @@ async function loadImageWithHeicSupport(imagePath) {
 }
 
 /**
- * Get EXIF orientation from image file
- * @param {string} imagePath - Path to image file
- * @returns {number} EXIF orientation value (1-8)
- */
-function getExifOrientation(imagePath) {
-  try {
-    const buffer = fs.readFileSync(imagePath);
-    const parser = exifParser.create(buffer);
-    const result = parser.parse();
-    return result.tags.Orientation || 1;
-  } catch (error) {
-    return 1;
-  }
-}
-
-/**
- * Loads an image (with HEIC support), applies its EXIF orientation, and
- * optionally auto-rotates it 90° to match the target orientation. This is
- * the "upright, ready to crop/resize" canvas - the same coordinate space
- * face detection runs against for face-aware cropping (see face-crop/).
+ * Loads an image (with HEIC support) and optionally auto-rotates it 90° to
+ * match the target orientation. This is the "upright, ready to crop/resize"
+ * canvas - the same coordinate space face detection runs against for
+ * face-aware cropping (see face-crop/).
+ *
+ * EXIF orientation is NOT applied manually here - @napi-rs/canvas's
+ * loadImage() already decodes the image into upright, correctly-oriented
+ * pixels on its own (see the import comment above for how this was
+ * confirmed). loadImage()'s own img.width/height already reflect that.
  *
  * @param {string} imagePath - Path to image file
  * @param {Object} [options]
@@ -81,17 +75,6 @@ export async function loadOrientedCanvas(imagePath, options = {}) {
   let canvas = createCanvas(img.width, img.height);
   const ctx = canvas.getContext("2d");
   ctx.drawImage(img, 0, 0);
-
-  const exifOrientation = getExifOrientation(imagePath);
-  if (exifOrientation > 1) {
-    if (verbose) {
-      console.log(`  Applying EXIF orientation: ${exifOrientation}`);
-    }
-    canvas = applyExifOrientation(canvas, exifOrientation, createCanvas);
-    if (verbose) {
-      console.log(`  After EXIF correction: ${canvas.width}x${canvas.height}`);
-    }
-  }
 
   if (autoOrient) {
     const isSourcePortrait = canvas.height > canvas.width;
