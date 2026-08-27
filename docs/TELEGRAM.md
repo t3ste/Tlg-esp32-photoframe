@@ -58,6 +58,11 @@ processing — a safety valve if the queue gets flooded or stuck.
 
 ## Multi-image orientation pairing
 
+**This setting only affects incoming Telegram photos** - see
+[Auto-rotate orientation pairing](#auto-rotate-orientation-pairing) below for the separate,
+similarly-named setting that governs album picks made during rotation instead (easy to mix the two
+up, since both produce the same kind of combined image).
+
 If the display is in portrait orientation (from `display_rotation_deg`) but the frame's default
 layout is landscape (or vice versa), a single portrait image would normally be letterboxed. When
 **Pairing** (`/pairing`) is enabled, two images of complementary orientation are combined
@@ -86,7 +91,7 @@ rotation cursor too).
 | `/status` | Firmware, reset reason, battery, WiFi, storage %, heap %, rotation schedule, and all toggle states |
 | `/clear` | Clears the display to white |
 | `/restart` | Restarts the device |
-| `/pairing` | Toggles portrait/landscape combining for Telegram receives |
+| `/pairing` | Toggles portrait/landscape combining for INCOMING Telegram photos - see `/rotation_pairing` below for the separate, similarly-named setting for album picks during rotation |
 | `/list_albums` | Lists every album, with its active/inactive state |
 | `/active_albums` | Lists only the active albums |
 | `/enable_album <name>` | Activates an existing album for rotation |
@@ -97,7 +102,7 @@ rotation cursor too).
 | `/wake_notify on\|off` | Toggles a status ping sent on every wake-up |
 | `/error_overlay on\|off` | Toggles an on-display warning banner after repeated WiFi failures |
 | `/wifi_perf on\|off` | Toggles the WiFi performance mode (see below) |
-| `/rotation_pairing on\|off` | Toggles auto-rotate orientation pairing (random mode only) |
+| `/rotation_pairing on\|off` | Toggles orientation pairing for ALBUM PICKS during rotation (random mode only) - also applies to the fallback picture on a Telegram/URL-mode wake with nothing new; not the same setting as `/pairing` above |
 | `/fallback_rotation on\|off` | Whether a wake with no new Telegram image still changes the display (on, default) or leaves it unchanged (off) |
 | `/fallback_rotation_on_error on\|off` | Only matters while the above is off: whether a failed/unconfigured poll still falls back to album rotation (on, default) or also leaves the display unchanged (off) |
 | `/power_save on\|off` | Minimizes wake duration/WiFi time on an automatic timer wake (see [below](#power-save-mode)) - never affects a manual button wake |
@@ -167,7 +172,7 @@ All default to preserving existing behavior for users who don't configure Telegr
 | WiFi performance mode | off | See below |
 | Home Assistant integration | **off** | Master switch for all HA features (see below) |
 | OTA auto-check | on | Automatic update check on cold boot |
-| Auto-rotate orientation pairing | **off** | See [below](#auto-rotate-orientation-pairing) - random mode only |
+| Auto-rotate orientation pairing | **off** | See [below](#auto-rotate-orientation-pairing) - random mode only, applies to any rotation mode's fallback too, not just Storage - not the same setting as "Pairing" above |
 | Fallback rotation | on | See [below](#fallback-rotation) |
 | Fallback rotation on connection error | on | See [below](#fallback-rotation) - only matters while the above is off |
 | Fallback-rotation notification | **off** | See [below](#fallback-rotation-notification) |
@@ -199,11 +204,23 @@ entirely — useful for dev builds where a `dev-<commit>` version string otherwi
 
 ### Auto-rotate orientation pairing
 
-Extends the same portrait/landscape combining idea to **normal auto-rotation**, not just Telegram
-receives. When enabled and the randomly-picked next image doesn't match the panel's orientation,
-the device immediately looks for another mismatched image in the active album(s) and combines
-them instead of showing one letterboxed. The combined result is saved permanently in the album
-(with a thumbnail); both source images are kept too, still independently rotatable later.
+**Easily confused with [Pairing](#multi-image-orientation-pairing) (`/pairing`) above - they are two
+separate settings.** `/pairing` combines *incoming Telegram photos* as they arrive; this one
+(`/rotation_pairing`) extends the same portrait/landscape combining idea to **album picks made
+during rotation** instead. When enabled and the randomly-picked next image doesn't match the
+panel's orientation, the device immediately looks for another mismatched image in the active
+album(s) and combines them instead of showing one letterboxed. The combined result is saved
+permanently in the album (with a thumbnail); both source images are kept too, still independently
+rotatable later.
+
+Since it governs *any* album pick during rotation, it isn't limited to `rotation_mode: storage` -
+`display_manager_rotate_from_storage()` is a single, mode-agnostic entry point that Telegram mode's
+own fallback (no new image, or a failed/unconfigured poll) and URL mode's own fallback (fetch
+failed) call into exactly the same as Storage mode's primary rotation. So this setting also decides
+whether the *fallback* picture shown on a Telegram- or URL-mode wake gets orientation-paired - not
+just Storage mode's regular rotation. The Web UI's "Storage Rotation Logic" card (which also holds
+this toggle) is shown whenever Auto-Rotate is on, regardless of the currently selected rotation
+mode, for exactly this reason.
 
 **Random rotation mode only** — sequential mode's deterministic image-order cursor is deliberately
 left untouched, so this setting has no effect there. The Web UI shows a warning if the toggle is

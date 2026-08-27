@@ -719,11 +719,13 @@ async function performFactoryReset() {
               </div>
 
               <v-expand-transition>
+                <!-- Not restricted to rotation_mode "storage": every rotation mode can end
+                     up calling display_manager_rotate_from_storage() (Telegram/URL-mode
+                     fallback reuse the exact same random/sequential-pick + pairing logic
+                     as the primary Storage mode), so these settings matter regardless of
+                     which mode is currently active. -->
                 <v-card
-                  v-if="
-                    settingsStore.deviceSettings.autoRotate &&
-                    settingsStore.deviceSettings.rotationMode === 'storage'
-                  "
+                  v-if="settingsStore.deviceSettings.autoRotate"
                   variant="tonal"
                   class="mb-4"
                 >
@@ -741,16 +743,21 @@ async function performFactoryReset() {
 
                     <v-switch
                       v-model="settingsStore.deviceSettings.rotationPairingEnabled"
-                      label="Combine mismatched-orientation images"
+                      label="Combine mismatched-orientation images picked during rotation"
                       color="primary"
                       hide-details
                     />
                     <div class="text-caption text-medium-emphasis">
-                      When the next image to show doesn't match the panel's orientation, looks for
-                      another mismatched image in the active album(s) and combines them side by
-                      side instead of showing one letterboxed. The combined image is saved
-                      permanently in the album (the two originals are kept too). Also togglable
-                      via the "/rotation_pairing" Telegram bot command.
+                      Not to be confused with the similarly-named "Combine mismatched-orientation
+                      Telegram receives" option in the Telegram tab - that one pairs incoming
+                      photos as they arrive; this one applies whenever an image gets picked from
+                      an album during rotation, which also includes the fallback picture shown on
+                      a Telegram- or URL-mode wake with nothing new to display. When the next image
+                      to show doesn't match the panel's orientation, looks for another mismatched
+                      image in the active album(s) and combines them side by side instead of
+                      showing one letterboxed. The combined image is saved permanently in the album
+                      (the two originals are kept too). Also togglable via the "/rotation_pairing"
+                      Telegram bot command.
                     </div>
                     <v-alert
                       v-if="settingsStore.deviceSettings.rotationPairingEnabled &&
@@ -920,16 +927,19 @@ async function performFactoryReset() {
 
                     <v-switch
                       v-model="settingsStore.deviceSettings.telegramPairingEnabled"
-                      label="Combine mismatched-orientation photos instead of showing one alone"
+                      label="Combine mismatched-orientation Telegram receives"
                       color="primary"
                       class="mb-2"
                       hide-details
                     />
                     <div class="text-caption text-medium-emphasis mb-4">
-                      Two portrait photos on a landscape frame (or two landscape photos on a
-                      portrait frame) are combined side by side / stacked. A lone mismatched
-                      photo is held back until its partner arrives. Also togglable via the
-                      "/pairing" bot command.
+                      Not to be confused with the similarly-named "Combine mismatched-orientation
+                      images picked during rotation" option in the Auto Rotate tab - that one
+                      applies to album picks during rotation; this one pairs incoming Telegram
+                      photos as they arrive. Two portrait photos on a landscape frame (or two
+                      landscape photos on a portrait frame) are combined side by side / stacked. A
+                      lone mismatched photo is held back until its partner arrives. Also togglable
+                      via the "/pairing" bot command.
                     </div>
 
                     <v-switch

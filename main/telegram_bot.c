@@ -2466,7 +2466,10 @@ static void execute_command(const char *raw_text)
             config_manager_set_rotation_pairing_enabled(true);
             telegram_bot_send_message(
                 "[x] Auto-rotate orientation pairing enabled\n"
-                "(random rotation mode only - has no effect in sequential mode).");
+                "(random rotation mode only, no effect in sequential mode - applies to any "
+                "album pick during rotation, including the fallback picture on a Telegram/"
+                "URL-mode wake with nothing new; see /pairing for incoming Telegram photos "
+                "instead).");
         } else if (args && strcasecmp(args, "off") == 0) {
             config_manager_set_rotation_pairing_enabled(false);
             telegram_bot_send_message("[ ] Auto-rotate orientation pairing disabled.");
@@ -2683,7 +2686,9 @@ static void execute_command(const char *raw_text)
             "Display:\n"
             "/clear - Clear the display\n"
             "/restart - Restart the photo frame\n"
-            "/pairing - Toggle portrait/landscape combining\n"
+            "/pairing - Toggle combining for INCOMING Telegram photos\n"
+            "  (see /rotation_pairing for the separate, similarly-named\n"
+            "  setting that applies to album picks during rotation instead)\n"
             "\n"
             "Albums:\n"
             "/list_albums - List all albums\n"
@@ -2698,8 +2703,10 @@ static void execute_command(const char *raw_text)
             "/wake_notify on|off - Status ping on every wake-up\n"
             "/error_overlay on|off - On-display error notice\n"
             "/wifi_perf on|off - WiFi performance mode\n"
-            "/rotation_pairing on|off - Combine mismatched-orientation images\n"
-            "  during auto-rotation (random mode only, no effect in sequential mode)\n"
+            "/rotation_pairing on|off - Combine mismatched-orientation ALBUM\n"
+            "  picks during rotation (random mode only) - also applies to the\n"
+            "  fallback picture on a Telegram/URL-mode wake with nothing new;\n"
+            "  see /pairing for the separate setting for incoming Telegram photos\n"
             "/rotation_notify on|off - Send a thumbnail when a wake displays an\n"
             "  image that didn't come from Telegram (i.e. fallback rotation)\n"
             "/fallback_rotation on|off - Whether a wake with no new Telegram\n"
