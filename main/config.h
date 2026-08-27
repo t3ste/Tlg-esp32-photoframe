@@ -423,6 +423,28 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // whenever headlines are also enabled, regardless of this setting.
 #define NVS_WEATHER_MULTILINE_KEY "wthr_multiline"
 
+// Small always-on-render corner badge (not a full-width bar, unlike the
+// overlays above) shown whenever the battery is below a configurable
+// threshold - independent of Telegram/Web UI reachability, so the user
+// notices the device needs charging just by looking at the display. Opt-in,
+// off by default.
+#define NVS_LOW_BATTERY_OVERLAY_ENABLED_KEY "lowbatt_ov_en"
+// Percent, e.g. 16 - the badge appears once the battery drops below this.
+#define NVS_LOW_BATTERY_OVERLAY_THRESHOLD_KEY "lowbatt_ov_pct"
+#define LOW_BATTERY_OVERLAY_THRESHOLD_DEFAULT 16
+#define LOW_BATTERY_OVERLAY_THRESHOLD_MIN 1
+#define LOW_BATTERY_OVERLAY_THRESHOLD_MAX 50
+// Fixed hysteresis gap (not user-configurable, to keep the Web UI to one
+// number) - the badge only clears once the battery recovers past
+// threshold + this margin, mirroring the existing Telegram low-battery
+// warning's own 20/25 (5-point) gap. Default threshold 16 + this margin (4)
+// matches the original 16%-show/20%-clear example exactly.
+#define LOW_BATTERY_OVERLAY_CLEAR_MARGIN 4
+// Internal hysteresis state - NOT a user setting, never exposed to the Web
+// UI (same as NVS_TELEGRAM_LOW_BATT_WARNED_KEY). Must be NVS-persisted, not
+// just held in memory, since deep sleep reboots the device every wake.
+#define NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY "lowbatt_ov_act"
+
 // WiFi association draws a brief high-current TX burst; whenever a battery
 // is in the loop (battery-only, or USB+battery together - see
 // wifi_manager.c), capping TX power lowers that peak (at some cost to

@@ -102,6 +102,8 @@ export const useSettingsStore = defineStore("settings", () => {
     captionInvertColorsEnabled: false,
     weatherMultilineEnabled: false,
     showExifDatetimeEnabled: false,
+    lowBatteryOverlayEnabled: false,
+    lowBatteryOverlayThreshold: 16,
     // Debugging
     debugLogEnabled: false,
     errorOverlayEnabled: false,
@@ -277,6 +279,8 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.captionInvertColorsEnabled = data.caption_invert_colors_enabled === true;
       deviceSettings.value.weatherMultilineEnabled = data.weather_multiline_enabled === true;
       deviceSettings.value.showExifDatetimeEnabled = data.show_exif_datetime_enabled === true;
+      deviceSettings.value.lowBatteryOverlayEnabled = data.low_battery_overlay_enabled === true;
+      deviceSettings.value.lowBatteryOverlayThreshold = data.low_battery_overlay_threshold ?? 16;
       deviceSettings.value.debugLogEnabled = data.debug_log_enabled === true;
       deviceSettings.value.errorOverlayEnabled = data.error_overlay_enabled === true;
       deviceSettings.value.haUrl = data.ha_url || "";
@@ -384,6 +388,8 @@ export const useSettingsStore = defineStore("settings", () => {
       caption_invert_colors_enabled: deviceSettings.value.captionInvertColorsEnabled,
       weather_multiline_enabled: deviceSettings.value.weatherMultilineEnabled,
       show_exif_datetime_enabled: deviceSettings.value.showExifDatetimeEnabled,
+      low_battery_overlay_enabled: deviceSettings.value.lowBatteryOverlayEnabled,
+      low_battery_overlay_threshold: deviceSettings.value.lowBatteryOverlayThreshold,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,
       error_overlay_enabled: deviceSettings.value.errorOverlayEnabled,
       save_downloaded_images: deviceSettings.value.saveDownloadedImages,

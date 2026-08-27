@@ -656,6 +656,14 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_show_exif_datetime_enabled(cJSON_IsTrue(item));
     }
+    item = cJSON_GetObjectItem(root, "low_battery_overlay_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_low_battery_overlay_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "low_battery_overlay_threshold");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_low_battery_overlay_threshold(item->valueint);
+    }
 
     return ESP_OK;
 }

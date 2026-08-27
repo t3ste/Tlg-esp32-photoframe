@@ -3675,6 +3675,56 @@ void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height
     render_text_bar(rgb_buffer, width, height, built_lines, built_count, true, bg, fg);
 }
 
+void image_processor_draw_battery_badge(uint8_t *rgb_buffer, int width, int height,
+                                        int battery_percent)
+{
+    if (!rgb_buffer || width <= 0 || height <= 0) {
+        return;
+    }
+    if (battery_percent < 0) {
+        battery_percent = 0;
+    } else if (battery_percent > 99) {
+        battery_percent = 99;  // keep the badge's fixed text length ("BATT NN%")
+    }
+
+    char text[16];
+    snprintf(text, sizeof(text), "BATT %d%%", battery_percent);
+    int text_len = (int) strlen(text);
+
+    // Sized to just this short string, not the full display width - the
+    // whole point versus render_text_bar()'s always-full-width bar.
+    int badge_width = text_len * Font24.Width + 2 * CAPTION_LINE_PADDING;
+    int badge_height = Font24.Height + 2 * CAPTION_LINE_PADDING;
+    if (badge_width > width) {
+        badge_width = width;
+    }
+    if (badge_height > height) {
+        badge_height = height;
+    }
+
+    // Red on color-capable (spectra6) boards, black on grayscale-only (gc16)
+    // boards where "red" isn't a real color - white text either way, same
+    // theoretical-palette convention as the caption/overlay bar above.
+    rgb_t bg = board_is_grayscale() ? palette[0] : palette[3];
+    rgb_t fg = palette[1];
+
+    for (int y = 0; y < badge_height; y++) {
+        for (int x = 0; x < badge_width; x++) {
+            int idx = (y * width + x) * 3;
+            rgb_buffer[idx] = bg.r;
+            rgb_buffer[idx + 1] = bg.g;
+            rgb_buffer[idx + 2] = bg.b;
+        }
+    }
+
+    int tx = CAPTION_LINE_PADDING;
+    int ty = CAPTION_LINE_PADDING;
+    for (const char *p = text; *p != '\0'; p++) {
+        draw_glyph(rgb_buffer, width, height, tx, ty, *p, fg);
+        tx += Font24.Width;
+    }
+}
+
 void image_processor_sanitize_ascii(const char *utf8, char *out, size_t out_len)
 {
     sanitize_caption_ascii(utf8, out, out_len);
@@ -3761,9 +3811,11 @@ static void overlay_draw_trampoline(uint8_t *rgb_buffer, int width, int height, 
 }
 
 esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lines, int line_count,
-                                              bool invert_colors)
+                                              bool invert_colors, bool draw_battery_badge,
+                                              int battery_percent)
 {
-    if (!lines || line_count <= 0) {
+    bool has_lines = lines && line_count > 0;
+    if (!has_lines && !draw_battery_badge) {
         return ESP_OK;
     }
     if (!path) {
@@ -3805,8 +3857,16 @@ esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lin
         return err;
     }
 
-    overlay_draw_arg_t arg = {.lines = lines, .line_count = line_count, .invert_colors = invert_colors};
-    overlay_draw_trampoline(rgb_buffer, width, height, &arg);
+    if (has_lines) {
+        overlay_draw_arg_t arg = {
+            .lines = lines, .line_count = line_count, .invert_colors = invert_colors};
+        overlay_draw_trampoline(rgb_buffer, width, height, &arg);
+    }
+    if (draw_battery_badge) {
+        // Drawn after the overlay bar above (if any) so it visually sits in
+        // front of it, inset into the left edge - see the doc comment.
+        image_processor_draw_battery_badge(rgb_buffer, width, height, battery_percent);
+    }
 
     image_format_t actual_format = format;
     err = image_processor_write_rgb_to_fmt(rgb_buffer, width, height, path, format, &actual_format);

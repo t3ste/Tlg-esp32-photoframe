@@ -2181,6 +2181,7 @@ static void format_toggles(char *out, size_t out_len)
              "[%c] Keep originals (pre-processing copies)\n"
              "[%c] Weather overlay\n"
              "[%c] Headlines overlay\n"
+             "[%c] Low battery overlay badge\n"
              "[%c] EXIF date as fallback caption",
              config_manager_get_telegram_pairing_enabled() ? 'x' : ' ',
              config_manager_get_deep_sleep_enabled() ? 'x' : ' ',
@@ -2197,6 +2198,7 @@ static void format_toggles(char *out, size_t out_len)
              config_manager_get_telegram_keep_originals_enabled() ? 'x' : ' ',
              config_manager_get_weather_overlay_enabled() ? 'x' : ' ',
              config_manager_get_headlines_overlay_enabled() ? 'x' : ' ',
+             config_manager_get_low_battery_overlay_enabled() ? 'x' : ' ',
              config_manager_get_show_exif_datetime_enabled() ? 'x' : ' ');
 }
 
@@ -2590,6 +2592,18 @@ static void execute_command(const char *raw_text)
         } else {
             telegram_bot_send_message("[i] Usage: /headlines on|off");
         }
+    } else if (strcmp(cmd, "/battery_overlay") == 0) {
+        if (args && strcasecmp(args, "on") == 0) {
+            config_manager_set_low_battery_overlay_enabled(true);
+            telegram_bot_send_message(
+                "[x] Low battery overlay enabled\n"
+                "(configure the threshold percentage in the Web UI - Settings).");
+        } else if (args && strcasecmp(args, "off") == 0) {
+            config_manager_set_low_battery_overlay_enabled(false);
+            telegram_bot_send_message("[ ] Low battery overlay disabled.");
+        } else {
+            telegram_bot_send_message("[i] Usage: /battery_overlay on|off");
+        }
     } else if (strcmp(cmd, "/list_albums") == 0) {
         char **albums = NULL;
         int count = 0;
@@ -2706,6 +2720,8 @@ static void execute_command(const char *raw_text)
             "  when it's received with no caption of its own\n"
             "/weather on|off - Weather overlay (configure location in Web UI)\n"
             "/headlines on|off - Headline overlay (configure RSS feed in Web UI)\n"
+            "/battery_overlay on|off - Small on-display low-battery corner\n"
+            "  badge (configure threshold % in Web UI)\n"
             "\n"
             "Emergency:\n"
             "/telegram_reset - Clear the queue immediately\n"

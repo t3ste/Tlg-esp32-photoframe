@@ -274,10 +274,34 @@ void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height
  * `path`'s extension is rewritten to ".png" to match where it actually got
  * written, mirroring image_processor_write_rgb_to_fmt()'s own contract).
  * `path` must be a mutable buffer (not a string literal) for that reason.
- * No-op (returns ESP_OK) if lines is NULL/empty.
+ *
+ * @param draw_battery_badge Also draws the low-battery corner badge (see
+ * image_processor_draw_battery_badge()) onto the same decoded buffer, in the
+ * same single decode/write pass - drawn after the overlay bar lines above, so
+ * it visually sits in front of them. Independent of `lines`/`line_count`,
+ * which may be NULL/0 to draw only the badge.
+ * @param battery_percent Only read when draw_battery_badge is true.
+ *
+ * No-op (returns ESP_OK) if lines is NULL/empty AND draw_battery_badge is
+ * false.
  */
 esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lines, int line_count,
-                                              bool invert_colors);
+                                              bool invert_colors, bool draw_battery_badge,
+                                              int battery_percent);
+
+/**
+ * @brief Draws a small, fixed-size corner badge (NOT a full-width bar, unlike
+ * image_processor_draw_overlay_bar()) in the top-left corner of an
+ * already-processed RGB888 buffer, showing the given battery percentage.
+ * Sized to just its own short text ("BATT NN%"), so it covers only a small
+ * fraction of the display - intended to sit in front of/inset into the left
+ * edge of the overlay bar above when both are drawn on the same image, or
+ * appear alone when the overlay bar isn't active. Uses red on color-capable
+ * (spectra6) boards, black on grayscale-only (gc16) boards - see
+ * board_is_grayscale() - white text either way.
+ */
+void image_processor_draw_battery_badge(uint8_t *rgb_buffer, int width, int height,
+                                        int battery_percent);
 
 /**
  * @brief Greedy word-wraps `text` into up to `max_lines` lines (each written

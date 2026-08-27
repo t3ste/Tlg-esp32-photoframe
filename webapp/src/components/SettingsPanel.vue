@@ -1423,6 +1423,34 @@ async function performFactoryReset() {
               Only offered with exactly 1 headline selected above - with more than one, each
               already gets its own line.
             </div>
+
+            <v-switch
+              v-model="settingsStore.deviceSettings.lowBatteryOverlayEnabled"
+              label="Low battery badge"
+              color="primary"
+              class="mb-2 mt-4"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              A small corner badge (not a full-width bar, unlike the overlays above) shown on
+              every display update once the battery drops below the threshold below - independent
+              of Telegram/Web UI reachability, so low battery is noticeable just by looking at the
+              frame. Clears once the battery recovers 4 percentage points above the threshold.
+            </div>
+            <v-row dense>
+              <v-col cols="12" sm="6">
+                <v-text-field
+                  v-model.number="settingsStore.deviceSettings.lowBatteryOverlayThreshold"
+                  label="Show below (%)"
+                  type="number"
+                  :min="1"
+                  :max="50"
+                  variant="outlined"
+                  density="compact"
+                  :disabled="!settingsStore.deviceSettings.lowBatteryOverlayEnabled"
+                />
+              </v-col>
+            </v-row>
           </v-tabs-window-item>
 
           <!-- Home Assistant Tab -->

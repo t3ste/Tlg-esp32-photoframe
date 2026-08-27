@@ -23,6 +23,43 @@ static const char *TAG = "overlay_manager";
 #define OVERLAY_LINES_CAP \
     (WEATHER_FORECAST_DAYS > (1 + HEADLINE_MAX_COUNT) ? WEATHER_FORECAST_DAYS : (1 + HEADLINE_MAX_COUNT))
 
+// Hysteresis-debounced low-battery corner badge check - mirrors
+// check_and_warn_low_battery()'s exact shape (telegram_bot.c), but
+// Telegram-independent and NVS-persisted under its own key
+// (config_manager_get/set_low_battery_overlay_active), since this is
+// consulted from every render path, not just Telegram polls, and its state
+// must survive deep sleep (which reboots the device every wake).
+static bool low_battery_overlay_should_show(int *out_percent)
+{
+    if (!config_manager_get_low_battery_overlay_enabled()) {
+        return false;
+    }
+    if (!board_hal_is_battery_connected()) {
+        return false;
+    }
+    int percent = board_hal_get_battery_percent();
+    if (percent < 0) {
+        return false;
+    }
+
+    int low = config_manager_get_low_battery_overlay_threshold();
+    int clear = low + LOW_BATTERY_OVERLAY_CLEAR_MARGIN;
+
+    bool active = config_manager_get_low_battery_overlay_active();
+    if (!active && percent < low) {
+        active = true;
+        config_manager_set_low_battery_overlay_active(true);
+    } else if (active && percent > clear) {
+        active = false;
+        config_manager_set_low_battery_overlay_active(false);
+    }
+
+    if (active && out_percent) {
+        *out_percent = percent;
+    }
+    return active;
+}
+
 static bool copy_file(const char *src_path, const char *dst_path)
 {
     FILE *src = fopen(src_path, "rb");
@@ -54,15 +91,25 @@ const char *overlay_manager_apply(const char *source_path)
 
     bool weather_on = config_manager_get_weather_overlay_enabled();
     bool headlines_on = config_manager_get_headlines_overlay_enabled();
-    if (!weather_on && !headlines_on) {
+    int battery_percent = 0;
+    bool battery_badge_due = low_battery_overlay_should_show(&battery_percent);
+    if (!weather_on && !headlines_on && !battery_badge_due) {
         return source_path;
     }
 
     image_format_t format = image_processor_detect_format(source_path);
     bool is_epdgz = (format == IMAGE_FORMAT_EPD_GZ);
     if (is_epdgz && !config_manager_get_overlay_epdgz_enabled()) {
-        ESP_LOGI(TAG, "Skipping overlay for %s: EPDGZ overlay support is disabled", source_path);
-        return source_path;
+        if (!battery_badge_due) {
+            ESP_LOGI(TAG, "Skipping overlay for %s: EPDGZ overlay support is disabled", source_path);
+            return source_path;
+        }
+        // The battery badge is a safety notification, not a decorative
+        // overlay - draws even on EPDGZ regardless of this (otherwise
+        // unrelated) setting, but weather/headlines still respect it: don't
+        // let them piggyback onto this pass just because the badge needed it.
+        weather_on = false;
+        headlines_on = false;
     }
     if (!is_epdgz && (format != IMAGE_FORMAT_PNG || !image_processor_is_processed(source_path))) {
         ESP_LOGI(TAG, "Skipping overlay for %s: not a processed PNG or EPDGZ", source_path);
@@ -135,7 +182,7 @@ const char *overlay_manager_apply(const char *source_path)
         }
     }
 
-    if (line_count == 0) {
+    if (line_count == 0 && !battery_badge_due) {
         ESP_LOGI(TAG, "No overlay content available this cycle, showing %s unmodified", source_path);
         return source_path;
     }
@@ -154,8 +201,8 @@ const char *overlay_manager_apply(const char *source_path)
     }
 
     bool invert_colors = config_manager_get_overlay_invert_colors();
-    esp_err_t err =
-        image_processor_add_overlay_to_file(scratch_path, lines, line_count, invert_colors);
+    esp_err_t err = image_processor_add_overlay_to_file(
+        scratch_path, lines, line_count, invert_colors, battery_badge_due, battery_percent);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to draw overlay onto scratch copy: %s", esp_err_to_name(err));
         return source_path;

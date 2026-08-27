@@ -339,6 +339,18 @@ bool config_manager_get_caption_invert_colors_enabled(void);
 // default.
 void config_manager_set_show_exif_datetime_enabled(bool enabled);
 bool config_manager_get_show_exif_datetime_enabled(void);
+// Small always-on-render corner badge shown below a configurable battery
+// threshold, independent of Telegram/Web UI reachability. Off by default.
+// See NVS_LOW_BATTERY_OVERLAY_ENABLED_KEY in config.h.
+void config_manager_set_low_battery_overlay_enabled(bool enabled);
+bool config_manager_get_low_battery_overlay_enabled(void);
+// Percent (default 16, clamped 1-50) - see NVS_LOW_BATTERY_OVERLAY_THRESHOLD_KEY.
+void config_manager_set_low_battery_overlay_threshold(int threshold);
+int config_manager_get_low_battery_overlay_threshold(void);
+// Internal hysteresis state, not a user setting - never exposed to the Web
+// UI. See NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY in config.h.
+void config_manager_set_low_battery_overlay_active(bool active);
+bool config_manager_get_low_battery_overlay_active(void);
 // Render the weather overlay as 3 lines (one per day) instead of one
 // combined line - only takes effect while headlines_overlay is disabled;
 // weather always renders as one line whenever headlines are also enabled.

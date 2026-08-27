@@ -165,9 +165,32 @@ show (1-3, default 3). Titles are extracted with a small purpose-built parser (n
 XML/RSS library) - CDATA and the common HTML entities are handled, and everything is
 transliterated to plain ASCII to match the display font.
 
+## Low battery badge
+
+A third, architecturally different overlay sharing the same render hook as the two above, but
+**off by default** and visually much smaller by design: instead of a full-width bar, it's a small
+fixed-size corner badge (`"BATT NN%"`, sized to just that short text - roughly 17% of an 800px-wide
+panel's width, versus 100% for the weather/headline bar) drawn in the top-left corner. Intended to
+be noticeable without needing the Web UI or Telegram, so a discharging battery doesn't go
+unnoticed.
+
+Enable it in the Web UI (Settings → Power → Overlays → "Low battery badge") and set a threshold
+percentage (default 16%). The badge appears on every display update once the battery drops below
+that threshold, and clears once it recovers 4 percentage points above it (a fixed hysteresis
+margin, not independently configurable, so a battery hovering right at the edge doesn't flicker the
+badge on and off every wake) - this state is remembered across deep sleep, not just held in memory.
+
+Colors follow the panel's own capability: red background on color-capable (Spectra6) boards, black
+on grayscale-only (GC16) boards where red isn't a real color option; white text either way. When
+weather/headlines are also active on the same image, the badge draws on top, inset into the left
+edge of that bar rather than needing its own separate space - when they're both off, the badge
+appears alone. Unlike the two overlays above, it isn't blocked by "Also overlay pre-rendered EPDGZ
+images" being off, since it's a safety notification rather than a decorative overlay.
+
 ## Commands
 
 | Command | Effect |
 |---|---|
 | `/weather on\|off` | Toggles the weather overlay (configure location in the Web UI) |
 | `/headlines on\|off` | Toggles the headlines overlay (configure the RSS feed in the Web UI) |
+| `/battery_overlay on\|off` | Toggles the low battery corner badge (configure the threshold % in the Web UI) |

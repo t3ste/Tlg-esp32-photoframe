@@ -1632,6 +1632,10 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_weather_multiline_enabled());
         cJSON_AddBoolToObject(root, "show_exif_datetime_enabled",
                               config_manager_get_show_exif_datetime_enabled());
+        cJSON_AddBoolToObject(root, "low_battery_overlay_enabled",
+                              config_manager_get_low_battery_overlay_enabled());
+        cJSON_AddNumberToObject(root, "low_battery_overlay_threshold",
+                                config_manager_get_low_battery_overlay_threshold());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");

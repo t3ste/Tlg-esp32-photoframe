@@ -111,6 +111,9 @@ static char overlay_language[OVERLAY_LANGUAGE_MAX_LEN] = OVERLAY_LANGUAGE_DEFAUL
 static bool caption_invert_colors_enabled = false;
 static bool weather_multiline_enabled = false;
 static bool show_exif_datetime_enabled = false;
+static bool low_battery_overlay_enabled = false;
+static uint8_t low_battery_overlay_threshold = LOW_BATTERY_OVERLAY_THRESHOLD_DEFAULT;
+static bool low_battery_overlay_active = false;
 
 // OTA
 static bool ota_check_enabled = true;
@@ -759,6 +762,23 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_SHOW_EXIF_DATETIME_KEY, &stored_show_exif_datetime) ==
             ESP_OK) {
             show_exif_datetime_enabled = (stored_show_exif_datetime != 0);
+        }
+        uint8_t stored_low_batt_overlay = 0;
+        if (nvs_get_u8(nvs_handle, NVS_LOW_BATTERY_OVERLAY_ENABLED_KEY, &stored_low_batt_overlay) ==
+            ESP_OK) {
+            low_battery_overlay_enabled = (stored_low_batt_overlay != 0);
+        }
+        uint8_t stored_low_batt_threshold = LOW_BATTERY_OVERLAY_THRESHOLD_DEFAULT;
+        if (nvs_get_u8(nvs_handle, NVS_LOW_BATTERY_OVERLAY_THRESHOLD_KEY,
+                       &stored_low_batt_threshold) == ESP_OK &&
+            stored_low_batt_threshold >= LOW_BATTERY_OVERLAY_THRESHOLD_MIN &&
+            stored_low_batt_threshold <= LOW_BATTERY_OVERLAY_THRESHOLD_MAX) {
+            low_battery_overlay_threshold = stored_low_batt_threshold;
+        }
+        uint8_t stored_low_batt_overlay_active = 0;
+        if (nvs_get_u8(nvs_handle, NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY,
+                       &stored_low_batt_overlay_active) == ESP_OK) {
+            low_battery_overlay_active = (stored_low_batt_overlay_active != 0);
         }
 
         {
@@ -2382,6 +2402,65 @@ void config_manager_set_show_exif_datetime_enabled(bool enabled)
 bool config_manager_get_show_exif_datetime_enabled(void)
 {
     return show_exif_datetime_enabled;
+}
+
+void config_manager_set_low_battery_overlay_enabled(bool enabled)
+{
+    low_battery_overlay_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_LOW_BATTERY_OVERLAY_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Low battery overlay %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_low_battery_overlay_enabled(void)
+{
+    return low_battery_overlay_enabled;
+}
+
+void config_manager_set_low_battery_overlay_threshold(int threshold)
+{
+    if (threshold < LOW_BATTERY_OVERLAY_THRESHOLD_MIN) {
+        threshold = LOW_BATTERY_OVERLAY_THRESHOLD_MIN;
+    } else if (threshold > LOW_BATTERY_OVERLAY_THRESHOLD_MAX) {
+        threshold = LOW_BATTERY_OVERLAY_THRESHOLD_MAX;
+    }
+    low_battery_overlay_threshold = (uint8_t) threshold;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_LOW_BATTERY_OVERLAY_THRESHOLD_KEY, low_battery_overlay_threshold);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int config_manager_get_low_battery_overlay_threshold(void)
+{
+    return low_battery_overlay_threshold;
+}
+
+// Internal hysteresis state - not a user setting, see NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY.
+void config_manager_set_low_battery_overlay_active(bool active)
+{
+    low_battery_overlay_active = active;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY, active ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+bool config_manager_get_low_battery_overlay_active(void)
+{
+    return low_battery_overlay_active;
 }
 
 // ============================================================================
