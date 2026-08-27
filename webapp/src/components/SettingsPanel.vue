@@ -938,11 +938,13 @@ async function performFactoryReset() {
                       color="primary"
                       class="mb-2"
                       hide-details
+                      :disabled="settingsStore.deviceSettings.telegramPowerSaveEnabled"
                     />
                     <div class="text-caption text-medium-emphasis mb-4">
                       Sends SSID, IP, battery, reset/wake reason and rotation schedule to the bot
                       on every poll, even when there are no new messages. Also togglable via the
-                      "/wake_notify" bot command.
+                      "/wake_notify" bot command. Suppressed while Power save mode is on (this
+                      setting is remembered, not cleared, and resumes if it's turned back off).
                     </div>
 
                     <v-switch
@@ -982,13 +984,17 @@ async function performFactoryReset() {
                       color="primary"
                       class="mb-2"
                       hide-details
-                      :disabled="!settingsStore.deviceSettings.telegramFallbackRotationEnabled"
+                      :disabled="
+                        !settingsStore.deviceSettings.telegramFallbackRotationEnabled ||
+                        settingsStore.deviceSettings.telegramPowerSaveEnabled
+                      "
                     />
                     <div class="text-caption text-medium-emphasis mb-4">
                       When a wake falls back to normal album rotation (no new Telegram image that
                       cycle), sends a thumbnail of whatever got displayed instead, so the chat
                       still shows what's currently on the frame. Also togglable via the
-                      "/rotation_notify" bot command.
+                      "/rotation_notify" bot command. Suppressed while Power save mode is on (this
+                      setting is remembered, not cleared, and resumes if it's turned back off).
                     </div>
 
                     <v-switch
@@ -1001,10 +1007,12 @@ async function performFactoryReset() {
                     <div class="text-caption text-medium-emphasis mb-4">
                       Minimizes wake duration and WiFi-on time on an automatic (timer) wake: fewer
                       WiFi/Telegram retries before giving up, skips the post-rotation config-sync
-                      window, and skips the per-photo "saved" confirmation reply. Never affects a
-                      manual button-triggered wake, which always keeps its full retry budget and
-                      window - a deliberate escape hatch to reach this page even with this on.
-                      Also togglable via the "/power_save" bot command.
+                      window, and skips the per-photo "saved" confirmation reply, the wake status
+                      ping, and the fallback-rotation photo notification (those three settings are
+                      only grayed out, not cleared - they resume as configured if this is turned
+                      back off). Never affects a manual button-triggered wake, which always keeps
+                      its full retry budget and window - a deliberate escape hatch to reach this
+                      page even with this on. Also togglable via the "/power_save" bot command.
                     </div>
 
                     <v-switch

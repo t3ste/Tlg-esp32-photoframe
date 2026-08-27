@@ -1548,8 +1548,12 @@ esp_err_t trigger_image_rotation(void)
 
                     // Only notify if the display actually changed - rotation is
                     // a no-op when there are no enabled albums / no images.
+                    // Suppressed in power save mode regardless of the setting's
+                    // own stored value - this is a genuine photo upload,
+                    // avoidable network time this mode exists to remove.
                     const char *after = display_manager_get_current_image();
-                    if (config_manager_get_telegram_rotation_notify_enabled() && after &&
+                    if (config_manager_get_telegram_rotation_notify_enabled() &&
+                        !config_manager_get_telegram_power_save_enabled() && after &&
                         after[0] != '\0' && strcmp(after, prev_image) != 0) {
                         telegram_bot_notify_fallback_image(after);
                     }

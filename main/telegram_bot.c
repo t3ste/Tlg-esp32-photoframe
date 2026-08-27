@@ -1587,7 +1587,13 @@ static void build_status_message(const char *title, char *out, size_t out_len);
 
 static void send_wake_notification_if_enabled(void)
 {
-    if (!config_manager_get_telegram_wake_notify_enabled()) {
+    // Suppressed in power save mode regardless of the setting's own stored
+    // value - it's an extra outbound Telegram message on every single poll,
+    // exactly the kind of avoidable network chatter that mode exists to
+    // remove. The stored preference is left untouched so it resumes exactly
+    // as configured if power save mode is turned back off.
+    if (!config_manager_get_telegram_wake_notify_enabled() ||
+        config_manager_get_telegram_power_save_enabled()) {
         return;
     }
     char wake_msg[900];

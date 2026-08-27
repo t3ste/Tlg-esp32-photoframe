@@ -261,9 +261,19 @@ Telegram-mode wake:
 - Skips the post-rotation config-sync window that otherwise keeps the device awake a bit longer for
   the web UI or Home Assistant.
 - Skips the routine per-photo "saved" confirmation reply (error replies still send normally).
+- Skips the [wake status ping](#commands) and the
+  [fallback-rotation photo notification](#fallback-rotation-notification), regardless of their own
+  settings - both are extra outbound Telegram requests on top of the normal poll, exactly what this
+  mode exists to avoid. Neither setting is cleared; the Web UI just grays them out, and both resume
+  exactly as configured if power save mode is turned back off.
 
-Home Assistant's own update notification (when HA integration is configured) is unaffected and still
-fires normally - this only trims the *ambient* waiting around it, not HA integration itself.
+Telegram pairing is deliberately **not** affected - it costs no extra network time at all (the photo
+download already happens regardless; pairing only adds local image composition afterward), so
+disabling it wouldn't save any power. The low-battery Telegram warning is also unaffected - it has no
+toggle of its own and runs independently of everything else this mode changes, so it keeps working
+exactly as before. Home Assistant's own update notification (when HA integration is configured) is
+likewise unaffected and still fires normally - this only trims the *ambient* waiting around it, not
+HA integration itself.
 
 **Never applies to a manual button-triggered wake** - pressing the rotate button always gets the
 full retry budget and config-sync window, so there's always a way to reach the web UI even with this
