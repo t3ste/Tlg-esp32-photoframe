@@ -6,6 +6,7 @@
 #include "color_palette.h"
 #include "esp_err.h"
 #include "jpeg_decoder.h"
+#include "tjpgd.h"
 
 int test_board_display_width = 800;
 int test_board_display_height = 480;
@@ -47,4 +48,24 @@ esp_err_t esp_jpeg_decode(esp_jpeg_image_cfg_t *cfg, esp_jpeg_image_output_t *im
     (void) cfg;
     (void) img;
     return ESP_FAIL;
+}
+
+JRESULT jd_prepare(JDEC *jd, unsigned int (*infunc)(JDEC *, uint8_t *, unsigned int), void *pool,
+                    size_t sz_pool, void *dev)
+{
+    (void) infunc;
+    (void) pool;
+    (void) sz_pool;
+    jd->device = dev;
+    jd->width = 0;
+    jd->height = 0;
+    return JDR_INP;
+}
+
+JRESULT jd_decomp(JDEC *jd, int (*outfunc)(JDEC *, void *, JRECT *), uint8_t scale)
+{
+    (void) jd;
+    (void) outfunc;
+    (void) scale;
+    return JDR_INP;
 }
