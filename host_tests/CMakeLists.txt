@@ -106,6 +106,7 @@ target_include_directories(
   PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
+  ${CMAKE_CURRENT_SOURCE_DIR}/../components/epaper_src
 )
 
 target_link_libraries(
