@@ -133,6 +133,7 @@ add_executable(
   stubs/fake_config_manager.c
   stubs/fake_processing_settings.c
   stubs/fake_storage.c
+  ../components/epaper_src/Fonts/font24.c
 )
 
 target_compile_definitions(
@@ -146,6 +147,8 @@ target_include_directories(
   PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
+  ${CMAKE_CURRENT_SOURCE_DIR}/../components/epaper_src
+  ${CMAKE_CURRENT_SOURCE_DIR}/../components/epaper_src/Fonts
 )
 
 target_link_libraries(
