@@ -4,6 +4,24 @@ A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently 
 
 ![PhotoFrame](.img/esp32-photoframe.png)
 
+> **This is the `basic` branch** — a smaller, more conservative feature set, kept around for anyone who prefers fewer moving parts. For the full-featured branch (face-aware crop, Cover/Fit variant rendering, Telegram power-save mode, an on-device low-battery badge, complete EXIF capture-date support, and more), see **[the `main` branch](https://github.com/t3ste/Tlg-esp32-photoframe/tree/main)**.
+>
+> | Feature | `basic` (this branch) | `main` (full-featured) |
+> |---|---|---|
+> | Telegram Bot (send photos, remote commands, orientation pairing) | ✅ | ✅ |
+> | Weather + headline overlays | ✅ | ✅ (plus a day-line ordering fix) |
+> | Telegram low-battery warning (chat message) | ✅ | ✅ |
+> | Battery history tab, WiFi TX-power cap | ✅ | ✅ |
+> | Telegram power-save mode (minimizes wake/WiFi-on time) | ❌ | ✅ |
+> | On-device low-battery corner badge (visible on the display itself, no phone/Telegram needed) | ❌ | ✅ |
+> | EXIF capture-date caption | ⚠️ Telegram only, experimental | ✅ Telegram + Storage/Auto-Rotate albums |
+> | Face-aware crop metadata (`process-cli --detect-faces`) | ❌ | ✅ |
+> | Pre-rendered Cover/Fit variant selection (firmware) | ❌ | ✅ |
+> | Config export/import covers every Web UI setting (incl. per-album enable/disable) | ⚠️ Partial | ✅ |
+> | GitHub Releases / independent OTA update feed | ❌ | ✅ |
+>
+> See `main`'s [Changes from Upstream](https://github.com/t3ste/Tlg-esp32-photoframe/blob/main/README.md#changes-from-upstream) section for the full, itemized list of what's different.
+
 ## Key Features
 
 - 🎨 **Superior Image Quality**: Measured color palette with automatic calibration produces significantly better results than stock firmware
