@@ -107,6 +107,7 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
   ${CMAKE_CURRENT_SOURCE_DIR}/../components/epaper_src
+  ${CMAKE_CURRENT_SOURCE_DIR}/../components/epaper_src/Fonts
 )
 
 target_link_libraries(
