@@ -70,6 +70,7 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - feat: opt-in overlay support for already-rendered EPDGZ Storage/Auto-Rotate album images (previously PNG-only) — decodes, draws, and re-encodes the one file being shown, off by default since it's an extra step per display
 - fix: the Web UI's "Display Image" gallery action never applied weather/headline overlays at all (any format, any settings) — it bypassed overlay compositing entirely, unlike the Auto-Rotate loops
 - feat: opt-in low-battery corner badge — a small (~17% of panel width, not a full-width bar) "BATT NN%" indicator drawn on every display update once the battery drops below a configurable threshold (default 16%, clears 4 points above it, state remembered across deep sleep), independent of Telegram/Web UI reachability; red on color-capable panels, black on grayscale-only ones
+- fix: clarified that "Also overlay pre-rendered EPDGZ images" (Settings → Weather + Headline Overlays) silently gates the weather/headline/battery overlays for Telegram-received photos too, not just Storage-mode albums — easy to miss since EPDGZ is the recommended default output format for both, and enabling weather/headlines with this still off produces no visible overlay and no error
 
 **Web UI**:
 - feat: display history with a reset button (Settings → Auto Rotate) — random rotation cycles through every image once before repeating, persisted across reboots

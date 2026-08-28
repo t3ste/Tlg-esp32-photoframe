@@ -73,22 +73,26 @@ pairing](TELEGRAM.md#auto-rotate-orientation-pairing) in the Telegram docs.
 5. **Not available in URL rotation mode**: that mode streams pixels row-by-row straight to the
    panel and never produces a processed image file to draw an overlay onto (the same reason the
    error-overlay feature can't use it either). Storage and Telegram rotation modes are unaffected.
-6. **Applies to processed PNG album images always; EPDGZ optionally (opt-in); BMP never.**
-   Storage-mode albums are, per the SD-card convention this project otherwise assumes (see
-   [docs/FACE_CROP.md](FACE_CROP.md)), typically already-rendered **EPDGZ** files rather than PNG -
-   without the toggle below, those are skipped entirely (both the visual bar **and** the
-   weather/headline fetch behind it), silently and without an error. Enable **Settings → Weather +
-   Headline Overlays → "Also overlay pre-rendered EPDGZ images (Storage/Auto-Rotate)"** (off by
-   default) to cover them too: the file is decoded back to RGB, the overlay bar is drawn, and it's
-   re-encoded as EPDGZ (falling back to PNG if EPDGZ's ~260 KB of deflate state can't be allocated
-   at that moment) - an extra decode/redraw/re-encode round-trip on every display of that image,
-   which is why this isn't on by default. `.bmp` files remain entirely unsupported either way - the
-   firmware has no BMP *decoder* (only a one-way PNG→BMP writer, used for boards whose native
-   display format is BMP), so there's no RGB buffer for our own code to draw onto. If
-   weather/headlines seem to never be fetched at all even though everything looks configured
-   correctly, check whether the images actually being shown are BMP, or EPDGZ with this toggle off
-   (the device log shows "Skipping overlay for `<path>`: not a processed PNG or EPDGZ", or "...:
-   EPDGZ overlay support is disabled", when either applies).
+6. **Applies to processed PNG images always; EPDGZ optionally (opt-in); BMP never.** This affects
+   **both** Storage mode and Telegram mode, not just Storage - a common trap, since EPDGZ is the
+   *recommended default* for both: Storage-mode albums are, per the SD-card convention this
+   project otherwise assumes (see [docs/FACE_CROP.md](FACE_CROP.md)), typically already-rendered
+   EPDGZ files rather than PNG; and Telegram-received photos are *also* EPDGZ by default (Telegram
+   tab → "On-device image format", defaults to EPDGZ). Either way, without the toggle below, those
+   images are skipped entirely (both the visual bar **and** the weather/headline fetch behind it),
+   silently and without an error - so it's easy to enable weather/headlines, see nothing happen,
+   and not realize this unrelated-looking toggle is why. Enable **Settings → Weather + Headline
+   Overlays → "Also overlay pre-rendered EPDGZ images"** (off by default) to cover them too: the
+   file is decoded back to RGB, the overlay is drawn, and it's re-encoded as EPDGZ (falling back to
+   PNG if EPDGZ's ~260 KB of deflate state can't be allocated at that moment) - an extra
+   decode/redraw/re-encode round-trip on every display of that image, which is why this isn't on
+   by default. `.bmp` files remain entirely unsupported either way - the firmware has no BMP
+   *decoder* (only a one-way PNG→BMP writer, used for boards whose native display format is BMP),
+   so there's no RGB buffer for our own code to draw onto. If weather/headlines seem to never be
+   fetched at all even though everything looks configured correctly (in **either** rotation mode),
+   check whether the images actually being shown are BMP, or EPDGZ with this toggle off (the device
+   log shows "Skipping overlay for `<path>`: not a processed PNG or EPDGZ", or "...: EPDGZ overlay
+   support is disabled", when either applies).
 
 ## Why there's no partial-refresh ("delta update") mode
 

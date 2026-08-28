@@ -1265,17 +1265,21 @@ async function performFactoryReset() {
 
             <v-switch
               v-model="settingsStore.deviceSettings.overlayEpdgzEnabled"
-              label="Also overlay pre-rendered EPDGZ images (Storage/Auto-Rotate)"
+              label="Also overlay pre-rendered EPDGZ images"
               color="primary"
               class="mb-2"
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-4">
-              Off by default. Storage/Auto-Rotate albums are typically already-rendered EPDGZ files
-              (not PNG), which the overlay otherwise skips entirely (no weather/headline fetch
-              either). Enabling this decodes/redraws/re-encodes that one file on every display - an
-              extra step not needed for anyone who doesn't use these overlays with Storage mode.
-              BMP images still aren't supported (no BMP decoder exists in the firmware).
+              <strong>Off by default - if the overlays below don't seem to appear at all, check
+              this first.</strong> Storage/Auto-Rotate albums are typically already-rendered EPDGZ
+              files (not PNG); so are Telegram-received photos whenever "On-device image format"
+              (Telegram tab) is set to EPDGZ, which it is by default. Either way, the overlay
+              otherwise skips that file entirely (no weather/headline fetch either) unless this is
+              on. Enabling this decodes/redraws/re-encodes that one file on every display - an
+              extra step not needed for anyone who doesn't use these overlays at all, or whose
+              images are already PNG. BMP images still aren't supported (no BMP decoder exists in
+              the firmware).
             </div>
 
             <v-switch
