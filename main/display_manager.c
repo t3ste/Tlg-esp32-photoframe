@@ -999,8 +999,14 @@ static void rotate_random(char **enabled_albums, int album_count)
         return;
     }
 
-    // Build image list with absolute paths from all enabled albums
-    char **image_list = malloc(total_image_count * sizeof(char *));
+    // Build image list with absolute paths from all enabled albums. Uses
+    // PSRAM, not the default (internal-preferred) heap: a large album can
+    // mean hundreds of small allocations here (one per path, plus the
+    // pointer array and the unseen-index array below), which was
+    // measured to leave too little contiguous internal SRAM for a
+    // subsequent TLS handshake (e.g. the weather fetch in the same wake
+    // cycle) to succeed.
+    char **image_list = heap_caps_malloc(total_image_count * sizeof(char *), MALLOC_CAP_SPIRAM);
     if (!image_list) {
         ESP_LOGE(TAG, "Failed to allocate image list");
         return;
@@ -1028,7 +1034,7 @@ static void rotate_random(char **enabled_albums, int album_count)
                     (strcasecmp(ext, ".bmp") == 0 || strcasecmp(ext, ".png") == 0 ||
                      strcasecmp(ext, ".epdgz") == 0) &&
                     display_manager_is_photo_anchor(album_path, entry->d_name)) {
-                    char *fullpath = malloc(512);
+                    char *fullpath = heap_caps_malloc(512, MALLOC_CAP_SPIRAM);
                     if (!fullpath) {
                         ESP_LOGE(TAG, "Failed to allocate path buffer");
                         continue;
@@ -1057,7 +1063,7 @@ static void rotate_random(char **enabled_albums, int album_count)
     // This also inherently avoids repeating the last-shown image whenever
     // more than one image remains unseen, so no separate retry-loop is
     // needed for that anymore.
-    int *unseen = malloc((size_t) total_image_count * sizeof(int));
+    int *unseen = heap_caps_malloc((size_t) total_image_count * sizeof(int), MALLOC_CAP_SPIRAM);
     if (!unseen) {
         ESP_LOGE(TAG, "Failed to allocate unseen-index list");
         for (int i = 0; i < total_image_count; i++) {
