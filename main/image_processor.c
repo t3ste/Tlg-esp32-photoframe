@@ -3055,7 +3055,11 @@ esp_err_t image_processor_peek_file_dimensions(const char *path, image_format_t 
     // Header-only peek - large enough for both JPEG SOF markers and a PNG
     // IHDR chunk without reading the whole (possibly multi-MB) file.
     const size_t scan_bytes = 65536;
-    uint8_t *buf = malloc(scan_bytes);
+    // PSRAM: runs on every rotation cycle (via image_orientation_mismatches())
+    // right before overlay_manager's weather/headlines fetch in the same wake
+    // cycle - see the fix in rotate_random() for why a 64 KB internal-RAM
+    // buffer here is risky even though it's freed promptly.
+    uint8_t *buf = heap_caps_malloc(scan_bytes, MALLOC_CAP_SPIRAM);
     if (!buf) {
         fclose(f);
         return ESP_ERR_NO_MEM;

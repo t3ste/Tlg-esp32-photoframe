@@ -83,7 +83,12 @@ static esp_err_t body_capture_handler(esp_http_client_event_t *evt)
         while (new_cap < need) {
             new_cap *= 2;
         }
-        char *grown = realloc(ctx->buf, new_cap);
+        // PSRAM, not the default (internal-preferred) heap: this can grow up
+        // to TELEGRAM_MAX_RESPONSE_BYTES, and internal SRAM exhaustion here
+        // was measured to break a subsequent TLS handshake in the same wake
+        // cycle - see the fix in display_manager.c's rotate_random() for the
+        // original incident.
+        char *grown = heap_caps_realloc(ctx->buf, new_cap, MALLOC_CAP_SPIRAM);
         if (!grown) {
             ESP_LOGE(TAG, "Out of memory growing response buffer to %zu bytes", new_cap);
             ctx->overflow = true;
@@ -518,7 +523,9 @@ static bool jpeg_file_is_progressive(const char *path)
         return false;
     }
 
-    uint8_t *buf = malloc(JPEG_HEADER_SCAN_BYTES);
+    // PSRAM: keep this out of the same scarce internal SRAM the TLS
+    // handshake for the next network call in this wake cycle needs.
+    uint8_t *buf = heap_caps_malloc(JPEG_HEADER_SCAN_BYTES, MALLOC_CAP_SPIRAM);
     if (!buf) {
         fclose(f);
         return false;

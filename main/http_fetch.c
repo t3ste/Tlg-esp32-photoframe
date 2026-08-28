@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -51,7 +52,12 @@ static esp_err_t body_capture_handler(esp_http_client_event_t *evt)
         if (new_cap > ctx->max_len) {
             new_cap = ctx->max_len;
         }
-        char *grown = realloc(ctx->buf, new_cap);
+        // PSRAM, not the default (internal-preferred) heap: this can grow up
+        // to max_response_bytes (tens of KB for weather/headlines), and
+        // internal SRAM exhaustion here was measured to break a subsequent
+        // TLS handshake in the same wake cycle - see the fix in
+        // display_manager.c's rotate_random() for the original incident.
+        char *grown = heap_caps_realloc(ctx->buf, new_cap, MALLOC_CAP_SPIRAM);
         if (!grown) {
             ESP_LOGE(TAG, "Out of memory growing response buffer to %zu bytes", new_cap);
             ctx->overflow = true;
