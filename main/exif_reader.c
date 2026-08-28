@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cJSON.h"
 #include "esp_log.h"
 
 static const char *TAG = "exif_reader";
@@ -185,5 +186,129 @@ bool exif_reader_get_datetime_original(const char *path, char *out, size_t out_l
     }
 
     free(tiff);
+    return ok;
+}
+
+// A hand-sized JSON sidecar (see process-cli/capture-date.js) is well under
+// a few KB - reject anything wildly out of shape rather than allocating an
+// unbounded buffer for a malformed or hostile file.
+#define CAPTURE_DATE_JSON_MAX_SIZE 4096
+
+// Derives "<dir>/<name>.capture.json" from a displayed image's anchor path,
+// stripping any ".fit" suffix, or - for a ".cover" variant living in the
+// "crop/" subdirectory per that feature's own convention (see
+// docs/FACE_CROP.md) - both the ".cover" suffix and the "crop/" directory
+// component, so all three possible anchor shapes for the same source photo
+// (bare "<name>.<ext>", "<name>.fit.<ext>", "crop/<name>.cover.<ext>")
+// resolve to the identical sidecar path process-cli itself always writes to:
+// captureDatePathFor() (process-cli/capture-date.js) derives from the output
+// base path before any variant suffix is appended, once per source image,
+// never per rendered variant. Mirrors facecrop_metadata.c's
+// derive_metadata_path() for the analogous ".facecrop.json" sidecar.
+static bool derive_capture_date_path(const char *anchor_path, char *out, size_t out_size)
+{
+    char dir[512] = "";
+    const char *slash = strrchr(anchor_path, '/');
+    const char *filename = anchor_path;
+    if (slash) {
+        size_t dir_len = (size_t) (slash - anchor_path);
+        if (dir_len >= sizeof(dir)) {
+            return false;
+        }
+        memcpy(dir, anchor_path, dir_len);
+        dir[dir_len] = '\0';
+        filename = slash + 1;
+    }
+
+    const char *dot = strrchr(filename, '.');
+    if (!dot) {
+        return false;
+    }
+    size_t name_len = (size_t) (dot - filename);
+
+    bool is_cover = (name_len > 6 && strncasecmp(filename + name_len - 6, ".cover", 6) == 0);
+    bool is_fit = !is_cover && (name_len > 4 && strncasecmp(filename + name_len - 4, ".fit", 4) == 0);
+    if (is_cover) {
+        name_len -= 6;
+        // ".cover" files live one level down, in "crop/" - go back up to the
+        // directory the original source photo (and its sidecars) live in.
+        static const char CROP_DIRNAME[] = "crop";
+        size_t dir_len = strlen(dir);
+        if (dir_len >= sizeof(CROP_DIRNAME) - 1 &&
+            strcasecmp(dir + dir_len - (sizeof(CROP_DIRNAME) - 1), CROP_DIRNAME) == 0) {
+            char *crop_slash = strrchr(dir, '/');
+            if (crop_slash) {
+                *crop_slash = '\0';
+            } else {
+                dir[0] = '\0';
+            }
+        }
+    } else if (is_fit) {
+        name_len -= 4;
+    }
+    if (name_len == 0 || name_len >= 128) {
+        return false;
+    }
+
+    char base[128];
+    memcpy(base, filename, name_len);
+    base[name_len] = '\0';
+
+    int written = snprintf(out, out_size, "%s%s%s.capture.json", dir, dir[0] ? "/" : "", base);
+    return written > 0 && (size_t) written < out_size;
+}
+
+bool capture_date_sidecar_read(const char *anchor_path, char *out, size_t out_len)
+{
+    if (!anchor_path || !out || out_len == 0) {
+        return false;
+    }
+    out[0] = '\0';
+
+    char sidecar_path[320];
+    if (!derive_capture_date_path(anchor_path, sidecar_path, sizeof(sidecar_path))) {
+        return false;
+    }
+
+    FILE *fp = fopen(sidecar_path, "rb");
+    if (!fp) {
+        return false;  // No sidecar - not an error, just "unavailable"
+    }
+
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (size <= 0 || size > CAPTURE_DATE_JSON_MAX_SIZE) {
+        fclose(fp);
+        return false;
+    }
+
+    char *buffer = malloc((size_t) size + 1);
+    if (!buffer) {
+        fclose(fp);
+        return false;
+    }
+    size_t read_bytes = fread(buffer, 1, (size_t) size, fp);
+    fclose(fp);
+    buffer[read_bytes] = '\0';
+
+    cJSON *root = cJSON_Parse(buffer);
+    free(buffer);
+    if (!root) {
+        ESP_LOGW(TAG, "Failed to parse %s", sidecar_path);
+        return false;
+    }
+
+    bool ok = false;
+    cJSON *capture_date = cJSON_GetObjectItem(root, "capture_date");
+    if (cJSON_IsString(capture_date) && capture_date->valuestring[0] != '\0') {
+        strncpy(out, capture_date->valuestring, out_len - 1);
+        out[out_len - 1] = '\0';
+        ok = true;
+    } else {
+        ESP_LOGW(TAG, "%s has no valid capture_date", sidecar_path);
+    }
+
+    cJSON_Delete(root);
     return ok;
 }

@@ -1881,6 +1881,25 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
             if (got_image) {
                 ESP_LOGI(TAG, "Saved Telegram image: %s", downloaded_path);
 
+                // Falls back to the photo's own EXIF capture date when it has
+                // no caption of its own - must happen here, while
+                // downloaded_path is still the original JPEG as received:
+                // finalize_telegram_image() below converts it to PNG/EPDGZ,
+                // neither of which carries EXIF, so this was previously
+                // computed too late (at display time) to ever actually fire
+                // in normal operation - confirmed dead code in practice,
+                // since the conversion only fails to run (leaving the file as
+                // JPG) in a rare error case, not the intended target of this
+                // setting.
+                char exif_caption[32] = {0};
+                const char *effective_caption = image_caption;
+                if ((!effective_caption || effective_caption[0] == '\0') &&
+                    config_manager_get_show_exif_datetime_enabled() &&
+                    exif_reader_get_datetime_original(downloaded_path, exif_caption,
+                                                      sizeof(exif_caption))) {
+                    effective_caption = exif_caption;
+                }
+
                 // Orientation mismatch must be checked against the ORIGINAL
                 // image's own aspect ratio, before finalize_telegram_image()
                 // below pads it to the panel's fixed display resolution.
@@ -1912,7 +1931,7 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
                     telegram_saved_image_t *entry = &saved_images[saved_image_count++];
                     strncpy(entry->path, downloaded_path, sizeof(entry->path) - 1);
                     entry->path[sizeof(entry->path) - 1] = '\0';
-                    strncpy(entry->caption, image_caption ? image_caption : "",
+                    strncpy(entry->caption, effective_caption ? effective_caption : "",
                             sizeof(entry->caption) - 1);
                     entry->caption[sizeof(entry->caption) - 1] = '\0';
                     strncpy(entry->thumb_file_id, thumb_file_id, sizeof(entry->thumb_file_id) - 1);
@@ -1961,7 +1980,7 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
                             pr->path_b[sizeof(pr->path_b) - 1] = '\0';
 
                             esp_err_t compose_err = compose_pair_and_save(
-                                pending_path, pending_cap, downloaded_path, image_caption,
+                                pending_path, pending_cap, downloaded_path, effective_caption,
                                 pr->composed_path, sizeof(pr->composed_path));
                             pr->ok = (compose_err == ESP_OK);
                             config_manager_remove_telegram_pending_image_at(0);
@@ -1983,7 +2002,7 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
                     }
                     if (!paired) {
                         config_manager_add_telegram_pending_image(
-                            downloaded_path, image_caption ? image_caption : "");
+                            downloaded_path, effective_caption ? effective_caption : "");
                     }
                 }
             }

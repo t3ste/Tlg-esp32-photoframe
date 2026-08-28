@@ -175,11 +175,13 @@ Options:
 - `photo.png` - 800x480 dithered PNG (theoretical palette for device)
 - `photo.bmp` - 800x480 dithered BMP
 - `photo.jpg` - 400x240 thumbnail
+- `photo.capture.json` - EXIF capture-date sidecar (only written when the source has a
+  `DateTimeOriginal` tag) - see [docs/OVERLAYS.md](../docs/OVERLAYS.md#capture-date-caption-for-storageauto-rotate-photos)
 - `--use-perceived-output` - Use perceived palette colors (realistic preview)
 
 ## Processing Pipeline
 
-1. Load image → 2. EXIF orientation → 3. Rotate if portrait → 4. Resize to 800x480 (cover mode) → 5. Tone mapping (S-curve/contrast) → 6. Saturation adjustment → 7. Floyd-Steinberg dithering → 8. Output EPDGZ + thumbnail
+1. Load image (EXIF-orientation-corrected automatically by the decoder) → 2. Rotate if portrait → 3. Resize to 800x480 (cover mode) → 4. Tone mapping (S-curve/contrast) → 5. Saturation adjustment → 6. Floyd-Steinberg dithering → 7. Output EPDGZ + thumbnail
 
 ## Examples
 

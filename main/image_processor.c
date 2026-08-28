@@ -3812,10 +3812,11 @@ static void overlay_draw_trampoline(uint8_t *rgb_buffer, int width, int height, 
 
 esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lines, int line_count,
                                               bool invert_colors, bool draw_battery_badge,
-                                              int battery_percent)
+                                              int battery_percent, const char *exif_caption)
 {
     bool has_lines = lines && line_count > 0;
-    if (!has_lines && !draw_battery_badge) {
+    bool has_exif_caption = exif_caption && exif_caption[0] != '\0';
+    if (!has_lines && !draw_battery_badge && !has_exif_caption) {
         return ESP_OK;
     }
     if (!path) {
@@ -3866,6 +3867,16 @@ esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lin
         // Drawn after the overlay bar above (if any) so it visually sits in
         // front of it, inset into the left edge - see the doc comment.
         image_processor_draw_battery_badge(rgb_buffer, width, height, battery_percent);
+    }
+    if (has_exif_caption) {
+        // Bottom-anchored (image_processor_draw_caption()), so it can never
+        // collide with the top-anchored overlay bar or the top-left battery
+        // badge drawn above. Same opt-in-on-top-of-the-overlay-setting color
+        // inversion convention already used for a Telegram photo's own
+        // caption (see telegram_bot.c's telegram_caption_invert_colors()).
+        bool invert_caption =
+            config_manager_get_caption_invert_colors_enabled() && invert_colors;
+        image_processor_draw_caption(rgb_buffer, width, height, exif_caption, invert_caption);
     }
 
     image_format_t actual_format = format;

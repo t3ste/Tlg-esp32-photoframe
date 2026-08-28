@@ -364,16 +364,21 @@ the best quality available is kept regardless of that display-side limitation.
 
 ### EXIF capture date as fallback caption (experimental)
 
-When a received photo has no caption of its own, optionally falls back to its EXIF
-"DateTimeOriginal" tag (the camera's capture date) as the caption instead — shown as
-`YYYY-MM-DD HH:MM`. If the photo has no EXIF data (or the tag is missing), no caption is shown at
-all; nothing is guessed or approximated. Off by default; toggle via Web UI or `/exif_date on|off`.
+When a photo has no caption of its own, optionally falls back to its EXIF "DateTimeOriginal" tag
+(the camera's capture date) as the caption instead — shown as `YYYY-MM-DD HH:MM`. If the photo has
+no EXIF data (or the tag is missing), no caption is shown at all; nothing is guessed or
+approximated. Off by default; toggle via Web UI or `/exif_date on|off`.
 
-**Experimental / Telegram-only**: parsing is a small hand-written JPEG/TIFF reader (no external
-library), tested against a limited set of real-world camera/phone JPEGs — atypical EXIF encodings
-may not parse. Only applies to Telegram photos: the original JPEG (with EXIF intact) reaches the
-device directly, whereas Storage/album images are processed client-side in the browser before
-upload, so no EXIF data is ever available for those on the device side.
+Applies to Telegram-received photos (read from the original JPEG immediately after download, before
+on-device conversion to PNG/EPDGZ discards it) **and** to Storage/Auto-Rotate album images processed
+by process-cli - see [docs/OVERLAYS.md](OVERLAYS.md#capture-date-caption-for-storageauto-rotate-photos)
+for how that half works, since it needs process-cli's help (the original is never on the device for
+that path) rather than reading EXIF on-device. Does **not** currently apply to Web UI album uploads,
+which are converted entirely client-side in the browser without extracting EXIF.
+
+**Experimental**: the on-device JPEG/TIFF parsing used for the Telegram case is a small hand-written
+reader (no external library), tested against a limited set of real-world camera/phone JPEGs —
+atypical EXIF encodings may not parse.
 
 ### Error overlay test
 

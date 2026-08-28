@@ -8,6 +8,7 @@
 #include "config.h"
 #include "config_manager.h"
 #include "esp_log.h"
+#include "exif_reader.h"
 #include "headlines.h"
 #include "image_processor.h"
 #include "weather.h"
@@ -93,7 +94,14 @@ const char *overlay_manager_apply(const char *source_path)
     bool headlines_on = config_manager_get_headlines_overlay_enabled();
     int battery_percent = 0;
     bool battery_badge_due = low_battery_overlay_should_show(&battery_percent);
-    if (!weather_on && !headlines_on && !battery_badge_due) {
+    // Informational (like weather/headlines), not a safety notification (like
+    // the battery badge) - reads a sidecar process-cli writes alongside a
+    // Storage/Auto-Rotate album image (see exif_reader.h), gated on the same
+    // setting that already governs this for Telegram-received photos.
+    char exif_caption[32] = {0};
+    bool exif_caption_due = config_manager_get_show_exif_datetime_enabled() &&
+                            capture_date_sidecar_read(source_path, exif_caption, sizeof(exif_caption));
+    if (!weather_on && !headlines_on && !exif_caption_due && !battery_badge_due) {
         return source_path;
     }
 
@@ -106,10 +114,12 @@ const char *overlay_manager_apply(const char *source_path)
         }
         // The battery badge is a safety notification, not a decorative
         // overlay - draws even on EPDGZ regardless of this (otherwise
-        // unrelated) setting, but weather/headlines still respect it: don't
-        // let them piggyback onto this pass just because the badge needed it.
+        // unrelated) setting, but weather/headlines/the capture-date caption
+        // still respect it: don't let them piggyback onto this pass just
+        // because the badge needed it.
         weather_on = false;
         headlines_on = false;
+        exif_caption_due = false;
     }
     if (!is_epdgz && (format != IMAGE_FORMAT_PNG || !image_processor_is_processed(source_path))) {
         ESP_LOGI(TAG, "Skipping overlay for %s: not a processed PNG or EPDGZ", source_path);
@@ -182,7 +192,7 @@ const char *overlay_manager_apply(const char *source_path)
         }
     }
 
-    if (line_count == 0 && !battery_badge_due) {
+    if (line_count == 0 && !exif_caption_due && !battery_badge_due) {
         ESP_LOGI(TAG, "No overlay content available this cycle, showing %s unmodified", source_path);
         return source_path;
     }
@@ -202,7 +212,8 @@ const char *overlay_manager_apply(const char *source_path)
 
     bool invert_colors = config_manager_get_overlay_invert_colors();
     esp_err_t err = image_processor_add_overlay_to_file(
-        scratch_path, lines, line_count, invert_colors, battery_badge_due, battery_percent);
+        scratch_path, lines, line_count, invert_colors, battery_badge_due, battery_percent,
+        exif_caption_due ? exif_caption : NULL);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to draw overlay onto scratch copy: %s", esp_err_to_name(err));
         return source_path;

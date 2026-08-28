@@ -281,13 +281,17 @@ void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height
  * it visually sits in front of them. Independent of `lines`/`line_count`,
  * which may be NULL/0 to draw only the badge.
  * @param battery_percent Only read when draw_battery_badge is true.
+ * @param exif_caption Optional (NULL/empty to skip) - drawn via
+ * image_processor_draw_caption() (bottom-anchored, so it can never collide
+ * with the top-anchored overlay bar or the top-left battery badge) on the
+ * same decoded buffer, after both of the above.
  *
- * No-op (returns ESP_OK) if lines is NULL/empty AND draw_battery_badge is
- * false.
+ * No-op (returns ESP_OK) if lines is NULL/empty, draw_battery_badge is false,
+ * and exif_caption is NULL/empty.
  */
 esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lines, int line_count,
                                               bool invert_colors, bool draw_battery_badge,
-                                              int battery_percent);
+                                              int battery_percent, const char *exif_caption);
 
 /**
  * @brief Draws a small, fixed-size corner badge (NOT a full-width bar, unlike

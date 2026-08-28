@@ -191,6 +191,38 @@ edge of that bar rather than needing its own separate space - when they're both 
 appears alone. Unlike the two overlays above, it isn't blocked by "Also overlay pre-rendered EPDGZ
 images" being off, since it's a safety notification rather than a decorative overlay.
 
+## Capture-date caption for Storage/Auto-Rotate photos
+
+"Show capture date as caption when a photo has none" (Settings → Telegram, `/exif_date`) - despite
+living in the Telegram settings section - now also applies to Storage/Auto-Rotate album images
+(bottom-anchored caption bar, drawn via the same `overlay_manager_apply()` hook as the overlays
+above, so it never collides with them). This includes Telegram-mode's own fallback-to-storage
+picture, since that reuses the identical rotation code as Storage mode's primary rotation.
+
+**Why this needed a separate mechanism from the Telegram case**: once a photo is dithered/
+palette-quantized into a display-ready PNG/EPDGZ/BMP, its EXIF is gone - and for the Storage/SD-card
+ingestion path, the original camera JPEG is (per this project's own documented convention) generally
+never kept on the device at all, only the rendered output. So there's no way for the *firmware* to
+recover a capture date after the fact for this path - it has to be captured once, at *processing*
+time, by whichever tool actually had access to the original: **process-cli**.
+
+`process-cli` now writes a small `<name>.capture.json` sidecar (schema-versioned like its sibling
+`<name>.facecrop.json`, but deliberately a separate file - a capture date shouldn't require face
+detection to be enabled) whenever the source photo has an EXIF `DateTimeOriginal` tag, unconditionally
+(no extra flag needed - a no-op when there's no EXIF to find). The firmware reads this sidecar back
+(`main/exif_reader.c`'s `capture_date_sidecar_read()`) only while the Web UI setting above is on,
+associating it with the shared source photo regardless of which rendered variant (`<name>.<ext>`,
+`<name>.fit.<ext>`, or `crop/<name>.cover.<ext>`) is actually on screen.
+
+**Known limitations, not solved by this feature**:
+- Web UI album uploads (`ImageUpload.vue`) are converted entirely client-side in the browser and
+  don't currently extract/persist EXIF at all - a Web-UI-uploaded photo never gets a capture-date
+  sidecar, even with an EXIF-carrying original. Achieving parity would need a separate browser-side
+  implementation.
+- A Telegram-originated composed/paired image (which may already carry its own baked-in caption)
+  could theoretically pick up a *second*, EXIF-derived caption if it later gets rotated through
+  Storage mode - a rare edge case, not specifically detected/prevented.
+
 ## Commands
 
 | Command | Effect |

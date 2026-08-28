@@ -1095,12 +1095,13 @@ async function performFactoryReset() {
                       hide-details
                     />
                     <div class="text-caption text-medium-emphasis mb-4">
-                      When a received photo has no caption of its own, falls back to its EXIF
+                      When a photo has no caption of its own, falls back to its EXIF
                       "DateTimeOriginal" (the camera's capture date), if present - otherwise no
-                      caption is shown. Telegram photos only (an original JPEG with EXIF intact
-                      reaches the device directly; Storage/album uploads are processed in the
-                      browser first, before any EXIF data would reach the device). Also togglable
-                      via the "/exif_date" bot command.
+                      caption is shown. Applies to Telegram-received photos and to Storage/
+                      Auto-Rotate album images processed by process-cli (see
+                      docs/OVERLAYS.md#capture-date-caption-for-storageauto-rotate-photos) - not to
+                      Web UI album uploads, which are converted entirely in the browser and don't
+                      currently extract EXIF. Also togglable via the "/exif_date" bot command.
                     </div>
 
                     <v-alert

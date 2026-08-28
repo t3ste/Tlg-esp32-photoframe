@@ -18,6 +18,7 @@ import {
 } from "@aitjcize/epaper-image-convert";
 import { processImagePipeline, loadOrientedCanvas } from "./utils.js";
 import { createImageServer } from "./server.js";
+import { captureDatePathFor, extractCaptureDate, writeCaptureDateFile } from "./capture-date.js";
 import {
   normalizeTargetGeometry,
   getBoardProfile,
@@ -822,6 +823,19 @@ function drawCropPreview(sourceCanvas, faces, cropRect) {
  */
 async function processImageFile(inputPath, outputBasePath, ext, processingOptions, devicePalette = null) {
   console.log(`Processing: ${inputPath}`);
+
+  // Unconditional (not gated behind --detect-faces or any other flag) -
+  // capturing the EXIF date here, once, at processing time is the only
+  // chance to ever recover it: the original is generally never kept on the
+  // device, and the rendered output (PNG/EPDGZ/BMP) never carries EXIF. A
+  // no-op (no sidecar written) when the source has none - see
+  // capture-date.js for why this is a separate sidecar from .facecrop.json.
+  const captureDate = extractCaptureDate(inputPath);
+  if (captureDate) {
+    const captureDatePath = captureDatePathFor(`${outputBasePath}${ext}`);
+    writeCaptureDateFile(captureDatePath, captureDate);
+    console.log(`  Wrote capture-date sidecar: ${captureDatePath}`);
+  }
 
   let recommendedCrop = null;
   if (processingOptions.faceCrop?.enabled) {
