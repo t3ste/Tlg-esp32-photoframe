@@ -33,7 +33,11 @@ describe("buildMetadata + write/read round-trip", () => {
   };
   const faces = [{ x: 10.4, y: 20.6, w: 100.2, h: 100.8, score: 0.9123 }];
   const recommendedCrop = { x: 5, y: 5, w: 400, h: 240 };
-  const strategy = { mode: "largest-face-priority", marginPercent: 0.12, engine: "blazeface" };
+  const strategy = {
+    mode: "largest-face-priority",
+    marginPercent: 0.12,
+    engine: "blazeface",
+  };
 
   test("buildMetadata produces the documented schema shape", () => {
     const metadata = buildMetadata({
@@ -86,7 +90,9 @@ describe("buildMetadata + write/read round-trip", () => {
     const metadataPath = path.join(tmpDir, "bad.facecrop.json");
     try {
       fs.writeFileSync(metadataPath, JSON.stringify({ schema: 999 }));
-      expect(() => readMetadataFile(metadataPath)).toThrow(/Unsupported facecrop schema/);
+      expect(() => readMetadataFile(metadataPath)).toThrow(
+        /Unsupported facecrop schema/,
+      );
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

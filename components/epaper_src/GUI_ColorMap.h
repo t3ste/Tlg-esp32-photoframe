@@ -69,12 +69,36 @@ static inline UBYTE GUI_RGBToGray16(uint8_t r, uint8_t g, uint8_t b)
 static inline void GUI_Spectra6ToRGB(UBYTE index, uint8_t *r, uint8_t *g, uint8_t *b)
 {
     switch (index) {
-        case 0: *r = 0; *g = 0; *b = 0; break;      // Black
-        case 2: *r = 255; *g = 255; *b = 0; break;  // Yellow
-        case 3: *r = 255; *g = 0; *b = 0; break;    // Red
-        case 5: *r = 0; *g = 0; *b = 255; break;    // Blue
-        case 6: *r = 0; *g = 255; *b = 0; break;    // Green
-        default: *r = 255; *g = 255; *b = 255; break;  // White (1, and unused 4)
+    case 0:
+        *r = 0;
+        *g = 0;
+        *b = 0;
+        break;  // Black
+    case 2:
+        *r = 255;
+        *g = 255;
+        *b = 0;
+        break;  // Yellow
+    case 3:
+        *r = 255;
+        *g = 0;
+        *b = 0;
+        break;  // Red
+    case 5:
+        *r = 0;
+        *g = 0;
+        *b = 255;
+        break;  // Blue
+    case 6:
+        *r = 0;
+        *g = 255;
+        *b = 0;
+        break;  // Green
+    default:
+        *r = 255;
+        *g = 255;
+        *b = 255;
+        break;  // White (1, and unused 4)
     }
 }
 

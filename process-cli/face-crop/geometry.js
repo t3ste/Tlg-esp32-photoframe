@@ -22,7 +22,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // process-cli is also published standalone to npm (see README's "Publishing
 // to npm" section), where that file won't exist - fall back to the embedded
 // copy below in that case, so board lookups never hard-fail.
-const REPO_BOARDS_JSON = path.join(__dirname, "..", "..", "boards", "boards.json");
+const REPO_BOARDS_JSON = path.join(
+  __dirname,
+  "..",
+  "..",
+  "boards",
+  "boards.json",
+);
 
 function loadRepoBoards() {
   try {
@@ -175,7 +181,10 @@ export function normalizeTargetGeometry(opts = {}) {
     });
   }
   if (boardProfile) {
-    candidates.push({ source: `--board ${board}`, value: boardProfile.orientation });
+    candidates.push({
+      source: `--board ${board}`,
+      value: boardProfile.orientation,
+    });
   }
 
   let finalOrientation;

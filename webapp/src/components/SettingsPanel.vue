@@ -746,11 +746,7 @@ async function performFactoryReset() {
                      fallback reuse the exact same random/sequential-pick + pairing logic
                      as the primary Storage mode), so these settings matter regardless of
                      which mode is currently active. -->
-                <v-card
-                  v-if="settingsStore.deviceSettings.autoRotate"
-                  variant="tonal"
-                  class="mb-4"
-                >
+                <v-card v-if="settingsStore.deviceSettings.autoRotate" variant="tonal" class="mb-4">
                   <v-card-text>
                     <v-select
                       v-model="settingsStore.deviceSettings.sdRotationMode"
@@ -771,19 +767,21 @@ async function performFactoryReset() {
                     />
                     <div class="text-caption text-medium-emphasis">
                       Not to be confused with the similarly-named "Combine mismatched-orientation
-                      Telegram receives" option in the Telegram tab - that one pairs incoming
-                      photos as they arrive; this one applies whenever an image gets picked from
-                      an album during rotation, which also includes the fallback picture shown on
-                      a Telegram- or URL-mode wake with nothing new to display. When the next image
-                      to show doesn't match the panel's orientation, looks for another mismatched
-                      image in the active album(s) and combines them side by side instead of
-                      showing one letterboxed. The combined image is saved permanently in the album
-                      (the two originals are kept too). Also togglable via the "/rotation_pairing"
-                      Telegram bot command.
+                      Telegram receives" option in the Telegram tab - that one pairs incoming photos
+                      as they arrive; this one applies whenever an image gets picked from an album
+                      during rotation, which also includes the fallback picture shown on a Telegram-
+                      or URL-mode wake with nothing new to display. When the next image to show
+                      doesn't match the panel's orientation, looks for another mismatched image in
+                      the active album(s) and combines them side by side instead of showing one
+                      letterboxed. The combined image is saved permanently in the album (the two
+                      originals are kept too). Also togglable via the "/rotation_pairing" Telegram
+                      bot command.
                     </div>
                     <v-alert
-                      v-if="settingsStore.deviceSettings.rotationPairingEnabled &&
-                        settingsStore.deviceSettings.sdRotationMode === 'sequential'"
+                      v-if="
+                        settingsStore.deviceSettings.rotationPairingEnabled &&
+                        settingsStore.deviceSettings.sdRotationMode === 'sequential'
+                      "
                       type="warning"
                       variant="tonal"
                       density="compact"
@@ -802,12 +800,12 @@ async function performFactoryReset() {
                     />
                     <div class="text-caption text-medium-emphasis">
                       For albums produced by process-cli's <code>--crop-output both</code> (a
-                      "&lt;name&gt;.fit.&lt;ext&gt;" next to the original, "&lt;name&gt;.cover.&lt;ext&gt;"
-                      in a "crop" subfolder, plus an optional "&lt;name&gt;.facecrop.json"): picks
-                      whichever file matches the Scale Mode setting (Processing tab) instead of
-                      re-rendering it on the device. Renders and caches the missing one on-device
-                      if needed (only for a genuine, not-yet-processed original). Ordinary albums
-                      are unaffected either way.
+                      "&lt;name&gt;.fit.&lt;ext&gt;" next to the original,
+                      "&lt;name&gt;.cover.&lt;ext&gt;" in a "crop" subfolder, plus an optional
+                      "&lt;name&gt;.facecrop.json"): picks whichever file matches the Scale Mode
+                      setting (Processing tab) instead of re-rendering it on the device. Renders and
+                      caches the missing one on-device if needed (only for a genuine,
+                      not-yet-processed original). Ordinary albums are unaffected either way.
                     </div>
                   </v-card-text>
                 </v-card>
@@ -912,7 +910,9 @@ async function performFactoryReset() {
                 >
                   <v-card-text>
                     <v-chip
-                      :color="settingsStore.deviceSettings.telegramConfigured ? 'success' : 'warning'"
+                      :color="
+                        settingsStore.deviceSettings.telegramConfigured ? 'success' : 'warning'
+                      "
                       size="small"
                       variant="tonal"
                       class="mb-4"
@@ -973,8 +973,8 @@ async function performFactoryReset() {
                       :disabled="settingsStore.deviceSettings.telegramPowerSaveEnabled"
                     />
                     <div class="text-caption text-medium-emphasis mb-4">
-                      Sends SSID, IP, battery, reset/wake reason and rotation schedule to the bot
-                      on every poll, even when there are no new messages. Also togglable via the
+                      Sends SSID, IP, battery, reset/wake reason and rotation schedule to the bot on
+                      every poll, even when there are no new messages. Also togglable via the
                       "/wake_notify" bot command. Suppressed while Power save mode is on (this
                       setting is remembered, not cleared, and resumes if it's turned back off).
                     </div>
@@ -990,8 +990,8 @@ async function performFactoryReset() {
                       On (default): a wake with no new Telegram image still falls back to normal
                       album rotation, same as the other rotation modes. Off: the display only
                       changes on a wake that actually receives a new Telegram photo - every other
-                      wake (timer/button) leaves the current image untouched. Also togglable via
-                      the "/fallback_rotation" bot command.
+                      wake (timer/button) leaves the current image untouched. Also togglable via the
+                      "/fallback_rotation" bot command.
                     </div>
 
                     <v-switch
@@ -1023,10 +1023,10 @@ async function performFactoryReset() {
                     />
                     <div class="text-caption text-medium-emphasis mb-4">
                       When a wake falls back to normal album rotation (no new Telegram image that
-                      cycle), sends a thumbnail of whatever got displayed instead, so the chat
-                      still shows what's currently on the frame. Also togglable via the
-                      "/rotation_notify" bot command. Suppressed while Power save mode is on (this
-                      setting is remembered, not cleared, and resumes if it's turned back off).
+                      cycle), sends a thumbnail of whatever got displayed instead, so the chat still
+                      shows what's currently on the frame. Also togglable via the "/rotation_notify"
+                      bot command. Suppressed while Power save mode is on (this setting is
+                      remembered, not cleared, and resumes if it's turned back off).
                     </div>
 
                     <v-switch
@@ -1080,7 +1080,10 @@ async function performFactoryReset() {
                     <v-select
                       v-model="settingsStore.deviceSettings.telegramImageFormat"
                       :items="[
-                        { title: 'EPDGZ (recommended - smaller, faster to display)', value: 'epdgz' },
+                        {
+                          title: 'EPDGZ (recommended - smaller, faster to display)',
+                          value: 'epdgz',
+                        },
                         { title: 'PNG (larger, for compatibility/inspection)', value: 'png' },
                       ]"
                       label="On-device image format"
@@ -1137,9 +1140,8 @@ async function performFactoryReset() {
                     </v-alert>
 
                     <div class="text-caption text-medium-emphasis">
-                      Send a photo or image file to the bot, or a "/" command
-                      (/status, /restart, /clear). Send /telegram_reset to
-                      immediately clear a stuck message queue.
+                      Send a photo or image file to the bot, or a "/" command (/status, /restart,
+                      /clear). Send /telegram_reset to immediately clear a stuck message queue.
                     </div>
                   </v-card-text>
                 </v-card>
@@ -1177,9 +1179,9 @@ async function performFactoryReset() {
             />
             <div class="text-caption text-medium-emphasis mb-4">
               Checks for a new firmware release once a day and on every cold boot. A manually
-              triggered "Check for updates" (below) always works regardless of this setting.
-              Useful to turn off for self-built/dev firmware, which otherwise always reports an
-              "update available".
+              triggered "Check for updates" (below) always works regardless of this setting. Useful
+              to turn off for self-built/dev firmware, which otherwise always reports an "update
+              available".
             </div>
 
             <v-switch
@@ -1190,11 +1192,11 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-4">
-              When on (default), the frame automatically switches to full WiFi receive power
-              (~60-70 mA extra draw, but a much snappier web UI) whenever someone might be
-              looking - an interactive wake or USB power - and drops back to WiFi power-save
-              otherwise. Turn off to always stay in power-save, even during interactive use,
-              trading web UI responsiveness for lower battery draw.
+              When on (default), the frame automatically switches to full WiFi receive power (~60-70
+              mA extra draw, but a much snappier web UI) whenever someone might be looking - an
+              interactive wake or USB power - and drops back to WiFi power-save otherwise. Turn off
+              to always stay in power-save, even during interactive use, trading web UI
+              responsiveness for lower battery draw.
             </div>
 
             <v-switch
@@ -1206,9 +1208,9 @@ async function performFactoryReset() {
             />
             <div class="text-caption text-medium-emphasis mb-4">
               On (default). Associating with an AP draws a brief high-current TX burst that a
-              marginal battery/PMIC rail (e.g. the PhotoPainter's original AXP2101) may not
-              sustain cleanly - capping TX power lowers that peak, at some cost to WiFi range.
-              Turn off if you'd rather keep full range and haven't seen any instability.
+              marginal battery/PMIC rail (e.g. the PhotoPainter's original AXP2101) may not sustain
+              cleanly - capping TX power lowers that peak, at some cost to WiFi range. Turn off if
+              you'd rather keep full range and haven't seen any instability.
             </div>
 
             <v-switch
@@ -1220,8 +1222,8 @@ async function performFactoryReset() {
             <div class="text-caption text-medium-emphasis mb-2">
               After 3 consecutive failed WiFi connection attempts on a scheduled wake, overlays a
               short error message on the currently displayed image (without modifying the saved
-              file) so the problem is visible on the frame itself, not just in logs. Also
-              togglable via the "/error_overlay" Telegram bot command.
+              file) so the problem is visible on the frame itself, not just in logs. Also togglable
+              via the "/error_overlay" Telegram bot command.
             </div>
             <v-btn
               variant="outlined"
@@ -1233,9 +1235,9 @@ async function performFactoryReset() {
               Test Error Overlay
             </v-btn>
             <div class="text-caption text-medium-emphasis mt-1">
-              Displays an example error message right now, regardless of the setting above -
-              useful to preview what it looks like. Overlays onto the current image if there is
-              one, otherwise shows it on a blank screen.
+              Displays an example error message right now, regardless of the setting above - useful
+              to preview what it looks like. Overlays onto the current image if there is one,
+              otherwise shows it on a blank screen.
             </div>
 
             <v-divider class="my-6" />
@@ -1294,15 +1296,17 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-4">
-              <strong>Off by default - if the overlays below don't seem to appear at all, check
-              this first.</strong> Storage/Auto-Rotate albums are typically already-rendered EPDGZ
-              files (not PNG); so are Telegram-received photos whenever "On-device image format"
-              (Telegram tab) is set to EPDGZ, which it is by default. Either way, the overlay
-              otherwise skips that file entirely (no weather/headline fetch either) unless this is
-              on. Enabling this decodes/redraws/re-encodes that one file on every display - an
-              extra step not needed for anyone who doesn't use these overlays at all, or whose
-              images are already PNG. BMP images still aren't supported (no BMP decoder exists in
-              the firmware).
+              <strong
+                >Off by default - if the overlays below don't seem to appear at all, check this
+                first.</strong
+              >
+              Storage/Auto-Rotate albums are typically already-rendered EPDGZ files (not PNG); so
+              are Telegram-received photos whenever "On-device image format" (Telegram tab) is set
+              to EPDGZ, which it is by default. Either way, the overlay otherwise skips that file
+              entirely (no weather/headline fetch either) unless this is on. Enabling this
+              decodes/redraws/re-encodes that one file on every display - an extra step not needed
+              for anyone who doesn't use these overlays at all, or whose images are already PNG. BMP
+              images still aren't supported (no BMP decoder exists in the firmware).
             </div>
 
             <v-switch
@@ -1313,9 +1317,9 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              3-day forecast (today + next 2 days), e.g.
-              "Wed sunny 16/24 | Thu partly cloudy 17/25 | Fri rain -5/3" (min/max °C). Free, no API
-              key. Also togglable via the "/weather" bot command.
+              3-day forecast (today + next 2 days), e.g. "Wed sunny 16/24 | Thu partly cloudy 17/25
+              | Fri rain -5/3" (min/max °C). Free, no API key. Also togglable via the "/weather" bot
+              command.
             </div>
             <v-row dense class="mb-2">
               <v-col cols="12" sm="6">
@@ -1388,9 +1392,9 @@ async function performFactoryReset() {
             />
             <div class="text-caption text-medium-emphasis mb-4">
               Even abbreviated, a 3-day forecast can't reliably fit on one ~46-character line for
-              every combination (long condition words, 3-digit negative temperatures) - one line
-              per day always fits. Only available while the headlines overlay below is off (not
-              enough room for both).
+              every combination (long condition words, 3-digit negative temperatures) - one line per
+              day always fits. Only available while the headlines overlay below is off (not enough
+              room for both).
             </div>
 
             <v-switch
@@ -1401,8 +1405,8 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Any RSS/Atom feed URL - no API key, no rate limit. Also togglable via the
-              "/headlines" bot command.
+              Any RSS/Atom feed URL - no API key, no rate limit. Also togglable via the "/headlines"
+              bot command.
             </div>
             <v-row dense>
               <v-col cols="12" sm="8">
@@ -1457,8 +1461,8 @@ async function performFactoryReset() {
               "
               class="text-caption text-medium-emphasis mt-1"
             >
-              Only offered with exactly 1 headline selected above - with more than one, each
-              already gets its own line.
+              Only offered with exactly 1 headline selected above - with more than one, each already
+              gets its own line.
             </div>
 
             <v-switch
@@ -1469,9 +1473,9 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              A small corner badge (not a full-width bar, unlike the overlays above) shown on
-              every display update once the battery drops below the threshold below - independent
-              of Telegram/Web UI reachability, so low battery is noticeable just by looking at the
+              A small corner badge (not a full-width bar, unlike the overlays above) shown on every
+              display update once the battery drops below the threshold below - independent of
+              Telegram/Web UI reachability, so low battery is noticeable just by looking at the
               frame. Clears once the battery recovers 4 percentage points above the threshold.
             </div>
             <v-row dense>

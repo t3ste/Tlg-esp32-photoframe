@@ -51,7 +51,7 @@ static void decode_entities(const char *in, size_t in_len, char *out, size_t out
                 const char *entity;
                 char value;
             } table[] = {
-                {"&amp;", '&'}, {"&lt;", '<'},   {"&gt;", '>'},
+                {"&amp;", '&'},  {"&lt;", '<'},    {"&gt;", '>'},
                 {"&quot;", '"'}, {"&apos;", '\''}, {"&#39;", '\''},
             };
             bool matched = false;
@@ -92,8 +92,7 @@ static void decode_entities(const char *in, size_t in_len, char *out, size_t out
 // Extracts the text content of the first <title>...</title> within
 // [block_start, block_end), unwrapping a CDATA section if present. Returns
 // false if no title tag is found in the block.
-static bool extract_title(const char *block_start, const char *block_end, char *out,
-                          size_t out_len)
+static bool extract_title(const char *block_start, const char *block_end, char *out, size_t out_len)
 {
     const char *title_open = NULL;
     for (const char *p = block_start; p < block_end;) {
@@ -172,7 +171,8 @@ static bool extract_title(const char *block_start, const char *block_end, char *
     return out[0] != '\0';
 }
 
-esp_err_t headlines_extract(const char *body, size_t body_len, int max_count, headlines_result_t *out)
+esp_err_t headlines_extract(const char *body, size_t body_len, int max_count,
+                            headlines_result_t *out)
 {
     if (!out) {
         return ESP_ERR_INVALID_ARG;
@@ -232,8 +232,9 @@ esp_err_t headlines_fetch(const char *feed_url, int max_count, headlines_result_
     char *body = NULL;
     size_t body_len = 0;
     bool truncated = false;
-    esp_err_t err = http_fetch_get(feed_url, HEADLINES_HTTP_TIMEOUT_MS, HEADLINES_MAX_RESPONSE_BYTES,
-                                   &body, &body_len, &truncated, NULL);
+    esp_err_t err =
+        http_fetch_get(feed_url, HEADLINES_HTTP_TIMEOUT_MS, HEADLINES_MAX_RESPONSE_BYTES, &body,
+                       &body_len, &truncated, NULL);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Feed request failed: %s", esp_err_to_name(err));
         return err;

@@ -256,9 +256,8 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password, int timeo
     // association succeeded but DHCP never completed (no further
     // WIFI_EVENT_STA_DISCONNECTED to ever set WIFI_FAIL_BIT). Every caller now
     // gets a definitive answer within timeout_ms either way.
-    EventBits_t bits =
-        xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE,
-                             pdMS_TO_TICKS(timeout_ms));
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                                           pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
 
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected to ap SSID:%s", ssid);

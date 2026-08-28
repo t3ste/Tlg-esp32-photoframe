@@ -21,8 +21,9 @@ static const char *TAG = "overlay_manager";
 // forced back to a single combined line whenever headlines are enabled (see
 // overlay_manager_apply()), so the two never actually add up to more than
 // max(WEATHER_FORECAST_DAYS, 1 + HEADLINE_MAX_COUNT) at once.
-#define OVERLAY_LINES_CAP \
-    (WEATHER_FORECAST_DAYS > (1 + HEADLINE_MAX_COUNT) ? WEATHER_FORECAST_DAYS : (1 + HEADLINE_MAX_COUNT))
+#define OVERLAY_LINES_CAP                                                     \
+    (WEATHER_FORECAST_DAYS > (1 + HEADLINE_MAX_COUNT) ? WEATHER_FORECAST_DAYS \
+                                                      : (1 + HEADLINE_MAX_COUNT))
 
 // Hysteresis-debounced low-battery corner badge check - mirrors
 // check_and_warn_low_battery()'s exact shape (telegram_bot.c), but
@@ -99,8 +100,9 @@ const char *overlay_manager_apply(const char *source_path)
     // Storage/Auto-Rotate album image (see exif_reader.h), gated on the same
     // setting that already governs this for Telegram-received photos.
     char exif_caption[32] = {0};
-    bool exif_caption_due = config_manager_get_show_exif_datetime_enabled() &&
-                            capture_date_sidecar_read(source_path, exif_caption, sizeof(exif_caption));
+    bool exif_caption_due =
+        config_manager_get_show_exif_datetime_enabled() &&
+        capture_date_sidecar_read(source_path, exif_caption, sizeof(exif_caption));
     if (!weather_on && !headlines_on && !exif_caption_due && !battery_badge_due) {
         return source_path;
     }
@@ -109,7 +111,8 @@ const char *overlay_manager_apply(const char *source_path)
     bool is_epdgz = (format == IMAGE_FORMAT_EPD_GZ);
     if (is_epdgz && !config_manager_get_overlay_epdgz_enabled()) {
         if (!battery_badge_due) {
-            ESP_LOGI(TAG, "Skipping overlay for %s: EPDGZ overlay support is disabled", source_path);
+            ESP_LOGI(TAG, "Skipping overlay for %s: EPDGZ overlay support is disabled",
+                     source_path);
             return source_path;
         }
         // The battery badge is a safety notification, not a decorative
@@ -193,7 +196,8 @@ const char *overlay_manager_apply(const char *source_path)
     }
 
     if (line_count == 0 && !exif_caption_due && !battery_badge_due) {
-        ESP_LOGI(TAG, "No overlay content available this cycle, showing %s unmodified", source_path);
+        ESP_LOGI(TAG, "No overlay content available this cycle, showing %s unmodified",
+                 source_path);
         return source_path;
     }
 

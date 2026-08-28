@@ -194,7 +194,7 @@ static void power_manager_enable_auto_light_sleep(void)
         .min_freq_mhz = 160,
         .light_sleep_enable = false,
 #else
-        .min_freq_mhz = 40,   // Minimum CPU frequency (40MHz when idle)
+        .min_freq_mhz = 40,          // Minimum CPU frequency (40MHz when idle)
         .light_sleep_enable = true,  // Enable automatic light sleep
 #endif
     };
@@ -216,7 +216,7 @@ static void power_manager_disable_auto_light_sleep(void)
 #ifdef BOARD_HAL_DISABLE_AUTO_LIGHT_SLEEP
         .min_freq_mhz = 160,  // Pin frequency: fully disables DFS, see above
 #else
-        .min_freq_mhz = 40,   // Minimum CPU frequency (40MHz when idle)
+        .min_freq_mhz = 40,  // Minimum CPU frequency (40MHz when idle)
 #endif
         .light_sleep_enable = false,
     };

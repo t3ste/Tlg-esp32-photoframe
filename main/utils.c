@@ -1398,7 +1398,8 @@ static esp_err_t display_error_overlay(const char *message)
 
     image_format_t format = image_processor_detect_format(current_image);
     if (format != IMAGE_FORMAT_PNG || !image_processor_is_processed(current_image)) {
-        ESP_LOGI(TAG, "Current image %s is not an overlay-ready processed PNG, using a blank canvas",
+        ESP_LOGI(TAG,
+                 "Current image %s is not an overlay-ready processed PNG, using a blank canvas",
                  current_image);
         return display_error_overlay_blank(message);
     }
@@ -1537,8 +1538,9 @@ esp_err_t trigger_image_rotation(void)
                     // Fallback rotation disabled - this wake changes nothing;
                     // the display only ever updates on a wake that actually
                     // receives a new Telegram image.
-                    ESP_LOGI(TAG, "No new Telegram image, fallback rotation disabled - leaving "
-                                  "display unchanged");
+                    ESP_LOGI(TAG,
+                             "No new Telegram image, fallback rotation disabled - leaving "
+                             "display unchanged");
                 } else {
                     // No new Telegram image this cycle - still change the
                     // display, same as the non-Telegram rotation modes, by

@@ -247,7 +247,8 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.lastFetchError = data.last_fetch_error || "";
       deviceSettings.value.deepSleepEnabled = data.deep_sleep_enabled !== false;
       deviceSettings.value.otaCheckEnabled = data.ota_check_enabled !== false;
-      deviceSettings.value.wifiPerformanceModeEnabled = data.wifi_performance_mode_enabled !== false;
+      deviceSettings.value.wifiPerformanceModeEnabled =
+        data.wifi_performance_mode_enabled !== false;
       deviceSettings.value.wifiTxPowerCapEnabled = data.wifi_tx_power_cap_enabled !== false;
       deviceSettings.value.rotationPairingEnabled = data.rotation_pairing_enabled === true;
       deviceSettings.value.variantSelectionEnabled = data.variant_selection_enabled === true;

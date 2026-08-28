@@ -9,6 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "GUI_ColorMap.h"
 #include "board_hal.h"
 #include "color_palette.h"
 #include "config_manager.h"
@@ -19,7 +20,6 @@
 #include "fonts.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "GUI_ColorMap.h"
 #include "jpeg_decoder.h"
 #include "processing_settings.h"
 #include "zlib.h"
@@ -87,10 +87,7 @@ static rgb_t palette_measured[7];
 // Theoretical is the device output ramp (value = round(i * 255 / 15) = i * 17),
 // mirroring epaper-image-convert; measured is the calibrated perceived ramp
 // used for color matching and error diffusion.
-#define GRAY(v)       \
-    {                 \
-        (v), (v), (v) \
-    }
+#define GRAY(v) {(v), (v), (v)}
 static const rgb_t gray_theoretical[16] = {
     GRAY(0),   GRAY(17),  GRAY(34),  GRAY(51),  GRAY(68),  GRAY(85),  GRAY(102), GRAY(119),
     GRAY(136), GRAY(153), GRAY(170), GRAY(187), GRAY(204), GRAY(221), GRAY(238), GRAY(255)};
@@ -602,8 +599,9 @@ static void geometry_init(geometry_t *geo, const uint8_t *src, int src_w, int sr
     // produces). The resample math is shared with cover mode -- off_x/off_y
     // just become the (negative) content origin.
     char bg_name[12] = "";
-    scale_mode_t effective_scale_mode =
-        forced_scale_mode >= 0 ? (scale_mode_t) forced_scale_mode : processing_settings_get_scale_mode();
+    scale_mode_t effective_scale_mode = forced_scale_mode >= 0
+                                            ? (scale_mode_t) forced_scale_mode
+                                            : processing_settings_get_scale_mode();
     geo->fit = effective_scale_mode == SCALE_MODE_FIT;
     geo->content_x0 = 0;
     geo->content_y0 = 0;
@@ -1010,8 +1008,8 @@ static esp_err_t epdgz_writer_open(epdgz_writer_t *ew, const char *filename, int
     ew->strm.opaque = Z_NULL;
     // windowBits 15+16 selects the gzip wrapper GUI_ReadEPDGZ expects
     ew->zready = ew->packed_row && ew->out_chunk &&
-                deflateInit2(&ew->strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8,
-                             Z_DEFAULT_STRATEGY) == Z_OK;
+                 deflateInit2(&ew->strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8,
+                              Z_DEFAULT_STRATEGY) == Z_OK;
 
     if (!ew->zready) {
         if (ew->packed_row) {
@@ -1035,9 +1033,9 @@ static esp_err_t epdgz_writer_row_sink(void *ctx, int y, const uint8_t *row)
 
     for (int x = 0; x < width; x += 2) {
         UBYTE p1 = ew->map_rgb(row[x * 3], row[x * 3 + 1], row[x * 3 + 2]);
-        UBYTE p2 = (x + 1 < width) ? ew->map_rgb(row[(x + 1) * 3], row[(x + 1) * 3 + 1],
-                                                  row[(x + 1) * 3 + 2])
-                                   : 0;
+        UBYTE p2 = (x + 1 < width)
+                       ? ew->map_rgb(row[(x + 1) * 3], row[(x + 1) * 3 + 1], row[(x + 1) * 3 + 2])
+                       : 0;
         ew->packed_row[x / 2] = (uint8_t) ((p1 << 4) | p2);
     }
 
@@ -1472,13 +1470,13 @@ typedef struct {
 
     uint8_t *ring;  // ring_rows full-width (post-descale) source rows
     int ring_rows;
-    int width;   // post-descale
-    int height;  // post-descale
-    int mcu_h;   // post-descale MCU tile height (row-band granularity)
+    int width;         // post-descale
+    int height;        // post-descale
+    int mcu_h;         // post-descale MCU tile height (row-band granularity)
     int rows_decoded;  // highest source row index with valid ring data, + 1
-    bool overflow;  // ring capacity would have been exceeded - kept distinct
-                    // from `error` so the failure is diagnosable
-    bool error;     // any other decode-time failure (sink, or the checks above)
+    bool overflow;     // ring capacity would have been exceeded - kept distinct
+                       // from `error` so the failure is diagnosable
+    bool error;        // any other decode-time failure (sink, or the checks above)
 
     geometry_t geo;
     cdr_state_t cdr;
@@ -2284,8 +2282,8 @@ static void with_png_extension(const char *path, char *out, size_t out_size)
 }
 
 esp_err_t image_processor_process_fmt(const char *input_path, const char *output_path,
-                                      dither_algorithm_t dither_algorithm, image_format_t out_format,
-                                      image_format_t *out_actual_format)
+                                      dither_algorithm_t dither_algorithm,
+                                      image_format_t out_format, image_format_t *out_actual_format)
 {
     const char *algo_names[] = {"floyd-steinberg", "stucki", "burkes", "sierra"};
     ESP_LOGI(TAG, "Processing %s -> %s (dither: %s, format: %s)", input_path, output_path,
@@ -2332,7 +2330,8 @@ esp_err_t image_processor_process_fmt(const char *input_path, const char *output
                      "Failed to allocate file buffer of %ld bytes - falling back to streaming JPEG "
                      "decode",
                      file_size);
-            return process_jpg_streaming_fallback(input_path, output_path, dither_algorithm, rotated);
+            return process_jpg_streaming_fallback(input_path, output_path, dither_algorithm,
+                                                  rotated);
         }
         ESP_LOGE(TAG, "Failed to allocate file buffer of %ld bytes", file_size);
         return ESP_ERR_NO_MEM;
@@ -2390,8 +2389,8 @@ esp_err_t image_processor_process_fmt(const char *input_path, const char *output
                         err = close_err;
                     }
                 } else {
-                    err = png_stream_run(&stream, dither_algorithm, png_writer_row_sink, &png_writer,
-                                         false, rotated);
+                    err = png_stream_run(&stream, dither_algorithm, png_writer_row_sink,
+                                         &png_writer, false, rotated);
                     esp_err_t close_err = png_writer_close(&png_writer, err == ESP_OK);
                     if (err == ESP_OK) {
                         err = close_err;
@@ -2403,7 +2402,8 @@ esp_err_t image_processor_process_fmt(const char *input_path, const char *output
 
             if (err == ESP_OK) {
                 ESP_LOGI(TAG, "Successfully wrote %s to %s",
-                        actual_format == IMAGE_FORMAT_EPD_GZ ? "EPDGZ" : "PNG", actual_output_path);
+                         actual_format == IMAGE_FORMAT_EPD_GZ ? "EPDGZ" : "PNG",
+                         actual_output_path);
                 if (out_actual_format) {
                     *out_actual_format = actual_format;
                 }
@@ -2470,8 +2470,8 @@ esp_err_t image_processor_process_fmt(const char *input_path, const char *output
             // Keep the processing error (e.g. ESP_ERR_NO_MEM, which callers
             // map to a specific response); only a failed finalize of an
             // otherwise successful write becomes the result.
-            err = process_rgb_stream(rgb_buffer, width, height, dither_algorithm, png_writer_row_sink,
-                                     &png_writer, false, rotated, -1);
+            err = process_rgb_stream(rgb_buffer, width, height, dither_algorithm,
+                                     png_writer_row_sink, &png_writer, false, rotated, -1);
             esp_err_t close_err = png_writer_close(&png_writer, err == ESP_OK);
             if (err == ESP_OK) {
                 err = close_err;
@@ -2483,7 +2483,7 @@ esp_err_t image_processor_process_fmt(const char *input_path, const char *output
 
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Successfully wrote %s to %s",
-                actual_format == IMAGE_FORMAT_EPD_GZ ? "EPDGZ" : "PNG", actual_output_path);
+                 actual_format == IMAGE_FORMAT_EPD_GZ ? "EPDGZ" : "PNG", actual_output_path);
         if (out_actual_format) {
             *out_actual_format = actual_format;
         }
@@ -2495,7 +2495,8 @@ esp_err_t image_processor_process_fmt(const char *input_path, const char *output
 }
 
 esp_err_t image_processor_render_variant(const char *input_path, const char *output_path,
-                                         dither_algorithm_t dither_algorithm, image_format_t out_format,
+                                         dither_algorithm_t dither_algorithm,
+                                         image_format_t out_format,
                                          image_format_t *out_actual_format, int forced_scale_mode,
                                          const image_crop_rect_t *crop)
 {
@@ -2582,14 +2583,14 @@ esp_err_t image_processor_render_variant(const char *input_path, const char *out
                 if (cropped) {
                     for (int y = 0; y < ch; y++) {
                         memcpy(cropped + (size_t) y * cw * 3,
-                              rgb_buffer + ((size_t) (cy + y) * width + cx) * 3, (size_t) cw * 3);
+                               rgb_buffer + ((size_t) (cy + y) * width + cx) * 3, (size_t) cw * 3);
                     }
                     heap_caps_free(rgb_buffer);
                     rgb_buffer = cropped;
                     width = cw;
                     height = ch;
-                    ESP_LOGI(TAG, "Applied crop: %dx%d at (%d,%d) -> %dx%d", crop->w, crop->h, cx, cy,
-                             width, height);
+                    ESP_LOGI(TAG, "Applied crop: %dx%d at (%d,%d) -> %dx%d", crop->w, crop->h, cx,
+                             cy, width, height);
                 } else {
                     ESP_LOGW(TAG, "Not enough memory to apply crop - rendering uncropped");
                 }
@@ -2629,8 +2630,9 @@ esp_err_t image_processor_render_variant(const char *input_path, const char *out
                 err = close_err;
             }
         } else {
-            err = process_rgb_stream(rgb_buffer, width, height, dither_algorithm, png_writer_row_sink,
-                                     &png_writer, false, rotated, forced_scale_mode);
+            err =
+                process_rgb_stream(rgb_buffer, width, height, dither_algorithm, png_writer_row_sink,
+                                   &png_writer, false, rotated, forced_scale_mode);
             esp_err_t close_err = png_writer_close(&png_writer, err == ESP_OK);
             if (err == ESP_OK) {
                 err = close_err;
@@ -2642,7 +2644,7 @@ esp_err_t image_processor_render_variant(const char *input_path, const char *out
 
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Successfully wrote %s variant to %s",
-                actual_format == IMAGE_FORMAT_EPD_GZ ? "EPDGZ" : "PNG", actual_output_path);
+                 actual_format == IMAGE_FORMAT_EPD_GZ ? "EPDGZ" : "PNG", actual_output_path);
         if (out_actual_format) {
             *out_actual_format = actual_format;
         }
@@ -3878,8 +3880,7 @@ esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lin
         // badge drawn above. Same opt-in-on-top-of-the-overlay-setting color
         // inversion convention already used for a Telegram photo's own
         // caption (see telegram_bot.c's telegram_caption_invert_colors()).
-        bool invert_caption =
-            config_manager_get_caption_invert_colors_enabled() && invert_colors;
+        bool invert_caption = config_manager_get_caption_invert_colors_enabled() && invert_colors;
         image_processor_draw_caption(rgb_buffer, width, height, exif_caption, invert_caption);
     }
 
@@ -4050,8 +4051,8 @@ esp_err_t image_processor_make_thumbnail(const char *source_path, int max_dimens
 }
 
 esp_err_t image_processor_make_thumbnail_from_original(const char *source_path,
-                                                        image_format_t format, int max_dimension,
-                                                        const char *output_path)
+                                                       image_format_t format, int max_dimension,
+                                                       const char *output_path)
 {
     if (!source_path || !output_path || max_dimension <= 0) {
         return ESP_ERR_INVALID_ARG;
@@ -4070,8 +4071,8 @@ esp_err_t image_processor_make_thumbnail_from_original(const char *source_path,
     uint8_t *src_rgb = NULL;
     int src_width = 0, src_height = 0;
     err = (format == IMAGE_FORMAT_JPG)
-             ? decode_jpg_buffer(file_buffer, file_size, &src_rgb, &src_width, &src_height)
-             : decode_png_buffer(file_buffer, file_size, &src_rgb, &src_width, &src_height);
+              ? decode_jpg_buffer(file_buffer, file_size, &src_rgb, &src_width, &src_height)
+              : decode_png_buffer(file_buffer, file_size, &src_rgb, &src_width, &src_height);
     heap_caps_free(file_buffer);
     if (err != ESP_OK) {
         return err;

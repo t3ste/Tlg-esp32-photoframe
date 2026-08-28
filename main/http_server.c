@@ -28,8 +28,8 @@
 #include "esp_vfs.h"
 #include "esp_vfs_fat.h"
 #include "freertos/task.h"
-#include "history_manager.h"
 #include "ha_integration.h"
+#include "history_manager.h"
 #include "image_processor.h"
 #include "nvs_flash.h"
 #include "ota_manager.h"
@@ -1216,7 +1216,8 @@ static esp_err_t organize_crop_variants_handler(httpd_req_t *req)
     int moved_count = 0;
     esp_err_t err = album_manager_organize_crop_variants(&moved_count);
     if (err != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to organize crop/ folders");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "Failed to organize crop/ folders");
         return ESP_FAIL;
     }
 
@@ -1625,7 +1626,8 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddBoolToObject(root, "overlay_epdgz_enabled",
                               config_manager_get_overlay_epdgz_enabled());
         cJSON_AddStringToObject(root, "overlay_language", config_manager_get_overlay_language());
-        cJSON_AddNumberToObject(root, "headlines_wrap_lines", config_manager_get_headlines_wrap_lines());
+        cJSON_AddNumberToObject(root, "headlines_wrap_lines",
+                                config_manager_get_headlines_wrap_lines());
         cJSON_AddBoolToObject(root, "caption_invert_colors_enabled",
                               config_manager_get_caption_invert_colors_enabled());
         cJSON_AddBoolToObject(root, "weather_multiline_enabled",
@@ -2295,7 +2297,8 @@ static esp_err_t error_overlay_test_handler(httpd_req_t *req)
         return ESP_OK;
     } else {
         httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Failed to display error overlay\"}");
+        httpd_resp_sendstr(
+            req, "{\"status\":\"error\",\"message\":\"Failed to display error overlay\"}");
         return ESP_FAIL;
     }
 }
@@ -2695,9 +2698,9 @@ esp_err_t http_server_init(void)
         httpd_register_uri_handler(server, &display_history_reset_uri);
 
         httpd_uri_t organize_crop_uri = {.uri = "/api/albums/organize-crop",
-                                        .method = HTTP_POST,
-                                        .handler = organize_crop_variants_handler,
-                                        .user_ctx = NULL};
+                                         .method = HTTP_POST,
+                                         .handler = organize_crop_variants_handler,
+                                         .user_ctx = NULL};
         httpd_register_uri_handler(server, &organize_crop_uri);
 
         httpd_uri_t sensor_uri = {

@@ -80,8 +80,8 @@ esp_err_t image_processor_process(const char *input_path, const char *output_pat
  *   afterward.
  */
 esp_err_t image_processor_process_fmt(const char *input_path, const char *output_path,
-                                      dither_algorithm_t dither_algorithm, image_format_t out_format,
-                                      image_format_t *out_actual_format);
+                                      dither_algorithm_t dither_algorithm,
+                                      image_format_t out_format, image_format_t *out_actual_format);
 
 /**
  * @brief Render a specific Cover or Fit variant of an image on demand
@@ -109,7 +109,8 @@ esp_err_t image_processor_process_fmt(const char *input_path, const char *output
  *   source at @p forced_scale_mode.
  */
 esp_err_t image_processor_render_variant(const char *input_path, const char *output_path,
-                                         dither_algorithm_t dither_algorithm, image_format_t out_format,
+                                         dither_algorithm_t dither_algorithm,
+                                         image_format_t out_format,
                                          image_format_t *out_actual_format, int forced_scale_mode,
                                          const image_crop_rect_t *crop);
 
@@ -263,8 +264,7 @@ esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *
  * (though callers may choose to pass the same value through).
  */
 void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height,
-                                      const char *const *lines, int line_count,
-                                      bool invert_colors);
+                                      const char *const *lines, int line_count, bool invert_colors);
 
 /**
  * @brief Same as image_processor_draw_overlay_bar(), but reads an already
@@ -378,7 +378,7 @@ esp_err_t image_processor_make_thumbnail(const char *source_path, int max_dimens
  * downloaded Telegram photo, before it's converted to a display-ready PNG).
  */
 esp_err_t image_processor_make_thumbnail_from_original(const char *source_path,
-                                                        image_format_t format, int max_dimension,
-                                                        const char *output_path);
+                                                       image_format_t format, int max_dimension,
+                                                       const char *output_path);
 
 #endif

@@ -74,7 +74,8 @@ static esp_err_t body_capture_handler(esp_http_client_event_t *evt)
 
     size_t need = ctx->len + (size_t) evt->data_len + 1;
     if (need > TELEGRAM_MAX_RESPONSE_BYTES) {
-        ESP_LOGW(TAG, "Response body exceeds %d bytes cap, truncating", TELEGRAM_MAX_RESPONSE_BYTES);
+        ESP_LOGW(TAG, "Response body exceeds %d bytes cap, truncating",
+                 TELEGRAM_MAX_RESPONSE_BYTES);
         ctx->overflow = true;
         return ESP_OK;
     }
@@ -242,7 +243,8 @@ static esp_err_t file_download_handler(esp_http_client_event_t *evt)
 
 static esp_err_t telegram_download_to_file(const char *url, const char *local_path)
 {
-    for (int attempt = 1; attempt <= telegram_max_retries(TELEGRAM_DOWNLOAD_RETRY_COUNT); attempt++) {
+    for (int attempt = 1; attempt <= telegram_max_retries(TELEGRAM_DOWNLOAD_RETRY_COUNT);
+         attempt++) {
         if (attempt > 1) {
             ESP_LOGW(TAG, "Retrying download (%d/%d) after %d ms...", attempt,
                      TELEGRAM_DOWNLOAD_RETRY_COUNT, TELEGRAM_DOWNLOAD_RETRY_DELAY_MS);
@@ -278,8 +280,8 @@ static esp_err_t telegram_download_to_file(const char *url, const char *local_pa
         esp_http_client_cleanup(client);
 
         if (err != ESP_OK || status != 200 || ctx.total_bytes <= 0) {
-            ESP_LOGW(TAG, "File download failed (err=%s, status=%d, bytes=%d)", esp_err_to_name(err),
-                     status, ctx.total_bytes);
+            ESP_LOGW(TAG, "File download failed (err=%s, status=%d, bytes=%d)",
+                     esp_err_to_name(err), status, ctx.total_bytes);
             unlink(local_path);
             continue;
         }
@@ -628,7 +630,8 @@ static esp_err_t make_unique_telegram_path(const char *ext, char *out, size_t ou
 static bool have_enough_memory_for_download(long file_size)
 {
     if (file_size <= 0) {
-        return true;  // size unknown - let it proceed, existing error handling catches real failures
+        return true;  // size unknown - let it proceed, existing error handling catches real
+                      // failures
     }
     size_t largest_free = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
     return (size_t) file_size + (size_t) file_size / 2 <= largest_free;
@@ -660,11 +663,11 @@ static bool have_enough_memory_for_download(long file_size)
 // poll. On a successful download (ESP_OK return), that id is recorded so a
 // future duplicate is caught too.
 static esp_err_t download_photo_with_fallback(cJSON *photo_array, char *out_path,
-                                               size_t out_path_len, char *out_thumb_file_id,
-                                               size_t out_thumb_file_id_len,
-                                               char *out_largest_file_id,
-                                               size_t out_largest_file_id_len,
-                                               bool *out_is_duplicate)
+                                              size_t out_path_len, char *out_thumb_file_id,
+                                              size_t out_thumb_file_id_len,
+                                              char *out_largest_file_id,
+                                              size_t out_largest_file_id_len,
+                                              bool *out_is_duplicate)
 {
     if (out_is_duplicate) {
         *out_is_duplicate = false;
@@ -839,8 +842,8 @@ static bool document_pick_extension(cJSON *document, const char **out_ext)
 // parameter - a document has just one file_unique_id of its own (no size
 // ladder to pick a "largest" from).
 static esp_err_t download_document_image(cJSON *document, char *out_path, size_t out_path_len,
-                                          char *out_thumb_file_id, size_t out_thumb_file_id_len,
-                                          bool *out_is_duplicate)
+                                         char *out_thumb_file_id, size_t out_thumb_file_id_len,
+                                         bool *out_is_duplicate)
 {
     if (out_is_duplicate) {
         *out_is_duplicate = false;
@@ -884,7 +887,8 @@ static esp_err_t download_document_image(cJSON *document, char *out_path, size_t
     // fallback a "photo" does (see have_enough_memory_for_download()'s
     // comment), so this gate doesn't apply to it.
     cJSON *fsize_item = cJSON_GetObjectItem(document, "file_size");
-    long fsize_bytes = (fsize_item && cJSON_IsNumber(fsize_item)) ? (long) fsize_item->valuedouble : -1;
+    long fsize_bytes =
+        (fsize_item && cJSON_IsNumber(fsize_item)) ? (long) fsize_item->valuedouble : -1;
     if (strcmp(ext, "jpg") != 0 && !have_enough_memory_for_download(fsize_bytes)) {
         ESP_LOGW(TAG, "Document (~%ld KB) too large for available memory, skipping",
                  fsize_bytes / 1024);
@@ -984,7 +988,8 @@ static esp_err_t process_and_display_telegram_image(const char *path, const char
 
     if (format == IMAGE_FORMAT_PNG && image_processor_is_processed(path)) {
         if (effective_caption && effective_caption[0] != '\0') {
-            image_processor_add_caption_to_file(path, effective_caption, telegram_caption_invert_colors());
+            image_processor_add_caption_to_file(path, effective_caption,
+                                                telegram_caption_invert_colors());
         }
         const char *shown = overlay_manager_apply(path);
         esp_err_t show_err = display_manager_show_image(shown);
@@ -1074,7 +1079,7 @@ static esp_err_t read_whole_file(const char *path, uint8_t **out_data, long *out
 // by the caller - a missing thumbnail just falls back to the icon+filename
 // placeholder in the gallery.
 static esp_err_t generate_original_thumbnail(const char *image_path, image_format_t format,
-                                              const char *final_path)
+                                             const char *final_path)
 {
     if (format != IMAGE_FORMAT_JPG && format != IMAGE_FORMAT_PNG) {
         return ESP_ERR_NOT_SUPPORTED;  // BMP/EPDGZ document - no true-color source to thumbnail
@@ -1092,8 +1097,7 @@ static esp_err_t generate_original_thumbnail(const char *image_path, image_forma
     esp_err_t err = image_processor_make_thumbnail_from_original(
         image_path, format, TELEGRAM_THUMBNAIL_MAX_DIMENSION, thumb_path);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Thumbnail: failed to generate for %s: %s", image_path,
-                 esp_err_to_name(err));
+        ESP_LOGW(TAG, "Thumbnail: failed to generate for %s: %s", image_path, esp_err_to_name(err));
     }
     return err;
 }
@@ -1112,11 +1116,10 @@ static void generate_processed_thumbnail(const char *image_path)
     }
     strcpy(ext, ".jpg");
 
-    esp_err_t err = image_processor_make_thumbnail(image_path, TELEGRAM_THUMBNAIL_MAX_DIMENSION,
-                                                   thumb_path);
+    esp_err_t err =
+        image_processor_make_thumbnail(image_path, TELEGRAM_THUMBNAIL_MAX_DIMENSION, thumb_path);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Thumbnail: failed to generate for %s: %s", image_path,
-                 esp_err_to_name(err));
+        ESP_LOGW(TAG, "Thumbnail: failed to generate for %s: %s", image_path, esp_err_to_name(err));
     }
 }
 
@@ -1150,7 +1153,8 @@ static void preserve_telegram_original(const char *path, const char *archival_fi
         if (telegram_download_file_id(archival_file_id, dest) == ESP_OK) {
             return;
         }
-        ESP_LOGW(TAG, "Failed to fetch largest photo size for archival, falling back to local copy");
+        ESP_LOGW(TAG,
+                 "Failed to fetch largest photo size for archival, falling back to local copy");
     }
 
     // A verbatim byte copy never needs the whole file in RAM at once (unlike
@@ -1214,8 +1218,8 @@ static void preserve_telegram_original(const char *path, const char *archival_fi
 static void finalize_telegram_image(char *path, size_t path_len, const char *archival_file_id)
 {
     image_format_t format = image_processor_detect_format(path);
-    bool needs_conversion =
-        (format == IMAGE_FORMAT_JPG || (format == IMAGE_FORMAT_PNG && !image_processor_is_processed(path)));
+    bool needs_conversion = (format == IMAGE_FORMAT_JPG ||
+                             (format == IMAGE_FORMAT_PNG && !image_processor_is_processed(path)));
 
     if (!needs_conversion) {
         // Already a processed, display-ready PNG - thumbnail it as-is. Its
@@ -1248,7 +1252,8 @@ static void finalize_telegram_image(char *path, size_t path_len, const char *arc
 
     dither_algorithm_t algo = processing_settings_get_dithering_algorithm();
     image_format_t actual_format = requested_format;
-    esp_err_t err = image_processor_process_fmt(path, out_path, algo, requested_format, &actual_format);
+    esp_err_t err =
+        image_processor_process_fmt(path, out_path, algo, requested_format, &actual_format);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to persist %s, keeping original: %s", path, esp_err_to_name(err));
         return;
@@ -1304,17 +1309,16 @@ static esp_err_t telegram_bot_send_photo_file(const char *file_path, const char 
     const char *chat_id = config_manager_get_telegram_chat_id();
 
     char part1[512];
-    int part1_len =
-        snprintf(part1, sizeof(part1),
-                 "--%s\r\n"
-                 "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n%s\r\n"
-                 "--%s\r\n"
-                 "Content-Disposition: form-data; name=\"caption\"\r\n\r\n%.900s\r\n"
-                 "--%s\r\n"
-                 "Content-Disposition: form-data; name=\"photo\"; filename=\"%.100s\"\r\n"
-                 "Content-Type: image/jpeg\r\n\r\n",
-                 boundary, chat_id ? chat_id : "", boundary, caption ? caption : "", boundary,
-                 filename);
+    int part1_len = snprintf(
+        part1, sizeof(part1),
+        "--%s\r\n"
+        "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n%s\r\n"
+        "--%s\r\n"
+        "Content-Disposition: form-data; name=\"caption\"\r\n\r\n%.900s\r\n"
+        "--%s\r\n"
+        "Content-Disposition: form-data; name=\"photo\"; filename=\"%.100s\"\r\n"
+        "Content-Type: image/jpeg\r\n\r\n",
+        boundary, chat_id ? chat_id : "", boundary, caption ? caption : "", boundary, filename);
     if (part1_len < 0 || (size_t) part1_len >= sizeof(part1)) {
         heap_caps_free(file_data);
         return ESP_FAIL;
@@ -1467,8 +1471,8 @@ static esp_err_t compose_pair_and_save(const char *path_a, const char *caption_a
     // Older (first-arrived) image goes in the first slot, newer in the
     // second, matching arrival order.
     err = image_processor_compose_pair_to_rgb(buf_a, (size_t) size_a, format_a, buf_b,
-                                              (size_t) size_b, format_b,
-                                              wants_portrait_frame_now(), algo, &result);
+                                              (size_t) size_b, format_b, wants_portrait_frame_now(),
+                                              algo, &result);
     heap_caps_free(buf_a);
     heap_caps_free(buf_b);
     if (err != ESP_OK) {
@@ -1476,7 +1480,7 @@ static esp_err_t compose_pair_and_save(const char *path_a, const char *caption_a
     }
 
     const char *overlay = (caption_b && caption_b[0])   ? caption_b
-                         : (caption_a && caption_a[0]) ? caption_a
+                          : (caption_a && caption_a[0]) ? caption_a
                                                         : NULL;
     if (overlay) {
         image_processor_draw_caption(result.rgb_data, result.width, result.height, overlay,
@@ -1544,8 +1548,8 @@ static void check_and_warn_low_battery(void)
     if (percent < TELEGRAM_LOW_BATTERY_THRESHOLD) {
         if (!config_manager_get_telegram_low_battery_warned()) {
             char msg[128];
-            snprintf(msg, sizeof(msg), "[!] Low battery warning: Only %d%% remaining. Please charge soon.",
-                     percent);
+            snprintf(msg, sizeof(msg),
+                     "[!] Low battery warning: Only %d%% remaining. Please charge soon.", percent);
             telegram_bot_send_message(msg);
             config_manager_set_telegram_low_battery_warned(true);
         }
@@ -1813,7 +1817,7 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
     // command in a photo-bearing batch, including the command needed to turn
     // this mode back off.
     bool latest_only_mode = config_manager_get_telegram_power_save_enabled() &&
-                             config_manager_get_telegram_power_save_latest_only();
+                            config_manager_get_telegram_power_save_latest_only();
     cJSON *winning_item = NULL;
     if (latest_only_mode) {
         cJSON *scan_item = NULL;
@@ -1861,18 +1865,17 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
             bool is_duplicate = false;
 
             if (photo && cJSON_IsArray(photo) && cJSON_GetArraySize(photo) > 0) {
-                got_image = (download_photo_with_fallback(photo, downloaded_path,
-                                                           sizeof(downloaded_path), thumb_file_id,
-                                                           sizeof(thumb_file_id), largest_file_id,
-                                                           sizeof(largest_file_id),
-                                                           &is_duplicate) == ESP_OK);
+                got_image = (download_photo_with_fallback(
+                                 photo, downloaded_path, sizeof(downloaded_path), thumb_file_id,
+                                 sizeof(thumb_file_id), largest_file_id, sizeof(largest_file_id),
+                                 &is_duplicate) == ESP_OK);
                 if (!got_image && !is_duplicate) {
                     image_attempt_failed = true;
                 }
             } else if (document && cJSON_IsObject(document)) {
-                got_image = (download_document_image(document, downloaded_path,
-                                                      sizeof(downloaded_path), thumb_file_id,
-                                                      sizeof(thumb_file_id), &is_duplicate) == ESP_OK);
+                got_image = (download_document_image(
+                                 document, downloaded_path, sizeof(downloaded_path), thumb_file_id,
+                                 sizeof(thumb_file_id), &is_duplicate) == ESP_OK);
                 if (!got_image && !is_duplicate) {
                     image_attempt_failed = true;
                 }
@@ -1948,9 +1951,11 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
                     strncpy(entry->filename, fname, sizeof(entry->filename) - 1);
                     entry->filename[sizeof(entry->filename) - 1] = '\0';
                     cJSON *mid = cJSON_GetObjectItem(message, "message_id");
-                    entry->message_id = (mid && cJSON_IsNumber(mid)) ? (int64_t) mid->valuedouble : 0;
+                    entry->message_id =
+                        (mid && cJSON_IsNumber(mid)) ? (int64_t) mid->valuedouble : 0;
                 } else {
-                    ESP_LOGW(TAG, "Too many images in this batch, skipping reply confirmation for %s",
+                    ESP_LOGW(TAG,
+                             "Too many images in this batch, skipping reply confirmation for %s",
                              downloaded_path);
                 }
 
@@ -1967,10 +1972,9 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
                     if (config_manager_get_telegram_pending_image_count() > 0 &&
                         pair_result_count < TELEGRAM_MAX_PAIR_RESULTS) {
                         char pending_path[320], pending_cap[TELEGRAM_CAPTION_MAX_LEN];
-                        config_manager_get_telegram_pending_image_at(0, pending_path,
-                                                                      sizeof(pending_path),
-                                                                      pending_cap,
-                                                                      sizeof(pending_cap));
+                        config_manager_get_telegram_pending_image_at(
+                            0, pending_path, sizeof(pending_path), pending_cap,
+                            sizeof(pending_cap));
 
                         struct stat st;
                         if (stat(pending_path, &st) != 0) {
@@ -2034,7 +2038,8 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
         if (!combined) {
             for (int i = saved_image_count - 1; i >= 0; i--) {
                 if (strcmp(saved_images[i].path, display_path) == 0) {
-                    caption_for_display = saved_images[i].caption[0] ? saved_images[i].caption : NULL;
+                    caption_for_display =
+                        saved_images[i].caption[0] ? saved_images[i].caption : NULL;
                     break;
                 }
             }
@@ -2082,10 +2087,9 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
         // entry->path is always one of the two SOURCE images, never the
         // synthesized composed_path itself - so this compares against the
         // pair's own composed_path, not entry->path/this_is_shown.
-        bool this_pair_is_shown = (pair_index >= 0 && pair_results[pair_index].ok && combined &&
-                                   have_display_candidate &&
-                                   strcmp(pair_results[pair_index].composed_path, display_path) ==
-                                       0);
+        bool this_pair_is_shown =
+            (pair_index >= 0 && pair_results[pair_index].ok && combined && have_display_candidate &&
+             strcmp(pair_results[pair_index].composed_path, display_path) == 0);
 
         if (this_pair_is_shown) {
             snprintf(caption_text, sizeof(caption_text),
@@ -2093,18 +2097,16 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
                      entry->filename);
         } else if (pair_index >= 0 && pair_results[pair_index].ok) {
             snprintf(caption_text, sizeof(caption_text),
-                     "[OK] Saved & combined in the album (not displayed)\n%.60s",
-                     entry->filename);
+                     "[OK] Saved & combined in the album (not displayed)\n%.60s", entry->filename);
         } else if (pair_index >= 0) {
-            snprintf(caption_text, sizeof(caption_text),
-                     "[!] Saved, combining failed\n%.80s", entry->filename);
+            snprintf(caption_text, sizeof(caption_text), "[!] Saved, combining failed\n%.80s",
+                     entry->filename);
         } else if (this_is_shown && displayed) {
             snprintf(caption_text, sizeof(caption_text), "[OK] Saved & displayed\n%.100s",
                      entry->filename);
         } else if (this_is_shown) {
-            snprintf(caption_text, sizeof(caption_text),
-                     "[!] Saved (%.80s)\nDisplay failed: %.30s", entry->filename,
-                     esp_err_to_name(disp_err));
+            snprintf(caption_text, sizeof(caption_text), "[!] Saved (%.80s)\nDisplay failed: %.30s",
+                     entry->filename, esp_err_to_name(disp_err));
         } else if (still_pending) {
             snprintf(caption_text, sizeof(caption_text),
                      "[OK] Saved, waiting for a portrait/landscape partner image\n%.100s",
@@ -2164,8 +2166,8 @@ static void format_battery(char *out, size_t out_len)
 {
     int percent;
     if (!get_valid_battery_percent(&percent)) {
-        snprintf(out, out_len, board_hal_is_usb_connected() ? "USB connected (no battery detected)"
-                                                             : "unknown");
+        snprintf(out, out_len,
+                 board_hal_is_usb_connected() ? "USB connected (no battery detected)" : "unknown");
         return;
     }
     int mv = board_hal_get_battery_voltage();
@@ -2418,7 +2420,7 @@ static void execute_command(const char *raw_text)
     } else if (strcmp(cmd, "/clear") == 0) {
         esp_err_t err = display_manager_clear();
         telegram_bot_send_message(err == ESP_OK ? "[OK] Display cleared."
-                                                 : "[ERROR] Failed to clear display.");
+                                                : "[ERROR] Failed to clear display.");
     } else if (strcmp(cmd, "/restart") == 0) {
         telegram_bot_send_message("[OK] Restarting...");
         vTaskDelay(pdMS_TO_TICKS(500));  // give the HTTP send a moment to flush
@@ -2436,8 +2438,7 @@ static void execute_command(const char *raw_text)
         snprintf(msg, sizeof(msg),
                  "[%c] Portrait/landscape combining\n"
                  "Current frame orientation: %s",
-                 enabled ? 'x' : ' ',
-                 wants_portrait_frame_now() ? "portrait" : "landscape");
+                 enabled ? 'x' : ' ', wants_portrait_frame_now() ? "portrait" : "landscape");
         telegram_bot_send_message(msg);
     } else if (strcmp(cmd, "/rotate_cron") == 0) {
         if (!args) {
@@ -2615,7 +2616,8 @@ static void execute_command(const char *raw_text)
             config_manager_set_show_exif_datetime_enabled(true);
             telegram_bot_send_message(
                 "[x] EXIF date fallback enabled\n"
-                "(a photo received with no caption shows its EXIF capture date instead, if present).");
+                "(a photo received with no caption shows its EXIF capture date instead, if "
+                "present).");
         } else if (args && strcasecmp(args, "off") == 0) {
             config_manager_set_show_exif_datetime_enabled(false);
             telegram_bot_send_message("[ ] EXIF date fallback disabled.");

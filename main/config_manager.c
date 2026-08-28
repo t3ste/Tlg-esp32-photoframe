@@ -195,8 +195,8 @@ static void cron_persist(void)
 // ----------------------------------------------------------------------------
 
 #define TELEGRAM_PENDING_JOINED_MAX \
-    (TELEGRAM_MAX_PENDING_IMAGES * (sizeof(((telegram_pending_image_t *) 0)->path) + \
-                                    TELEGRAM_CAPTION_MAX_LEN + 2))
+    (TELEGRAM_MAX_PENDING_IMAGES *  \
+     (sizeof(((telegram_pending_image_t *) 0)->path) + TELEGRAM_CAPTION_MAX_LEN + 2))
 
 static void telegram_pending_persist(void)
 {
@@ -705,7 +705,7 @@ esp_err_t config_manager_init(void)
         char stored_provider[WEATHER_PROVIDER_MAX_LEN] = {0};
         size_t weather_provider_len = sizeof(stored_provider);
         if (nvs_get_str(nvs_handle, NVS_WEATHER_PROVIDER_KEY, stored_provider,
-                         &weather_provider_len) == ESP_OK &&
+                        &weather_provider_len) == ESP_OK &&
             (strcmp(stored_provider, WEATHER_PROVIDER_OPEN_METEO) == 0 ||
              strcmp(stored_provider, WEATHER_PROVIDER_WTTR_IN) == 0 ||
              strcmp(stored_provider, WEATHER_PROVIDER_YR_NO) == 0)) {
@@ -730,7 +730,8 @@ esp_err_t config_manager_init(void)
         }
         uint8_t stored_wrap_lines = HEADLINES_WRAP_LINES_DEFAULT;
         if (nvs_get_u8(nvs_handle, NVS_HEADLINES_WRAP_LINES_KEY, &stored_wrap_lines) == ESP_OK &&
-            stored_wrap_lines >= HEADLINES_WRAP_LINES_MIN && stored_wrap_lines <= HEADLINES_WRAP_LINES_MAX) {
+            stored_wrap_lines >= HEADLINES_WRAP_LINES_MIN &&
+            stored_wrap_lines <= HEADLINES_WRAP_LINES_MAX) {
             headlines_wrap_lines = stored_wrap_lines;
         }
 
@@ -740,7 +741,8 @@ esp_err_t config_manager_init(void)
             overlay_invert_colors = (stored_overlay_invert != 0);
         }
         uint8_t stored_overlay_epdgz = 0;
-        if (nvs_get_u8(nvs_handle, NVS_OVERLAY_EPDGZ_ENABLED_KEY, &stored_overlay_epdgz) == ESP_OK) {
+        if (nvs_get_u8(nvs_handle, NVS_OVERLAY_EPDGZ_ENABLED_KEY, &stored_overlay_epdgz) ==
+            ESP_OK) {
             overlay_epdgz_enabled = (stored_overlay_epdgz != 0);
         }
         size_t overlay_lang_len = sizeof(overlay_language);
@@ -755,7 +757,8 @@ esp_err_t config_manager_init(void)
             caption_invert_colors_enabled = (stored_caption_invert != 0);
         }
         uint8_t stored_weather_multiline = 0;
-        if (nvs_get_u8(nvs_handle, NVS_WEATHER_MULTILINE_KEY, &stored_weather_multiline) == ESP_OK) {
+        if (nvs_get_u8(nvs_handle, NVS_WEATHER_MULTILINE_KEY, &stored_weather_multiline) ==
+            ESP_OK) {
             weather_multiline_enabled = (stored_weather_multiline != 0);
         }
         uint8_t stored_show_exif_datetime = 0;
@@ -2025,8 +2028,7 @@ bool config_manager_telegram_has_seen_unique_id(const char *unique_id)
 
 void config_manager_telegram_mark_seen_unique_id(const char *unique_id)
 {
-    if (!unique_id || unique_id[0] == '\0' ||
-        strlen(unique_id) >= TELEGRAM_UNIQUE_ID_MAX_LEN) {
+    if (!unique_id || unique_id[0] == '\0' || strlen(unique_id) >= TELEGRAM_UNIQUE_ID_MAX_LEN) {
         return;
     }
     if (config_manager_telegram_has_seen_unique_id(unique_id)) {
@@ -2333,8 +2335,9 @@ bool config_manager_get_overlay_epdgz_enabled(void)
 void config_manager_set_overlay_language(const char *language)
 {
     const char *new_lang =
-        (language && (strcmp(language, "de") == 0 || strcmp(language, "en") == 0)) ? language
-                                                                                    : OVERLAY_LANGUAGE_DEFAULT;
+        (language && (strcmp(language, "de") == 0 || strcmp(language, "en") == 0))
+            ? language
+            : OVERLAY_LANGUAGE_DEFAULT;
     strncpy(overlay_language, new_lang, sizeof(overlay_language) - 1);
     overlay_language[sizeof(overlay_language) - 1] = '\0';
 
@@ -2396,7 +2399,8 @@ void config_manager_set_show_exif_datetime_enabled(bool enabled)
         nvs_close(nvs_handle);
     }
 
-    ESP_LOGI(TAG, "Show EXIF capture date as fallback caption %s", enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Show EXIF capture date as fallback caption %s",
+             enabled ? "enabled" : "disabled");
 }
 
 bool config_manager_get_show_exif_datetime_enabled(void)
@@ -2434,7 +2438,8 @@ void config_manager_set_low_battery_overlay_threshold(int threshold)
 
     nvs_handle_t nvs_handle;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_LOW_BATTERY_OVERLAY_THRESHOLD_KEY, low_battery_overlay_threshold);
+        nvs_set_u8(nvs_handle, NVS_LOW_BATTERY_OVERLAY_THRESHOLD_KEY,
+                   low_battery_overlay_threshold);
         nvs_commit(nvs_handle);
         nvs_close(nvs_handle);
     }

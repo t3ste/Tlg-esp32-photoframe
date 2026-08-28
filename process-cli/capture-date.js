@@ -65,6 +65,9 @@ export function extractCaptureDate(sourcePath) {
 
 /** Writes the capture-date sidecar (overwrites any existing file). */
 export function writeCaptureDateFile(captureDatePath, captureDate) {
-  const metadata = { schema: CAPTURE_DATE_SCHEMA_VERSION, capture_date: captureDate };
+  const metadata = {
+    schema: CAPTURE_DATE_SCHEMA_VERSION,
+    capture_date: captureDate,
+  };
   fs.writeFileSync(captureDatePath, JSON.stringify(metadata, null, 2) + "\n");
 }

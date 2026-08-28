@@ -17,7 +17,12 @@ export function scoreFaces(faces) {
 function expandWithMargin(face, marginPercent) {
   const mx = face.w * marginPercent;
   const my = face.h * marginPercent;
-  return { x: face.x - mx, y: face.y - my, w: face.w + 2 * mx, h: face.h + 2 * my };
+  return {
+    x: face.x - mx,
+    y: face.y - my,
+    w: face.w + 2 * mx,
+    h: face.h + 2 * my,
+  };
 }
 
 function union(a, b) {
@@ -101,7 +106,11 @@ function growToFillImage(box, imgWidth, imgHeight, aspectRatio) {
   };
 
   const minimal = growToAspect(clipped, aspectRatio);
-  const { w: maxW, h: maxH } = maxBoxForAspect(imgWidth, imgHeight, aspectRatio);
+  const { w: maxW, h: maxH } = maxBoxForAspect(
+    imgWidth,
+    imgHeight,
+    aspectRatio,
+  );
 
   if (maxW <= minimal.w || maxH <= minimal.h) {
     return minimal;
@@ -211,7 +220,13 @@ export function fallbackCrop(imgWidth, imgHeight, target) {
  *   width/height, before it's merged into the working crop.
  * @returns {{x:number,y:number,w:number,h:number}}
  */
-export function computeRecommendedCrop(imgWidth, imgHeight, faces, target, options = {}) {
+export function computeRecommendedCrop(
+  imgWidth,
+  imgHeight,
+  faces,
+  target,
+  options = {},
+) {
   const marginPercent = options.marginPercent ?? 0.12;
 
   if (!faces || faces.length === 0) {
@@ -240,6 +255,11 @@ export function computeRecommendedCrop(imgWidth, imgHeight, faces, target, optio
   }
 
   const margined = expandWithMargin(bbox, marginPercent);
-  const grown = growToFillImage(margined, imgWidth, imgHeight, target.aspectRatio);
+  const grown = growToFillImage(
+    margined,
+    imgWidth,
+    imgHeight,
+    target.aspectRatio,
+  );
   return roundCrop(clampCropToImage(grown, imgWidth, imgHeight));
 }

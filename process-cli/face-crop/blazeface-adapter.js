@@ -133,7 +133,13 @@ export function createBlazefaceDetector(options = {}) {
       const [x0, y0] = p.topLeft;
       const [x1, y1] = p.bottomRight;
       const score = p.probability != null ? p.probability[0] : 0;
-      return { x: x0 + offsetX, y: y0 + offsetY, w: x1 - x0, h: y1 - y0, score };
+      return {
+        x: x0 + offsetX,
+        y: y0 + offsetY,
+        w: x1 - x0,
+        h: y1 - y0,
+        score,
+      };
     });
   }
 
@@ -142,7 +148,12 @@ export function createBlazefaceDetector(options = {}) {
       await tf.setBackend("cpu");
       await tf.ready();
       const modelUrl = modelDir ? localDirIOHandler(modelDir) : undefined;
-      model = await blazeface.load({ maxFaces, scoreThreshold, iouThreshold, modelUrl });
+      model = await blazeface.load({
+        maxFaces,
+        scoreThreshold,
+        iouThreshold,
+        modelUrl,
+      });
     },
 
     async detect(imageData) {
@@ -155,14 +166,24 @@ export function createBlazefaceDetector(options = {}) {
         return fullFrameFaces;
       }
 
-      const tiles = computeTiles(imageData.width, imageData.height, tileGrid, tileOverlap);
+      const tiles = computeTiles(
+        imageData.width,
+        imageData.height,
+        tileGrid,
+        tileOverlap,
+      );
       let tileFaces = [];
       for (const tile of tiles) {
         const region = cropImageData(imageData, tile.x, tile.y, tile.w, tile.h);
-        tileFaces = tileFaces.concat(await detectRegion(region, tile.x, tile.y));
+        tileFaces = tileFaces.concat(
+          await detectRegion(region, tile.x, tile.y),
+        );
       }
 
-      return mergeOverlappingDetections([...fullFrameFaces, ...tileFaces], iouThreshold);
+      return mergeOverlappingDetections(
+        [...fullFrameFaces, ...tileFaces],
+        iouThreshold,
+      );
     },
 
     dispose() {
@@ -179,8 +200,14 @@ export function createBlazefaceDetector(options = {}) {
  * @returns {Array<{x:number,y:number,w:number,h:number}>}
  */
 export function computeTiles(imgWidth, imgHeight, gridSize, overlap = 0.2) {
-  const tileW = Math.min(imgWidth, Math.ceil(imgWidth / gridSize / (1 - overlap)));
-  const tileH = Math.min(imgHeight, Math.ceil(imgHeight / gridSize / (1 - overlap)));
+  const tileW = Math.min(
+    imgWidth,
+    Math.ceil(imgWidth / gridSize / (1 - overlap)),
+  );
+  const tileH = Math.min(
+    imgHeight,
+    Math.ceil(imgHeight / gridSize / (1 - overlap)),
+  );
   const stepX = gridSize > 1 ? (imgWidth - tileW) / (gridSize - 1) : 0;
   const stepY = gridSize > 1 ? (imgHeight - tileH) / (gridSize - 1) : 0;
 

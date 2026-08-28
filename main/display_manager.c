@@ -24,9 +24,9 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_system.h"
+#include "facecrop_metadata.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "facecrop_metadata.h"
 #include "history_manager.h"
 #include "image_processor.h"
 #include "nvs.h"
@@ -572,7 +572,7 @@ static bool find_existing_variant(char *out_path, size_t out_size, const char *d
     for (size_t i = 0; i < VARIANT_EXTS_COUNT; i++) {
         if (subdir_or_null) {
             snprintf(out_path, out_size, "%s/%s/%s%s%s", dir, subdir_or_null, base, suffix,
-                    VARIANT_EXTS[i]);
+                     VARIANT_EXTS[i]);
         } else {
             snprintf(out_path, out_size, "%s/%s%s%s", dir, base, suffix, VARIANT_EXTS[i]);
         }
@@ -592,7 +592,8 @@ static bool find_existing_variant(char *out_path, size_t out_size, const char *d
 static bool is_decodable_original(const char *path)
 {
     image_format_t fmt = image_processor_detect_format(path);
-    return fmt == IMAGE_FORMAT_JPG || (fmt == IMAGE_FORMAT_PNG && !image_processor_is_processed(path));
+    return fmt == IMAGE_FORMAT_JPG ||
+           (fmt == IMAGE_FORMAT_PNG && !image_processor_is_processed(path));
 }
 
 // Renders `original_path` at `forced_scale_mode` (optionally applying
@@ -638,7 +639,7 @@ static bool render_and_cache_variant(const char *original_path, const char *dir,
     const char *actual_ext = (actual_fmt == render_fmt) ? render_ext : ".png";
     char actual_tmp_path[700];
     snprintf(actual_tmp_path, sizeof(actual_tmp_path), "%s/%s%s.tmp%s", dest_dir, base, suffix,
-            actual_ext);
+             actual_ext);
     char final_path[700];
     snprintf(final_path, sizeof(final_path), "%s/%s%s%s", dest_dir, base, suffix, actual_ext);
 
@@ -1124,9 +1125,9 @@ static void rotate_random(char **enabled_albums, int album_count)
                     *slash = '\0';
                 }
 
-                esp_err_t err = compose_rotation_pair(display_path, image_list[partner_index],
-                                                      dest_album_path, composed_path,
-                                                      sizeof(composed_path));
+                esp_err_t err =
+                    compose_rotation_pair(display_path, image_list[partner_index], dest_album_path,
+                                          composed_path, sizeof(composed_path));
                 if (err == ESP_OK) {
                     ESP_LOGI(TAG, "Auto-rotate: combined %s + %s -> %s", display_path,
                              image_list[partner_index], composed_path);

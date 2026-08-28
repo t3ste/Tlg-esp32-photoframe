@@ -40,6 +40,7 @@ esp_err_t headlines_fetch(const char *feed_url, int max_count, headlines_result_
  * already in memory, `body_len` bytes) directly. See headlines_fetch() for
  * the extraction rules (CDATA, entities, ASCII sanitization, truncation).
  */
-esp_err_t headlines_extract(const char *body, size_t body_len, int max_count, headlines_result_t *out);
+esp_err_t headlines_extract(const char *body, size_t body_len, int max_count,
+                            headlines_result_t *out);
 
 #endif

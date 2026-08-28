@@ -111,7 +111,9 @@ TEST(HeadlinesExtract, MixedRssAndAtomInOneDocument)
 
 TEST(HeadlinesExtract, GermanUmlautsTransliterated)
 {
-    const char *feed = "<item><title>Grosse \xc3\x9c" "berraschung in M\xc3\xbcnchen</title></item>";
+    const char *feed =
+        "<item><title>Grosse \xc3\x9c"
+        "berraschung in M\xc3\xbcnchen</title></item>";
 
     headlines_result_t out = extract(feed);
     ASSERT_EQ(out.count, 1);

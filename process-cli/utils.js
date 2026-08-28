@@ -28,7 +28,12 @@ import fs from "fs";
 // @napi-rs/canvas started doing that same correction internally.
 import { loadImage, createCanvas } from "@napi-rs/canvas";
 import heicConvert from "heic-convert";
-import { processImage, rotateImage, SPECTRA6, GRAYSCALE16 } from "@aitjcize/epaper-image-convert";
+import {
+  processImage,
+  rotateImage,
+  SPECTRA6,
+  GRAYSCALE16,
+} from "@aitjcize/epaper-image-convert";
 
 /**
  * Load image with HEIC support
@@ -69,7 +74,12 @@ async function loadImageWithHeicSupport(imagePath) {
  * @returns {Promise<Canvas>}
  */
 export async function loadOrientedCanvas(imagePath, options = {}) {
-  const { autoOrient = false, displayWidth, displayHeight, verbose = false } = options;
+  const {
+    autoOrient = false,
+    displayWidth,
+    displayHeight,
+    verbose = false,
+  } = options;
 
   const img = await loadImageWithHeicSupport(imagePath);
   let canvas = createCanvas(img.width, img.height);

@@ -76,7 +76,9 @@ describe("computeRecommendedCrop - single large face", () => {
     // that's what the margin is for.
     const face = { x: 400, y: 400, w: 200, h: 200, score: 0.95 };
     const marginPercent = 0.5;
-    const crop = computeRecommendedCrop(1000, 1000, [face], LANDSCAPE_TARGET, { marginPercent });
+    const crop = computeRecommendedCrop(1000, 1000, [face], LANDSCAPE_TARGET, {
+      marginPercent,
+    });
 
     const mx = face.w * marginPercent;
     const my = face.h * marginPercent;
@@ -94,7 +96,12 @@ describe("computeRecommendedCrop - multiple faces, different sizes", () => {
   test("includes both faces when they comfortably fit together", () => {
     const large = { x: 300, y: 200, w: 150, h: 150, score: 0.9 };
     const small = { x: 550, y: 220, w: 40, h: 40, score: 0.8 };
-    const crop = computeRecommendedCrop(1600, 900, [large, small], LANDSCAPE_TARGET);
+    const crop = computeRecommendedCrop(
+      1600,
+      900,
+      [large, small],
+      LANDSCAPE_TARGET,
+    );
     expect(boxContains(crop, large)).toBe(true);
     expect(boxContains(crop, small)).toBe(true);
   });
@@ -102,7 +109,12 @@ describe("computeRecommendedCrop - multiple faces, different sizes", () => {
   test("prioritizes the largest face when a distant small face would push it out of frame", () => {
     const large = { x: 350, y: 250, w: 100, h: 100, score: 0.9 };
     const farTiny = { x: 3900, y: 1900, w: 10, h: 10, score: 0.3 };
-    const crop = computeRecommendedCrop(4000, 2000, [large, farTiny], LANDSCAPE_TARGET);
+    const crop = computeRecommendedCrop(
+      4000,
+      2000,
+      [large, farTiny],
+      LANDSCAPE_TARGET,
+    );
     // The large face must always remain fully visible...
     expect(boxContains(crop, large)).toBe(true);
     // ...even though that means the tiny distant face is left out.
@@ -197,11 +209,27 @@ describe("landscape vs portrait produce different crops for the same source", ()
       { x: 300, y: 500, w: 150, h: 150, score: 0.9 },
       { x: 900, y: 300, w: 100, h: 100, score: 0.8 },
     ];
-    const landscapeCrop = computeRecommendedCrop(1600, 1200, faces, LANDSCAPE_TARGET);
-    const portraitCrop = computeRecommendedCrop(1600, 1200, faces, PORTRAIT_TARGET);
+    const landscapeCrop = computeRecommendedCrop(
+      1600,
+      1200,
+      faces,
+      LANDSCAPE_TARGET,
+    );
+    const portraitCrop = computeRecommendedCrop(
+      1600,
+      1200,
+      faces,
+      PORTRAIT_TARGET,
+    );
 
     expect(landscapeCrop).not.toEqual(portraitCrop);
-    expect(landscapeCrop.w / landscapeCrop.h).toBeCloseTo(LANDSCAPE_TARGET.aspectRatio, 1);
-    expect(portraitCrop.w / portraitCrop.h).toBeCloseTo(PORTRAIT_TARGET.aspectRatio, 1);
+    expect(landscapeCrop.w / landscapeCrop.h).toBeCloseTo(
+      LANDSCAPE_TARGET.aspectRatio,
+      1,
+    );
+    expect(portraitCrop.w / portraitCrop.h).toBeCloseTo(
+      PORTRAIT_TARGET.aspectRatio,
+      1,
+    );
   });
 });

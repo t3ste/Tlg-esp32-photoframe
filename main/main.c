@@ -273,8 +273,8 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
     // wake - never a manual button press, which always keeps the full retry
     // budget/window as a deliberate escape hatch to reach the web UI.
     bool telegram_power_save_active = (rotation_mode == ROTATION_MODE_TELEGRAM) &&
-                                       config_manager_get_telegram_power_save_enabled() &&
-                                       !is_button_wake;
+                                      config_manager_get_telegram_power_save_enabled() &&
+                                      !is_button_wake;
 
     // Early-wake check before spending power on WiFi: on boards with an
     // external RTC the corrected time is already restored at this point, so
@@ -394,8 +394,9 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
     // exists to let a server/HA reach the device after the fact, not to serve
     // an active in-progress request) - but still honors an explicit
     // server_wait below, since that reflects a real, in-progress interaction.
-    int hold_sec =
-        telegram_power_save_active ? 0 : (wifi_connected && ha_configured) ? HA_CONFIG_WINDOW_SEC : 0;
+    int hold_sec = telegram_power_save_active          ? 0
+                   : (wifi_connected && ha_configured) ? HA_CONFIG_WINDOW_SEC
+                                                       : 0;
     int server_wait = utils_get_post_rotate_wait_sec();
     if (server_wait > hold_sec) {
         hold_sec = server_wait;
@@ -648,8 +649,8 @@ void app_main(void)
         // (apparently sufficient) 16384 for the identical call, see
         // power_manager.c. See trigger_image_rotation()'s own stack
         // high-water-mark log (utils.c) for real numbers on this build.
-        xTaskCreate(deep_sleep_wake_task, "deep_sleep_wake", 16384,
-                    (void *) (intptr_t) wakeup_src, 5, NULL);
+        xTaskCreate(deep_sleep_wake_task, "deep_sleep_wake", 16384, (void *) (intptr_t) wakeup_src,
+                    5, NULL);
         // Returning (rather than `break`) hands off exclusively to the new
         // task - falling through to the cold-boot/BOOT_BUTTON setup code
         // below would otherwise run concurrently with it (duplicate WiFi/HTTP

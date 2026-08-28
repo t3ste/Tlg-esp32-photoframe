@@ -26,8 +26,9 @@ static uint16_t read_u16(const uint8_t *p, bool big_endian)
 
 static uint32_t read_u32(const uint8_t *p, bool big_endian)
 {
-    return big_endian ? ((uint32_t) p[0] << 24 | (uint32_t) p[1] << 16 | (uint32_t) p[2] << 8 | p[3])
-                      : ((uint32_t) p[3] << 24 | (uint32_t) p[2] << 16 | (uint32_t) p[1] << 8 | p[0]);
+    return big_endian
+               ? ((uint32_t) p[0] << 24 | (uint32_t) p[1] << 16 | (uint32_t) p[2] << 8 | p[3])
+               : ((uint32_t) p[3] << 24 | (uint32_t) p[2] << 16 | (uint32_t) p[1] << 8 | p[0]);
 }
 
 // Searches one IFD (Image File Directory) at `ifd_offset` (relative to the
@@ -227,7 +228,8 @@ static bool derive_capture_date_path(const char *anchor_path, char *out, size_t 
     size_t name_len = (size_t) (dot - filename);
 
     bool is_cover = (name_len > 6 && strncasecmp(filename + name_len - 6, ".cover", 6) == 0);
-    bool is_fit = !is_cover && (name_len > 4 && strncasecmp(filename + name_len - 4, ".fit", 4) == 0);
+    bool is_fit =
+        !is_cover && (name_len > 4 && strncasecmp(filename + name_len - 4, ".fit", 4) == 0);
     if (is_cover) {
         name_len -= 6;
         // ".cover" files live one level down, in "crop/" - go back up to the

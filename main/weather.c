@@ -77,7 +77,8 @@ static esp_err_t resolve_lat_lon(char *out_lat, size_t out_lat_len, char *out_lo
     const char *geocoded_name = config_manager_get_weather_geocoded_name();
     const char *cached_lat = config_manager_get_weather_lat();
     const char *cached_lon = config_manager_get_weather_lon();
-    if (strcmp(location_name, geocoded_name) == 0 && cached_lat[0] != '\0' && cached_lon[0] != '\0') {
+    if (strcmp(location_name, geocoded_name) == 0 && cached_lat[0] != '\0' &&
+        cached_lon[0] != '\0') {
         strncpy(out_lat, cached_lat, out_lat_len - 1);
         out_lat[out_lat_len - 1] = '\0';
         strncpy(out_lon, cached_lon, out_lon_len - 1);
@@ -89,9 +90,10 @@ static esp_err_t resolve_lat_lon(char *out_lat, size_t out_lat_len, char *out_lo
     url_encode(location_name, encoded_name, sizeof(encoded_name));
 
     char url[300];
-    snprintf(url, sizeof(url),
-             "https://geocoding-api.open-meteo.com/v1/search?name=%s&count=1&language=%s&format=json",
-             encoded_name, config_manager_get_overlay_language());
+    snprintf(
+        url, sizeof(url),
+        "https://geocoding-api.open-meteo.com/v1/search?name=%s&count=1&language=%s&format=json",
+        encoded_name, config_manager_get_overlay_language());
 
     char *body = NULL;
     size_t body_len = 0;
@@ -201,29 +203,75 @@ static esp_err_t fetch_open_meteo(const char *lat, const char *lon, weather_fore
 static int wttrin_code_to_wmo(int code)
 {
     switch (code) {
-        case 113: return 0;    // Sunny/Clear
-        case 116: return 2;    // Partly cloudy
-        case 119: case 122: return 3;  // Cloudy/Overcast
-        case 143: case 248: case 260: return 45;  // Mist/Fog/Freezing fog
-        case 263: return 51;   // Patchy light drizzle
-        case 266: return 53;   // Light drizzle
-        case 281: return 53;   // Freezing drizzle
-        case 284: return 55;   // Heavy freezing drizzle
-        case 176: case 293: case 296: case 311: return 61;  // Light/patchy rain
-        case 299: case 302: return 63;  // Moderate rain
-        case 305: case 308: case 314: return 65;  // Heavy rain
-        case 317: case 323: case 326: return 71;  // Light snow/sleet
-        case 320: case 329: case 332: case 350: return 73;  // Moderate snow/sleet
-        case 335: case 338: return 75;  // Heavy snow
-        case 227: return 73;    // Blowing snow
-        case 230: return 75;    // Blizzard
-        case 353: case 362: case 368: case 374: return 80;  // Light showers
-        case 356: case 365: case 371: case 377: return 81;  // Showers
-        case 359: return 82;    // Torrential rain shower
-        case 200: case 386: case 392: return 95;  // Thundery outbreaks
-        case 389: return 96;    // Rain with thunder
-        case 395: return 99;    // Heavy snow with thunder
-        default: return -1;     // Unmapped - condition_text() falls back to "unknown"
+    case 113:
+        return 0;  // Sunny/Clear
+    case 116:
+        return 2;  // Partly cloudy
+    case 119:
+    case 122:
+        return 3;  // Cloudy/Overcast
+    case 143:
+    case 248:
+    case 260:
+        return 45;  // Mist/Fog/Freezing fog
+    case 263:
+        return 51;  // Patchy light drizzle
+    case 266:
+        return 53;  // Light drizzle
+    case 281:
+        return 53;  // Freezing drizzle
+    case 284:
+        return 55;  // Heavy freezing drizzle
+    case 176:
+    case 293:
+    case 296:
+    case 311:
+        return 61;  // Light/patchy rain
+    case 299:
+    case 302:
+        return 63;  // Moderate rain
+    case 305:
+    case 308:
+    case 314:
+        return 65;  // Heavy rain
+    case 317:
+    case 323:
+    case 326:
+        return 71;  // Light snow/sleet
+    case 320:
+    case 329:
+    case 332:
+    case 350:
+        return 73;  // Moderate snow/sleet
+    case 335:
+    case 338:
+        return 75;  // Heavy snow
+    case 227:
+        return 73;  // Blowing snow
+    case 230:
+        return 75;  // Blizzard
+    case 353:
+    case 362:
+    case 368:
+    case 374:
+        return 80;  // Light showers
+    case 356:
+    case 365:
+    case 371:
+    case 377:
+        return 81;  // Showers
+    case 359:
+        return 82;  // Torrential rain shower
+    case 200:
+    case 386:
+    case 392:
+        return 95;  // Thundery outbreaks
+    case 389:
+        return 96;  // Rain with thunder
+    case 395:
+        return 99;  // Heavy snow with thunder
+    default:
+        return -1;  // Unmapped - condition_text() falls back to "unknown"
     }
 }
 
@@ -378,9 +426,9 @@ static esp_err_t fetch_yrno(const char *lat, const char *lon, weather_forecast_t
     // MET Norway's usage terms require a real, identifying User-Agent -
     // requests without one are throttled/rejected. Includes this project's
     // repo URL as the required contact info.
-    esp_err_t err =
-        http_fetch_get(url, WEATHER_HTTP_TIMEOUT_MS, WEATHER_MAX_RESPONSE_BYTES_YRNO, &body,
-                      &body_len, NULL, "esp32-photoframe/1.0 github.com/t3ste/Tlg-esp32-photoframe");
+    esp_err_t err = http_fetch_get(url, WEATHER_HTTP_TIMEOUT_MS, WEATHER_MAX_RESPONSE_BYTES_YRNO,
+                                   &body, &body_len, NULL,
+                                   "esp32-photoframe/1.0 github.com/t3ste/Tlg-esp32-photoframe");
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "yr.no request failed: %s", esp_err_to_name(err));
         return err;
@@ -404,8 +452,8 @@ static esp_err_t fetch_yrno(const char *lat, const char *lon, weather_forecast_t
     char current_date[11] = {0};
     float day_min = 0, day_max = 0;
     bool have_temp = false;
-    const char *day_symbol = NULL;   // owned by an entry inside `root`, valid until cJSON_Delete
-    int best_hour_distance = 999;    // tracks closest-to-noon entry seen for `day_symbol`
+    const char *day_symbol = NULL;  // owned by an entry inside `root`, valid until cJSON_Delete
+    int best_hour_distance = 999;   // tracks closest-to-noon entry seen for `day_symbol`
 
     int n = cJSON_GetArraySize(timeseries);
     for (int i = 0; i < n && out->count < WEATHER_FORECAST_DAYS; i++) {
@@ -451,8 +499,10 @@ static esp_err_t fetch_yrno(const char *lat, const char *lon, weather_forecast_t
                 day_min = day_max = t;
                 have_temp = true;
             } else {
-                if (t < day_min) day_min = t;
-                if (t > day_max) day_max = t;
+                if (t < day_min)
+                    day_min = t;
+                if (t > day_max)
+                    day_max = t;
             }
         }
 
@@ -633,7 +683,8 @@ void weather_format_line(const weather_forecast_t *f, char *out, size_t out_len)
         char part[WEATHER_DAY_LINE_MAX_LEN + 4];
         int part_len = snprintf(part, sizeof(part), "%s%s", (i > 0) ? " | " : "", day_line);
         if (part_len < 0 || o + (size_t) part_len >= out_len) {
-            break;  // would overflow - stop here, draw_overlay_bar truncates/ellipsizes further anyway
+            break;  // would overflow - stop here, draw_overlay_bar truncates/ellipsizes further
+                    // anyway
         }
         memcpy(out + o, part, (size_t) part_len);
         o += (size_t) part_len;

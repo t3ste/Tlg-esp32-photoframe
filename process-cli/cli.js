@@ -18,7 +18,11 @@ import {
 } from "@aitjcize/epaper-image-convert";
 import { processImagePipeline, loadOrientedCanvas } from "./utils.js";
 import { createImageServer } from "./server.js";
-import { captureDatePathFor, extractCaptureDate, writeCaptureDateFile } from "./capture-date.js";
+import {
+  captureDatePathFor,
+  extractCaptureDate,
+  writeCaptureDateFile,
+} from "./capture-date.js";
 import {
   normalizeTargetGeometry,
   getBoardProfile,
@@ -762,7 +766,9 @@ async function renderVariant(
     console.log(`  Writing BMP: ${outputFile}`);
     writeBMP(imageData, outputFile);
   } else {
-    throw new Error(`Unsupported format: ${format}. Use 'epdgz', 'png', or 'bmp'`);
+    throw new Error(
+      `Unsupported format: ${format}. Use 'epdgz', 'png', or 'bmp'`,
+    );
   }
 
   if (processingOptions.generateThumbnail && outputThumb) {
@@ -770,7 +776,11 @@ async function renderVariant(
     // Generate thumbnail from this variant's own clean, unprocessed source -
     // e.g. the "fit" variant's thumbnail correctly shows the full letterboxed
     // photo, not the "cover" variant's crop.
-    const thumbCanvas = generateThumbnail(originalCanvas, THUMBNAIL_MAX_DIM, createCanvas);
+    const thumbCanvas = generateThumbnail(
+      originalCanvas,
+      THUMBNAIL_MAX_DIM,
+      createCanvas,
+    );
     const buffer = thumbCanvas.toBuffer("image/jpeg", { quality: 0.8 });
     fs.writeFileSync(outputThumb, buffer);
   }
@@ -821,7 +831,13 @@ function drawCropPreview(sourceCanvas, faces, cropRect) {
  * @returns {Promise<Array<{outputFile: string, outputThumb: string}>>} The
  *   rendered variant(s) - empty when --metadata-only skipped rendering.
  */
-async function processImageFile(inputPath, outputBasePath, ext, processingOptions, devicePalette = null) {
+async function processImageFile(
+  inputPath,
+  outputBasePath,
+  ext,
+  processingOptions,
+  devicePalette = null,
+) {
   console.log(`Processing: ${inputPath}`);
 
   // Unconditional (not gated behind --detect-faces or any other flag) -
@@ -839,8 +855,14 @@ async function processImageFile(inputPath, outputBasePath, ext, processingOption
 
   let recommendedCrop = null;
   if (processingOptions.faceCrop?.enabled) {
-    const { target, marginPercent, detector, engineName, metadataOnly, cropPreview } =
-      processingOptions.faceCrop;
+    const {
+      target,
+      marginPercent,
+      detector,
+      engineName,
+      metadataOnly,
+      cropPreview,
+    } = processingOptions.faceCrop;
 
     const orientedCanvas = await loadOrientedCanvas(inputPath, {
       autoOrient: processingOptions.autoOrient || false,
@@ -853,7 +875,13 @@ async function processImageFile(inputPath, outputBasePath, ext, processingOption
       .getImageData(0, 0, orientedCanvas.width, orientedCanvas.height);
 
     console.log(`  Detecting faces (${engineName})...`);
-    const analyzed = await analyzeFaceCrop({ detector, imageData, target, marginPercent, engineName });
+    const analyzed = await analyzeFaceCrop({
+      detector,
+      imageData,
+      target,
+      marginPercent,
+      engineName,
+    });
     console.log(`  Found ${analyzed.faces.length} face(s)`);
 
     const metadata = buildMetadata({
@@ -878,12 +906,22 @@ async function processImageFile(inputPath, outputBasePath, ext, processingOption
     }
 
     if (cropPreview) {
-      const coverPreview = drawCropPreview(orientedCanvas, analyzed.faces, analyzed.recommendedCrop);
+      const coverPreview = drawCropPreview(
+        orientedCanvas,
+        analyzed.faces,
+        analyzed.recommendedCrop,
+      );
       const fitPreview = drawCropPreview(orientedCanvas, analyzed.faces, null);
       const coverPreviewPath = `${outputBasePath}_test.cover.jpg`;
       const fitPreviewPath = `${outputBasePath}_test.fit.jpg`;
-      fs.writeFileSync(coverPreviewPath, coverPreview.toBuffer("image/jpeg", { quality: 0.9 }));
-      fs.writeFileSync(fitPreviewPath, fitPreview.toBuffer("image/jpeg", { quality: 0.9 }));
+      fs.writeFileSync(
+        coverPreviewPath,
+        coverPreview.toBuffer("image/jpeg", { quality: 0.9 }),
+      );
+      fs.writeFileSync(
+        fitPreviewPath,
+        fitPreview.toBuffer("image/jpeg", { quality: 0.9 }),
+      );
       console.log(`  Wrote crop preview: ${coverPreviewPath}`);
       console.log(`  Wrote crop preview: ${fitPreviewPath}`);
       console.log(`Done! (crop preview only)`);
@@ -898,7 +936,13 @@ async function processImageFile(inputPath, outputBasePath, ext, processingOption
   // untouched, zero behavior change.
   let variants;
   if (!processingOptions.faceCrop?.enabled) {
-    variants = [{ suffix: "", scaleMode: processingOptions.scaleMode || "cover", cropRect: null }];
+    variants = [
+      {
+        suffix: "",
+        scaleMode: processingOptions.scaleMode || "cover",
+        cropRect: null,
+      },
+    ];
   } else {
     const cropOutput = processingOptions.faceCrop.cropOutput;
     if (cropOutput === "uncropped") {
@@ -910,7 +954,9 @@ async function processImageFile(inputPath, outputBasePath, ext, processingOption
       ];
     } else {
       // "cropped" (default)
-      variants = [{ suffix: "", scaleMode: "cover", cropRect: recommendedCrop }];
+      variants = [
+        { suffix: "", scaleMode: "cover", cropRect: recommendedCrop },
+      ];
     }
   }
 
@@ -918,7 +964,14 @@ async function processImageFile(inputPath, outputBasePath, ext, processingOption
   for (const variant of variants) {
     const outputFile = `${outputBasePath}${variant.suffix}${ext}`;
     const outputThumb = `${outputBasePath}${variant.suffix}.jpg`;
-    await renderVariant(inputPath, outputFile, outputThumb, processingOptions, devicePalette, variant);
+    await renderVariant(
+      inputPath,
+      outputFile,
+      outputThumb,
+      processingOptions,
+      devicePalette,
+      variant,
+    );
     rendered.push({ outputFile, outputThumb });
   }
 
@@ -1155,7 +1208,8 @@ program
       }
 
       // Parse dimension if provided
-      const dimensionExplicit = program.getOptionValueSource("dimension") === "cli";
+      const dimensionExplicit =
+        program.getOptionValueSource("dimension") === "cli";
       if (options.dimension) {
         const match = options.dimension.match(/^(\d+)x(\d+)$/);
         if (match) {
@@ -1172,7 +1226,8 @@ program
       // --resolution is an alias of --dimension (also the face-crop target's
       // pixel size) - parsed the same way, applied after --dimension so it
       // wins if both happen to be given.
-      const resolutionExplicit = program.getOptionValueSource("resolution") === "cli";
+      const resolutionExplicit =
+        program.getOptionValueSource("resolution") === "cli";
       if (options.resolution) {
         const match = options.resolution.match(/^(\d+)x(\d+)$/);
         if (match) {
@@ -1190,8 +1245,10 @@ program
       // specific sizing flag was explicitly given (--resolution/--dimension/
       // --display-width/--display-height all take precedence).
       if (options.board && !dimensionExplicit && !resolutionExplicit) {
-        const displayWidthExplicit = program.getOptionValueSource("displayWidth") === "cli";
-        const displayHeightExplicit = program.getOptionValueSource("displayHeight") === "cli";
+        const displayWidthExplicit =
+          program.getOptionValueSource("displayWidth") === "cli";
+        const displayHeightExplicit =
+          program.getOptionValueSource("displayHeight") === "cli";
         if (!displayWidthExplicit && !displayHeightExplicit) {
           const profile = getBoardProfile(options.board);
           if (!profile) {
@@ -1389,7 +1446,8 @@ program
         console.error("Error: --metadata-only requires --detect-faces");
         process.exit(1);
       }
-      const cropOutputExplicit = program.getOptionValueSource("cropOutput") === "cli";
+      const cropOutputExplicit =
+        program.getOptionValueSource("cropOutput") === "cli";
       if (cropOutputExplicit && !options.detectFaces) {
         console.error("Error: --crop-output requires --detect-faces");
         process.exit(1);
@@ -1410,7 +1468,9 @@ program
         process.exit(1);
       }
       if (options.cropPreview && options.metadataOnly) {
-        console.error("Error: --crop-preview conflicts with --metadata-only (one skips rendering, the other requires it)");
+        console.error(
+          "Error: --crop-preview conflicts with --metadata-only (one skips rendering, the other requires it)",
+        );
         process.exit(1);
       }
       if (options.cropPreview && (options.upload || options.direct)) {
@@ -1420,12 +1480,15 @@ program
         process.exit(1);
       }
       if (options.cropPreview && cropOutputExplicit) {
-        console.warn("Warning: --crop-output is ignored because --crop-preview overrides it");
+        console.warn(
+          "Warning: --crop-output is ignored because --crop-preview overrides it",
+        );
       }
       if (options.detectFaces) {
         let target;
         try {
-          const orientationExplicit = program.getOptionValueSource("orientation") === "cli";
+          const orientationExplicit =
+            program.getOptionValueSource("orientation") === "cli";
           target = normalizeTargetGeometry({
             board: options.board,
             resolution: options.resolution,

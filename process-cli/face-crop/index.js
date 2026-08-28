@@ -5,7 +5,11 @@
  * planned firmware-side consumption flow.
  */
 
-import { registerFaceDetector, createFaceDetector, listFaceDetectors } from "./detector.js";
+import {
+  registerFaceDetector,
+  createFaceDetector,
+  listFaceDetectors,
+} from "./detector.js";
 import { createBlazefaceDetector } from "./blazeface-adapter.js";
 import {
   normalizeTargetGeometry,
