@@ -61,7 +61,7 @@ struct JDEC {
 };
 
 JRESULT jd_prepare(JDEC *jd, unsigned int (*infunc)(JDEC *, uint8_t *, unsigned int), void *pool,
-                    size_t sz_pool, void *dev);
+                   size_t sz_pool, void *dev);
 JRESULT jd_decomp(JDEC *jd, int (*outfunc)(JDEC *, void *, JRECT *), uint8_t scale);
 
 #ifdef __cplusplus

@@ -99,6 +99,7 @@ add_executable(
   stubs/fake_display_manager.c
   stubs/fake_config_manager.c
   stubs/fake_processing_settings.c
+  ../components/epaper_src/Fonts/font24.c
 )
 
 target_include_directories(

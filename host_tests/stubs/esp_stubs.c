@@ -51,7 +51,7 @@ esp_err_t esp_jpeg_decode(esp_jpeg_image_cfg_t *cfg, esp_jpeg_image_output_t *im
 }
 
 JRESULT jd_prepare(JDEC *jd, unsigned int (*infunc)(JDEC *, uint8_t *, unsigned int), void *pool,
-                    size_t sz_pool, void *dev)
+                   size_t sz_pool, void *dev)
 {
     (void) infunc;
     (void) pool;

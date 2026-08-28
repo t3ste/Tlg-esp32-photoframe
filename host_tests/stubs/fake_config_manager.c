@@ -7,3 +7,8 @@ display_orientation_t config_manager_get_display_orientation(void)
 {
     return test_display_orientation;
 }
+
+bool config_manager_get_caption_invert_colors_enabled(void)
+{
+    return false;
+}
