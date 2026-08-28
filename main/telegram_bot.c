@@ -922,9 +922,11 @@ static bool telegram_caption_invert_colors(void)
 // place for later rotation cycles.
 //
 // If `caption` is non-empty, it's overlaid as a caption bar on the displayed
-// image (only supported for the PNG/JPG path - EPDGZ/BMP are already
-// display-ready blobs with no RGB buffer to draw into). If `caption` is
-// empty and config_manager_get_show_exif_datetime_enabled() is on, falls
+// image - only supported for the PNG/JPG path, since image_processor_add_
+// caption_to_file() itself is PNG-only (a separate limitation from the
+// weather/headline/battery overlay below: EPDGZ genuinely can be decoded
+// back to RGB - decode_epdgz_buffer() - captions just aren't wired up to use
+// that yet; BMP has no decoder at all). If `caption` is
 // back to the photo's own EXIF capture date as the caption instead - only
 // possible when `path` is still the original JPEG as received (the common
 // case for a Telegram photo message), since PNG here has already been
@@ -933,7 +935,30 @@ static esp_err_t process_and_display_telegram_image(const char *path, const char
 {
     image_format_t format = image_processor_detect_format(path);
 
-    if (format == IMAGE_FORMAT_EPD_GZ || format == IMAGE_FORMAT_BMP) {
+    if (format == IMAGE_FORMAT_EPD_GZ) {
+        // Route through the same overlay pipeline as the processed-PNG branch
+        // below (and as Storage-mode's own rotation code already does for its
+        // EPDGZ album files) - unlike BMP, EPDGZ genuinely can be decoded back
+        // to RGB (decode_epdgz_buffer(), already used by overlay_manager_apply()
+        // itself), so weather/headline/battery overlays are fully supported
+        // here too, gated by the existing "Also overlay pre-rendered EPDGZ
+        // images" toggle. Previously this branch skipped overlay compositing
+        // unconditionally for every Telegram photo saved as EPDGZ (the
+        // recommended default format) regardless of that toggle - confirmed
+        // as the actual cause of weather overlay silently never appearing in
+        // Telegram mode. overlay_manager_apply() itself already no-ops
+        // cleanly back to `path` unchanged when no overlay applies, so this
+        // is behavior-preserving for anyone not using overlays.
+        const char *shown = overlay_manager_apply(path);
+        esp_err_t show_err = display_manager_show_image(shown);
+        if (show_err == ESP_OK && strcmp(shown, path) != 0) {
+            history_manager_mark_shown(path);
+        }
+        return show_err;
+    }
+    if (format == IMAGE_FORMAT_BMP) {
+        // No BMP decoder exists anywhere in the firmware - overlay
+        // compositing genuinely isn't possible for this format.
         return display_manager_show_image(path);
     }
 
