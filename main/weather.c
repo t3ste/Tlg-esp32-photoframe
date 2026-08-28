@@ -611,7 +611,7 @@ static void format_day_line(const weather_day_t *day, bool german, char *out, si
     const char *cond = condition_text(day->weather_code, german);
     int tmin = (int) lroundf(day->temp_min_c);
     int tmax = (int) lroundf(day->temp_max_c);
-    snprintf(out, out_len, "%s %s %d/%d", wd, cond, tmin, tmax);
+    snprintf(out, out_len, "%s %d/%d %s", wd, tmin, tmax, cond);
 }
 
 void weather_format_line(const weather_forecast_t *f, char *out, size_t out_len)

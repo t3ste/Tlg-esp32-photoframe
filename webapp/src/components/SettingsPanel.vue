@@ -232,10 +232,11 @@ async function resetDisplayHistory() {
 
 async function exportConfig() {
   try {
-    const [configRes, processingRes, paletteRes] = await Promise.all([
+    const [configRes, processingRes, paletteRes, albumsRes] = await Promise.all([
       fetch("/api/config"),
       fetch("/api/settings/processing"),
       fetch("/api/settings/palette"),
+      fetch("/api/albums"),
     ]);
 
     const exported = {};
@@ -248,6 +249,13 @@ async function exportConfig() {
     }
     if (processingRes.ok) exported.processing = await processingRes.json();
     if (paletteRes.ok) exported.palette = await paletteRes.json();
+    if (albumsRes.ok && albumsRes.headers.get("content-type")?.includes("application/json")) {
+      const albums = await albumsRes.json();
+      // Per-album enable/disable toggle - the rest (name, image_count) is
+      // content, not a setting, and wouldn't make sense to "import" onto a
+      // different device's storage anyway.
+      exported.albums = albums.map((a) => ({ name: a.name, enabled: a.enabled }));
+    }
 
     const blob = new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -397,6 +405,19 @@ async function performImport() {
         })
       );
     }
+    if (Array.isArray(importData.value.albums)) {
+      for (const album of importData.value.albums) {
+        if (album && typeof album.name === "string" && typeof album.enabled === "boolean") {
+          promises.push(
+            fetch(`/api/albums/enabled?name=${encodeURIComponent(album.name)}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ enabled: album.enabled }),
+            })
+          );
+        }
+      }
+    }
 
     await Promise.all(promises);
 
@@ -405,6 +426,7 @@ async function performImport() {
       settingsStore.loadDeviceSettings(),
       settingsStore.loadSettings(),
       settingsStore.loadPalette(),
+      appStore.loadAlbums(),
     ]);
 
     saveSuccess.value = true;
@@ -1796,6 +1818,7 @@ async function performFactoryReset() {
               <li v-if="importData.config">Device settings</li>
               <li v-if="importData.processing">Processing settings</li>
               <li v-if="importData.palette">Palette calibration</li>
+              <li v-if="importData.albums?.length">Album enabled/disabled state</li>
             </ul>
           </div>
         </v-card-text>
