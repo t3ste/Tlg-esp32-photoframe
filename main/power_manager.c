@@ -400,12 +400,18 @@ void power_manager_enter_sleep(void)
     // was never started.
     esp_wifi_stop();
 
+    // Flush buffered debug log lines and close the file before storage goes
+    // away (board_hal_prepare_for_sleep() below unmounts the SD card on this
+    // board). Must run first: the debug-log writer task otherwise races
+    // sdcard_deinit()'s FATFS teardown - either side can lose and assert in
+    // the VFS lock code (observed on-device: 10 crashes/9.6 days with debug
+    // logging enabled, backtraces in both the writer task and
+    // deep_sleep_wake, both bottoming out in the same FATFS lock assert).
+    // Capture resumes automatically on the next boot.
+    debug_log_flush();
+
     ESP_LOGI(TAG, "Configuring Board HAL for deep sleep");
     board_hal_prepare_for_sleep();
-
-    // Flush buffered debug log lines and close the file before storage goes
-    // away. Capture resumes automatically on the next boot.
-    debug_log_flush();
 
     // Unmount LittleFS and force flash power domain off to prevent
     // VDD_SPI from staying active during deep sleep (~1-2mA drain).

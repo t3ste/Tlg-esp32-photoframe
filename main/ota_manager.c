@@ -20,6 +20,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "ha_integration.h"
+#include "http_fetch.h"
 #include "nvs.h"
 #include "periodic_tasks.h"
 #include "power_manager.h"
@@ -97,104 +98,29 @@ static int version_compare(const char *v1, const char *v2)
     return v1_patch - v2_patch;
 }
 
-static esp_err_t http_event_handler(esp_http_client_event_t *evt)
-{
-    switch (evt->event_id) {
-    case HTTP_EVENT_ERROR:
-        ESP_LOGD(TAG, "HTTP_EVENT_ERROR");
-        break;
-    case HTTP_EVENT_ON_CONNECTED:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
-        break;
-    case HTTP_EVENT_HEADER_SENT:
-        ESP_LOGD(TAG, "HTTP_EVENT_HEADER_SENT");
-        break;
-    case HTTP_EVENT_ON_HEADER:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
-        break;
-    case HTTP_EVENT_ON_DATA:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
-        break;
-    case HTTP_EVENT_ON_FINISH:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");
-        break;
-    case HTTP_EVENT_DISCONNECTED:
-        ESP_LOGD(TAG, "HTTP_EVENT_DISCONNECTED");
-        break;
-    case HTTP_EVENT_REDIRECT:
-        ESP_LOGD(TAG, "HTTP_EVENT_REDIRECT");
-        break;
-    default:
-        break;
-    }
-    return ESP_OK;
-}
-
 static esp_err_t fetch_github_release_info(char *latest_version, size_t version_len,
                                            char *download_url, size_t url_len)
 {
     esp_err_t err = ESP_FAIL;
     char *response_buffer = NULL;
-    int response_len = 0;
 
-    esp_http_client_config_t config = {
-        .url = GITHUB_API_URL,
-        .event_handler = http_event_handler,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms = 10000,
-        .buffer_size = 4096,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        ESP_LOGE(TAG, "Failed to initialize HTTP client");
+    // GitHub's releases/latest API can respond with Transfer-Encoding: chunked
+    // rather than a fixed Content-Length - a fixed-length read (the previous
+    // implementation here) then sees Content-Length 0 and fails every time.
+    // http_fetch_get() accumulates the body via the HTTP client's own
+    // event-driven callback regardless of encoding (already proven against
+    // this exact class of API by weather.c/headlines.c) - reuse it instead of
+    // a second, more fragile fetch implementation. This project's own release
+    // (14 assets - 7 boards x merged+OTA binary) measured 34 KB of response
+    // JSON (GitHub's per-asset metadata, e.g. the uploader object, is
+    // verbose) - 64 KB leaves real headroom for more assets later.
+    size_t response_len = 0;
+    err = http_fetch_get(GITHUB_API_URL, 10000, 64 * 1024, &response_buffer, &response_len, NULL,
+                         "ESP32-PhotoFrame");
+    if (err != ESP_OK || !response_buffer) {
+        ESP_LOGE(TAG, "Failed to fetch release info: %s", esp_err_to_name(err));
         return ESP_FAIL;
     }
-
-    // Set User-Agent header (GitHub API requires it)
-    esp_http_client_set_header(client, "User-Agent", "ESP32-PhotoFrame");
-
-    err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
-        goto cleanup;
-    }
-
-    int content_length = esp_http_client_fetch_headers(client);
-    int status_code = esp_http_client_get_status_code(client);
-
-    if (status_code != 200) {
-        ESP_LOGE(TAG, "HTTP GET failed, status = %d", status_code);
-        err = ESP_FAIL;
-        goto cleanup;
-    }
-
-    if (content_length <= 0) {
-        ESP_LOGE(TAG, "Invalid content length: %d", content_length);
-        err = ESP_FAIL;
-        goto cleanup;
-    }
-
-    if (content_length >= INT_MAX) {
-        ESP_LOGE(TAG, "Content length overflow: %d", content_length);
-        err = ESP_FAIL;
-        goto cleanup;
-    }
-    response_buffer = heap_caps_malloc(content_length + 1, MALLOC_CAP_SPIRAM);
-    if (response_buffer == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for response");
-        err = ESP_ERR_NO_MEM;
-        goto cleanup;
-    }
-
-    response_len = esp_http_client_read_response(client, response_buffer, content_length);
-    if (response_len <= 0) {
-        ESP_LOGE(TAG, "Failed to read response");
-        err = ESP_FAIL;
-        goto cleanup;
-    }
-
-    response_buffer[response_len] = '\0';
 
     // Parse JSON response
     cJSON *json = cJSON_Parse(response_buffer);
@@ -264,12 +190,7 @@ static esp_err_t fetch_github_release_info(char *latest_version, size_t version_
     ESP_LOGI(TAG, "Download URL: %s", download_url);
 
 cleanup:
-    if (response_buffer) {
-        free(response_buffer);
-    }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-
+    free(response_buffer);
     return err;
 }
 
