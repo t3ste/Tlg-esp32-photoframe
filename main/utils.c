@@ -1454,6 +1454,53 @@ void utils_handle_wifi_connect_result(bool connected)
     display_error_overlay(caption);
 }
 
+// Per-wake-cycle state for utils_record_internet_attempt()/
+// utils_finalize_internet_health() - not persisted (RTC_DATA_ATTR isn't
+// needed): a fresh deep-sleep wake always starts with both false, and a
+// button wake that stays awake across multiple manual actions doesn't need
+// this tracked across them either.
+static bool s_internet_needed_this_wake = false;
+static bool s_internet_succeeded_this_wake = false;
+
+void utils_record_internet_attempt(bool succeeded)
+{
+    s_internet_needed_this_wake = true;
+    if (succeeded) {
+        s_internet_succeeded_this_wake = true;
+    }
+}
+
+void utils_finalize_internet_health(void)
+{
+    if (!s_internet_needed_this_wake) {
+        return;  // nothing enabled this cycle actually needed internet
+    }
+    bool succeeded = s_internet_succeeded_this_wake;
+    s_internet_needed_this_wake = false;
+    s_internet_succeeded_this_wake = false;
+
+    if (succeeded) {
+        if (config_manager_get_wifi_fail_count() != 0) {
+            config_manager_set_wifi_fail_count(0);
+        }
+        return;
+    }
+
+    int count = config_manager_get_wifi_fail_count() + 1;
+    config_manager_set_wifi_fail_count(count);
+    ESP_LOGW(TAG,
+             "Internet-dependent request(s) failed despite WiFi being connected (%d consecutive)",
+             count);
+
+    if (!config_manager_get_error_overlay_enabled() || count < WIFI_FAIL_OVERLAY_THRESHOLD) {
+        return;
+    }
+
+    char caption[96];
+    snprintf(caption, sizeof(caption), "Error: No internet access (%dx in a row)", count);
+    display_error_overlay(caption);
+}
+
 esp_err_t utils_test_error_overlay(void)
 {
     // Manual preview from the Web UI - always overlays the example message
@@ -1521,6 +1568,7 @@ esp_err_t trigger_image_rotation(void)
         // (with progressive-size fallback), queue any "/" commands.
         telegram_poll_result_t poll_result = TELEGRAM_POLL_ERROR;
         esp_err_t poll_err = telegram_bot_poll(&poll_result);
+        utils_record_internet_attempt(poll_err == ESP_OK);
 
         if (poll_result == TELEGRAM_POLL_RESET) {
             // Emergency "/telegram_reset": the queue was already cleared and
@@ -1595,7 +1643,9 @@ esp_err_t trigger_image_rotation(void)
         ESP_LOGI(TAG, "URL rotation mode - downloading from: %s", image_url);
 
         bool not_modified = false;
-        if (fetch_and_display_image_from_url(image_url, &not_modified) == ESP_OK) {
+        bool url_fetch_ok = (fetch_and_display_image_from_url(image_url, &not_modified) == ESP_OK);
+        utils_record_internet_attempt(url_fetch_ok);
+        if (url_fetch_ok) {
             if (not_modified) {
                 // Server confirmed cached image still current (HTTP 304).
                 // Keep the existing eInk image — do not refresh, do not fall

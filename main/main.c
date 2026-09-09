@@ -353,6 +353,7 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
         // is up but we couldn't ask HA, so don't rotate. (A total WiFi failure
         // never reaches here, so it rotates as normal.)
         esp_err_t notify_err = ha_notify_online(is_button_wake ? NULL : &should_rotate);
+        utils_record_internet_attempt(notify_err == ESP_OK);
         if (!is_button_wake && notify_err != ESP_OK) {
             ESP_LOGW(TAG, "Could not reach Home Assistant to check rotation; skipping");
             utils_set_last_fetch_error("Could not reach Home Assistant to check rotation");
@@ -382,7 +383,7 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
 
     // Notify HA that data has been updated (after both OTA check and rotation)
     if (wifi_connected && ha_configured) {
-        ha_notify_update();
+        utils_record_internet_attempt(ha_notify_update() == ESP_OK);
     }
 
     // Keep the HTTP server up briefly so a late config change — or a server-side
@@ -407,6 +408,14 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
         vTaskDelay(pdMS_TO_TICKS(hold_sec * 1000));
         ESP_LOGI(TAG, "HTTP server window closed");
     }
+
+    // Tally this cycle's internet-dependent attempts (weather/headlines/
+    // Telegram/HA/URL fetch, wherever any of those were actually enabled) -
+    // a no-op if none of them applied this cycle. Separate from
+    // utils_handle_wifi_connect_result() above: that one only catches WiFi
+    // itself failing to associate, not "WiFi connected fine but every
+    // internet-bound request failed anyway" (e.g. a transient DNS outage).
+    utils_finalize_internet_health();
 
     // Go back to sleep (offline notification sent inside power_manager_enter_sleep)
     ESP_LOGI(TAG, "Auto-rotate complete, going back to sleep");

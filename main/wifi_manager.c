@@ -177,6 +177,20 @@ esp_err_t wifi_manager_apply_ip_config(void)
     return ESP_OK;
 }
 
+// Sets one DNS server slot (MAIN/BACKUP/FALLBACK) to a plain dotted-quad
+// IPv4 address. Used both for the user's optional DNS override (MAIN) and
+// the always-on public-DNS safety net below (BACKUP/FALLBACK).
+static void set_dns_server_slot(esp_netif_dns_type_t slot, const char *ip_str)
+{
+    esp_netif_dns_info_t dns_info = {0};
+    if (esp_netif_str_to_ip4(ip_str, &dns_info.ip.u_addr.ip4) != ESP_OK) {
+        ESP_LOGE(TAG, "Invalid DNS server: %s", ip_str);
+        return;
+    }
+    dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+    esp_netif_set_dns_info(s_sta_netif, slot, &dns_info);
+}
+
 // Apply the DNS override (if configured). Called after GOT_IP so it takes
 // precedence over DHCP-provided servers in DHCP mode; in static mode it is the
 // only DNS source (defaults to the gateway when unset).
@@ -186,18 +200,21 @@ static void apply_dns_override(void)
     if ((dns == NULL || dns[0] == '\0') && config_manager_get_ip_mode() == IP_MODE_STATIC) {
         dns = config_manager_get_static_gateway();
     }
-    if (dns == NULL || dns[0] == '\0') {
-        return;
+    if (dns != NULL && dns[0] != '\0') {
+        set_dns_server_slot(ESP_NETIF_DNS_MAIN, dns);
+        ESP_LOGI(TAG, "DNS server set to: %s", dns);
     }
 
-    esp_netif_dns_info_t dns_info = {0};
-    if (esp_netif_str_to_ip4(dns, &dns_info.ip.u_addr.ip4) != ESP_OK) {
-        ESP_LOGE(TAG, "Invalid DNS server: %s", dns);
-        return;
-    }
-    dns_info.ip.type = ESP_IPADDR_TYPE_V4;
-    esp_netif_set_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN, &dns_info);
-    ESP_LOGI(TAG, "DNS server set to: %s", dns);
+    // lwIP already cycles through DNS_MAIN -> DNS_BACKUP -> DNS_FALLBACK on a
+    // query timeout (dns.c), but this project never populated the latter two,
+    // so a single flaky DNS server (typically the router's own, via DHCP) had
+    // no automatic recovery - observed in the field as a transient failure to
+    // resolve *any* hostname (Telegram and the weather API alike) for one
+    // whole wake cycle. Always seed BACKUP/FALLBACK with well-known public
+    // resolvers regardless of DHCP/override, at no cost when the primary
+    // server is healthy (they're only ever queried after it times out).
+    set_dns_server_slot(ESP_NETIF_DNS_BACKUP, "1.1.1.1");    // Cloudflare
+    set_dns_server_slot(ESP_NETIF_DNS_FALLBACK, "8.8.8.8");  // Google
 }
 
 esp_err_t wifi_manager_connect(const char *ssid, const char *password, int timeout_ms)

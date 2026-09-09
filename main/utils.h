@@ -49,6 +49,27 @@ esp_err_t fetch_and_display_image_from_url(const char *url, bool *not_modified);
 // enabled) so a problem is visible on the frame itself, not just in logs.
 void utils_handle_wifi_connect_result(bool connected);
 
+// Records the outcome of one internet-dependent attempt this wake cycle
+// (weather fetch, headlines fetch, Telegram poll, HA notify, URL-mode image
+// fetch - anywhere WiFi being merely connected isn't enough to guarantee the
+// request itself succeeds, e.g. a transient DNS outage). Call once per
+// attempt; a cycle where nothing internet-dependent was even enabled never
+// calls this at all, which utils_finalize_internet_health() below treats as
+// "nothing to report" rather than a failure.
+void utils_record_internet_attempt(bool succeeded);
+
+// Call once near the end of the deep-sleep wake path, after every
+// internet-dependent feature enabled this cycle has had its chance to run.
+// Shares WIFI_FAIL_OVERLAY_THRESHOLD/the error-overlay setting/the same
+// consecutive-failure counter with utils_handle_wifi_connect_result() above
+// - "WiFi never connected" and "WiFi connected but nothing internet-bound
+// got through" are both just flavors of "no usable internet this wake",
+// and showing two separate overlays for them would be confusing. A no-op if
+// utils_record_internet_attempt() was never called this cycle (nothing
+// needed internet) or if WiFi itself already failed (that case is fully
+// handled by utils_handle_wifi_connect_result() already).
+void utils_finalize_internet_health(void);
+
 // Manual preview: overlays an example error message on the currently
 // displayed image (or a blank canvas if nothing suitable is currently
 // displayed), regardless of the error-overlay setting.

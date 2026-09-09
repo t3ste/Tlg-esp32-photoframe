@@ -11,6 +11,7 @@
 #include "exif_reader.h"
 #include "headlines.h"
 #include "image_processor.h"
+#include "utils.h"
 #include "weather.h"
 
 static const char *TAG = "overlay_manager";
@@ -142,7 +143,9 @@ const char *overlay_manager_apply(const char *source_path)
 
     if (weather_on) {
         weather_forecast_t forecast;
-        if (weather_fetch_forecast(&forecast) == ESP_OK) {
+        bool weather_ok = (weather_fetch_forecast(&forecast) == ESP_OK);
+        utils_record_internet_attempt(weather_ok);
+        if (weather_ok) {
             // Multi-line (one line per day) only when headlines won't also
             // be claiming lines - together they could otherwise grow to an
             // unreasonably tall overlay (see NVS_WEATHER_MULTILINE_KEY).
@@ -171,7 +174,9 @@ const char *overlay_manager_apply(const char *source_path)
             ESP_LOGW(TAG, "Headlines overlay enabled but no RSS feed URL configured");
         } else {
             int count = config_manager_get_headlines_count();
-            if (headlines_fetch(rss_url, count, &headlines) == ESP_OK) {
+            bool headlines_ok = (headlines_fetch(rss_url, count, &headlines) == ESP_OK);
+            utils_record_internet_attempt(headlines_ok);
+            if (headlines_ok) {
                 // A single fetched headline can optionally be word-wrapped
                 // across multiple display lines instead of hard-truncated to
                 // one - only meaningful/offered when exactly one headline
