@@ -1,94 +1,62 @@
-# ESP32 PhotoFrame
+# ESP32 PhotoFrame - with optional native Telegram integration
 
 A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently supporting **Waveshare PhotoPainter**, **Seeed Studio XIAO EE02/EE03/EE04**, and **Seeed Studio reTerminal E1002/E1003/E1004**). This firmware replaces stock firmware with a powerful RESTful API, web interface, and **significantly better image quality**.
 
 > **This is an independently maintained fork** of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe) (based on its `v2.18.0` release), maintained here as its own repository going forward rather than as a pull request back upstream. See [Changes from Upstream](#changes-from-upstream) below for the full list of what's different, and [Roadmap](#roadmap) for what's planned next. All companion-project links below (server, app, Home Assistant integration) point at the original upstream project's ecosystem, not this fork.
 
-![PhotoFrame](.img/esp32-photoframe.png)
+![PhotoFrame](.img/photo1.jpg)
 
 ## Key Features
 
+### Upstream & Fork
+
 - 🎨 **Superior Image Quality**: Measured color palette with automatic calibration produces significantly better results than stock firmware
-- 🖼️ **Crop or Letterbox**: Choose whether mismatched-aspect-ratio images are cropped to fill the screen or shown in full with letterbox bars ([docs](docs/SCALE_MODE.md))
-- 🙂 **Face-Aware Crop Metadata**: Optional offline face detection in `process-cli` recommends a crop that keeps faces fully visible instead of a plain center-crop, saved as a per-image JSON sidecar; the firmware can optionally pick between pre-rendered Cover/Fit variants per its own Scale Mode setting, avoiding on-device rendering entirely ([docs](docs/FACE_CROP.md))
 - 🔋 **Smart Power Management**: Deep sleep mode for weeks of battery life, or always-on for Home Assistant
 - 📁 **Flexible Image Sources**: SD card rotation, URL-based fetching (weather, news, random images from image server)
-- 🤖 **Telegram Bot**: Send photos straight to the frame via a Telegram bot, no extra server required ([docs](docs/TELEGRAM.md))
-- ☀️ **Weather + Headline Overlays**: Optional on-device weather line and news headlines drawn on the display, no companion server required ([docs](docs/OVERLAYS.md))
 - 🌐 **Modern Web Interface**: Drag-and-drop uploads, gallery view, real-time battery status
 - 📱 **Mobile App**: [Companion app](https://github.com/aitjcize/esp32-photoframe-app) for WiFi provisioning, image processing, and AI generation
 - 🖼️ **Image Server**: [Companion server](https://github.com/aitjcize/esp32-photoframe-server) with many photo sources — Google Photos, Immich, Synology Photos, Unsplash, Pexels, Telegram bot, URL proxy, and AI generation — plus date/time and weather overlays
 - 🏠 **Home Assistant Ready**: [Companion integration](https://github.com/aitjcize/ha-esp32-photoframe) available
 - 🔌 **RESTful API**: Full programmatic control ([API docs](docs/API.md))
 
-## Changes from Upstream
+### Fork only
 
-This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe)'s `main` by 40+ commits. Everything below is new in this fork, not present upstream:
+- 🖼️ **Crop or Letterbox**: Choose whether mismatched-aspect-ratio images are cropped to fill the screen or shown in full with letterbox bars ([docs](docs/SCALE_MODE.md))
+- 🙂 **Face-Aware Crop Metadata**: Optional offline face detection in `process-cli` recommends a crop that keeps faces fully visible instead of a plain center-crop, saved as a per-image JSON sidecar; the firmware can optionally pick between pre-rendered Cover/Fit variants per its own Scale Mode setting, avoiding on-device rendering entirely ([docs](docs/FACE_CROP.md))
+- 🤖 **Telegram Bot**: Send photos straight to the frame via a Telegram bot, no extra server required, plus an extensive set of chat commands for remote control and status monitoring ([docs](docs/TELEGRAM.md))
+- 🧩 **Orientation Pairing**: Two portrait photos are automatically combined side by side into one image instead of letterboxing either one — works for both Telegram receives and normal auto-rotation
+- ☀️ **Weather + Headline Overlays**: Optional on-device weather line and news headlines drawn on the display, no companion server required ([docs](docs/OVERLAYS.md))
+- 🪫 **Low-Battery Warnings**: On-display corner badge and a Telegram alert below a configurable threshold, plus a Battery History tab with a days-remaining-until-20% estimate
+- ⚠️ **On-Display Error Banner**: Shows a short error message right on the frame after repeated WiFi/internet failures, not just in the logs
+- 🔁 **No-Repeat Display History**: Random rotation remembers what's already been shown so every image appears once before any repeats
 
-**Telegram Bot integration** ([docs](docs/TELEGRAM.md)):
-- feat: native Telegram Bot rotation mode — send photos straight to the frame, alongside (not replacing) SD-card/URL rotation, with progressive-JPEG fallback through Telegram's alternate photo resolutions
-- feat: Telegram image caption drawn as a text overlay on the photo
-- feat: extensive Telegram command set for remote control/configuration (`/status`, `/clear`, `/restart`, `/pairing`, `/rotate_cron`, `/deep_sleep`, `/auto_rotate`, `/wake_notify`, `/error_overlay`, `/wifi_perf`, `/help`, `/list_albums`, `/active_albums`, `/enable_album`, `/clear_history`, `/rotation_notify`, `/rotation_pairing`, `/keep_originals`, `/exif_date`), plus an emergency `/telegram_reset` that clears the queue and sleeps immediately, bypassing normal processing
-- feat: `/start` treated as an alias for `/help` (Telegram clients send it automatically on first open)
-- feat: orientation pairing — combine two complementary portrait/landscape photos into one composed image instead of letterboxing either one (Telegram-only at first, later extended to normal auto-rotation too)
-- feat: album fallback rotation for Telegram mode — falls back to normal rotation instead of leaving the previous image up indefinitely when a poll doesn't yield a new image, with an optional Telegram notification (photo re-upload) so the chat still reflects what's on the frame; itself toggleable, so the frame can instead be pinned to show only actual Telegram photos and never change on a wake with nothing new — with a second, related toggle deciding separately whether a Telegram connection failure (vs. a poll that simply found nothing new) still counts as an exception that falls back
-- feat: Telegram "keep originals" toggle — archives each received photo's raw bytes (always the largest available size) to `Telegram/Originals`
-- feat: streaming JPEG decoder for large Telegram document uploads that don't fit in one contiguous PSRAM buffer
-- feat: experimental EXIF capture-date fallback caption when a received photo has no caption of its own
-- feat: low-battery Telegram warning (below 20%, debounced per discharge cycle)
-- feat: reports the actually-used weather source in `/status` (the configured provider and the one that last actually succeeded can differ)
-- feat: opt-in duplicate detection via Telegram's own content-based `file_unique_id` — a re-sent/forwarded photo or file is skipped before downloading anything, no local hashing needed
-- feat: EPDGZ output for composed orientation pairs, following the same on-device image format setting used for a single photo
-- fix: Telegram thumbnail generation could silently overwrite/corrupt the just-downloaded original photo before it was ever converted or archived
-- fix: don't reject large Telegram JPEGs before download now that the streaming decoder can actually handle them
-- fix: a document upload's "saved" confirmation tried to echo back its thumbnail file as a photo, which Telegram categorically rejects — falls back to a text-only confirmation now
-- feat: opt-in Telegram power-save mode — minimizes wake duration/WiFi-on time on an automatic timer wake (fewer WiFi/Telegram retries, no post-rotation config-sync window, no per-photo "saved" reply, no wake status ping, no fallback-rotation photo notification — the latter two settings are grayed out, not cleared, and resume if this is turned back off), never affecting a manual button wake so the web UI always stays reachable; a nested "latest only" sub-option processes just the newest update in a batch and permanently discards the rest (other photos, captions, and "/" commands); orientation pairing and the low-battery warning are deliberately left untouched since neither costs any extra network time
-- fix: `wifi_manager_connect()` could hang indefinitely if WiFi association succeeded but DHCP then stalled (no bounded wait existed); it and its callers now always return within a definite timeout — also fixes a pre-existing bug where a *known* total connection failure still wasted up to a full 60s busy-polling a result that could never change
-- fix: the Web UI's "auto-rotate orientation pairing" toggle (`/rotation_pairing`, album picks during rotation) was only shown while `rotation_mode` was set to Storage, even though it — and the rest of its settings card — apply regardless: Telegram- and URL-mode's own fallback-to-storage path calls the exact same rotation code as Storage mode's primary rotation. Now shown whenever Auto-Rotate is on, any mode; also clarified its wording (and the separate, similarly-named `/pairing` for incoming Telegram photos) in the Web UI, bot replies, and docs, since the two were easy to confuse
+## Screenshots
 
-**Face-Aware Crop** ([docs](docs/FACE_CROP.md)):
-- feat: offline face detection in `process-cli` (BlazeFace, fully offline-capable) recommends a crop that keeps faces fully visible, saved as a versioned `<name>.facecrop.json` sidecar (39 unit tests, pure-logic coverage)
-- feat: `--crop-output cropped|uncropped|both` — render the face-aware Cover crop, the uncropped Fit letterbox, or both side by side, so an album can be pre-rendered for either firmware Scale Mode setting without re-processing
-- feat: `--crop-preview` — writes the full, unmodified source image with detected face boxes (blue) and the recommended crop rectangle (red) overlaid, for sanity-checking face detection/the crop heuristic before a real batch render
-- fix: switched process-cli's canvas library from `canvas` to `@napi-rs/canvas` (severe Windows-only native memory leak that crashed large `--detect-faces --crop-output both` batches), which surfaced a latent Canvas-vs-ImageData detection bug in the shared rendering pipeline — both fixed
-- fix: the face-crop heuristic's internal "does this face still fit" check rounded to whole pixels too early, which could reject a face that genuinely fit and needlessly shrink the recommended crop (observed cutting a 3-person photo down to 2) — now stays sub-pixel-precise internally and rounds only at the final output
-- fix: the recommended crop grew only as much as the minimum needed to reach the target aspect ratio around the accepted faces, discarding image content on the sides/top/bottom even when nothing required it — now grows to the *largest* aspect-ratio box that still fits the image and contains the faces (e.g. a wide photo now only loses height, not width+height, to reach 5:3)
-- fix: the face-crop heuristic applied each face's safety margin (`--face-margin`) *before* checking whether it still fit, so the margin buffer itself — not the actual faces — could push the union just over the available space and wrongly drop an otherwise-fitting face (observed excluding a 3rd person whose bare face box fit easily); margin is now applied once, after face selection, to the final accepted set
-- feat: `--face-detect-tiles <n>` — additionally runs face detection on an NxN grid of overlapping tiles, to catch small/distant faces that whole-image detection misses (BlazeFace's frozen 128x128 input shrinks the whole photo regardless of resolution, so small faces can vanish before `--face-min-score` ever gets a candidate to threshold); confirmed recovering 2 faces (one sunglasses-occluded, one just small/distant) that whole-image detection missed on a real 5-person photo
-- feat: firmware-side, opt-in on-demand Cover/Fit rendering — the device recognizes pre-rendered `<name>.cover.<ext>` / `<name>.fit.<ext>` variants and picks whichever matches its own Scale Mode setting, falling back to a one-time on-device render (cached afterwards) only for a genuinely still-undecoded source, verified by content, not filename
-- feat: Web UI "Organize Crop Folders" maintenance action, and Cover/Fit variant pairs are deduplicated to one entry in the gallery listing and rotation loops
+<table>
+<tr>
+<td align="center"><b>Gallery & Albums</b></td>
+<td align="center"><b>Battery History</b></td>
+</tr>
+<tr>
+<td><img src=".img/webui_gallery.png" width="420"/></td>
+<td><img src=".img/webui_battery_history.png" width="420"/></td>
+</tr>
+</table>
 
-**Image formats & processing**:
-- feat: new on-device EPDGZ encoder — Telegram-ingested photos can now be converted straight to EPDGZ (palette-indexed, gzip-compressed) instead of always PNG, matching what Web UI uploads already produced client-side; configurable per ingestion path (Telegram: device-side setting; Web UI: browser-side setting), with automatic fallback to PNG if EPDGZ can't get the memory it needs
-- feat: streaming JPEG decode fallback (`tjpgd`'s low-level API driven directly) for oversized documents that don't fit the all-in-one-buffer decode path
-- feat: `process-cli --split-by-orientation` — routes each album's output into `landscape`/`portrait`/`square` subfolders based on each photo's own orientation, instead of one flat folder; a photo that can't be decoded at all is copied unmodified into an `unknown/` subfolder rather than just being skipped with a console error. Off by default, folder mode only
+**Weather, headline, and error overlays** are drawn directly on the device — no companion server needed:
 
-**Weather & headline overlays** ([docs](docs/OVERLAYS.md)):
-- feat: native 3-day forecast weather overlay + RSS/Atom news headline overlay drawn on the display — no companion server or API keys needed
-- feat: selectable weather data source (Open-Meteo, wttr.in, or yr.no/MET Norway)
-- feat: overlay colors (black bar/white text, or inverted) and English/German condition wording, shared with Telegram caption styling
-- feat: opt-in overlay support for already-rendered EPDGZ Storage/Auto-Rotate album images (previously PNG-only) — decodes, draws, and re-encodes the one file being shown, off by default since it's an extra step per display
-- fix: the Web UI's "Display Image" gallery action never applied weather/headline overlays at all (any format, any settings) — it bypassed overlay compositing entirely, unlike the Auto-Rotate loops
-- feat: opt-in low-battery corner badge — a small (~17% of panel width, not a full-width bar) "BATT NN%" indicator drawn on every display update once the battery drops below a configurable threshold (default 16%, clears 4 points above it, state remembered across deep sleep), independent of Telegram/Web UI reachability; red on color-capable panels, black on grayscale-only ones
-- fix: clarified that "Also overlay pre-rendered EPDGZ images" (Settings → Weather + Headline Overlays) gates the weather/headline/battery overlays for Telegram-received photos too, not just Storage-mode albums — easy to miss since EPDGZ is the recommended default output format for both
-- fix: a genuinely new Telegram photo saved as EPDGZ (the recommended default format) never got weather/headline/battery overlays at all, *even with the toggle above enabled* — its display path took a shortcut straight to the panel that bypassed overlay compositing entirely, unconditionally, regardless of any setting; only the Telegram-mode fallback-to-album-rotation path (a different code path) applied overlays correctly. Now routed through the same overlay pipeline Storage-mode's own EPDGZ album images already use
-- fix: "Show capture date as caption when a photo has none" was effectively dead code for Telegram photos in normal operation — it checked EXIF at *display* time, by which point the photo had already been converted to PNG/EPDGZ (neither carries EXIF); now read from the original JPEG immediately after download, before conversion
-- feat: the same capture-date caption now also applies to Storage/Auto-Rotate album images (including Telegram-mode's own fallback picture) — `process-cli` writes a new `<name>.capture.json` sidecar whenever a source photo has an EXIF capture date (the original is otherwise never kept on-device for this ingestion path, so this is the only point it can be captured at all), which the firmware reads back and draws as a caption, gated on the same setting. Not yet supported for Web UI album uploads (converted entirely client-side, no EXIF extraction there)
+![Overlay options: none, weather, headlines, weather+headlines combined, error banner](.img/overlay_showcase.png)
 
-**Web UI**:
-- feat: display history with a reset button (Settings → Auto Rotate) — random rotation cycles through every image once before repeating, persisted across reboots
-- feat: toggleable thumbnail loading in the gallery (was unconditionally slowing down the HTTP server)
-- feat: battery history tab (hand-rolled SVG chart) with an estimated days-remaining-until-20% figure, plus a reset button
-- feat: real top-level tabs (Gallery / Settings / Battery History / Updates) instead of one long stacked page
-- feat: on-display error banner, testable on demand via a Web UI button
-- feat: WiFi TX-power cap for Waveshare PhotoPainter battery-brownout mitigation, now user-toggleable (default on)
-
-**Stability fixes**:
-- fix: resolve battery-wake stability issues on Waveshare PhotoPainter — a dynamic-frequency-scaling/WiFi-interrupt race and a main-task stack overflow, both confirmed via on-device coredump
-- fix: WiFi TX-power cap was gated on USB being disconnected, backwards from the actual Waveshare PMIC brownout condition (USB **and** battery connected together) — now gated on battery presence instead
-- fix: several task stack-overflow crashes in the Telegram/rotation pipeline (button task, deep-sleep wake, HTTP `/api/rotate`), each confirmed via live coredump and moved off the shared main-task stack where possible
-- fix: `album_manager_delete_album()` failed to delete an album containing a subdirectory
-- fix: `build.py` couldn't find `idf.py` on a standard Windows ESP-IDF PowerShell install
+<table>
+<tr>
+<td align="center"><b>Settings → Auto Rotate</b></td>
+<td align="center"><b>Settings → Power</b></td>
+</tr>
+<tr>
+<td><img src=".img/settings_auto_rotate_full.png" width="280"/></td>
+<td><img src=".img/settings_power_full.png" width="280"/></td>
+</tr>
+</table>
 
 ## Ecosystem
 
@@ -161,6 +129,16 @@ The measured palette accounts for the fact that e-paper displays show darker, mo
 
 Configure via web interface **Settings** section.
 
+### Real-World Battery Life
+
+Upstream issue [#121](https://github.com/aitjcize/esp32-photoframe/issues/121) reports battery drain far short of "months" (10-15%/day) on several boards. This traced to two deep-sleep-wake crashes that only reproduce on battery power — a dynamic-frequency-scaling/WiFi-interrupt race, and a main-task stack overflow (see [Stability fixes](#changes-from-upstream) below), both confirmed via on-device coredump. A crash mid-sleep-entry forces a reboot instead of a real deep sleep, which is a plausible full explanation for the reported drain.
+
+A ~9.9-day untethered soak test on a `waveshare_photopainter_73` running this fork's fixes measured **~1.17%/day** — roughly 10x better than the reported rate — with a Telegram bot, weather overlay, and WiFi power-save mode all active throughout:
+
+![Real-world battery drain over 9.9 days, ~1.17%/day measured](.img/battery_drain_real_world.png)
+
+So far, the fix is confirmed and shipped on `main` only for `waveshare_photopainter_73`, the one board available for direct testing here. `reterminal_e1002` shares the same SD-card/e-paper SPI-bus wiring implicated in part of the crash and is a strong candidate for the same fix; `xiao_ee02`/`xiao_ee04` would be by analogy only. Neither has shipped yet — tracked against issue #121, pending a build for owners of that hardware to confirm before merging.
+
 ## AI Image Generation 🤖
 
 The web interface supports client-side AI image generation using OpenAI (GPT Image, DALL-E) or Google Gemini.
@@ -221,11 +199,11 @@ Boards with larger flash chips (XIAO EE02/EE03/EE04, reTerminal E1002/E1004) use
 
 ### Web Flasher (Easiest) ⚡
 
-**[🌐 Flash from Browser](https://aitjcize.github.io/esp32-photoframe/#flash)** - Chrome/Edge/Opera required
+**[🌐 Flash from Browser](https://t3ste.github.io/Tlg-esp32-photoframe/#flash)** - Chrome/Edge/Opera required
 
 ### Manual Flash
 
-Download from [Releases](https://github.com/aitjcize/esp32-photoframe/releases):
+Download from [Releases](https://github.com/t3ste/Tlg-esp32-photoframe/releases):
 
 ```bash
 esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 photoframe-firmware-<board>-merged.bin
@@ -348,22 +326,94 @@ See [process-cli/README.md](process-cli/README.md) for details.
 
 **Building your own image server?** The firmware's URL rotation fetch protocol — request method, custom `X-*` headers, `Authorization` / custom-header handling, and the `ETag` / `304 Not Modified` caching flow — is documented in [docs/API.md → URL Rotation Fetch](docs/API.md#url-rotation-fetch).
 
+## Changes from Upstream
+
+This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe)'s `main` by 80+ commits. Everything below is new in this fork, not present upstream:
+
+**Telegram Bot integration** ([docs](docs/TELEGRAM.md)):
+- feat: native Telegram Bot rotation mode — send photos straight to the frame, alongside (not replacing) SD-card/URL rotation, with progressive-JPEG fallback through Telegram's alternate photo resolutions
+- feat: Telegram image caption drawn as a text overlay on the photo
+- feat: extensive Telegram command set for remote control/configuration (`/status`, `/clear`, `/restart`, `/pairing`, `/rotate_cron`, `/deep_sleep`, `/auto_rotate`, `/wake_notify`, `/error_overlay`, `/wifi_perf`, `/help`, `/list_albums`, `/active_albums`, `/enable_album`, `/clear_history`, `/rotation_notify`, `/rotation_pairing`, `/keep_originals`, `/exif_date`), plus an emergency `/telegram_reset` that clears the queue and sleeps immediately, bypassing normal processing
+- feat: `/start` treated as an alias for `/help` (Telegram clients send it automatically on first open)
+- feat: orientation pairing — combine two complementary portrait/landscape photos into one composed image instead of letterboxing either one (Telegram-only at first, later extended to normal auto-rotation too)
+- feat: album fallback rotation for Telegram mode — falls back to normal rotation instead of leaving the previous image up indefinitely when a poll doesn't yield a new image, with an optional Telegram notification (photo re-upload) so the chat still reflects what's on the frame; itself toggleable, so the frame can instead be pinned to show only actual Telegram photos and never change on a wake with nothing new — with a second, related toggle deciding separately whether a Telegram connection failure (vs. a poll that simply found nothing new) still counts as an exception that falls back
+- feat: Telegram "keep originals" toggle — archives each received photo's raw bytes (always the largest available size) to `Telegram/Originals`
+- feat: streaming JPEG decoder for large Telegram document uploads that don't fit in one contiguous PSRAM buffer
+- feat: experimental EXIF capture-date fallback caption when a received photo has no caption of its own
+- feat: low-battery Telegram warning (below 20%, debounced per discharge cycle)
+- feat: reports the actually-used weather source in `/status` (the configured provider and the one that last actually succeeded can differ)
+- feat: opt-in duplicate detection via Telegram's own content-based `file_unique_id` — a re-sent/forwarded photo or file is skipped before downloading anything, no local hashing needed
+- feat: EPDGZ output for composed orientation pairs, following the same on-device image format setting used for a single photo
+- fix: Telegram thumbnail generation could silently overwrite/corrupt the just-downloaded original photo before it was ever converted or archived
+- fix: don't reject large Telegram JPEGs before download now that the streaming decoder can actually handle them
+- fix: a document upload's "saved" confirmation tried to echo back its thumbnail file as a photo, which Telegram categorically rejects — falls back to a text-only confirmation now
+- feat: opt-in Telegram power-save mode — minimizes wake duration/WiFi-on time on an automatic timer wake (fewer WiFi/Telegram retries, no post-rotation config-sync window, no per-photo "saved" reply, no wake status ping, no fallback-rotation photo notification — the latter two settings are grayed out, not cleared, and resume if this is turned back off), never affecting a manual button wake so the web UI always stays reachable; a nested "latest only" sub-option processes just the newest update in a batch and permanently discards the rest (other photos, captions, and "/" commands); orientation pairing and the low-battery warning are deliberately left untouched since neither costs any extra network time
+- fix: `wifi_manager_connect()` could hang indefinitely if WiFi association succeeded but DHCP then stalled (no bounded wait existed); it and its callers now always return within a definite timeout — also fixes a pre-existing bug where a *known* total connection failure still wasted up to a full 60s busy-polling a result that could never change
+- fix: the Web UI's "auto-rotate orientation pairing" toggle (`/rotation_pairing`, album picks during rotation) was only shown while `rotation_mode` was set to Storage, even though it — and the rest of its settings card — apply regardless: Telegram- and URL-mode's own fallback-to-storage path calls the exact same rotation code as Storage mode's primary rotation. Now shown whenever Auto-Rotate is on, any mode; also clarified its wording (and the separate, similarly-named `/pairing` for incoming Telegram photos) in the Web UI, bot replies, and docs, since the two were easy to confuse
+
+**Face-Aware Crop** ([docs](docs/FACE_CROP.md)):
+- feat: offline face detection in `process-cli` (BlazeFace, fully offline-capable) recommends a crop that keeps faces fully visible, saved as a versioned `<name>.facecrop.json` sidecar (39 unit tests, pure-logic coverage)
+- feat: `--crop-output cropped|uncropped|both` — render the face-aware Cover crop, the uncropped Fit letterbox, or both side by side, so an album can be pre-rendered for either firmware Scale Mode setting without re-processing
+- feat: `--crop-preview` — writes the full, unmodified source image with detected face boxes (blue) and the recommended crop rectangle (red) overlaid, for sanity-checking face detection/the crop heuristic before a real batch render
+- fix: switched process-cli's canvas library from `canvas` to `@napi-rs/canvas` (severe Windows-only native memory leak that crashed large `--detect-faces --crop-output both` batches), which surfaced a latent Canvas-vs-ImageData detection bug in the shared rendering pipeline — both fixed
+- fix: the face-crop heuristic's internal "does this face still fit" check rounded to whole pixels too early, which could reject a face that genuinely fit and needlessly shrink the recommended crop (observed cutting a 3-person photo down to 2) — now stays sub-pixel-precise internally and rounds only at the final output
+- fix: the recommended crop grew only as much as the minimum needed to reach the target aspect ratio around the accepted faces, discarding image content on the sides/top/bottom even when nothing required it — now grows to the *largest* aspect-ratio box that still fits the image and contains the faces (e.g. a wide photo now only loses height, not width+height, to reach 5:3)
+- fix: the face-crop heuristic applied each face's safety margin (`--face-margin`) *before* checking whether it still fit, so the margin buffer itself — not the actual faces — could push the union just over the available space and wrongly drop an otherwise-fitting face (observed excluding a 3rd person whose bare face box fit easily); margin is now applied once, after face selection, to the final accepted set
+- feat: `--face-detect-tiles <n>` — additionally runs face detection on an NxN grid of overlapping tiles, to catch small/distant faces that whole-image detection misses (BlazeFace's frozen 128x128 input shrinks the whole photo regardless of resolution, so small faces can vanish before `--face-min-score` ever gets a candidate to threshold); confirmed recovering 2 faces (one sunglasses-occluded, one just small/distant) that whole-image detection missed on a real 5-person photo
+- feat: firmware-side, opt-in on-demand Cover/Fit rendering — the device recognizes pre-rendered `<name>.cover.<ext>` / `<name>.fit.<ext>` variants and picks whichever matches its own Scale Mode setting, falling back to a one-time on-device render (cached afterwards) only for a genuinely still-undecoded source, verified by content, not filename
+- feat: Web UI "Organize Crop Folders" maintenance action, and Cover/Fit variant pairs are deduplicated to one entry in the gallery listing and rotation loops
+
+**Image formats & processing**:
+- feat: new on-device EPDGZ encoder — Telegram-ingested photos can now be converted straight to EPDGZ (palette-indexed, gzip-compressed) instead of always PNG, matching what Web UI uploads already produced client-side; configurable per ingestion path (Telegram: device-side setting; Web UI: browser-side setting), with automatic fallback to PNG if EPDGZ can't get the memory it needs
+- feat: streaming JPEG decode fallback (`tjpgd`'s low-level API driven directly) for oversized documents that don't fit the all-in-one-buffer decode path
+- feat: `process-cli --split-by-orientation` — routes each album's output into `landscape`/`portrait`/`square` subfolders based on each photo's own orientation, instead of one flat folder; a photo that can't be decoded at all is copied unmodified into an `unknown/` subfolder rather than just being skipped with a console error. Off by default, folder mode only
+
+**Weather & headline overlays** ([docs](docs/OVERLAYS.md)):
+- feat: native 3-day forecast weather overlay + RSS/Atom news headline overlay drawn on the display — no companion server or API keys needed
+- feat: selectable weather data source (Open-Meteo, wttr.in, or yr.no/MET Norway)
+- feat: overlay colors (black bar/white text, or inverted) and English/German condition wording, shared with Telegram caption styling
+- feat: opt-in overlay support for already-rendered EPDGZ Storage/Auto-Rotate album images (previously PNG-only) — decodes, draws, and re-encodes the one file being shown, off by default since it's an extra step per display
+- fix: the Web UI's "Display Image" gallery action never applied weather/headline overlays at all (any format, any settings) — it bypassed overlay compositing entirely, unlike the Auto-Rotate loops
+- feat: opt-in low-battery corner badge — a small (~17% of panel width, not a full-width bar) "BATT NN%" indicator drawn on every display update once the battery drops below a configurable threshold (default 16%, clears 4 points above it, state remembered across deep sleep), independent of Telegram/Web UI reachability; red on color-capable panels, black on grayscale-only ones
+- fix: clarified that "Also overlay pre-rendered EPDGZ images" (Settings → Weather + Headline Overlays) gates the weather/headline/battery overlays for Telegram-received photos too, not just Storage-mode albums — easy to miss since EPDGZ is the recommended default output format for both
+- fix: a genuinely new Telegram photo saved as EPDGZ (the recommended default format) never got weather/headline/battery overlays at all, *even with the toggle above enabled* — its display path took a shortcut straight to the panel that bypassed overlay compositing entirely, unconditionally, regardless of any setting; only the Telegram-mode fallback-to-album-rotation path (a different code path) applied overlays correctly. Now routed through the same overlay pipeline Storage-mode's own EPDGZ album images already use
+- fix: "Show capture date as caption when a photo has none" was effectively dead code for Telegram photos in normal operation — it checked EXIF at *display* time, by which point the photo had already been converted to PNG/EPDGZ (neither carries EXIF); now read from the original JPEG immediately after download, before conversion
+- feat: the same capture-date caption now also applies to Storage/Auto-Rotate album images (including Telegram-mode's own fallback picture) — `process-cli` writes a new `<name>.capture.json` sidecar whenever a source photo has an EXIF capture date (the original is otherwise never kept on-device for this ingestion path, so this is the only point it can be captured at all), which the firmware reads back and draws as a caption, gated on the same setting. Not yet supported for Web UI album uploads (converted entirely client-side, no EXIF extraction there)
+
+**Web UI**:
+- feat: display history with a reset button (Settings → Auto Rotate) — random rotation cycles through every image once before repeating, persisted across reboots
+- feat: toggleable thumbnail loading in the gallery (was unconditionally slowing down the HTTP server)
+- feat: battery history tab (hand-rolled SVG chart) with an estimated days-remaining-until-20% figure, plus a reset button
+- feat: real top-level tabs (Gallery / Settings / Battery History / Updates) instead of one long stacked page
+- feat: on-display error banner, testable on demand via a Web UI button
+- feat: WiFi TX-power cap for Waveshare PhotoPainter battery-brownout mitigation, now user-toggleable (default on)
+
+**Stability fixes**:
+- fix: resolve battery-wake stability issues on Waveshare PhotoPainter — a dynamic-frequency-scaling/WiFi-interrupt race and a main-task stack overflow, both confirmed via on-device coredump
+- fix: WiFi TX-power cap was gated on USB being disconnected, backwards from the actual Waveshare PMIC brownout condition (USB **and** battery connected together) — now gated on battery presence instead
+- fix: several task stack-overflow crashes in the Telegram/rotation pipeline (button task, deep-sleep wake, HTTP `/api/rotate`), each confirmed via live coredump and moved off the shared main-task stack where possible
+- fix: `album_manager_delete_album()` failed to delete an album containing a subdirectory
+- fix: `build.py` couldn't find `idf.py` on a standard Windows ESP-IDF PowerShell install
+
+**Reliability & infrastructure**:
+- feat: DNS backup/fallback servers (Cloudflare `1.1.1.1`, Google `8.8.8.8`) now populate lwIP's built-in multi-server fallback slots, previously left empty — a single flaky or unreachable DNS server (typically the router's own, handed out via DHCP) could otherwise fail to resolve *any* hostname (weather, Telegram, headlines alike) for a whole wake cycle with no automatic recovery
+- feat: "no internet" error banner — tracks consecutive wake cycles where WiFi connected fine but every internet-dependent request (weather, headlines, Telegram, Home Assistant, URL-mode fetch) still failed anyway (e.g. a transient DNS outage); shares the same threshold/toggle/counter as the existing WiFi-connect-failure banner, since both are just flavors of "no usable internet this wake"
+- fix: debug-log flush ran *after* the SD card was unmounted during deep-sleep entry, racing the log writer task against the unmount and crashing on the next boot's flush attempt — reordered to flush first
+- fix: OTA update-check parsed GitHub's release API response assuming a fixed `Content-Length`, which fails against GitHub's actual chunked-transfer responses (`"Invalid content length: 0"`) — switched to the existing streaming HTTP client already used elsewhere
+- fix: OTA/update-check pointed at upstream's GitHub repo instead of this fork's — an automatic update would have silently replaced this fork's firmware with vanilla upstream
+- feat: own CI/release pipeline — 7-board build matrix, automatic draft releases with per-board flashable binaries, GitHub Pages web flasher kept in sync with the latest published release
+- feat: `v218.x.y` versioning — the major version permanently encodes the upstream base release (`v2.18.0`) this fork tracks; minor/patch are this fork's own release counter
+
 ## Roadmap
 
 Planned for upcoming work on this fork:
 
-- Update config backup/restore to cover the new settings and parameters added so far
-- Publish GitHub Releases for this fork (currently only buildable from source)
-- Adapt the OTA update mechanism, which still points at the upstream project's release feed
+- ~~Update config backup/restore to cover the new settings and parameters added so far~~ — done, config export/import now also covers per-album enable/disable state
+- ~~Publish GitHub Releases for this fork (currently only buildable from source)~~ — done, own CI/release pipeline with per-board flashable binaries
+- ~~Adapt the OTA update mechanism, which still points at the upstream project's release feed~~ — done, OTA now points at this fork's own repo and correctly handles GitHub's chunked API responses
 - ~~Display delta updates instead of a full refresh~~ — investigated, not possible on the required `waveshare_photopainter_73` board (or any other color board this project targets): 6-color e-paper panels have no partial-refresh mode at the protocol or physical level. See [docs/OVERLAYS.md → Why there's no partial-refresh ("delta update") mode](docs/OVERLAYS.md#why-theres-no-partial-refresh-delta-update-mode) for the full explanation, including why the grayscale boards' IT8951 controller (which does support it) isn't pursued as a partial fix either.
 - Performance/resource-usage optimization — album scanning/management via lightweight index files (txt/JSON) instead of repeated directory walks, and a configurable wake-cycle time budget (e.g. "spend at most 20 seconds on network activity, then go back to sleep"), including capping how much of a wake cycle a burst of new Telegram messages can consume
 - Document the recommended course of action when a device's orientation is changed between landscape and portrait after the fact, since `process-cli`'s rendered Cover/Fit variants and face-crop metadata are generated for one specific target orientation and don't automatically adapt to a later change
-
-## Support
-
-If you find this project useful, consider buying me a coffee! ☕
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/aitjcize)
 
 ## License
 
@@ -371,6 +421,7 @@ This project is based on the ESP32-S3-PhotoPainter sample code. Please refer to 
 
 ## Credits
 
+- Upstream project: [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe)
 - Original PhotoPainter sample: Waveshare ESP32-S3-PhotoPainter
 - E-paper drivers: Waveshare
 - ESP-IDF: Espressif Systems
