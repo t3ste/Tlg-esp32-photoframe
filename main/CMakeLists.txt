@@ -28,6 +28,7 @@ set(SOURCES
     "storage.c"
     "cron.c"
     "telegram_bot.c"
+    "todo.c"
     "utils.c"
     "weather.c"
     "wifi_manager.c"

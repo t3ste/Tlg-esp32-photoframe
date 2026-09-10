@@ -81,11 +81,36 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
 
+# ToDo (todo.txt) parsing (pure parsing logic split out of todo.c's
+# network-calling todo_fetch(), specifically so it's host-testable without
+# a real HTTP stack) - same shape as headlines_test above
+add_executable(
+  todo_test
+  test_todo.cpp
+  ../main/todo.c
+  stubs/fake_http_fetch.c
+  stubs/fake_image_processor_sanitize.c
+)
+
+target_link_libraries(
+  todo_test
+  GTest::gtest_main
+)
+
+target_include_directories(
+  todo_test
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
 # Discover tests
 include(GoogleTest)
 gtest_discover_tests(cron_test)
 gtest_discover_tests(wake_schedule_test)
 gtest_discover_tests(headlines_test)
+gtest_discover_tests(todo_test)
 
 # On-device image pipeline characterization tests (host build of
 # main/image_processor.c against ESP-IDF stubs + system libpng)
