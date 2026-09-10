@@ -358,6 +358,35 @@ void config_manager_set_weather_multiline_enabled(bool enabled);
 bool config_manager_get_weather_multiline_enabled(void);
 
 // ============================================================================
+// Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
+// overlay. See NVS_AGENDA_*_KEY in config.h and agenda_manager.h.
+// ============================================================================
+
+void config_manager_set_agenda_todo_enabled(bool enabled);
+bool config_manager_get_agenda_todo_enabled(void);
+void config_manager_set_agenda_cal_enabled(bool enabled);
+bool config_manager_get_agenda_cal_enabled(void);
+
+void config_manager_set_agenda_todo_url(const char *url);
+const char *config_manager_get_agenda_todo_url(void);
+// Write-only from the Web UI's perspective - never included in GET
+// /api/config, same treatment as the WiFi password. See http_server.c.
+void config_manager_set_agenda_cal_url(const char *url);
+const char *config_manager_get_agenda_cal_url(void);
+
+// Clamped [AGENDA_CAL_DAYS_MIN, AGENDA_CAL_DAYS_MAX].
+void config_manager_set_agenda_cal_days(int days);
+int config_manager_get_agenda_cal_days(void);
+
+// Independent schedule, same cron grammar/storage shape as the rotate
+// schedule above (config_manager_get/set_cron_rules()) but its own rule
+// set - see agenda_manager_wake_matches_now()/agenda_manager_seconds_until_next_wake().
+int config_manager_get_agenda_cron_rule_count(void);
+const char *config_manager_get_agenda_cron_rule(int index);
+void config_manager_set_agenda_cron_rules(const char *const *rules, int count);
+int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max);
+
+// ============================================================================
 // OTA
 // ============================================================================
 

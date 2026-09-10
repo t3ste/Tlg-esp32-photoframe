@@ -228,6 +228,13 @@ esp_err_t image_processor_compose_pair_to_rgb(const uint8_t *data_a, size_t size
 // to match.
 #define OVERLAY_LINE_MAX_CHARS 96
 
+// Font24's fixed glyph cell size in pixels - exposed for a caller doing its
+// own custom text layout (e.g. agenda_renderer.c's grid) rather than using
+// the built-in bar/caption helpers below, which already know this
+// internally.
+#define IMAGE_PROCESSOR_FONT_WIDTH 17
+#define IMAGE_PROCESSOR_FONT_HEIGHT 24
+
 /**
  * @brief Overlays a caption bar (solid background + wrapped bitmap-font text)
  * across the bottom of an already-processed (dithered, palette-quantized)
@@ -306,6 +313,26 @@ esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lin
  */
 void image_processor_draw_battery_badge(uint8_t *rgb_buffer, int width, int height,
                                         int battery_percent);
+
+/**
+ * @brief Fills an axis-aligned rectangle with a solid color, clipped to
+ * [0,width)x[0,height). General-purpose (unlike the purpose-built bar/badge
+ * fills above) - the agenda renderer's grid/column layout is the first
+ * caller that draws onto a from-scratch canvas rather than a decoded photo.
+ */
+void image_processor_fill_rect(uint8_t *rgb_buffer, int width, int height, int x, int y, int w,
+                               int h, uint8_t r, uint8_t g, uint8_t b);
+
+/**
+ * @brief Draws `ascii_text` (already ASCII - callers needing UTF-8 input
+ * should run it through image_processor_sanitize_ascii() first) left-to-right
+ * starting at (x, y) using the same Font24 bitmap glyphs as every other
+ * text-drawing function in this module, in a single solid color. No
+ * wrapping/truncation - pre-wrap with image_processor_wrap_text() first if
+ * the text might not fit.
+ */
+void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                               const char *ascii_text, uint8_t r, uint8_t g, uint8_t b);
 
 /**
  * @brief Greedy word-wraps `text` into up to `max_lines` lines (each written

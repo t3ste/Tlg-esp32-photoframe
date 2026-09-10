@@ -1,4 +1,6 @@
 set(SOURCES
+    "agenda_manager.c"
+    "agenda_renderer.c"
     "album_manager.c"
     "battery_history.c"
     "calendar_ics.c"

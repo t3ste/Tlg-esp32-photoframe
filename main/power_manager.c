@@ -9,6 +9,7 @@
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <limits.h>
 #include <nvs.h>
 #include <nvs_flash.h>
 #include <time.h>
@@ -17,6 +18,7 @@
 #include <hal/usb_serial_jtag_ll.h>
 #endif
 
+#include "agenda_manager.h"
 #include "board_hal.h"
 #include "config.h"
 #include "config_manager.h"
@@ -363,16 +365,29 @@ void power_manager_enter_sleep(void)
     board_hal_led_set(BOARD_HAL_LED_POWER, false);
     board_hal_led_set(BOARD_HAL_LED_ACTIVITY, false);
 
-    // Check if auto-rotate is enabled
-    if (config_manager_get_auto_rotate()) {
-        // Use timer-based sleep for auto-rotate
-        int wake_seconds = get_seconds_until_next_wakeup();
+    // Timer-based sleep if either the normal photo rotation schedule or the
+    // independent agenda (ToDo + Calendar) schedule is enabled - whichever
+    // fires sooner. The two are otherwise unrelated: deep_sleep_wake_main()
+    // re-checks which one(s) actually matched at the moment the device
+    // wakes (a coarse timer wake can't itself carry that information), and
+    // renders the photo or the agenda screen accordingly - see
+    // agenda_manager_wake_matches_now().
+    bool rotate_on = config_manager_get_auto_rotate();
+    bool agenda_on = agenda_manager_is_enabled();
+    if (rotate_on || agenda_on) {
+        int rotate_wake = rotate_on ? get_seconds_until_next_wakeup() : INT_MAX;
+        int agenda_wake = agenda_on ? agenda_manager_seconds_until_next_wake() : INT_MAX;
+        int wake_seconds = (rotate_wake < agenda_wake) ? rotate_wake : agenda_wake;
+        bool via_agenda = (agenda_wake < rotate_wake);
 
-        ESP_LOGI(TAG, "Auto-rotate enabled, setting timer wake-up for %d seconds (%s)",
-                 wake_seconds, "cron");
+        ESP_LOGI(TAG, "Setting timer wake-up for %d seconds (%s)", wake_seconds,
+                 via_agenda ? "agenda cron" : "rotate cron");
         esp_sleep_enable_timer_wakeup(wake_seconds * 1000000ULL);
 
-        // Store expected wakeup time in RTC memory for drift detection
+        // Store expected wakeup time in RTC memory for drift detection -
+        // schedule-agnostic (power_manager_get_seconds_until_wake_target()
+        // just compares against whichever single boundary this was, however
+        // it was computed).
         time_t now;
         time(&now);
         expected_wakeup_time = now + wake_seconds;

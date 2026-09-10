@@ -6,6 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "agenda_manager.h"
 #include "album_manager.h"
 #include "board_hal.h"
 #include "color_palette.h"
@@ -291,12 +292,22 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
         // Won't reach here after sleep
     }
 
+    // Whether THIS wake is an agenda (ToDo + Calendar) wake, decided once
+    // here (not re-derived later) since it also affects the WiFi-init
+    // decision immediately below - agenda mode always needs WiFi, since
+    // ToDo/Calendar are fetched fresh over HTTP every cycle, independent of
+    // rotation_mode/HA configuration. A manual ROTATE button press never
+    // counts as an agenda wake - it always means "rotate the photo now."
+    bool agenda_wake = !is_button_wake && wakeup_src == WAKEUP_SOURCE_TIMER &&
+                       agenda_manager_is_enabled() && agenda_manager_wake_matches_now();
+
     // Initialize WiFi if needed (URL/Telegram modes always need it, SD card mode only if HA
-    // configured)
+    // configured, agenda mode always does)
     if (rotation_mode == ROTATION_MODE_URL || rotation_mode == ROTATION_MODE_TELEGRAM ||
-        ha_configured) {
+        ha_configured || agenda_wake) {
         ESP_LOGI(TAG, "Initializing WiFi for %s",
-                 rotation_mode == ROTATION_MODE_URL
+                 agenda_wake ? "agenda mode"
+                 : rotation_mode == ROTATION_MODE_URL
                      ? "URL rotation"
                      : (rotation_mode == ROTATION_MODE_TELEGRAM ? "Telegram rotation"
                                                                 : "HA battery post"));
@@ -333,6 +344,26 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
     if (!is_button_wake && early_seconds > EARLY_WAKE_TOLERANCE_SEC) {
         ESP_LOGI(TAG, "Woke %d seconds before scheduled rotation, going back to sleep",
                  early_seconds);
+        power_manager_enter_sleep();
+        // Won't reach here after sleep
+    }
+
+    // An agenda wake takes over the display exclusively for ToDo/Calendar
+    // content and skips the entire photo pipeline below (HA veto ask,
+    // trigger_image_rotation(), Telegram command drain, post-rotate HTTP
+    // hold window) - none of that applies when no photo is being shown
+    // this cycle. If the normal rotate schedule happens to match the exact
+    // same minute, the agenda wake wins; the rotate schedule simply fires
+    // on its own next natural boundary next time around (no makeup logic -
+    // same "just skip, don't special-case a retry" spirit already used for
+    // an HA-vetoed rotation below).
+    if (agenda_wake) {
+        ESP_LOGI(TAG,
+                 "Agenda wake matched - rendering ToDo/Calendar screen, skipping photo rotation");
+        power_manager_reset_sleep_timer();
+        agenda_manager_run();
+        utils_finalize_internet_health();
+        ESP_LOGI(TAG, "Agenda render complete, going back to sleep");
         power_manager_enter_sleep();
         // Won't reach here after sleep
     }

@@ -90,6 +90,12 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // scratch file's extension always matches its actual content.
 #define CURRENT_OVERLAY_EPDGZ_PATH FS_MOUNT_POINT "/.overlay.epdgz"
 
+// Agenda (ToDo + Calendar) full-screen render scratch file - always PNG,
+// no EPDGZ variant needed (this is a from-scratch canvas, never decoded
+// back, so there's no "matches the source format" concern like the
+// overlay paths above).
+#define AGENDA_OUTPUT_PATH FS_MOUNT_POINT "/.agenda.png"
+
 // Display-history file (one shown image's full path per line) - lets random
 // rotation and the Telegram fallback rotation cycle through every image once
 // before repeating. See history_manager.[ch].
@@ -444,6 +450,35 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // UI (same as NVS_TELEGRAM_LOW_BATT_WARNED_KEY). Must be NVS-persisted, not
 // just held in memory, since deep sleep reboots the device every wake.
 #define NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY "lowbatt_ov_act"
+
+// Agenda mode (ToDo + Calendar) - a full-screen display mode, NOT a photo
+// overlay: whenever a wake matches its own independent schedule below, the
+// device renders ToDo/Calendar content instead of a photo for that wake,
+// then goes back to sleep. Normal photo auto-rotation is unaffected and
+// keeps running on its own separate schedule. See agenda_manager.h.
+#define NVS_AGENDA_TODO_ENABLED_KEY "agenda_todo_en"
+#define NVS_AGENDA_CAL_ENABLED_KEY "agenda_cal_en"
+// A plain todo.txt file, fetched fresh on every agenda wake (no on-device
+// caching) - see todo.h for the parsed grammar.
+#define NVS_AGENDA_TODO_URL_KEY "agenda_todo_url"
+#define AGENDA_TODO_URL_MAX_LEN 256
+// An iCalendar/ICS feed - e.g. a Google Calendar "secret address in iCal
+// format" (plain HTTPS GET, no OAuth). Treated like a credential: never
+// surfaced via GET /api/config, same write-only treatment as
+// NVS_WIFI_PASS_KEY (see config_manager.c).
+#define NVS_AGENDA_CAL_URL_KEY "agenda_cal_url"
+#define AGENDA_CAL_URL_MAX_LEN 256
+// How many upcoming days (including today) of calendar events to show.
+#define NVS_AGENDA_CAL_DAYS_KEY "agenda_cal_days"
+#define AGENDA_CAL_DAYS_DEFAULT 2
+#define AGENDA_CAL_DAYS_MIN 1
+#define AGENDA_CAL_DAYS_MAX 3
+// Independent schedule - same simplified 3-field cron grammar/limits as
+// DEFAULT_ROTATE_CRON/MAX_CRON_RULES/CRON_RULE_MAX_LEN above (reused
+// as-is, just a second rule set under its own NVS key). E.g. "0 6-18 *"
+// for hourly, 6am-6pm, every day.
+#define NVS_AGENDA_CRON_KEY "agenda_cron"
+#define DEFAULT_AGENDA_CRON "0 6-18 *"
 
 // WiFi association draws a brief high-current TX burst; whenever a battery
 // is in the loop (battery-only, or USB+battery together - see

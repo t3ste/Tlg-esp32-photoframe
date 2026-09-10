@@ -3381,6 +3381,42 @@ static void draw_glyph(uint8_t *rgb, int width, int height, int x, int y, char c
     }
 }
 
+// Exported general-purpose primitives (agenda_renderer.c's grid layout is
+// the first caller that draws onto a from-scratch canvas rather than a
+// decoded photo, so unlike the overlay/caption/badge helpers above - each
+// already fine as file-private, purpose-built shapes - these two needed a
+// real public surface instead of yet another inline copy).
+void image_processor_fill_rect(uint8_t *rgb_buffer, int width, int height, int x, int y, int w,
+                               int h, uint8_t r, uint8_t g, uint8_t b)
+{
+    int x0 = x < 0 ? 0 : x;
+    int y0 = y < 0 ? 0 : y;
+    int x1 = (x + w > width) ? width : x + w;
+    int y1 = (y + h > height) ? height : y + h;
+    for (int py = y0; py < y1; py++) {
+        for (int px = x0; px < x1; px++) {
+            int idx = (py * width + px) * 3;
+            rgb_buffer[idx] = r;
+            rgb_buffer[idx + 1] = g;
+            rgb_buffer[idx + 2] = b;
+        }
+    }
+}
+
+void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                               const char *ascii_text, uint8_t r, uint8_t g, uint8_t b)
+{
+    if (!ascii_text) {
+        return;
+    }
+    rgb_t color = {r, g, b};
+    int cx = x;
+    for (const char *p = ascii_text; *p != '\0'; p++) {
+        draw_glyph(rgb_buffer, width, height, cx, y, *p, color);
+        cx += Font24.Width;
+    }
+}
+
 #define CAPTION_MAX_LINES 3
 // Single source of truth for the per-line char buffer size is
 // OVERLAY_LINE_MAX_CHARS (image_processor.h - public, since

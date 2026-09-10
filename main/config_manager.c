@@ -115,6 +115,15 @@ static bool low_battery_overlay_enabled = false;
 static uint8_t low_battery_overlay_threshold = LOW_BATTERY_OVERLAY_THRESHOLD_DEFAULT;
 static bool low_battery_overlay_active = false;
 
+// Agenda (ToDo + Calendar) - a full-screen display mode, not a photo overlay
+static bool agenda_todo_enabled = false;
+static bool agenda_cal_enabled = false;
+static char agenda_todo_url[AGENDA_TODO_URL_MAX_LEN] = {0};
+static char agenda_cal_url[AGENDA_CAL_URL_MAX_LEN] = {0};
+static uint8_t agenda_cal_days = AGENDA_CAL_DAYS_DEFAULT;
+static char agenda_cron_rules_store[MAX_CRON_RULES][CRON_RULE_MAX_LEN] = {{0}};
+static int agenda_cron_rule_count = 0;
+
 // OTA
 static bool ota_check_enabled = true;
 
@@ -180,6 +189,60 @@ static void cron_persist(void)
             nvs_set_str(nvs_handle, NVS_ROTATE_CRON_KEY, joined);
         } else {
             nvs_erase_key(nvs_handle, NVS_ROTATE_CRON_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Agenda cron schedule helpers - independent second schedule (ToDo/Calendar
+// full-screen mode), same '\n'-joined NVS encoding as the rotate schedule
+// above, just its own store/key so the two never interfere.
+// ----------------------------------------------------------------------------
+
+static void agenda_cron_load_from_joined(const char *joined)
+{
+    agenda_cron_rule_count = 0;
+    if (!joined) {
+        return;
+    }
+    const char *p = joined;
+    while (*p && agenda_cron_rule_count < MAX_CRON_RULES) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t) (nl - p) : strlen(p);
+        if (len > 0 && len < CRON_RULE_MAX_LEN) {
+            memcpy(agenda_cron_rules_store[agenda_cron_rule_count], p, len);
+            agenda_cron_rules_store[agenda_cron_rule_count][len] = '\0';
+            agenda_cron_rule_count++;
+        }
+        if (!nl) {
+            break;
+        }
+        p = nl + 1;
+    }
+}
+
+static void agenda_cron_persist(void)
+{
+    char joined[MAX_CRON_RULES * CRON_RULE_MAX_LEN];
+    joined[0] = '\0';
+    size_t off = 0;
+    for (int i = 0; i < agenda_cron_rule_count; i++) {
+        int n = snprintf(joined + off, sizeof(joined) - off, "%s%s", i ? "\n" : "",
+                         agenda_cron_rules_store[i]);
+        if (n < 0 || (size_t) n >= sizeof(joined) - off) {
+            break;
+        }
+        off += n;
+    }
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (agenda_cron_rule_count > 0) {
+            nvs_set_str(nvs_handle, NVS_AGENDA_CRON_KEY, joined);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_AGENDA_CRON_KEY);
         }
         nvs_commit(nvs_handle);
         nvs_close(nvs_handle);
@@ -782,6 +845,34 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY,
                        &stored_low_batt_overlay_active) == ESP_OK) {
             low_battery_overlay_active = (stored_low_batt_overlay_active != 0);
+        }
+
+        uint8_t stored_agenda_todo_en = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_TODO_ENABLED_KEY, &stored_agenda_todo_en) == ESP_OK) {
+            agenda_todo_enabled = (stored_agenda_todo_en != 0);
+        }
+        uint8_t stored_agenda_cal_en = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_ENABLED_KEY, &stored_agenda_cal_en) == ESP_OK) {
+            agenda_cal_enabled = (stored_agenda_cal_en != 0);
+        }
+        size_t agenda_todo_url_len = sizeof(agenda_todo_url);
+        nvs_get_str(nvs_handle, NVS_AGENDA_TODO_URL_KEY, agenda_todo_url, &agenda_todo_url_len);
+        size_t agenda_cal_url_len = sizeof(agenda_cal_url);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_URL_KEY, agenda_cal_url, &agenda_cal_url_len);
+        uint8_t stored_agenda_cal_days = AGENDA_CAL_DAYS_DEFAULT;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_DAYS_KEY, &stored_agenda_cal_days) == ESP_OK &&
+            stored_agenda_cal_days >= AGENDA_CAL_DAYS_MIN &&
+            stored_agenda_cal_days <= AGENDA_CAL_DAYS_MAX) {
+            agenda_cal_days = stored_agenda_cal_days;
+        }
+        {
+            char agenda_cron_buf[MAX_CRON_RULES * CRON_RULE_MAX_LEN] = {0};
+            size_t agenda_cron_len = sizeof(agenda_cron_buf);
+            if (nvs_get_str(nvs_handle, NVS_AGENDA_CRON_KEY, agenda_cron_buf, &agenda_cron_len) ==
+                ESP_OK) {
+                agenda_cron_load_from_joined(agenda_cron_buf);
+                ESP_LOGI(TAG, "Loaded %d agenda cron rule(s) from NVS", agenda_cron_rule_count);
+            }
         }
 
         {
@@ -2466,6 +2557,164 @@ void config_manager_set_low_battery_overlay_active(bool active)
 bool config_manager_get_low_battery_overlay_active(void)
 {
     return low_battery_overlay_active;
+}
+
+// ============================================================================
+// Agenda (ToDo + Calendar)
+// ============================================================================
+
+void config_manager_set_agenda_todo_enabled(bool enabled)
+{
+    agenda_todo_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_AGENDA_TODO_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Agenda ToDo %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_agenda_todo_enabled(void)
+{
+    return agenda_todo_enabled;
+}
+
+void config_manager_set_agenda_cal_enabled(bool enabled)
+{
+    agenda_cal_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_AGENDA_CAL_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Agenda Calendar %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_agenda_cal_enabled(void)
+{
+    return agenda_cal_enabled;
+}
+
+void config_manager_set_agenda_todo_url(const char *url)
+{
+    const char *new_url = url ? url : "";
+    strncpy(agenda_todo_url, new_url, AGENDA_TODO_URL_MAX_LEN - 1);
+    agenda_todo_url[AGENDA_TODO_URL_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (agenda_todo_url[0] != '\0') {
+            nvs_set_str(nvs_handle, NVS_AGENDA_TODO_URL_KEY, agenda_todo_url);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_AGENDA_TODO_URL_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_agenda_todo_url(void)
+{
+    return agenda_todo_url;
+}
+
+// The ICS URL is a credential (Google: "only you should know this
+// address") - logged only by length, never by value, matching
+// config_manager_set_wifi_password()'s own discipline.
+void config_manager_set_agenda_cal_url(const char *url)
+{
+    const char *new_url = url ? url : "";
+    strncpy(agenda_cal_url, new_url, AGENDA_CAL_URL_MAX_LEN - 1);
+    agenda_cal_url[AGENDA_CAL_URL_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (agenda_cal_url[0] != '\0') {
+            nvs_set_str(nvs_handle, NVS_AGENDA_CAL_URL_KEY, agenda_cal_url);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_AGENDA_CAL_URL_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Agenda Calendar URL set (length: %zu)", strlen(agenda_cal_url));
+}
+
+const char *config_manager_get_agenda_cal_url(void)
+{
+    return agenda_cal_url;
+}
+
+void config_manager_set_agenda_cal_days(int days)
+{
+    if (days < AGENDA_CAL_DAYS_MIN) {
+        days = AGENDA_CAL_DAYS_MIN;
+    } else if (days > AGENDA_CAL_DAYS_MAX) {
+        days = AGENDA_CAL_DAYS_MAX;
+    }
+    agenda_cal_days = (uint8_t) days;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_AGENDA_CAL_DAYS_KEY, agenda_cal_days);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int config_manager_get_agenda_cal_days(void)
+{
+    return agenda_cal_days;
+}
+
+int config_manager_get_agenda_cron_rule_count(void)
+{
+    return agenda_cron_rule_count;
+}
+
+const char *config_manager_get_agenda_cron_rule(int index)
+{
+    if (index < 0 || index >= agenda_cron_rule_count) {
+        return NULL;
+    }
+    return agenda_cron_rules_store[index];
+}
+
+void config_manager_set_agenda_cron_rules(const char *const *rules, int count)
+{
+    if (count < 0) {
+        count = 0;
+    }
+    agenda_cron_rule_count = 0;
+    for (int i = 0; i < count && agenda_cron_rule_count < MAX_CRON_RULES; i++) {
+        if (!rules[i] || rules[i][0] == '\0' || strlen(rules[i]) >= CRON_RULE_MAX_LEN) {
+            continue;
+        }
+        strncpy(agenda_cron_rules_store[agenda_cron_rule_count], rules[i], CRON_RULE_MAX_LEN - 1);
+        agenda_cron_rules_store[agenda_cron_rule_count][CRON_RULE_MAX_LEN - 1] = '\0';
+        agenda_cron_rule_count++;
+    }
+
+    agenda_cron_persist();
+    ESP_LOGI(TAG, "Agenda schedule set to %d cron rule(s)", agenda_cron_rule_count);
+}
+
+int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max)
+{
+    int n = 0;
+    for (int i = 0; i < agenda_cron_rule_count && n < max; i++) {
+        if (cron_parse(agenda_cron_rules_store[i], &out[n])) {
+            n++;
+        }
+    }
+    return n;
 }
 
 // ============================================================================
