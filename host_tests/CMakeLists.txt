@@ -105,12 +105,38 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
 
+# Calendar (ICS/iCalendar) parsing (pure parsing logic split out of
+# calendar_ics.c's network-calling calendar_ics_fetch(), specifically so
+# it's host-testable without a real HTTP stack) - same shape as
+# headlines_test/todo_test above
+add_executable(
+  calendar_ics_test
+  test_calendar_ics.cpp
+  ../main/calendar_ics.c
+  stubs/fake_http_fetch.c
+  stubs/fake_image_processor_sanitize.c
+)
+
+target_link_libraries(
+  calendar_ics_test
+  GTest::gtest_main
+)
+
+target_include_directories(
+  calendar_ics_test
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
 # Discover tests
 include(GoogleTest)
 gtest_discover_tests(cron_test)
 gtest_discover_tests(wake_schedule_test)
 gtest_discover_tests(headlines_test)
 gtest_discover_tests(todo_test)
+gtest_discover_tests(calendar_ics_test)
 
 # On-device image pipeline characterization tests (host build of
 # main/image_processor.c against ESP-IDF stubs + system libpng)

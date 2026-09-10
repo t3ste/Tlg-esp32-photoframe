@@ -1,6 +1,7 @@
 set(SOURCES
     "album_manager.c"
     "battery_history.c"
+    "calendar_ics.c"
     "cert_pin.c"
     "color_palette.c"
     "config_manager.c"
