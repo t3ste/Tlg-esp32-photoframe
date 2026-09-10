@@ -866,7 +866,15 @@ esp_err_t config_manager_init(void)
             agenda_cal_days = stored_agenda_cal_days;
         }
         {
-            char agenda_cron_buf[MAX_CRON_RULES * CRON_RULE_MAX_LEN] = {0};
+            // static: this large a buffer on the main task's stack
+            // (CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144) is unnecessary stack
+            // pressure on top of the pre-existing rotate cron_buf[] above -
+            // same reasoning as pending_buf/seen_ids_buf just below. Ruled
+            // out (not confirmed) as the cause of a separately-investigated
+            // debug_log-task coredump; kept regardless as the correct,
+            // precedent-matching way to declare it.
+            static char agenda_cron_buf[MAX_CRON_RULES * CRON_RULE_MAX_LEN];
+            agenda_cron_buf[0] = '\0';
             size_t agenda_cron_len = sizeof(agenda_cron_buf);
             if (nvs_get_str(nvs_handle, NVS_AGENDA_CRON_KEY, agenda_cron_buf, &agenda_cron_len) ==
                 ESP_OK) {

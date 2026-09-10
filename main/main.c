@@ -492,8 +492,15 @@ static void log_coredump_summary(void)
     }
     esp_core_dump_summary_t summary;
     if (esp_core_dump_get_summary(&summary) == ESP_OK) {
-        ESP_LOGE(TAG, "COREDUMP: task '%s' crashed at PC 0x%08x (%u frames)", summary.exc_task,
-                 (unsigned) summary.exc_pc, (unsigned) summary.exc_bt_info.depth);
+        ESP_LOGE(TAG, "COREDUMP: task '%s' crashed at PC 0x%08x (%u frames%s)", summary.exc_task,
+                 (unsigned) summary.exc_pc, (unsigned) summary.exc_bt_info.depth,
+                 summary.exc_bt_info.corrupted ? ", CORRUPTED" : "");
+        // exc_cause/exc_vaddr distinguish a null/dangling-pointer access
+        // (LoadProhibited=28/StoreProhibited=29, exc_vaddr = the bad address)
+        // from other fault classes - not previously logged, so every past
+        // crash summary only had the backtrace to go on.
+        ESP_LOGE(TAG, "COREDUMP   exc_cause=%u exc_vaddr=0x%08x", (unsigned) summary.ex_info.exc_cause,
+                 (unsigned) summary.ex_info.exc_vaddr);
         for (uint32_t i = 0; i < summary.exc_bt_info.depth; i++) {
             ESP_LOGE(TAG, "COREDUMP   bt[%u] 0x%08x", (unsigned) i,
                      (unsigned) summary.exc_bt_info.bt[i]);
