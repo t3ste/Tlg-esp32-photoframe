@@ -66,14 +66,31 @@ esp_err_t agenda_manager_run(void)
     bool want_todo = config_manager_get_agenda_todo_enabled();
     bool want_cal = config_manager_get_agenda_cal_enabled();
 
-    todo_list_t todo = {0};
+    // Heap/PSRAM-allocated rather than stack locals: todo_list_t and
+    // ics_event_list_t are ~17.7KB and ~4.4KB respectively (24 items each,
+    // with per-item fixed-size text/tag arrays) - together well over the
+    // entire 12KB stack of the dedicated deep_sleep_wake task this runs on
+    // (main.c's deep_sleep_wake_task). As stack locals this was a
+    // guaranteed, coredump-confirmed stack overflow (vApplicationStackOverflowHook)
+    // on every single agenda wake, sometimes surfacing as a clean panic and
+    // sometimes as corrupted-looking heap/task state elsewhere (whatever
+    // memory happened to sit past the stack's end).
+    todo_list_t *todo = heap_caps_calloc(1, sizeof(todo_list_t), MALLOC_CAP_SPIRAM);
+    ics_event_list_t *events = heap_caps_calloc(1, sizeof(ics_event_list_t), MALLOC_CAP_SPIRAM);
+    if (!todo || !events) {
+        ESP_LOGE(TAG, "Failed to allocate agenda fetch buffers");
+        heap_caps_free(todo);
+        heap_caps_free(events);
+        return ESP_ERR_NO_MEM;
+    }
+
     bool have_todo = false;
     if (want_todo) {
         const char *url = config_manager_get_agenda_todo_url();
         if (url[0] == '\0') {
             ESP_LOGW(TAG, "ToDo enabled but no URL configured");
         } else {
-            bool ok = (todo_fetch(url, 0, &todo) == ESP_OK);
+            bool ok = (todo_fetch(url, 0, todo) == ESP_OK);
             utils_record_internet_attempt(ok);
             have_todo = ok;
             if (!ok) {
@@ -82,7 +99,6 @@ esp_err_t agenda_manager_run(void)
         }
     }
 
-    ics_event_list_t events = {0};
     bool have_events = false;
     int cal_days = config_manager_get_agenda_cal_days();
     if (want_cal) {
@@ -92,7 +108,7 @@ esp_err_t agenda_manager_run(void)
         } else {
             time_t now = time(NULL);
             time_t window_end = now + (time_t) cal_days * 86400;
-            bool ok = (calendar_ics_fetch(url, 0, now, window_end, &events) == ESP_OK);
+            bool ok = (calendar_ics_fetch(url, 0, now, window_end, events) == ESP_OK);
             utils_record_internet_attempt(ok);
             have_events = ok;
             if (!ok) {
@@ -101,17 +117,21 @@ esp_err_t agenda_manager_run(void)
         }
     }
 
+    esp_err_t result;
     if (!have_todo && !have_events) {
         ESP_LOGW(TAG, "Nothing to render this agenda cycle (no source fetched successfully)");
-        return ESP_FAIL;
+        result = ESP_FAIL;
+    } else {
+        result = agenda_renderer_render(have_todo ? todo : NULL, have_events ? events : NULL,
+                                        cal_days, AGENDA_OUTPUT_PATH, IMAGE_FORMAT_PNG);
+        if (result != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to render agenda screen: %s", esp_err_to_name(result));
+        } else {
+            result = display_manager_show_image(AGENDA_OUTPUT_PATH);
+        }
     }
 
-    esp_err_t err = agenda_renderer_render(have_todo ? &todo : NULL, have_events ? &events : NULL,
-                                           cal_days, AGENDA_OUTPUT_PATH, IMAGE_FORMAT_PNG);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to render agenda screen: %s", esp_err_to_name(err));
-        return err;
-    }
-
-    return display_manager_show_image(AGENDA_OUTPUT_PATH);
+    heap_caps_free(todo);
+    heap_caps_free(events);
+    return result;
 }
