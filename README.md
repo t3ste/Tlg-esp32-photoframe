@@ -29,6 +29,7 @@ A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently 
 - 🪫 **Low-Battery Warnings**: On-display corner badge and a Telegram alert below a configurable threshold, plus a Battery History tab with a days-remaining-until-20% estimate
 - ⚠️ **On-Display Error Banner**: Shows a short error message right on the frame after repeated WiFi/internet failures, not just in the logs
 - 🔁 **No-Repeat Display History**: Random rotation remembers what's already been shown so every image appears once before any repeats
+- 🗓️ **Agenda Mode**: Optional full-screen ToDo (todo.txt format) + Calendar view (up to two ICS/iCal URLs, merged) on its own independent wake schedule — skips normal photo rotation entirely, with color-coded priorities/tags/due dates, per-calendar-source colors, and a configurable background ([docs](docs/AGENDA_COLORS.html))
 
 ## Screenshots
 
@@ -394,6 +395,14 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - fix: several task stack-overflow crashes in the Telegram/rotation pipeline (button task, deep-sleep wake, HTTP `/api/rotate`), each confirmed via live coredump and moved off the shared main-task stack where possible
 - fix: `album_manager_delete_album()` failed to delete an album containing a subdirectory
 - fix: `build.py` couldn't find `idf.py` on a standard Windows ESP-IDF PowerShell install
+
+**Agenda Mode** ([colors doc](docs/AGENDA_COLORS.html)):
+- feat: full-screen ToDo (todo.txt-format URL) + Calendar (up to two ICS/iCal URLs, merged and sorted together) mode on its own independent cron schedule, rendering directly to the panel and skipping the normal photo pipeline entirely for that wake
+- feat: per-element ToDo coloring (priority, `+project`/`@context` tags, due-date urgency, each colored independently) and per-calendar-source coloring (Calendar A/B get their own color); day-grouped Calendar view with a divider per day, correctly showing multi-day events under every day they span
+- feat: configurable shared background (white/black/any hardware-supported color) with automatic fallback if a text color would otherwise match it; landscape layout choice between stacked and side-by-side ToDo/Calendar columns
+- feat: adjustable Calendar lookahead window (1-3 days, Web UI: Agenda settings)
+- fix: a Calendar event's `VALARM` reminder block could overwrite the real event's title if the alarm itself carried its own `SUMMARY`
+- fix: TLS fetch failure against calendars whose certificate chain terminates at a cross-signed root (affects Google Calendar's current chain) — enabled cross-signed root verification in the mbedTLS certificate bundle
 
 **Reliability & infrastructure**:
 - feat: DNS backup/fallback servers (Cloudflare `1.1.1.1`, Google `8.8.8.8`) now populate lwIP's built-in multi-server fallback slots, previously left empty — a single flaky or unreachable DNS server (typically the router's own, handed out via DHCP) could otherwise fail to resolve *any* hostname (weather, Telegram, headlines alike) for a whole wake cycle with no automatic recovery
