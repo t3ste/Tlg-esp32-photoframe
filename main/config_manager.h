@@ -400,6 +400,33 @@ bool config_manager_get_agenda_stack_layout(void);
 void config_manager_set_agenda_bg_color(const char *color);
 const char *config_manager_get_agenda_bg_color(void);
 
+// Per-role color customization (Spectra6/color boards only) - each is one
+// of "red"/"yellow"/"blue"/"green", see the NVS_AGENDA_*_DEFAULT comment in
+// config.h for why free RGB isn't offered here. agenda_renderer.c's
+// role_hue() is the sole reader.
+void config_manager_set_agenda_pri_a_color(const char *color);
+const char *config_manager_get_agenda_pri_a_color(void);
+void config_manager_set_agenda_pri_b_color(const char *color);
+const char *config_manager_get_agenda_pri_b_color(void);
+void config_manager_set_agenda_pri_c_color(const char *color);
+const char *config_manager_get_agenda_pri_c_color(void);
+void config_manager_set_agenda_pri_d_color(const char *color);
+const char *config_manager_get_agenda_pri_d_color(void);
+void config_manager_set_agenda_due_overdue_color(const char *color);
+const char *config_manager_get_agenda_due_overdue_color(void);
+void config_manager_set_agenda_due_today_color(const char *color);
+const char *config_manager_get_agenda_due_today_color(void);
+void config_manager_set_agenda_due_later_color(const char *color);
+const char *config_manager_get_agenda_due_later_color(void);
+void config_manager_set_agenda_project_color(const char *color);
+const char *config_manager_get_agenda_project_color(void);
+void config_manager_set_agenda_context_color(const char *color);
+const char *config_manager_get_agenda_context_color(void);
+void config_manager_set_agenda_cal_a_color(const char *color);
+const char *config_manager_get_agenda_cal_a_color(void);
+void config_manager_set_agenda_cal_b_color(const char *color);
+const char *config_manager_get_agenda_cal_b_color(void);
+
 // ============================================================================
 // OTA
 // ============================================================================

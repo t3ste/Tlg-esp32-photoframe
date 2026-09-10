@@ -181,6 +181,25 @@ const agendaBgOptions = computed(() => {
   ];
 });
 
+// Per-role color pickers (agendaPriAColor etc.) only make sense on a color
+// panel - grayscale has no spare hue to assign, see agenda_renderer.c's
+// role_hue() comment.
+const agendaIsGrayscaleBoard = computed(() => {
+  const displayType = appStore.systemInfo.display_type || "";
+  return displayType.startsWith("gc");
+});
+
+// Mirrors role_hue() in agenda_renderer.c exactly - only these 4 chromatic
+// Spectra6 hues are ever offered, never a free color, since anything
+// off-palette dithers into visual noise on real hardware (see
+// priority_color()'s comment there for the full story).
+const agendaHueOptions = [
+  { title: "Yellow", value: "yellow" },
+  { title: "Red", value: "red" },
+  { title: "Blue", value: "blue" },
+  { title: "Green", value: "green" },
+];
+
 // 90/270 would swap the panel's logical dimensions, which the streaming
 // pipeline and dimensionless .epdgz payloads can't represent; portrait
 // mounting is handled by the orientation setting instead
@@ -1312,6 +1331,132 @@ async function performFactoryReset() {
               persistent-hint
               style="max-width: 320px"
             />
+
+            <template v-if="!agendaIsGrayscaleBoard">
+              <v-divider class="mb-4 mt-4" />
+              <div class="text-subtitle-2 mb-2">Colors</div>
+              <div class="text-caption text-medium-emphasis mb-3">
+                Color panels only - grayscale boards have no spare hue to assign here. Any color
+                that happens to match the background above is automatically swapped for a safe
+                fallback, so nothing can silently disappear.
+              </div>
+              <div class="text-caption text-medium-emphasis mb-1">ToDo</div>
+              <v-row dense>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaPriAColor"
+                    :items="agendaHueOptions"
+                    label="Priority (A)"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaPriBColor"
+                    :items="agendaHueOptions"
+                    label="Priority (B)"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaPriCColor"
+                    :items="agendaHueOptions"
+                    label="Priority (C)"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaPriDColor"
+                    :items="agendaHueOptions"
+                    label="Priority (D)"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaDueOverdueColor"
+                    :items="agendaHueOptions"
+                    label="Overdue"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaDueTodayColor"
+                    :items="agendaHueOptions"
+                    label="Due today"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaDueLaterColor"
+                    :items="agendaHueOptions"
+                    label="Due later"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaProjectColor"
+                    :items="agendaHueOptions"
+                    label="+Project"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaContextColor"
+                    :items="agendaHueOptions"
+                    label="@Context"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+              </v-row>
+              <div class="text-caption text-medium-emphasis mb-1 mt-3">Calendar</div>
+              <v-row dense>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaCalAColor"
+                    :items="agendaHueOptions"
+                    label="Calendar A"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4" md="3">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaCalBColor"
+                    :items="agendaHueOptions"
+                    label="Calendar B"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+              </v-row>
+            </template>
           </v-tabs-window-item>
 
           <!-- Power Tab -->

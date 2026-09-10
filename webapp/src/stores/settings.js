@@ -125,6 +125,20 @@ export const useSettingsStore = defineStore("settings", () => {
     // hardware-specific name (see SettingsPanel.vue's per-display-type
     // option list). An unrecognized/inapplicable value falls back to white.
     agendaBgColor: "white",
+    // Per-role color pickers (Spectra6/color boards only - grayscale has no
+    // spare hue to choose between). Each is one of "red"/"yellow"/"blue"/
+    // "green"; defaults match this feature's original hardcoded colors.
+    agendaPriAColor: "red",
+    agendaPriBColor: "yellow",
+    agendaPriCColor: "green",
+    agendaPriDColor: "blue",
+    agendaDueOverdueColor: "red",
+    agendaDueTodayColor: "yellow",
+    agendaDueLaterColor: "blue",
+    agendaProjectColor: "blue",
+    agendaContextColor: "green",
+    agendaCalAColor: "blue",
+    agendaCalBColor: "green",
     // Debugging
     debugLogEnabled: false,
     errorOverlayEnabled: false,
@@ -316,6 +330,17 @@ export const useSettingsStore = defineStore("settings", () => {
           : ["0 6-18 *"];
       deviceSettings.value.agendaStackLayout = data.agenda_stack_layout !== false;
       deviceSettings.value.agendaBgColor = data.agenda_bg_color || "white";
+      deviceSettings.value.agendaPriAColor = data.agenda_pri_a_color || "red";
+      deviceSettings.value.agendaPriBColor = data.agenda_pri_b_color || "yellow";
+      deviceSettings.value.agendaPriCColor = data.agenda_pri_c_color || "green";
+      deviceSettings.value.agendaPriDColor = data.agenda_pri_d_color || "blue";
+      deviceSettings.value.agendaDueOverdueColor = data.agenda_due_overdue_color || "red";
+      deviceSettings.value.agendaDueTodayColor = data.agenda_due_today_color || "yellow";
+      deviceSettings.value.agendaDueLaterColor = data.agenda_due_later_color || "blue";
+      deviceSettings.value.agendaProjectColor = data.agenda_project_color || "blue";
+      deviceSettings.value.agendaContextColor = data.agenda_context_color || "green";
+      deviceSettings.value.agendaCalAColor = data.agenda_cal_a_color || "blue";
+      deviceSettings.value.agendaCalBColor = data.agenda_cal_b_color || "green";
       deviceSettings.value.debugLogEnabled = data.debug_log_enabled === true;
       deviceSettings.value.errorOverlayEnabled = data.error_overlay_enabled === true;
       deviceSettings.value.haUrl = data.ha_url || "";
@@ -432,6 +457,17 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_cron: deviceSettings.value.agendaCron,
       agenda_stack_layout: deviceSettings.value.agendaStackLayout,
       agenda_bg_color: deviceSettings.value.agendaBgColor,
+      agenda_pri_a_color: deviceSettings.value.agendaPriAColor,
+      agenda_pri_b_color: deviceSettings.value.agendaPriBColor,
+      agenda_pri_c_color: deviceSettings.value.agendaPriCColor,
+      agenda_pri_d_color: deviceSettings.value.agendaPriDColor,
+      agenda_due_overdue_color: deviceSettings.value.agendaDueOverdueColor,
+      agenda_due_today_color: deviceSettings.value.agendaDueTodayColor,
+      agenda_due_later_color: deviceSettings.value.agendaDueLaterColor,
+      agenda_project_color: deviceSettings.value.agendaProjectColor,
+      agenda_context_color: deviceSettings.value.agendaContextColor,
+      agenda_cal_a_color: deviceSettings.value.agendaCalAColor,
+      agenda_cal_b_color: deviceSettings.value.agendaCalBColor,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,
       error_overlay_enabled: deviceSettings.value.errorOverlayEnabled,
       save_downloaded_images: deviceSettings.value.saveDownloadedImages,

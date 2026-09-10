@@ -126,6 +126,17 @@ static char agenda_cron_rules_store[MAX_CRON_RULES][CRON_RULE_MAX_LEN] = {{0}};
 static int agenda_cron_rule_count = 0;
 static bool agenda_stack_layout = AGENDA_STACK_DEFAULT;
 static char agenda_bg_color[AGENDA_BG_MAX_LEN] = AGENDA_BG_DEFAULT;
+static char agenda_pri_a_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PRI_A_DEFAULT;
+static char agenda_pri_b_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PRI_B_DEFAULT;
+static char agenda_pri_c_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PRI_C_DEFAULT;
+static char agenda_pri_d_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PRI_D_DEFAULT;
+static char agenda_due_overdue_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_DUE_OD_DEFAULT;
+static char agenda_due_today_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_DUE_TDY_DEFAULT;
+static char agenda_due_later_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_DUE_LTR_DEFAULT;
+static char agenda_project_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PROJ_C_DEFAULT;
+static char agenda_context_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CTX_C_DEFAULT;
+static char agenda_cal_a_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_A_C_DEFAULT;
+static char agenda_cal_b_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_B_C_DEFAULT;
 
 // OTA
 static bool ota_check_enabled = true;
@@ -223,6 +234,20 @@ static void agenda_cron_load_from_joined(const char *joined)
             break;
         }
         p = nl + 1;
+    }
+}
+
+// Shared by the 11 agenda per-role color loads in config_manager_init() below
+// - each is a plain string field with the exact same "load or fall back to
+// this role's hardcoded default" shape, so one helper replaces 11 near-
+// identical nvs_get_str()+strncpy() blocks.
+static void agenda_role_color_load(nvs_handle_t handle, const char *key, char *buf, size_t buf_size,
+                                   const char *default_val)
+{
+    size_t len = buf_size;
+    if (nvs_get_str(handle, key, buf, &len) != ESP_OK) {
+        strncpy(buf, default_val, buf_size - 1);
+        buf[buf_size - 1] = '\0';
     }
 }
 
@@ -896,6 +921,28 @@ esp_err_t config_manager_init(void)
             strncpy(agenda_bg_color, AGENDA_BG_DEFAULT, sizeof(agenda_bg_color) - 1);
             agenda_bg_color[sizeof(agenda_bg_color) - 1] = '\0';
         }
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_PRI_A_KEY, agenda_pri_a_color,
+                               sizeof(agenda_pri_a_color), AGENDA_PRI_A_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_PRI_B_KEY, agenda_pri_b_color,
+                               sizeof(agenda_pri_b_color), AGENDA_PRI_B_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_PRI_C_KEY, agenda_pri_c_color,
+                               sizeof(agenda_pri_c_color), AGENDA_PRI_C_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_PRI_D_KEY, agenda_pri_d_color,
+                               sizeof(agenda_pri_d_color), AGENDA_PRI_D_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_DUE_OD_KEY, agenda_due_overdue_color,
+                               sizeof(agenda_due_overdue_color), AGENDA_DUE_OD_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_DUE_TDY_KEY, agenda_due_today_color,
+                               sizeof(agenda_due_today_color), AGENDA_DUE_TDY_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_DUE_LTR_KEY, agenda_due_later_color,
+                               sizeof(agenda_due_later_color), AGENDA_DUE_LTR_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_PROJ_C_KEY, agenda_project_color,
+                               sizeof(agenda_project_color), AGENDA_PROJ_C_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_CTX_C_KEY, agenda_context_color,
+                               sizeof(agenda_context_color), AGENDA_CTX_C_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_A_C_KEY, agenda_cal_a_color,
+                               sizeof(agenda_cal_a_color), AGENDA_CAL_A_C_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_B_C_KEY, agenda_cal_b_color,
+                               sizeof(agenda_cal_b_color), AGENDA_CAL_B_C_DEFAULT);
 
         {
             static char pending_buf[TELEGRAM_PENDING_JOINED_MAX];
@@ -2800,6 +2847,141 @@ void config_manager_set_agenda_bg_color(const char *color)
 const char *config_manager_get_agenda_bg_color(void)
 {
     return agenda_bg_color;
+}
+
+// Shared by the 11 agenda per-role color setters below - identical
+// "copy into this role's static buffer, then persist" shape.
+static void agenda_role_color_set(char *buf, size_t buf_size, const char *nvs_key, const char *color)
+{
+    if (!color || color[0] == '\0') {
+        return;
+    }
+    strncpy(buf, color, buf_size - 1);
+    buf[buf_size - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, nvs_key, buf);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+void config_manager_set_agenda_pri_a_color(const char *color)
+{
+    agenda_role_color_set(agenda_pri_a_color, sizeof(agenda_pri_a_color), NVS_AGENDA_PRI_A_KEY, color);
+}
+
+const char *config_manager_get_agenda_pri_a_color(void)
+{
+    return agenda_pri_a_color;
+}
+
+void config_manager_set_agenda_pri_b_color(const char *color)
+{
+    agenda_role_color_set(agenda_pri_b_color, sizeof(agenda_pri_b_color), NVS_AGENDA_PRI_B_KEY, color);
+}
+
+const char *config_manager_get_agenda_pri_b_color(void)
+{
+    return agenda_pri_b_color;
+}
+
+void config_manager_set_agenda_pri_c_color(const char *color)
+{
+    agenda_role_color_set(agenda_pri_c_color, sizeof(agenda_pri_c_color), NVS_AGENDA_PRI_C_KEY, color);
+}
+
+const char *config_manager_get_agenda_pri_c_color(void)
+{
+    return agenda_pri_c_color;
+}
+
+void config_manager_set_agenda_pri_d_color(const char *color)
+{
+    agenda_role_color_set(agenda_pri_d_color, sizeof(agenda_pri_d_color), NVS_AGENDA_PRI_D_KEY, color);
+}
+
+const char *config_manager_get_agenda_pri_d_color(void)
+{
+    return agenda_pri_d_color;
+}
+
+void config_manager_set_agenda_due_overdue_color(const char *color)
+{
+    agenda_role_color_set(agenda_due_overdue_color, sizeof(agenda_due_overdue_color),
+                          NVS_AGENDA_DUE_OD_KEY, color);
+}
+
+const char *config_manager_get_agenda_due_overdue_color(void)
+{
+    return agenda_due_overdue_color;
+}
+
+void config_manager_set_agenda_due_today_color(const char *color)
+{
+    agenda_role_color_set(agenda_due_today_color, sizeof(agenda_due_today_color),
+                          NVS_AGENDA_DUE_TDY_KEY, color);
+}
+
+const char *config_manager_get_agenda_due_today_color(void)
+{
+    return agenda_due_today_color;
+}
+
+void config_manager_set_agenda_due_later_color(const char *color)
+{
+    agenda_role_color_set(agenda_due_later_color, sizeof(agenda_due_later_color),
+                          NVS_AGENDA_DUE_LTR_KEY, color);
+}
+
+const char *config_manager_get_agenda_due_later_color(void)
+{
+    return agenda_due_later_color;
+}
+
+void config_manager_set_agenda_project_color(const char *color)
+{
+    agenda_role_color_set(agenda_project_color, sizeof(agenda_project_color), NVS_AGENDA_PROJ_C_KEY,
+                          color);
+}
+
+const char *config_manager_get_agenda_project_color(void)
+{
+    return agenda_project_color;
+}
+
+void config_manager_set_agenda_context_color(const char *color)
+{
+    agenda_role_color_set(agenda_context_color, sizeof(agenda_context_color), NVS_AGENDA_CTX_C_KEY,
+                          color);
+}
+
+const char *config_manager_get_agenda_context_color(void)
+{
+    return agenda_context_color;
+}
+
+void config_manager_set_agenda_cal_a_color(const char *color)
+{
+    agenda_role_color_set(agenda_cal_a_color, sizeof(agenda_cal_a_color), NVS_AGENDA_CAL_A_C_KEY,
+                          color);
+}
+
+const char *config_manager_get_agenda_cal_a_color(void)
+{
+    return agenda_cal_a_color;
+}
+
+void config_manager_set_agenda_cal_b_color(const char *color)
+{
+    agenda_role_color_set(agenda_cal_b_color, sizeof(agenda_cal_b_color), NVS_AGENDA_CAL_B_C_KEY,
+                          color);
+}
+
+const char *config_manager_get_agenda_cal_b_color(void)
+{
+    return agenda_cal_b_color;
 }
 
 // ============================================================================

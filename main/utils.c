@@ -742,6 +742,53 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
         config_manager_set_agenda_bg_color(cJSON_GetStringValue(item));
     }
+    // Per-role color pickers - all optional, non-secret, plain strings (one
+    // of "red"/"yellow"/"blue"/"green"); an invalid/unrecognized value is
+    // handled fail-soft by agenda_renderer.c's role_hue(), not rejected here.
+    item = cJSON_GetObjectItem(root, "agenda_pri_a_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_pri_a_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_pri_b_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_pri_b_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_pri_c_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_pri_c_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_pri_d_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_pri_d_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_due_overdue_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_due_overdue_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_due_today_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_due_today_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_due_later_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_due_later_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_project_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_project_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_context_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_context_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_a_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_a_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_b_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_b_color(cJSON_GetStringValue(item));
+    }
 
     return ESP_OK;
 }

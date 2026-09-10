@@ -146,6 +146,58 @@ static void agenda_avoid_bg_collision(uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, 
     }
 }
 
+// Resolves one of the 11 user-configurable per-role color names
+// (config_manager_get_agenda_*_color(), Spectra6/color boards only - see
+// config.h's AGENDA_ROLE_COLOR_MAX_LEN comment) to its exact Spectra6 RGB
+// triple. Never free RGB, only ever one of these 4 exact hues - an
+// off-palette value dithers into visual noise on real hardware (see
+// priority_color()'s comment below for the full story). An unrecognized or
+// empty name (including on a fresh device that's never saved this setting)
+// falls back to whichever default the caller passes in - normally the
+// role's own original hardcoded color from before this setting existed.
+static void role_hue(const char *name, uint8_t default_r, uint8_t default_g, uint8_t default_b,
+                     uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    if (name && strcmp(name, "red") == 0) {
+        *r = 255;
+        *g = 0;
+        *b = 0;
+    } else if (name && strcmp(name, "yellow") == 0) {
+        *r = 255;
+        *g = 255;
+        *b = 0;
+    } else if (name && strcmp(name, "blue") == 0) {
+        *r = 0;
+        *g = 0;
+        *b = 255;
+    } else if (name && strcmp(name, "green") == 0) {
+        *r = 0;
+        *g = 255;
+        *b = 0;
+    } else {
+        *r = default_r;
+        *g = default_g;
+        *b = default_b;
+    }
+}
+
+// Which text color reads legibly on top of a given chip hue - hardware
+// truth, not a formula: live testing on real Spectra6 hardware found the
+// panel's actual green ink prints much darker than the sRGB (0,255,0)
+// preview suggests (see priority_color()'s original comment on Priority C),
+// so a luminance-based contrast pick (agenda_is_light()) would get green
+// wrong. Yellow is the only hue light enough for black text; red/blue/green
+// all need white.
+static void hue_contrast_text(uint8_t hue_r, uint8_t hue_g, uint8_t hue_b, uint8_t *tr, uint8_t *tg,
+                              uint8_t *tb)
+{
+    if (hue_r == 255 && hue_g == 255 && hue_b == 0) {
+        *tr = *tg = *tb = 0;  // yellow -> black text
+    } else {
+        *tr = *tg = *tb = 255;  // red/blue/green -> white text
+    }
+}
+
 // Used by the per-element ToDo coloring below: compares `due_date`
 // ("YYYY-MM-DD") against `now`'s calendar date. All three flags are left
 // false if there's no due date at all.
@@ -208,11 +260,18 @@ static void add_run(image_processor_text_run_t *runs, int *count, int start, int
 // a "lighter"/blended shade picked for a calmer look (as an earlier version
 // of this function did for priority C/@context) can render as visual noise
 // or even vanish into the surrounding white - only the 6 exact palette
-// values are guaranteed solid. Grayscale boards have no bug to fix here
-// (black text was always used) so they're intentionally left plainer -
-// see docs/AGENDA_COLORS.html for why grayscale doesn't have enough
-// distinguishable fill levels to give every priority its own chip without
-// them blurring together.
+// values are guaranteed solid. Each letter's hue is user-configurable
+// (config_manager_get_agenda_pri_*_color()) - see role_hue()'s comment;
+// hue_contrast_text() then picks the text color for whichever hue actually
+// ended up assigned, so a user reassigning e.g. priority A to green still
+// gets legible white text automatically. If a chosen hue exactly matches
+// the page background, the chip would otherwise vanish entirely - falls
+// back to a plain (no-fill) safe text color in that case, same idea as
+// agenda_avoid_bg_collision() but for a chip's own fill rather than plain
+// text. Grayscale boards have no bug to fix here (black text was always
+// used) and have no per-role picker at all - see docs/AGENDA_COLORS.html
+// for why grayscale doesn't have enough distinguishable fill levels to give
+// every priority its own chip without them blurring together.
 static void priority_color(char priority, bool grayscale, uint8_t bg_r, uint8_t bg_g, uint8_t bg_b,
                            uint8_t *fr, uint8_t *fg, uint8_t *fb, bool *has_bg, uint8_t *br,
                            uint8_t *bgg, uint8_t *bb)
@@ -223,43 +282,48 @@ static void priority_color(char priority, bool grayscale, uint8_t bg_r, uint8_t 
         agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
         return;  // plain black, no fill - matches every other unhighlighted role
     }
+    const char *role_name = NULL;
+    uint8_t default_r = 0, default_g = 0, default_b = 0;
     switch (priority) {
     case 'A':
-        *has_bg = true;
-        *fr = *fg = *fb = 255;  // white text
-        *br = 255;
-        *bgg = 0;
-        *bb = 0;  // red fill
+        role_name = config_manager_get_agenda_pri_a_color();
+        default_r = 255;
+        default_g = 0;
+        default_b = 0;  // red
         break;
     case 'B':
-        *has_bg = true;
-        // black text (already set above)
-        *br = 255;
-        *bgg = 255;
-        *bb = 0;  // yellow fill
+        role_name = config_manager_get_agenda_pri_b_color();
+        default_r = 255;
+        default_g = 255;
+        default_b = 0;  // yellow
         break;
     case 'C':
-        *has_bg = true;
-        // White text: confirmed live on real Spectra6 hardware that the
-        // panel's actual green ink prints much darker than the sRGB
-        // (0,255,0) preview suggests, so black text reads poorly on it -
-        // unlike yellow (B) where black stays the right call.
-        *fr = *fg = *fb = 255;
-        *br = 0;
-        *bgg = 255;
-        *bb = 0;  // green fill
+        role_name = config_manager_get_agenda_pri_c_color();
+        default_r = 0;
+        default_g = 255;
+        default_b = 0;  // green
         break;
     case 'D':
-        *has_bg = true;
-        *fr = *fg = *fb = 255;  // white text
-        *br = 0;
-        *bgg = 0;
-        *bb = 255;  // blue fill
+        role_name = config_manager_get_agenda_pri_d_color();
+        default_r = 0;
+        default_g = 0;
+        default_b = 255;  // blue
         break;
     default:
         agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
-        break;  // no priority letter beyond D: plain black text, no fill
+        return;  // no priority letter beyond D: plain black text, no fill
     }
+    uint8_t hue_r, hue_g, hue_b;
+    role_hue(role_name, default_r, default_g, default_b, &hue_r, &hue_g, &hue_b);
+    if (agenda_colors_equal(hue_r, hue_g, hue_b, bg_r, bg_g, bg_b)) {
+        agenda_safe_text_color(bg_r, bg_g, bg_b, fr, fg, fb);
+        return;
+    }
+    *has_bg = true;
+    hue_contrast_text(hue_r, hue_g, hue_b, fr, fg, fb);
+    *br = hue_r;
+    *bgg = hue_g;
+    *bb = hue_b;
 }
 
 // Due-date urgency -> foreground + optional background chip. Independent of
@@ -271,42 +335,53 @@ static void due_color(bool overdue, bool today, bool grayscale, uint8_t bg_r, ui
 {
     *has_bg = false;
     if (overdue) {
-        *has_bg = true;
         if (grayscale) {
+            *has_bg = true;
             *fr = *fg = *fb = 255;
             *br = *bgg = *bb = 0;  // full inversion
-        } else {
-            *fr = 255;
-            *fg = 255;
-            *fb = 255;
-            *br = 255;
-            *bgg = 0;
-            *bb = 0;
+            return;
         }
+        uint8_t hue_r, hue_g, hue_b;
+        role_hue(config_manager_get_agenda_due_overdue_color(), 255, 0, 0, &hue_r, &hue_g, &hue_b);
+        if (agenda_colors_equal(hue_r, hue_g, hue_b, bg_r, bg_g, bg_b)) {
+            agenda_safe_text_color(bg_r, bg_g, bg_b, fr, fg, fb);
+            return;
+        }
+        *has_bg = true;
+        hue_contrast_text(hue_r, hue_g, hue_b, fr, fg, fb);
+        *br = hue_r;
+        *bgg = hue_g;
+        *bb = hue_b;
         return;
     }
     if (today) {
-        *has_bg = true;
-        *fr = *fg = *fb = 0;
         if (grayscale) {
+            *has_bg = true;
+            *fr = *fg = *fb = 0;
             *br = *bgg = *bb = 136;  // level 8
-        } else {
-            *br = 255;
-            *bgg = 255;
-            *bb = 0;
+            return;
         }
+        uint8_t hue_r, hue_g, hue_b;
+        role_hue(config_manager_get_agenda_due_today_color(), 255, 255, 0, &hue_r, &hue_g, &hue_b);
+        if (agenda_colors_equal(hue_r, hue_g, hue_b, bg_r, bg_g, bg_b)) {
+            agenda_safe_text_color(bg_r, bg_g, bg_b, fr, fg, fb);
+            return;
+        }
+        *has_bg = true;
+        hue_contrast_text(hue_r, hue_g, hue_b, fr, fg, fb);
+        *br = hue_r;
+        *bgg = hue_g;
+        *bb = hue_b;
         return;
     }
     // Future due date, or no due date at all (caller only invokes this when
     // there is one): plain, no fill. Grayscale has no spare channel left
     // after overdue/today claim the two inversion levels, so it falls back
-    // to plain body-text black - see docs/AGENDA_COLORS.html §4.
+    // to plain body-text black - see docs/AGENDA_COLORS.html.
     if (grayscale) {
         *fr = *fg = *fb = 0;
     } else {
-        *fr = 0;
-        *fg = 0;
-        *fb = 255;
+        role_hue(config_manager_get_agenda_due_later_color(), 0, 0, 255, fr, fg, fb);
     }
     agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
 }
@@ -358,9 +433,7 @@ static void build_todo_line(const todo_item_t *item, time_t now, bool grayscale,
     if (grayscale) {
         proj_r = proj_g = proj_b = 0;
     } else {
-        proj_r = 0;
-        proj_g = 0;
-        proj_b = 255;
+        role_hue(config_manager_get_agenda_project_color(), 0, 0, 255, &proj_r, &proj_g, &proj_b);
     }
     agenda_avoid_bg_collision(bg_r, bg_g, bg_b, &proj_r, &proj_g, &proj_b);
     for (int i = 0; i < item->project_count && pos < cap; i++) {
@@ -375,16 +448,14 @@ static void build_todo_line(const todo_item_t *item, time_t now, bool grayscale,
         pos += written;
     }
 
-    // Exact Spectra6 green (0,255,0), not a softer/blended shade - see the
+    // Exact Spectra6 palette hue, not a softer/blended shade - see the
     // comment on priority_color() above for why anything off-palette risks
     // dithering into visual noise (or vanishing) rather than rendering solid.
     uint8_t ctx_r, ctx_g, ctx_b;
     if (grayscale) {
         ctx_r = ctx_g = ctx_b = 0;
     } else {
-        ctx_r = 0;
-        ctx_g = 255;
-        ctx_b = 0;
+        role_hue(config_manager_get_agenda_context_color(), 0, 255, 0, &ctx_r, &ctx_g, &ctx_b);
     }
     agenda_avoid_bg_collision(bg_r, bg_g, bg_b, &ctx_r, &ctx_g, &ctx_b);
     for (int i = 0; i < item->context_count && pos < cap; i++) {
@@ -459,26 +530,24 @@ typedef struct {
 // testing found the chip visually noisy against the actual event rows
 // ("Die Schrift-Hintergrundfarbe ... stört bei den Termineinträgen"), so
 // both backgrounds now use the same plain-colored-text, no-fill
-// treatment. Grayscale boards have no spare hue for this at all (same
+// treatment, using each source's user-configurable hue
+// (config_manager_get_agenda_cal_a_color()/_cal_b_color()) with the usual
+// collision-avoidance fallback if that hue happens to match the page
+// background. Grayscale boards have no spare hue for this at all (same
 // reasoning as priority_color()'s grayscale fallback) and fall back to
 // plain body-colored text.
-static void calendar_source_color(int calendar_index, bool grayscale, uint8_t *fr, uint8_t *fg,
-                                  uint8_t *fb, bool *has_bg)
+static void calendar_source_color(int calendar_index, bool grayscale, uint8_t bg_r, uint8_t bg_g,
+                                  uint8_t bg_b, uint8_t *fr, uint8_t *fg, uint8_t *fb, bool *has_bg)
 {
     *has_bg = false;
     if (grayscale) {
         *fr = *fg = *fb = 0;
-        return;
-    }
-    if (calendar_index == 0) {
-        *fr = 0;
-        *fg = 0;
-        *fb = 255;  // Calendar A - blue
+    } else if (calendar_index == 0) {
+        role_hue(config_manager_get_agenda_cal_a_color(), 0, 0, 255, fr, fg, fb);
     } else {
-        *fr = 0;
-        *fg = 255;
-        *fb = 0;  // Calendar B - green
+        role_hue(config_manager_get_agenda_cal_b_color(), 0, 255, 0, fr, fg, fb);
     }
+    agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
 }
 
 // Builds one event's display text - "HH:MM " (omitted for an all-day
@@ -487,7 +556,7 @@ static void calendar_source_color(int calendar_index, bool grayscale, uint8_t *f
 // above. No date/day-of-week here: draw_calendar_column() shows that once
 // per day group via draw_day_divider(), not repeated on every event.
 static void build_event_line(const ics_event_t *ev, int calendar_index, bool grayscale,
-                             agenda_event_line_t *out)
+                             uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, agenda_event_line_t *out)
 {
     memset(out, 0, sizeof(*out));
     size_t pos = 0;
@@ -512,7 +581,8 @@ static void build_event_line(const ics_event_t *ev, int calendar_index, bool gra
     pos += slen;
     out->text[pos] = '\0';
 
-    calendar_source_color(calendar_index, grayscale, &out->fr, &out->fg, &out->fb, &out->has_bg);
+    calendar_source_color(calendar_index, grayscale, bg_r, bg_g, bg_b, &out->fr, &out->fg, &out->fb,
+                          &out->has_bg);
 }
 
 // Draws a day-separator row: a dashed horizontal line with a chip centered
@@ -902,13 +972,13 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
         if (lines_a && lines_b && tagged) {
             int tagged_count = 0;
             for (int i = 0; i < count_a && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
-                build_event_line(&events_a->events[i], 0, grayscale, &lines_a[i]);
+                build_event_line(&events_a->events[i], 0, grayscale, bg_r, bg_g, bg_b, &lines_a[i]);
                 tagged[tagged_count].ev = &events_a->events[i];
                 tagged[tagged_count].line = &lines_a[i];
                 tagged_count++;
             }
             for (int i = 0; i < count_b && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
-                build_event_line(&events_b->events[i], 1, grayscale, &lines_b[i]);
+                build_event_line(&events_b->events[i], 1, grayscale, bg_r, bg_g, bg_b, &lines_b[i]);
                 tagged[tagged_count].ev = &events_b->events[i];
                 tagged[tagged_count].line = &lines_b[i];
                 tagged_count++;

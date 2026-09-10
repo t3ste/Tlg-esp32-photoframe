@@ -502,6 +502,40 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define AGENDA_BG_MAX_LEN 16
 #define AGENDA_BG_DEFAULT "white"
 
+// Per-role color customization (Spectra6/color boards only - grayscale has
+// no spare hue to pick between, see agenda_renderer.c's role_hue()). Every
+// value is one of "red"/"yellow"/"blue"/"green" (the 4 chromatic Spectra6
+// hues) - never a free RGB value, since anything off this exact palette
+// dithers into visual noise on real hardware (see agenda_renderer.c's
+// priority_color() comment for the full story). Each role falls back to its
+// original hardcoded default if unset/unrecognized. A role whose chosen hue
+// exactly matches the current agenda_bg_color automatically falls back to
+// the same black/white polarity the day divider and column headers use,
+// rather than silently disappearing into the page background.
+#define AGENDA_ROLE_COLOR_MAX_LEN 8
+#define NVS_AGENDA_PRI_A_KEY "agenda_pri_a"
+#define AGENDA_PRI_A_DEFAULT "red"
+#define NVS_AGENDA_PRI_B_KEY "agenda_pri_b"
+#define AGENDA_PRI_B_DEFAULT "yellow"
+#define NVS_AGENDA_PRI_C_KEY "agenda_pri_c"
+#define AGENDA_PRI_C_DEFAULT "green"
+#define NVS_AGENDA_PRI_D_KEY "agenda_pri_d"
+#define AGENDA_PRI_D_DEFAULT "blue"
+#define NVS_AGENDA_DUE_OD_KEY "agenda_due_od"
+#define AGENDA_DUE_OD_DEFAULT "red"
+#define NVS_AGENDA_DUE_TDY_KEY "agenda_due_tdy"
+#define AGENDA_DUE_TDY_DEFAULT "yellow"
+#define NVS_AGENDA_DUE_LTR_KEY "agenda_due_ltr"
+#define AGENDA_DUE_LTR_DEFAULT "blue"
+#define NVS_AGENDA_PROJ_C_KEY "agenda_proj_c"
+#define AGENDA_PROJ_C_DEFAULT "blue"
+#define NVS_AGENDA_CTX_C_KEY "agenda_ctx_c"
+#define AGENDA_CTX_C_DEFAULT "green"
+#define NVS_AGENDA_CAL_A_C_KEY "agenda_cal_a_c"
+#define AGENDA_CAL_A_C_DEFAULT "blue"
+#define NVS_AGENDA_CAL_B_C_KEY "agenda_cal_b_c"
+#define AGENDA_CAL_B_C_DEFAULT "green"
+
 // WiFi association draws a brief high-current TX burst; whenever a battery
 // is in the loop (battery-only, or USB+battery together - see
 // wifi_manager.c), capping TX power lowers that peak (at some cost to

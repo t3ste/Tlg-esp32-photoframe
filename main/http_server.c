@@ -1661,6 +1661,22 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddBoolToObject(root, "agenda_stack_layout",
                               config_manager_get_agenda_stack_layout());
         cJSON_AddStringToObject(root, "agenda_bg_color", config_manager_get_agenda_bg_color());
+        cJSON_AddStringToObject(root, "agenda_pri_a_color", config_manager_get_agenda_pri_a_color());
+        cJSON_AddStringToObject(root, "agenda_pri_b_color", config_manager_get_agenda_pri_b_color());
+        cJSON_AddStringToObject(root, "agenda_pri_c_color", config_manager_get_agenda_pri_c_color());
+        cJSON_AddStringToObject(root, "agenda_pri_d_color", config_manager_get_agenda_pri_d_color());
+        cJSON_AddStringToObject(root, "agenda_due_overdue_color",
+                                config_manager_get_agenda_due_overdue_color());
+        cJSON_AddStringToObject(root, "agenda_due_today_color",
+                                config_manager_get_agenda_due_today_color());
+        cJSON_AddStringToObject(root, "agenda_due_later_color",
+                                config_manager_get_agenda_due_later_color());
+        cJSON_AddStringToObject(root, "agenda_project_color",
+                                config_manager_get_agenda_project_color());
+        cJSON_AddStringToObject(root, "agenda_context_color",
+                                config_manager_get_agenda_context_color());
+        cJSON_AddStringToObject(root, "agenda_cal_a_color", config_manager_get_agenda_cal_a_color());
+        cJSON_AddStringToObject(root, "agenda_cal_b_color", config_manager_get_agenda_cal_b_color());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");

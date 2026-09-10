@@ -370,6 +370,10 @@
       <code>(0,255,0)</code> preview suggests, so black text on it reads poorly (unlike yellow for
       <code>B</code>, where black stays correct).
     </p>
+    <p style="color:var(--muted);font-size:0.88rem;">
+      Every hue in the Spectra6 table below is the <em>default</em> for its role, not fixed — each is
+      individually reassignable to any of the 4 chromatic hues via the Web UI (§6).
+    </p>
 
     <h3 class="profile-heading">Spectra6 (color) boards</h3>
     <table>
@@ -527,6 +531,9 @@
         </tr>
       </tbody>
     </table>
+    <p style="color:var(--muted);font-size:0.88rem;">
+      Blue/green are the defaults, not fixed — see §6 for the full per-role Web UI color picker.
+    </p>
     <p>
       The day divider itself and both column headers (&ldquo;TODO&hellip;&rdquo;/&ldquo;CALENDAR&hellip;&rdquo;)
       always draw a solid fill in the page's body-text color, with the label/title text color computed for
@@ -576,21 +583,60 @@
       </tbody>
     </table>
     <p>
-      Every <em>plain, no-own-fill</em> text color above (body text, priority-other, due-later,
-      <code>+project</code>, <code>@context</code>) is automatically swapped to a safe fallback
-      (black on a light background, white on a dark one) if — and only if — it would otherwise exactly
-      match the chosen background, so nothing can silently disappear. Elements that already draw their own
-      background chip (priority A&ndash;D, due-today/overdue, the day divider, both headers) are unaffected
-      by this rule, since their own fill already guarantees contrast against whatever page background is
-      chosen.
+      Every <em>plain, no-own-fill</em> text color (body text, priority-other, due-later,
+      <code>+project</code>, <code>@context</code>, Calendar A/B) is automatically swapped to a safe
+      fallback (black on a light background, white on a dark one) if — and only if — it would otherwise
+      exactly match the chosen background, so nothing can silently disappear. Elements that draw their own
+      background chip (priority A&ndash;D, due-today/overdue) get the equivalent protection for their
+      <em>fill</em> instead: since §6 below makes every one of those fill hues user-configurable too, a
+      chip's fill can now, in principle, be set to the exact same color as the page background — in that
+      case the chip is dropped entirely and the role falls back to the same plain safe-contrast text every
+      other collision fallback uses, rather than rendering an invisible box. The day divider and both
+      headers are unaffected either way, since their fill is always derived from the page background itself
+      (§4), never independently configurable.
     </p>
 
-    <h2>6. Open items</h2>
+    <h2>6. Per-role color picker (Web UI: Agenda &rarr; Appearance &rarr; Colors)</h2>
+    <p>
+      Every hue used above — both ToDo's per-element colors and each Calendar source's color — is
+      individually user-configurable on Spectra6/color boards, not just derivable from this document.
+      Grayscale boards have no picker here at all: with only one channel to work with, there's no spare hue
+      to reassign (see §3's grayscale table — nothing there was ever a bug to begin with). Every picker
+      offers the same 4 chromatic Spectra6 hues; nothing else is offered, since (as covered in §3) anything
+      off this exact palette risks dithering into visual noise on real hardware rather than rendering solid:
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Config key</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Priority (A)</td><td><code>agenda_pri_a_color</code></td><td>Red</td></tr>
+        <tr><td>Priority (B)</td><td><code>agenda_pri_b_color</code></td><td>Yellow</td></tr>
+        <tr><td>Priority (C)</td><td><code>agenda_pri_c_color</code></td><td>Green</td></tr>
+        <tr><td>Priority (D)</td><td><code>agenda_pri_d_color</code></td><td>Blue</td></tr>
+        <tr><td>Overdue</td><td><code>agenda_due_overdue_color</code></td><td>Red</td></tr>
+        <tr><td>Due today</td><td><code>agenda_due_today_color</code></td><td>Yellow</td></tr>
+        <tr><td>Due later</td><td><code>agenda_due_later_color</code></td><td>Blue</td></tr>
+        <tr><td><code>+Project</code></td><td><code>agenda_project_color</code></td><td>Blue</td></tr>
+        <tr><td><code>@Context</code></td><td><code>agenda_context_color</code></td><td>Green</td></tr>
+        <tr><td>Calendar A</td><td><code>agenda_cal_a_color</code></td><td>Blue</td></tr>
+        <tr><td>Calendar B</td><td><code>agenda_cal_b_color</code></td><td>Green</td></tr>
+      </tbody>
+    </table>
+    <p>
+      A chip role's <em>text</em> color is never picked separately from its hue — reassigning e.g. Priority
+      A to green automatically gets green's own correct contrast text (white), the same hardware-verified
+      per-hue table this document already uses elsewhere (see §3's note on Priority C), not a
+      formula-derived guess that would get real Spectra6 ink wrong the way a plain luminance check did during
+      this feature's own development.
+    </p>
+
+    <h2>7. Open items</h2>
     <ul>
-      <li>
-        A full per-hardware Web UI color picker, letting the user override every individual Agenda color
-        (not just the shared background) — explicitly scoped as a later, separate step and not started.
-      </li>
       <li>
         Multi-line notes/calendar entries with word-wrap and a leading bullet character, as a selectable
         display option — backlogged, not started.
