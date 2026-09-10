@@ -154,6 +154,33 @@ const orientationOptions = computed(() => {
   ];
 });
 
+// Mirrors agenda_renderer.c's agenda_background_color() exactly - the value
+// list a board can actually display depends on its BOARD_HAL_DISPLAY_TYPE
+// ("gc..." = grayscale, otherwise Spectra6 6-color), so this can't be one
+// static list. An element/text color that happens to collide with whatever
+// is picked here is automatically swapped to a safe fallback on-device
+// (agenda_avoid_bg_collision()) - no need to warn about that in this UI.
+const agendaBgOptions = computed(() => {
+  const displayType = appStore.systemInfo.display_type || "";
+  if (displayType.startsWith("gc")) {
+    return [
+      { title: "White", value: "white" },
+      { title: "Light gray", value: "gray75" },
+      { title: "Mid gray", value: "gray50" },
+      { title: "Dark gray", value: "gray25" },
+      { title: "Black", value: "black" },
+    ];
+  }
+  return [
+    { title: "White", value: "white" },
+    { title: "Black", value: "black" },
+    { title: "Yellow", value: "yellow" },
+    { title: "Red", value: "red" },
+    { title: "Blue", value: "blue" },
+    { title: "Green", value: "green" },
+  ];
+});
+
 // 90/270 would swap the panel's logical dimensions, which the streaming
 // pipeline and dimensionless .epdgz payloads can't represent; portrait
 // mounting is handled by the orientation setting instead
@@ -246,6 +273,7 @@ async function exportConfig() {
       // Remove sensitive fields
       delete config.wifi_password;
       delete config.agenda_cal_url;
+      delete config.agenda_cal_url2;
       exported.config = config;
     }
     if (processingRes.ok) exported.processing = await processingRes.json();
@@ -1195,13 +1223,17 @@ async function performFactoryReset() {
             <div class="text-caption text-medium-emphasis mb-2">
               An iCalendar/ICS feed - e.g. a Google Calendar "Secret address in iCal format"
               (Calendar Settings → Integrate calendar). Google's own docs warn that only you should
-              know this address - treat it like a password, never share it.
+              know this address - treat it like a password, never share it. A second calendar is
+              optional (e.g. work alongside personal) - events from both are merged into one list,
+              sorted by time, and colored by origin: Calendar A is blue, Calendar B is green
+              (shown as a filled background on a light agenda background, plain colored text on a
+              dark one - see Appearance below).
             </div>
             <v-row dense>
               <v-col cols="12" sm="8">
                 <v-text-field
                   v-model="settingsStore.deviceSettings.agendaCalUrl"
-                  label="Calendar ICS URL"
+                  label="Calendar A ICS URL"
                   type="password"
                   variant="outlined"
                   density="compact"
@@ -1222,6 +1254,18 @@ async function performFactoryReset() {
                 />
               </v-col>
             </v-row>
+            <v-text-field
+              v-model="settingsStore.deviceSettings.agendaCalUrl2"
+              label="Calendar B ICS URL (optional)"
+              type="password"
+              variant="outlined"
+              density="compact"
+              hint="Leave empty to keep the current URL, or to use only one calendar"
+              persistent-hint
+              placeholder="••••••••"
+              class="mb-2"
+              :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+            />
 
             <v-divider class="mb-4 mt-2" />
 
@@ -1238,6 +1282,35 @@ async function performFactoryReset() {
                   settingsStore.deviceSettings.agendaCalEnabled
                 )
               "
+            />
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Appearance</div>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Layout only matters when both ToDo and Calendar are shown together - portrait boards
+              always stack them regardless of this setting (a side-by-side split would make each
+              column too narrow there).
+            </div>
+            <v-radio-group
+              v-model="settingsStore.deviceSettings.agendaStackLayout"
+              inline
+              density="compact"
+              hide-details
+              class="mb-4"
+            >
+              <v-radio label="Stacked (ToDo above Calendar)" :value="true" />
+              <v-radio label="Side by side" :value="false" />
+            </v-radio-group>
+            <v-select
+              v-model="settingsStore.deviceSettings.agendaBgColor"
+              :items="agendaBgOptions"
+              label="Background color"
+              variant="outlined"
+              density="compact"
+              hint="Shared by both columns. If an element's own color happens to match this background, it's automatically swapped for a safe fallback."
+              persistent-hint
+              style="max-width: 320px"
             />
           </v-tabs-window-item>
 

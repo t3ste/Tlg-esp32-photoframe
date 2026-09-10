@@ -112,8 +112,19 @@ export const useSettingsStore = defineStore("settings", () => {
     agendaCalEnabled: false,
     agendaTodoUrl: "",
     agendaCalUrl: "",
+    // Optional second calendar (e.g. work vs. personal) - merged with the
+    // first at render time, colored per its own origin. Same write-only
+    // treatment as agendaCalUrl above.
+    agendaCalUrl2: "",
     agendaCalDays: 2,
     agendaCron: ["0 6-18 *"],
+    // true = ToDo above Calendar (default), false = side by side. Portrait
+    // boards always stack regardless of this setting - see agenda_renderer.c.
+    agendaStackLayout: true,
+    // Shared by both columns - one of "white" (default), "black", or a
+    // hardware-specific name (see SettingsPanel.vue's per-display-type
+    // option list). An unrecognized/inapplicable value falls back to white.
+    agendaBgColor: "white",
     // Debugging
     debugLogEnabled: false,
     errorOverlayEnabled: false,
@@ -303,6 +314,8 @@ export const useSettingsStore = defineStore("settings", () => {
         Array.isArray(data.agenda_cron) && data.agenda_cron.length
           ? data.agenda_cron
           : ["0 6-18 *"];
+      deviceSettings.value.agendaStackLayout = data.agenda_stack_layout !== false;
+      deviceSettings.value.agendaBgColor = data.agenda_bg_color || "white";
       deviceSettings.value.debugLogEnabled = data.debug_log_enabled === true;
       deviceSettings.value.errorOverlayEnabled = data.error_overlay_enabled === true;
       deviceSettings.value.haUrl = data.ha_url || "";
@@ -417,6 +430,8 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_todo_url: deviceSettings.value.agendaTodoUrl,
       agenda_cal_days: deviceSettings.value.agendaCalDays,
       agenda_cron: deviceSettings.value.agendaCron,
+      agenda_stack_layout: deviceSettings.value.agendaStackLayout,
+      agenda_bg_color: deviceSettings.value.agendaBgColor,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,
       error_overlay_enabled: deviceSettings.value.errorOverlayEnabled,
       save_downloaded_images: deviceSettings.value.saveDownloadedImages,
@@ -448,6 +463,9 @@ export const useSettingsStore = defineStore("settings", () => {
     // a new one.
     if (deviceSettings.value.agendaCalUrl && deviceSettings.value.agendaCalUrl.length > 0) {
       currentConfig.agenda_cal_url = deviceSettings.value.agendaCalUrl;
+    }
+    if (deviceSettings.value.agendaCalUrl2 && deviceSettings.value.agendaCalUrl2.length > 0) {
+      currentConfig.agenda_cal_url2 = deviceSettings.value.agendaCalUrl2;
     }
 
     // Compare with original config and only send changed fields.

@@ -1658,6 +1658,9 @@ static esp_err_t config_handler(httpd_req_t *req)
             }
         }
         cJSON_AddItemToObject(root, "agenda_cron", agenda_cron_arr);
+        cJSON_AddBoolToObject(root, "agenda_stack_layout",
+                              config_manager_get_agenda_stack_layout());
+        cJSON_AddStringToObject(root, "agenda_bg_color", config_manager_get_agenda_bg_color());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");

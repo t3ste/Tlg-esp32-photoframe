@@ -9,28 +9,38 @@
 /**
  * @brief Renders ToDo and/or Calendar content as a full-screen grid - no
  * source photo at all, unlike every other display path in this firmware.
- * Exactly one of `todo`/`events` may be NULL/empty and the other still
- * renders as a single full-width column; if both have content, landscape
- * boards show them side by side and portrait boards stack them, mirroring
- * image_processor_compose_pair_to_rgb()'s own orientation convention.
+ * `events_a`/`events_b` are two independent calendar sources (e.g. work vs.
+ * personal) merged into one day-grouped list, sorted by start time; either
+ * (or both) may be NULL/empty. `todo` may also be NULL/empty - whichever of
+ * ToDo/Calendar has content renders as a single full-width column if the
+ * other doesn't; if both do, the layout follows
+ * config_manager_get_agenda_stack_layout() (landscape only - portrait
+ * always stacks, mirroring image_processor_compose_pair_to_rgb()'s own
+ * orientation convention).
  *
- * Rows are color-coded (Spectra6 hue on color boards, a distinct gray
- * level on grayscale boards): overdue/priority-A ToDo items and a
- * happening-today Calendar event are most prominent, a future due date or
- * a +project tag is a secondary accent, everything else is plain text.
- * This is a whole-row color, not per-token - see docs/AGENDA.md for the
- * simplification rationale.
+ * Color-coded per docs/AGENDA_COLORS.html. ToDo rows color priority,
+ * +project/@context tags, and due-date urgency independently within one
+ * row. Calendar rows are colored by origin (events_a vs. events_b) via
+ * calendar_source_color() - plain colored text (blue for A, green for B),
+ * no background chip, on any page background. The shared background
+ * (config_manager_get_agenda_bg_color()) and its automatic
+ * collision-avoidance fallback (agenda_avoid_bg_collision()) apply to
+ * every plain (non-chip) text color in both columns, including the day
+ * divider and both column headers, which invert (light chip average shown
+ * dark and vice versa) rather than staying black-fixed like other chips
+ * that draw their own always-black/white fill.
  *
- * @param lookahead_days Only used for the Calendar column's header label
- * (the actual event filtering already happened when `events` was fetched).
+ * @param lookahead_days Only used for the Calendar column's day-window
+ * bookkeeping (the actual event filtering already happened when
+ * `events_a`/`events_b` were fetched) - no longer shown in the header text.
  * @return ESP_ERR_INVALID_ARG on bad arguments, ESP_ERR_INVALID_STATE if
- * both `todo` and `events` are NULL/empty (nothing to render - callers
- * should check this first rather than relying on it), ESP_ERR_NO_MEM if
- * the canvas buffer can't be allocated, otherwise whatever
- * image_processor_write_rgb_to_fmt() returns.
+ * `todo`, `events_a`, and `events_b` are all NULL/empty (nothing to render -
+ * callers should check this first rather than relying on it),
+ * ESP_ERR_NO_MEM if the canvas buffer can't be allocated, otherwise
+ * whatever image_processor_write_rgb_to_fmt() returns.
  */
-esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t *events,
-                                 int lookahead_days, const char *output_path,
-                                 image_format_t out_format);
+esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t *events_a,
+                                 const ics_event_list_t *events_b, int lookahead_days,
+                                 const char *output_path, image_format_t out_format);
 
 #endif

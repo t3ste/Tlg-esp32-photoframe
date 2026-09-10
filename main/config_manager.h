@@ -373,6 +373,9 @@ const char *config_manager_get_agenda_todo_url(void);
 // /api/config, same treatment as the WiFi password. See http_server.c.
 void config_manager_set_agenda_cal_url(const char *url);
 const char *config_manager_get_agenda_cal_url(void);
+// Optional second calendar - same write-only treatment.
+void config_manager_set_agenda_cal_url2(const char *url);
+const char *config_manager_get_agenda_cal_url2(void);
 
 // Clamped [AGENDA_CAL_DAYS_MIN, AGENDA_CAL_DAYS_MAX].
 void config_manager_set_agenda_cal_days(int days);
@@ -385,6 +388,17 @@ int config_manager_get_agenda_cron_rule_count(void);
 const char *config_manager_get_agenda_cron_rule(int index);
 void config_manager_set_agenda_cron_rules(const char *const *rules, int count);
 int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max);
+
+// Landscape-only layout choice (portrait always stacks) - see
+// AGENDA_STACK_DEFAULT in config.h.
+void config_manager_set_agenda_stack_layout(bool stacked);
+bool config_manager_get_agenda_stack_layout(void);
+
+// Shared ToDo+Calendar background color name - see AGENDA_BG_DEFAULT in
+// config.h and agenda_renderer.c's agenda_background_color() for the
+// authoritative per-hardware value list.
+void config_manager_set_agenda_bg_color(const char *color);
+const char *config_manager_get_agenda_bg_color(void);
 
 // ============================================================================
 // OTA

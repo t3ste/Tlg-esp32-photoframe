@@ -120,9 +120,12 @@ static bool agenda_todo_enabled = false;
 static bool agenda_cal_enabled = false;
 static char agenda_todo_url[AGENDA_TODO_URL_MAX_LEN] = {0};
 static char agenda_cal_url[AGENDA_CAL_URL_MAX_LEN] = {0};
+static char agenda_cal_url2[AGENDA_CAL_URL2_MAX_LEN] = {0};
 static uint8_t agenda_cal_days = AGENDA_CAL_DAYS_DEFAULT;
 static char agenda_cron_rules_store[MAX_CRON_RULES][CRON_RULE_MAX_LEN] = {{0}};
 static int agenda_cron_rule_count = 0;
+static bool agenda_stack_layout = AGENDA_STACK_DEFAULT;
+static char agenda_bg_color[AGENDA_BG_MAX_LEN] = AGENDA_BG_DEFAULT;
 
 // OTA
 static bool ota_check_enabled = true;
@@ -859,6 +862,8 @@ esp_err_t config_manager_init(void)
         nvs_get_str(nvs_handle, NVS_AGENDA_TODO_URL_KEY, agenda_todo_url, &agenda_todo_url_len);
         size_t agenda_cal_url_len = sizeof(agenda_cal_url);
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_URL_KEY, agenda_cal_url, &agenda_cal_url_len);
+        size_t agenda_cal_url2_len = sizeof(agenda_cal_url2);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_URL2_KEY, agenda_cal_url2, &agenda_cal_url2_len);
         uint8_t stored_agenda_cal_days = AGENDA_CAL_DAYS_DEFAULT;
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_DAYS_KEY, &stored_agenda_cal_days) == ESP_OK &&
             stored_agenda_cal_days >= AGENDA_CAL_DAYS_MIN &&
@@ -881,6 +886,15 @@ esp_err_t config_manager_init(void)
                 agenda_cron_load_from_joined(agenda_cron_buf);
                 ESP_LOGI(TAG, "Loaded %d agenda cron rule(s) from NVS", agenda_cron_rule_count);
             }
+        }
+        uint8_t stored_agenda_stack = AGENDA_STACK_DEFAULT ? 1 : 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_STACK_KEY, &stored_agenda_stack) == ESP_OK) {
+            agenda_stack_layout = (stored_agenda_stack != 0);
+        }
+        size_t agenda_bg_len = sizeof(agenda_bg_color);
+        if (nvs_get_str(nvs_handle, NVS_AGENDA_BG_KEY, agenda_bg_color, &agenda_bg_len) != ESP_OK) {
+            strncpy(agenda_bg_color, AGENDA_BG_DEFAULT, sizeof(agenda_bg_color) - 1);
+            agenda_bg_color[sizeof(agenda_bg_color) - 1] = '\0';
         }
 
         {
@@ -2660,6 +2674,31 @@ const char *config_manager_get_agenda_cal_url(void)
     return agenda_cal_url;
 }
 
+void config_manager_set_agenda_cal_url2(const char *url)
+{
+    const char *new_url = url ? url : "";
+    strncpy(agenda_cal_url2, new_url, AGENDA_CAL_URL2_MAX_LEN - 1);
+    agenda_cal_url2[AGENDA_CAL_URL2_MAX_LEN - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        if (agenda_cal_url2[0] != '\0') {
+            nvs_set_str(nvs_handle, NVS_AGENDA_CAL_URL2_KEY, agenda_cal_url2);
+        } else {
+            nvs_erase_key(nvs_handle, NVS_AGENDA_CAL_URL2_KEY);
+        }
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Agenda Calendar URL 2 set (length: %zu)", strlen(agenda_cal_url2));
+}
+
+const char *config_manager_get_agenda_cal_url2(void)
+{
+    return agenda_cal_url2;
+}
+
 void config_manager_set_agenda_cal_days(int days)
 {
     if (days < AGENDA_CAL_DAYS_MIN) {
@@ -2723,6 +2762,44 @@ int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max)
         }
     }
     return n;
+}
+
+void config_manager_set_agenda_stack_layout(bool stacked)
+{
+    agenda_stack_layout = stacked;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_AGENDA_STACK_KEY, agenda_stack_layout ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+bool config_manager_get_agenda_stack_layout(void)
+{
+    return agenda_stack_layout;
+}
+
+void config_manager_set_agenda_bg_color(const char *color)
+{
+    if (!color || color[0] == '\0') {
+        return;
+    }
+    strncpy(agenda_bg_color, color, sizeof(agenda_bg_color) - 1);
+    agenda_bg_color[sizeof(agenda_bg_color) - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_AGENDA_BG_KEY, agenda_bg_color);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_agenda_bg_color(void)
+{
+    return agenda_bg_color;
 }
 
 // ============================================================================

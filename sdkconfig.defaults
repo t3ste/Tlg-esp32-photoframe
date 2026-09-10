@@ -70,3 +70,16 @@ CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y
 
 # mbedTLS - Keep peer certificate for trust-cert endpoint
 CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE=y
+
+# mbedTLS certificate bundle - support cross-signed roots. Found live: a
+# Google Calendar ICS fetch failed every time with "esp-x509-crt-bundle: No
+# matching trusted root certificate found" / "mbedtls_ssl_handshake
+# returned -0x3000", even though the URL worked fine from a browser/curl.
+# calendar.google.com's chain terminates at "GTS Root R4" (Google Trust
+# Services' newer ECDSA root), which is itself cross-signed by the much
+# older, near-universally-trusted "GlobalSign Root CA" - exactly the
+# scenario this option exists for (standard bundle verification only
+# checks whether the chain's own terminal cert is *directly* a trusted
+# self-signed root, not whether it's cross-signed by one). Costs ~700
+# bytes of heap per the option's own Kconfig help text.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y

@@ -104,6 +104,18 @@ esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_by
             .buffer_size = 2048,
             .crt_bundle_attach = esp_crt_bundle_attach,
             .user_agent = user_agent,
+            // This project's lwIP config resolves only one address per
+            // hostname (CONFIG_LWIP_DNS_MAX_HOST_IP=1) with no
+            // "happy eyeballs" fallback between address families - if that
+            // one address happens to be IPv6 and the route to it is
+            // broken/slow for this network (a real-world case found live:
+            // a Google Calendar ICS fetch failed with ESP_ERR_HTTP_CONNECT
+            // on every attempt despite the identical URL working fine from
+            // a browser/curl, which do have automatic dual-stack fallback),
+            // the fetch fails outright with no retry via IPv4. Forcing IPv4
+            // here sidesteps that whole class of failure; IPv4 reachability
+            // is universal for every host this shared helper talks to.
+            .addr_type = HTTP_ADDR_TYPE_INET,
         };
 
         esp_http_client_handle_t client = esp_http_client_init(&config);

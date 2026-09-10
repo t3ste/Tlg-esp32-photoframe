@@ -167,6 +167,33 @@ TEST_F(CalendarIcs, NonVeventBlocksIgnored)
     EXPECT_STREQ(out.events[0].summary, "Real event");
 }
 
+// A VALARM (RFC 5545 §3.6.6) is a sub-block nested inside VEVENT that can
+// carry its own SUMMARY (e.g. an EMAIL-action alarm's message subject,
+// distinct from the event's own title). Without tracking "inside VALARM"
+// separately from "inside VEVENT", the alarm's SUMMARY line would overwrite
+// the event's real one, since both share the same property name.
+TEST_F(CalendarIcs, ValarmSummaryDoesNotOverwriteEventSummary)
+{
+    const char *ics =
+        "BEGIN:VCALENDAR\n"
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240115T090000Z\n"
+        "SUMMARY:Real event title\n"
+        "BEGIN:VALARM\n"
+        "ACTION:EMAIL\n"
+        "TRIGGER:-P1D\n"
+        "SUMMARY:Reminder email subject\n"
+        "DESCRIPTION:Don't forget tomorrow\n"
+        "END:VALARM\n"
+        "END:VEVENT\n"
+        "END:VCALENDAR\n";
+
+    ics_event_list_t out =
+        parse(ics, make_utc(2024, 1, 15, 0, 0, 0), make_utc(2024, 1, 16, 0, 0, 0));
+    ASSERT_EQ(out.count, 1);
+    EXPECT_STREQ(out.events[0].summary, "Real event title");
+}
+
 TEST_F(CalendarIcs, EventFullyOutsideWindowExcluded)
 {
     const char *ics =

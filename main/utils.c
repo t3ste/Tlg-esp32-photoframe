@@ -685,6 +685,11 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
         config_manager_set_agenda_cal_url(cJSON_GetStringValue(item));
     }
+    // Optional second calendar - same write-only treatment.
+    item = cJSON_GetObjectItem(root, "agenda_cal_url2");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_url2(cJSON_GetStringValue(item));
+    }
     item = cJSON_GetObjectItem(root, "agenda_cal_days");
     if (item && cJSON_IsNumber(item)) {
         config_manager_set_agenda_cal_days(item->valueint);
@@ -728,6 +733,14 @@ esp_err_t apply_config_from_json(cJSON *root)
             }
         }
         config_manager_set_agenda_cron_rules(rules, n);
+    }
+    item = cJSON_GetObjectItem(root, "agenda_stack_layout");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_stack_layout(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_bg_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_bg_color(cJSON_GetStringValue(item));
     }
 
     return ESP_OK;

@@ -3417,6 +3417,30 @@ void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x
     }
 }
 
+void image_processor_draw_text_runs(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                                    const char *ascii_text, const image_processor_text_run_t *runs,
+                                    int run_count, uint8_t default_r, uint8_t default_g,
+                                    uint8_t default_b)
+{
+    if (!ascii_text) {
+        return;
+    }
+    rgb_t default_color = {default_r, default_g, default_b};
+    int cx = x;
+    int index = 0;
+    for (const char *p = ascii_text; *p != '\0'; p++, index++) {
+        rgb_t color = default_color;
+        for (int i = 0; i < run_count; i++) {
+            if (index >= runs[i].start && index < runs[i].start + runs[i].length) {
+                color = (rgb_t) {runs[i].r, runs[i].g, runs[i].b};
+                break;
+            }
+        }
+        draw_glyph(rgb_buffer, width, height, cx, y, *p, color);
+        cx += Font24.Width;
+    }
+}
+
 #define CAPTION_MAX_LINES 3
 // Single source of truth for the per-line char buffer size is
 // OVERLAY_LINE_MAX_CHARS (image_processor.h - public, since

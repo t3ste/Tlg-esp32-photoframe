@@ -11,7 +11,22 @@
 static const char *TAG = "calendar_ics";
 
 #define ICS_HTTP_TIMEOUT_MS 10000
-#define ICS_MAX_RESPONSE_BYTES (96 * 1024)
+// A real Google Calendar export (many years of history, recurring series,
+// categories/attendees on every VEVENT) was found live to exceed the
+// original 96KB cap and get silently truncated mid-parse - confirmed live
+// at ~800KB and still growing over time (the user's own calendar). Google's
+// "secret address" ICS export has no query parameter to limit it to a date
+// range, so there's no way to ask for less data up front. This is
+// necessarily a "raise the ceiling" mitigation, not a permanent fix - a
+// truly unbounded-size-safe fix needs the parser to work incrementally on
+// the HTTP response stream (RFC 5545 line-unfolding included) rather than
+// buffering the whole body first, which is a real rewrite deliberately not
+// attempted under time pressure here. The response buffer lives in PSRAM
+// (http_fetch_get()), which this project has megabytes of headroom in, so
+// there's no reason to be stingy with the cap in the meantime - only the
+// fixed-size ics_event_list_t output (ICS_MAX_EVENTS entries) is actually
+// bounded by anything else.
+#define ICS_MAX_RESPONSE_BYTES (2 * 1024 * 1024)
 #define ICS_LINE_MAX_LEN 600  // a folded SUMMARY can legitimately run long
 
 // Un-folds ICS line-folding in place: a line that starts with a single
@@ -402,6 +417,13 @@ esp_err_t calendar_ics_parse(char *body, size_t body_len, time_t window_start, t
     body_len = ics_unfold(body, body_len);
 
     bool in_event = false;
+    // A VALARM is a sub-block *inside* VEVENT (RFC 5545 §3.6.6) that can
+    // carry its own SUMMARY/DESCRIPTION/TRIGGER properties (e.g. a reminder
+    // text distinct from the event's own title). Without tracking this
+    // separately, a VALARM's SUMMARY line would overwrite the real event's
+    // SUMMARY below, since both share the same property name and this
+    // parser otherwise only distinguishes "inside VEVENT" from "outside".
+    bool in_alarm = false;
     ics_vevent_state_t st;
     reset_vevent_state(&st);
 
@@ -423,6 +445,7 @@ esp_err_t calendar_ics_parse(char *body, size_t body_len, time_t window_start, t
 
         if (line_len >= 12 && strncmp(line, "BEGIN:VEVENT", 12) == 0) {
             in_event = true;
+            in_alarm = false;
             reset_vevent_state(&st);
             continue;
         }
@@ -431,10 +454,19 @@ esp_err_t calendar_ics_parse(char *body, size_t body_len, time_t window_start, t
                 finalize_vevent(&st, window_start, window_end, out);
             }
             in_event = false;
+            in_alarm = false;
             continue;
         }
-        if (!in_event) {
-            continue;  // VCALENDAR/VTIMEZONE/VALARM/etc. header noise - ignored
+        if (line_len >= 12 && strncmp(line, "BEGIN:VALARM", 12) == 0) {
+            in_alarm = true;
+            continue;
+        }
+        if (line_len >= 10 && strncmp(line, "END:VALARM", 10) == 0) {
+            in_alarm = false;
+            continue;
+        }
+        if (!in_event || in_alarm) {
+            continue;  // VCALENDAR/VTIMEZONE header noise, or a VALARM's own properties - ignored
         }
 
         const char *name, *value;

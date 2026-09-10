@@ -76,12 +76,58 @@ esp_err_t agenda_manager_run(void)
     // sometimes as corrupted-looking heap/task state elsewhere (whatever
     // memory happened to sit past the stack's end).
     todo_list_t *todo = heap_caps_calloc(1, sizeof(todo_list_t), MALLOC_CAP_SPIRAM);
-    ics_event_list_t *events = heap_caps_calloc(1, sizeof(ics_event_list_t), MALLOC_CAP_SPIRAM);
-    if (!todo || !events) {
+    ics_event_list_t *events_a = heap_caps_calloc(1, sizeof(ics_event_list_t), MALLOC_CAP_SPIRAM);
+    ics_event_list_t *events_b = heap_caps_calloc(1, sizeof(ics_event_list_t), MALLOC_CAP_SPIRAM);
+    if (!todo || !events_a || !events_b) {
         ESP_LOGE(TAG, "Failed to allocate agenda fetch buffers");
         heap_caps_free(todo);
-        heap_caps_free(events);
+        heap_caps_free(events_a);
+        heap_caps_free(events_b);
         return ESP_ERR_NO_MEM;
+    }
+
+    // Calendar fetched before ToDo (reversed from this feature's original
+    // order): live testing found Calendar consistently failing to connect
+    // (ESP_ERR_HTTP_CONNECT) while ToDo succeeded every time in the same
+    // cycle, matching the internal-SRAM-exhaustion class of bug already
+    // root-caused once in this project (f22e2e1 - a first TLS fetch can
+    // leave too little contiguous internal heap for a second, more
+    // demanding handshake, e.g. a longer certificate chain, to succeed).
+    // Both fetches log free internal heap right before connecting (a byte
+    // count only, never anything about the URL/host) so this can be
+    // confirmed from the debug log; running the apparently more demanding
+    // one first, while heap is freshest, is a safe, low-risk mitigation
+    // regardless of the exact numbers.
+    bool have_events_a = false, have_events_b = false;
+    int cal_days = config_manager_get_agenda_cal_days();
+    if (want_cal) {
+        const char *url = config_manager_get_agenda_cal_url();
+        const char *url2 = config_manager_get_agenda_cal_url2();
+        if (url[0] == '\0' && url2[0] == '\0') {
+            ESP_LOGW(TAG, "Calendar enabled but no URL configured");
+        }
+        time_t now = time(NULL);
+        time_t window_end = now + (time_t) cal_days * 86400;
+        if (url[0] != '\0') {
+            ESP_LOGI(TAG, "Free internal heap before Calendar fetch: %u bytes",
+                    (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+            bool ok = (calendar_ics_fetch(url, 0, now, window_end, events_a) == ESP_OK);
+            utils_record_internet_attempt(ok);
+            have_events_a = ok;
+            if (!ok) {
+                ESP_LOGW(TAG, "Calendar fetch failed, that column will be omitted this cycle");
+            }
+        }
+        if (url2[0] != '\0') {
+            ESP_LOGI(TAG, "Free internal heap before Calendar 2 fetch: %u bytes",
+                    (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+            bool ok = (calendar_ics_fetch(url2, 0, now, window_end, events_b) == ESP_OK);
+            utils_record_internet_attempt(ok);
+            have_events_b = ok;
+            if (!ok) {
+                ESP_LOGW(TAG, "Calendar 2 fetch failed, that source will be omitted this cycle");
+            }
+        }
     }
 
     bool have_todo = false;
@@ -90,6 +136,8 @@ esp_err_t agenda_manager_run(void)
         if (url[0] == '\0') {
             ESP_LOGW(TAG, "ToDo enabled but no URL configured");
         } else {
+            ESP_LOGI(TAG, "Free internal heap before ToDo fetch: %u bytes",
+                    (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             bool ok = (todo_fetch(url, 0, todo) == ESP_OK);
             utils_record_internet_attempt(ok);
             have_todo = ok;
@@ -99,31 +147,14 @@ esp_err_t agenda_manager_run(void)
         }
     }
 
-    bool have_events = false;
-    int cal_days = config_manager_get_agenda_cal_days();
-    if (want_cal) {
-        const char *url = config_manager_get_agenda_cal_url();
-        if (url[0] == '\0') {
-            ESP_LOGW(TAG, "Calendar enabled but no URL configured");
-        } else {
-            time_t now = time(NULL);
-            time_t window_end = now + (time_t) cal_days * 86400;
-            bool ok = (calendar_ics_fetch(url, 0, now, window_end, events) == ESP_OK);
-            utils_record_internet_attempt(ok);
-            have_events = ok;
-            if (!ok) {
-                ESP_LOGW(TAG, "Calendar fetch failed, that column will be omitted this cycle");
-            }
-        }
-    }
-
     esp_err_t result;
-    if (!have_todo && !have_events) {
+    if (!have_todo && !have_events_a && !have_events_b) {
         ESP_LOGW(TAG, "Nothing to render this agenda cycle (no source fetched successfully)");
         result = ESP_FAIL;
     } else {
-        result = agenda_renderer_render(have_todo ? todo : NULL, have_events ? events : NULL,
-                                        cal_days, AGENDA_OUTPUT_PATH, IMAGE_FORMAT_PNG);
+        result = agenda_renderer_render(have_todo ? todo : NULL, have_events_a ? events_a : NULL,
+                                        have_events_b ? events_b : NULL, cal_days,
+                                        AGENDA_OUTPUT_PATH, IMAGE_FORMAT_PNG);
         if (result != ESP_OK) {
             ESP_LOGE(TAG, "Failed to render agenda screen: %s", esp_err_to_name(result));
         } else {
@@ -132,6 +163,7 @@ esp_err_t agenda_manager_run(void)
     }
 
     heap_caps_free(todo);
-    heap_caps_free(events);
+    heap_caps_free(events_a);
+    heap_caps_free(events_b);
     return result;
 }

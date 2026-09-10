@@ -468,6 +468,13 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // NVS_WIFI_PASS_KEY (see config_manager.c).
 #define NVS_AGENDA_CAL_URL_KEY "agenda_cal_url"
 #define AGENDA_CAL_URL_MAX_LEN 256
+// Optional second calendar (e.g. work vs. personal) - merged with the first
+// at render time, each colored per its own origin (agenda_renderer.c's
+// calendar_source_color()). Same write-only credential treatment as the
+// first URL. Only this second feed is disabled if left empty; the first
+// remains the only one required to enable Calendar at all.
+#define NVS_AGENDA_CAL_URL2_KEY "agenda_cal_url2"
+#define AGENDA_CAL_URL2_MAX_LEN 256
 // How many upcoming days (including today) of calendar events to show.
 #define NVS_AGENDA_CAL_DAYS_KEY "agenda_cal_days"
 #define AGENDA_CAL_DAYS_DEFAULT 2
@@ -479,6 +486,21 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // for hourly, 6am-6pm, every day.
 #define NVS_AGENDA_CRON_KEY "agenda_cron"
 #define DEFAULT_AGENDA_CRON "0 6-18 *"
+// Landscape layout only (portrait always stacks top/bottom - too narrow
+// otherwise): true stacks ToDo above Calendar, false shows them side by
+// side. Default stacked, per user preference - side-by-side was the
+// original default and is kept as an option.
+#define NVS_AGENDA_STACK_KEY "agenda_stack"
+#define AGENDA_STACK_DEFAULT true
+// Shared by both the ToDo and Calendar columns (one setting, not two - a
+// mismatched split background was explicitly rejected). One of "white"
+// (default), "black", or a hardware-specific name (agenda_renderer.c's
+// agenda_background_color() has the authoritative list per display
+// profile) - an unrecognized or hardware-inapplicable value falls back to
+// white rather than erroring, matching this project's fail-soft style.
+#define NVS_AGENDA_BG_KEY "agenda_bg"
+#define AGENDA_BG_MAX_LEN 16
+#define AGENDA_BG_DEFAULT "white"
 
 // WiFi association draws a brief high-current TX burst; whenever a battery
 // is in the loop (battery-only, or USB+battery together - see

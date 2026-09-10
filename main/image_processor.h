@@ -335,6 +335,35 @@ void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x
                                const char *ascii_text, uint8_t r, uint8_t g, uint8_t b);
 
 /**
+ * @brief One colored substring of a string drawn by
+ * image_processor_draw_text_runs() - [start, start+length) are character
+ * (not byte) indices into that call's ascii_text, since every glyph is the
+ * same fixed width. Ranges outside the string's actual length, or beyond
+ * the text as truncated by a prior image_processor_wrap_text() call, are
+ * simply never reached by the draw loop - callers don't need to pre-clip.
+ */
+typedef struct {
+    int start;
+    int length;
+    uint8_t r, g, b;
+} image_processor_text_run_t;
+
+/**
+ * @brief Like image_processor_draw_text(), but each character take its
+ * color from whichever run in `runs` covers its index (first match wins;
+ * runs should not overlap), falling back to (default_r, default_g,
+ * default_b) for any character not covered by a run. Backgrounds (e.g. a
+ * "due today" highlight chip) are not drawn here - call
+ * image_processor_fill_rect() for the relevant character range first, the
+ * same way callers already layer a header bar under text elsewhere in this
+ * module.
+ */
+void image_processor_draw_text_runs(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                                    const char *ascii_text, const image_processor_text_run_t *runs,
+                                    int run_count, uint8_t default_r, uint8_t default_g,
+                                    uint8_t default_b);
+
+/**
  * @brief Greedy word-wraps `text` into up to `max_lines` lines (each written
  * into `out_lines`, OVERLAY_LINE_MAX_CHARS bytes per row) that fit within
  * `width` pixels using the same font/wrap rules as
