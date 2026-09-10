@@ -209,17 +209,136 @@ TEST_F(CalendarIcs, MissingSummaryHandledGracefully)
     EXPECT_STREQ(out.events[0].summary, "(untitled)");
 }
 
-TEST_F(CalendarIcs, RecurringEventWithRruleSkippedUntilPhase6)
+TEST_F(CalendarIcs, DailyRruleExpandsWithinWindow)
 {
+    // DTSTART is well before the window; a 3-day window should surface
+    // exactly the occurrences that land inside it.
     const char *ics =
         "BEGIN:VEVENT\n"
-        "DTSTART:20240115T090000Z\n"
+        "DTSTART:20240101T090000Z\n"
+        "DTEND:20240101T093000Z\n"
         "SUMMARY:Daily standup\n"
         "RRULE:FREQ=DAILY\n"
         "END:VEVENT\n";
 
     ics_event_list_t out =
+        parse(ics, make_utc(2024, 1, 15, 0, 0, 0), make_utc(2024, 1, 18, 0, 0, 0));
+    ASSERT_EQ(out.count, 3);
+    EXPECT_EQ(out.events[0].start, make_utc(2024, 1, 15, 9, 0, 0));
+    EXPECT_EQ(out.events[0].end, make_utc(2024, 1, 15, 9, 30, 0));
+    EXPECT_EQ(out.events[1].start, make_utc(2024, 1, 16, 9, 0, 0));
+    EXPECT_EQ(out.events[2].start, make_utc(2024, 1, 17, 9, 0, 0));
+    for (int i = 0; i < out.count; i++) {
+        EXPECT_STREQ(out.events[i].summary, "Daily standup");
+    }
+}
+
+TEST_F(CalendarIcs, DailyRruleClosedFormJumpFromFarPastDtstart)
+{
+    // DTSTART is years before the window - this specifically exercises the
+    // closed-form jump to the first in-window occurrence rather than a
+    // slow (or wrong) day-by-day walk from DTSTART.
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20200101T080000Z\n"
+        "SUMMARY:Ancient daily reminder\n"
+        "RRULE:FREQ=DAILY\n"
+        "END:VEVENT\n";
+
+    ics_event_list_t out =
         parse(ics, make_utc(2024, 1, 15, 0, 0, 0), make_utc(2024, 1, 16, 0, 0, 0));
+    ASSERT_EQ(out.count, 1);
+    EXPECT_EQ(out.events[0].start, make_utc(2024, 1, 15, 8, 0, 0));
+}
+
+TEST_F(CalendarIcs, WeeklyRruleExpandsOnCorrectDays)
+{
+    // DTSTART is a Monday (2024-01-01); weekly occurrences should land on
+    // Mondays only, one per 7-day period.
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240101T100000Z\n"
+        "SUMMARY:Weekly sync\n"
+        "RRULE:FREQ=WEEKLY\n"
+        "END:VEVENT\n";
+
+    // Window covers 2024-01-08 (Mon) through 2024-01-21 (Sun) - two weekly
+    // occurrences (Jan 8 and Jan 15) should fall inside it.
+    ics_event_list_t out =
+        parse(ics, make_utc(2024, 1, 8, 0, 0, 0), make_utc(2024, 1, 22, 0, 0, 0));
+    ASSERT_EQ(out.count, 2);
+    EXPECT_EQ(out.events[0].start, make_utc(2024, 1, 8, 10, 0, 0));
+    EXPECT_EQ(out.events[1].start, make_utc(2024, 1, 15, 10, 0, 0));
+}
+
+TEST_F(CalendarIcs, IntervalTwoLandsOnCorrectBoundary)
+{
+    // DTSTART 2024-01-01, INTERVAL=2 (every other day): occurrences on
+    // Jan 1, 3, 5, 7, 9, 11, 13, 15, 17... A window covering just Jan 16
+    // should NOT include the Jan-15 or Jan-17 occurrences (off-by-one check
+    // on the ceiling-division math that picks the first in-window k).
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240101T120000Z\n"
+        "SUMMARY:Every other day\n"
+        "RRULE:FREQ=DAILY;INTERVAL=2\n"
+        "END:VEVENT\n";
+
+    ics_event_list_t out =
+        parse(ics, make_utc(2024, 1, 16, 0, 0, 0), make_utc(2024, 1, 17, 0, 0, 0));
+    EXPECT_EQ(out.count, 0);
+
+    ics_event_list_t out2 =
+        parse(ics, make_utc(2024, 1, 17, 0, 0, 0), make_utc(2024, 1, 18, 0, 0, 0));
+    ASSERT_EQ(out2.count, 1);
+    EXPECT_EQ(out2.events[0].start, make_utc(2024, 1, 17, 12, 0, 0));
+}
+
+TEST_F(CalendarIcs, CountExcludesOccurrenceBeyondLimit)
+{
+    // DTSTART 2024-01-01, DAILY, COUNT=3 -> only Jan 1/2/3 ever occur. A
+    // window covering Jan 10 should see nothing, even though the naive
+    // (COUNT-less) pattern would otherwise land there.
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240101T090000Z\n"
+        "SUMMARY:Three-day trial\n"
+        "RRULE:FREQ=DAILY;COUNT=3\n"
+        "END:VEVENT\n";
+
+    ics_event_list_t out =
+        parse(ics, make_utc(2024, 1, 10, 0, 0, 0), make_utc(2024, 1, 13, 0, 0, 0));
+    EXPECT_EQ(out.count, 0);
+
+    // But the window covering the original 3 days should still see them.
+    ics_event_list_t out2 =
+        parse(ics, make_utc(2024, 1, 1, 0, 0, 0), make_utc(2024, 1, 4, 0, 0, 0));
+    EXPECT_EQ(out2.count, 3);
+}
+
+TEST_F(CalendarIcs, RruleWithBydayUnsupportedSkippedEntirely)
+{
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240101T090000Z\n"
+        "SUMMARY:Weekdays only\n"
+        "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR\n"
+        "END:VEVENT\n";
+
+    ics_event_list_t out = parse(ics, make_utc(2024, 1, 1, 0, 0, 0), make_utc(2024, 1, 8, 0, 0, 0));
+    EXPECT_EQ(out.count, 0);
+}
+
+TEST_F(CalendarIcs, RruleWithUnsupportedFreqSkippedEntirely)
+{
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240101T090000Z\n"
+        "SUMMARY:Monthly report\n"
+        "RRULE:FREQ=MONTHLY\n"
+        "END:VEVENT\n";
+
+    ics_event_list_t out = parse(ics, make_utc(2024, 1, 1, 0, 0, 0), make_utc(2024, 2, 1, 0, 0, 0));
     EXPECT_EQ(out.count, 0);
 }
 

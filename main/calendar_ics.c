@@ -169,6 +169,88 @@ static void decode_ics_text(const char *in, size_t in_len, char *out, size_t out
     out[o] = '\0';
 }
 
+// RRULE-lite: FREQ=DAILY/WEEKLY only, optional INTERVAL (default 1) and
+// COUNT. Anything else in the rule (BYDAY, EXDATE, UNTIL, BYMONTHDAY,
+// WKST, an unrecognized FREQ, ...) makes `supported` false - the caller
+// then skips the whole event rather than risk showing a wrong occurrence.
+typedef struct {
+    bool supported;
+    bool weekly;   // false = daily
+    int interval;  // >= 1
+    bool has_count;
+    int count;
+} ics_rrule_t;
+
+// Parses one RRULE value ("FREQ=DAILY;INTERVAL=2;COUNT=10"-style,
+// ';'-separated "KEY=VALUE" components, order not significant per RFC
+// 5545). Bails out (supported = false) the moment any component isn't one
+// of the handful this project chose to support - see ics_rrule_t's own
+// comment for the rationale.
+static bool parse_rrule(const char *value, size_t value_len, ics_rrule_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->interval = 1;
+    bool have_freq = false;
+
+    size_t i = 0;
+    while (i < value_len) {
+        size_t part_start = i;
+        while (i < value_len && value[i] != ';') {
+            i++;
+        }
+        size_t part_len = i - part_start;
+        if (i < value_len) {
+            i++;  // skip ';'
+        }
+        if (part_len == 0) {
+            continue;
+        }
+
+        const char *part = value + part_start;
+        const char *eq = memchr(part, '=', part_len);
+        if (!eq) {
+            return false;  // malformed component - fail closed
+        }
+        size_t key_len = (size_t) (eq - part);
+        const char *val_ptr = eq + 1;
+        size_t val_len = part_len - key_len - 1;
+
+        if (key_len == 4 && strncmp(part, "FREQ", 4) == 0) {
+            have_freq = true;
+            if (val_len == 5 && strncmp(val_ptr, "DAILY", 5) == 0) {
+                out->weekly = false;
+            } else if (val_len == 6 && strncmp(val_ptr, "WEEKLY", 6) == 0) {
+                out->weekly = true;
+            } else {
+                return false;  // MONTHLY/YEARLY/HOURLY/... not supported
+            }
+        } else if (key_len == 8 && strncmp(part, "INTERVAL", 8) == 0) {
+            char buf[16];
+            size_t n = val_len < sizeof(buf) - 1 ? val_len : sizeof(buf) - 1;
+            memcpy(buf, val_ptr, n);
+            buf[n] = '\0';
+            int iv = atoi(buf);
+            out->interval = (iv < 1) ? 1 : iv;
+        } else if (key_len == 5 && strncmp(part, "COUNT", 5) == 0) {
+            char buf[16];
+            size_t n = val_len < sizeof(buf) - 1 ? val_len : sizeof(buf) - 1;
+            memcpy(buf, val_ptr, n);
+            buf[n] = '\0';
+            out->count = atoi(buf);
+            out->has_count = true;
+        } else {
+            // BYDAY, EXDATE, UNTIL, BYMONTHDAY, WKST, BYSETPOS, ... - none
+            // of these are safe to just ignore (they'd change which
+            // occurrences are actually valid), so the whole rule is
+            // unsupported rather than silently wrong.
+            return false;
+        }
+    }
+
+    out->supported = have_freq;
+    return out->supported;
+}
+
 typedef struct {
     bool have_dtstart;
     struct tm dtstart_tm;
@@ -182,7 +264,8 @@ typedef struct {
     char raw_summary[ICS_SUMMARY_MAX_LEN];
     bool have_summary;
 
-    bool unsupported_rrule;  // an RRULE present but not FREQ=DAILY/WEEKLY-only
+    bool has_rrule;
+    ics_rrule_t rrule;
 } ics_vevent_state_t;
 
 static void reset_vevent_state(ics_vevent_state_t *st)
@@ -210,14 +293,57 @@ static void add_event(ics_event_list_t *out, time_t start, time_t end, bool all_
     e->summary[ICS_SUMMARY_MAX_LEN - 1] = '\0';
 }
 
+// Expands a supported RRULE (see ics_rrule_t) into whichever occurrences
+// overlap [window_start, window_end), via a closed-form jump straight to
+// the first candidate rather than walking forward one period at a time
+// from DTSTART - important since a long-running recurring event's DTSTART
+// can be years in the past, and the lookahead window here is only ever a
+// few days wide. Whole-day period arithmetic is done directly in epoch
+// seconds (period_secs is always an exact multiple of 86400) rather than
+// via calendar-date components - equivalent as long as local-time-of-day
+// shifts by exactly 86400s/day, which holds under this project's existing
+// fixed-UTC-offset timezone model (no DST transitions to account for).
+static void expand_rrule(const ics_rrule_t *rule, time_t base_start, time_t duration, bool all_day,
+                         const char *summary, time_t window_start, time_t window_end,
+                         ics_event_list_t *out)
+{
+    long period_secs = (long) (rule->weekly ? 7 : 1) * rule->interval * 86400;
+    if (period_secs <= 0) {
+        period_secs = 86400;  // defensive - interval is already clamped >= 1 by parse_rrule()
+    }
+
+    time_t diff = window_start - base_start;
+    long k0 = (diff <= 0) ? 0 : (long) ((diff + period_secs - 1) / period_secs);
+
+    // Hard safety cap regardless of inputs: a window of at most a few days
+    // can never legitimately need more than window_days+1 occurrences at
+    // this period granularity, so 8 is a correctness backstop, not a real
+    // constraint.
+    for (long k = k0; k < k0 + 8; k++) {
+        if (rule->has_count && k >= rule->count) {
+            break;
+        }
+        time_t occ_start = base_start + (time_t) (k * period_secs);
+        if (occ_start >= window_end) {
+            break;  // start only increases with k - nothing further can matter
+        }
+        time_t occ_end = occ_start + duration;
+        if (time_overlaps_window(occ_start, occ_end, window_start, window_end)) {
+            add_event(out, occ_start, occ_end, all_day, summary);
+        }
+    }
+}
+
 // Finalizes one VEVENT block (called at "END:VEVENT"): fills in missing
-// DTEND per the documented defaults, and includes the event if it
-// overlaps the requested window. RRULE handling (Phase 6) hooks in here
-// too, once added - a block flagged unsupported_rrule is skipped outright.
+// DTEND per the documented defaults, then either expands a supported RRULE
+// (see expand_rrule()) or includes the single event if it overlaps the
+// requested window. A present-but-unsupported RRULE means the event is
+// skipped entirely, fail-soft - showing it once as if non-recurring would
+// be actively misleading.
 static void finalize_vevent(const ics_vevent_state_t *st, time_t window_start, time_t window_end,
                             ics_event_list_t *out)
 {
-    if (!st->have_dtstart || st->unsupported_rrule) {
+    if (!st->have_dtstart) {
         return;
     }
     time_t start = ics_datetime_to_time(&st->dtstart_tm, st->dtstart_utc);
@@ -232,10 +358,21 @@ static void finalize_vevent(const ics_vevent_state_t *st, time_t window_start, t
         end = st->all_day ? start + 86400 : start;
     }
 
+    const char *summary = st->have_summary ? st->raw_summary : NULL;
+
+    if (st->has_rrule) {
+        if (!st->rrule.supported) {
+            return;
+        }
+        expand_rrule(&st->rrule, start, end - start, st->all_day, summary, window_start, window_end,
+                     out);
+        return;
+    }
+
     if (!time_overlaps_window(start, end, window_start, window_end)) {
         return;
     }
-    add_event(out, start, end, st->all_day, st->have_summary ? st->raw_summary : NULL);
+    add_event(out, start, end, st->all_day, summary);
 }
 
 static int compare_events_by_start(const void *a, const void *b)
@@ -333,10 +470,8 @@ esp_err_t calendar_ics_parse(char *body, size_t body_len, time_t window_start, t
             st.raw_summary[ICS_SUMMARY_MAX_LEN - 1] = '\0';
             st.have_summary = true;
         } else if (name_is(name, name_len, "RRULE")) {
-            // Phase 6 (RRULE-lite) parses this properly; until then, any
-            // recurring event is skipped rather than shown once as if it
-            // were a one-off (which would be actively misleading).
-            st.unsupported_rrule = true;
+            st.has_rrule = true;
+            parse_rrule(value, value_len, &st.rrule);  // rrule.supported tells finalize_vevent()
         }
     }
 
