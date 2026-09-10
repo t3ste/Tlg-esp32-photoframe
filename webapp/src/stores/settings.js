@@ -104,6 +104,16 @@ export const useSettingsStore = defineStore("settings", () => {
     showExifDatetimeEnabled: false,
     lowBatteryOverlayEnabled: false,
     lowBatteryOverlayThreshold: 16,
+    // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
+    // overlay. agendaCalUrl is write-only (never returned by GET
+    // /api/config, same treatment as wifiPassword above) - starts empty
+    // even when a URL is actually configured on the device.
+    agendaTodoEnabled: false,
+    agendaCalEnabled: false,
+    agendaTodoUrl: "",
+    agendaCalUrl: "",
+    agendaCalDays: 2,
+    agendaCron: ["0 6-18 *"],
     // Debugging
     debugLogEnabled: false,
     errorOverlayEnabled: false,
@@ -282,6 +292,17 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.showExifDatetimeEnabled = data.show_exif_datetime_enabled === true;
       deviceSettings.value.lowBatteryOverlayEnabled = data.low_battery_overlay_enabled === true;
       deviceSettings.value.lowBatteryOverlayThreshold = data.low_battery_overlay_threshold ?? 16;
+      deviceSettings.value.agendaTodoEnabled = data.agenda_todo_enabled === true;
+      deviceSettings.value.agendaCalEnabled = data.agenda_cal_enabled === true;
+      deviceSettings.value.agendaTodoUrl = data.agenda_todo_url || "";
+      // agenda_cal_url is intentionally never present in this response (see
+      // config_manager.c) - stays empty even when a URL is actually
+      // configured, same write-only treatment as wifiPassword above.
+      deviceSettings.value.agendaCalDays = data.agenda_cal_days ?? 2;
+      deviceSettings.value.agendaCron =
+        Array.isArray(data.agenda_cron) && data.agenda_cron.length
+          ? data.agenda_cron
+          : ["0 6-18 *"];
       deviceSettings.value.debugLogEnabled = data.debug_log_enabled === true;
       deviceSettings.value.errorOverlayEnabled = data.error_overlay_enabled === true;
       deviceSettings.value.haUrl = data.ha_url || "";
@@ -391,6 +412,11 @@ export const useSettingsStore = defineStore("settings", () => {
       show_exif_datetime_enabled: deviceSettings.value.showExifDatetimeEnabled,
       low_battery_overlay_enabled: deviceSettings.value.lowBatteryOverlayEnabled,
       low_battery_overlay_threshold: deviceSettings.value.lowBatteryOverlayThreshold,
+      agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
+      agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
+      agenda_todo_url: deviceSettings.value.agendaTodoUrl,
+      agenda_cal_days: deviceSettings.value.agendaCalDays,
+      agenda_cron: deviceSettings.value.agendaCron,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,
       error_overlay_enabled: deviceSettings.value.errorOverlayEnabled,
       save_downloaded_images: deviceSettings.value.saveDownloadedImages,
@@ -414,6 +440,14 @@ export const useSettingsStore = defineStore("settings", () => {
     // Only include password if it's been changed (not empty)
     if (deviceSettings.value.wifiPassword && deviceSettings.value.wifiPassword.length > 0) {
       currentConfig.wifi_password = deviceSettings.value.wifiPassword;
+    }
+
+    // Same write-only treatment for the Calendar ICS URL (a credential,
+    // per Google's own "secret address" warning) - never round-tripped
+    // from GET /api/config, so only send it when the user actually typed
+    // a new one.
+    if (deviceSettings.value.agendaCalUrl && deviceSettings.value.agendaCalUrl.length > 0) {
+      currentConfig.agenda_cal_url = deviceSettings.value.agendaCalUrl;
     }
 
     // Compare with original config and only send changed fields.

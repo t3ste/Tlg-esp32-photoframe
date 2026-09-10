@@ -245,6 +245,7 @@ async function exportConfig() {
       const config = await configRes.json();
       // Remove sensitive fields
       delete config.wifi_password;
+      delete config.agenda_cal_url;
       exported.config = config;
     }
     if (processingRes.ok) exported.processing = await processingRes.json();
@@ -503,6 +504,7 @@ async function performFactoryReset() {
       <v-tabs v-model="tab" color="primary" show-arrows density="compact">
         <v-tab value="general"> General </v-tab>
         <v-tab value="autoRotate"> Auto Rotate </v-tab>
+        <v-tab value="agenda"> Agenda </v-tab>
         <v-tab value="power"> Power </v-tab>
         <v-tab value="homeAssistant"> Home Assistant </v-tab>
         <v-tab value="processing"> Processing </v-tab>
@@ -1147,6 +1149,96 @@ async function performFactoryReset() {
                 </v-card>
               </v-expand-transition>
             </div>
+          </v-tabs-window-item>
+
+          <!-- Agenda Tab (ToDo + Calendar) -->
+          <v-tabs-window-item value="agenda">
+            <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+              Not an overlay on a photo - whenever a wake matches the schedule below, the display is
+              used exclusively to show ToDo and/or Calendar content instead of a photo, then goes
+              back to sleep. Normal photo auto-rotation is unaffected and keeps running on its own
+              separate schedule.
+            </v-alert>
+
+            <div class="text-subtitle-2 mb-2">ToDo</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.agendaTodoEnabled"
+              label="Show ToDo list"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              A plain todo.txt file, fetched fresh every agenda wake - no API key, no on-device
+              caching. Completed tasks ("x " prefix) are never shown.
+            </div>
+            <v-text-field
+              v-model="settingsStore.deviceSettings.agendaTodoUrl"
+              label="todo.txt URL"
+              variant="outlined"
+              density="compact"
+              placeholder="https://example.com/todo.txt"
+              class="mb-4"
+              :disabled="!settingsStore.deviceSettings.agendaTodoEnabled"
+            />
+
+            <v-divider class="mb-4" />
+
+            <div class="text-subtitle-2 mb-2">Calendar</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.agendaCalEnabled"
+              label="Show upcoming events"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              An iCalendar/ICS feed - e.g. a Google Calendar "Secret address in iCal format"
+              (Calendar Settings → Integrate calendar). Google's own docs warn that only you should
+              know this address - treat it like a password, never share it.
+            </div>
+            <v-row dense>
+              <v-col cols="12" sm="8">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.agendaCalUrl"
+                  label="Calendar ICS URL"
+                  type="password"
+                  variant="outlined"
+                  density="compact"
+                  hint="Leave empty to keep the current URL"
+                  persistent-hint
+                  placeholder="••••••••"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+              </v-col>
+              <v-col cols="12" sm="4">
+                <v-select
+                  v-model="settingsStore.deviceSettings.agendaCalDays"
+                  :items="[1, 2, 3]"
+                  label="Days ahead"
+                  variant="outlined"
+                  density="compact"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+              </v-col>
+            </v-row>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Schedule</div>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Independent from the Auto-Rotate schedule above - only applies while ToDo and/or
+              Calendar is enabled.
+            </div>
+            <RotationSchedule
+              v-model="settingsStore.deviceSettings.agendaCron"
+              :disabled="
+                !(
+                  settingsStore.deviceSettings.agendaTodoEnabled ||
+                  settingsStore.deviceSettings.agendaCalEnabled
+                )
+              "
+            />
           </v-tabs-window-item>
 
           <!-- Power Tab -->

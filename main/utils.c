@@ -665,6 +665,71 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_low_battery_overlay_threshold(item->valueint);
     }
 
+    item = cJSON_GetObjectItem(root, "agenda_todo_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_todo_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_todo_url");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_todo_url(cJSON_GetStringValue(item));
+    }
+    // Write-only, like wifi_password above: only ever applied when the
+    // client actually sent a non-empty value (an empty string here just
+    // means "the user didn't touch this field," not "clear the URL" - see
+    // config_manager_get_agenda_cal_url()'s doc comment).
+    item = cJSON_GetObjectItem(root, "agenda_cal_url");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_url(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_days");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_agenda_cal_days(item->valueint);
+    }
+    // Agenda schedule: same shape/validation as rotate_cron above, but an
+    // empty array is allowed here (agenda_manager_is_enabled() already
+    // requires a non-empty schedule before agenda mode can ever fire, so
+    // an empty schedule is just "not configured yet," not an error).
+    item = cJSON_GetObjectItem(root, "agenda_cron");
+    if (item && cJSON_IsArray(item)) {
+        int count = cJSON_GetArraySize(item);
+        if (count > MAX_CRON_RULES) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Too many agenda schedule rules (max %d)", MAX_CRON_RULES);
+            utils_set_config_error(msg);
+            return ESP_FAIL;
+        }
+        const char *rules[MAX_CRON_RULES];
+        int n = 0;
+        cJSON *el;
+        cJSON_ArrayForEach(el, item)
+        {
+            if (!cJSON_IsString(el)) {
+                utils_set_config_error("Agenda schedule rule must be a string");
+                return ESP_FAIL;
+            }
+            const char *expr = cJSON_GetStringValue(el);
+            if (strlen(expr) >= CRON_RULE_MAX_LEN) {
+                utils_set_config_error("Cron expression too long");
+                return ESP_FAIL;
+            }
+            cron_rule_t tmp;
+            if (!cron_parse(expr, &tmp)) {
+                char msg[96];
+                snprintf(msg, sizeof(msg), "Invalid agenda cron expression: %s", expr);
+                utils_set_config_error(msg);
+                return ESP_FAIL;
+            }
+            if (n < MAX_CRON_RULES) {
+                rules[n++] = expr;
+            }
+        }
+        config_manager_set_agenda_cron_rules(rules, n);
+    }
+
     return ESP_OK;
 }
 

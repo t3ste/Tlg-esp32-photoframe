@@ -1639,6 +1639,26 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddNumberToObject(root, "low_battery_overlay_threshold",
                                 config_manager_get_low_battery_overlay_threshold());
 
+        // Agenda (ToDo + Calendar). agenda_cal_url is deliberately NEVER
+        // added here - it's a credential (Google: "only you should know
+        // this address"), same write-only treatment as wifi_password
+        // above, which is also absent from this response.
+        cJSON_AddBoolToObject(root, "agenda_todo_enabled",
+                              config_manager_get_agenda_todo_enabled());
+        cJSON_AddBoolToObject(root, "agenda_cal_enabled", config_manager_get_agenda_cal_enabled());
+        const char *agenda_todo_url = config_manager_get_agenda_todo_url();
+        cJSON_AddStringToObject(root, "agenda_todo_url", agenda_todo_url ? agenda_todo_url : "");
+        cJSON_AddNumberToObject(root, "agenda_cal_days", config_manager_get_agenda_cal_days());
+        cJSON *agenda_cron_arr = cJSON_CreateArray();
+        int agenda_cron_count = config_manager_get_agenda_cron_rule_count();
+        for (int i = 0; i < agenda_cron_count; i++) {
+            const char *rule = config_manager_get_agenda_cron_rule(i);
+            if (rule) {
+                cJSON_AddItemToArray(agenda_cron_arr, cJSON_CreateString(rule));
+            }
+        }
+        cJSON_AddItemToObject(root, "agenda_cron", agenda_cron_arr);
+
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, json_str);
