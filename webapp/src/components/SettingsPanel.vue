@@ -296,6 +296,16 @@ async function resetDisplayHistory() {
   }
 }
 
+// Default OFF: an export is downloaded to disk as plaintext JSON, so
+// credentials should only end up in it when the user explicitly opts in
+// (e.g. to get a fully self-contained backup for re-import elsewhere).
+// Note this can only cover fields GET /api/config actually returns -
+// wifi_password/agenda_todo_url/agenda_cal_url/agenda_cal_url2 are
+// deliberately write-only at the device level (never in the GET response
+// at all), so no frontend checkbox can include them; those must always be
+// re-entered by hand after an import.
+const exportIncludeSecrets = ref(false);
+
 async function exportConfig() {
   try {
     const [configRes, processingRes, paletteRes, albumsRes] = await Promise.all([
@@ -309,17 +319,22 @@ async function exportConfig() {
 
     if (configRes.ok) {
       const config = await configRes.json();
-      // Remove sensitive fields - anything GET /api/config returns in
-      // plaintext that should never end up in a downloadable file
+      // Always write-only at the device level - never returned by GET, so
+      // these deletes are belt-and-suspenders and unaffected by the
+      // checkbox below.
       delete config.wifi_password;
       delete config.agenda_todo_url;
       delete config.agenda_cal_url;
       delete config.agenda_cal_url2;
-      delete config.access_token;
-      delete config.http_header_value;
-      delete config.telegram_bot_token;
-      delete config.openai_api_key;
-      delete config.google_api_key;
+      // These 5 ARE returned by GET /api/config in plaintext - only strip
+      // them when the user hasn't opted in to a full-credentials export.
+      if (!exportIncludeSecrets.value) {
+        delete config.access_token;
+        delete config.http_header_value;
+        delete config.telegram_bot_token;
+        delete config.openai_api_key;
+        delete config.google_api_key;
+      }
       exported.config = config;
     }
     if (processingRes.ok) exported.processing = await processingRes.json();
@@ -1941,6 +1956,19 @@ async function performFactoryReset() {
             <div class="text-subtitle-1 mt-2 mb-4">Config Backup</div>
             <v-row>
               <v-col cols="12">
+                <v-checkbox
+                  v-model="exportIncludeSecrets"
+                  density="compact"
+                  hide-details
+                  class="mb-2"
+                  label="Include credentials in export (Telegram bot token, AI API keys, access token, custom auth header)"
+                />
+                <div class="text-caption text-grey mb-3">
+                  Off by default: an export is a plaintext JSON file. Enable this for a
+                  fully self-contained backup, e.g. before restoring to a fresh device.
+                  WiFi password and Calendar/ToDo URLs can never be included (the device
+                  never returns them at all) - re-enter those manually after importing.
+                </div>
                 <v-btn variant="outlined" class="mr-2" @click="exportConfig">
                   <v-icon start>mdi-download</v-icon>
                   Export Config
