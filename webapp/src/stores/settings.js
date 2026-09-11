@@ -126,6 +126,9 @@ export const useSettingsStore = defineStore("settings", () => {
     // the same weather settings/provider as the photo weather overlay -
     // see weatherLocationName/weatherProvider etc. below). Off by default.
     agendaCalWeatherEnabled: false,
+    // Placement only - centered (default) or right-aligned; doesn't change
+    // how much forecast text can fit (see agenda_renderer.c).
+    agendaCalWeatherRightAligned: false,
     // A multi-day event is shown once (first visible day) with an "N/M: "
     // position prefix instead of repeated under every day it spans.
     agendaCalCompactMultiday: false,
@@ -339,6 +342,8 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.agendaCalName2 = data.agenda_cal_name2 || "";
       deviceSettings.value.agendaCalDays = data.agenda_cal_days ?? 2;
       deviceSettings.value.agendaCalWeatherEnabled = data.agenda_cal_weather_enabled === true;
+      deviceSettings.value.agendaCalWeatherRightAligned =
+        data.agenda_cal_weather_right_aligned === true;
       deviceSettings.value.agendaCalCompactMultiday = data.agenda_cal_compact_multiday === true;
       deviceSettings.value.agendaCron =
         Array.isArray(data.agenda_cron) && data.agenda_cron.length
@@ -473,6 +478,7 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_cal_name2: deviceSettings.value.agendaCalName2,
       agenda_cal_days: deviceSettings.value.agendaCalDays,
       agenda_cal_weather_enabled: deviceSettings.value.agendaCalWeatherEnabled,
+      agenda_cal_weather_right_aligned: deviceSettings.value.agendaCalWeatherRightAligned,
       agenda_cal_compact_multiday: deviceSettings.value.agendaCalCompactMultiday,
       agenda_cron: deviceSettings.value.agendaCron,
       agenda_stack_layout: deviceSettings.value.agendaStackLayout,

@@ -1651,6 +1651,8 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddNumberToObject(root, "agenda_cal_days", config_manager_get_agenda_cal_days());
         cJSON_AddBoolToObject(root, "agenda_cal_weather_enabled",
                               config_manager_get_agenda_cal_weather_enabled());
+        cJSON_AddBoolToObject(root, "agenda_cal_weather_right_aligned",
+                              config_manager_get_agenda_cal_weather_right_aligned());
         cJSON_AddBoolToObject(root, "agenda_cal_compact_multiday",
                               config_manager_get_agenda_cal_compact_multiday());
         cJSON_AddStringToObject(root, "agenda_cal_name", config_manager_get_agenda_cal_name());

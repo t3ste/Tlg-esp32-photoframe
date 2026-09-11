@@ -606,9 +606,15 @@ static void build_event_line(const ics_event_t *ev, int calendar_index, bool gra
 // WEATHER_FORECAST_DAYS is 3) - it just gets one continuous dashed run
 // instead of a second chip, rather than reverting to the centered layout
 // for that one day, which would look inconsistent against its neighbors.
+// `weather_right_aligned` (only consulted when weather_mode is on) flips
+// the forecast chip's placement within its reserved space from centered
+// to flush against the row's right edge - purely where it sits, not how
+// much of it fits, since max_weather_chars below reserves the same amount
+// of space either way.
 static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t rect, int y,
-                             const char *label, bool weather_mode, const char *weather_text,
-                             uint8_t fill_r, uint8_t fill_g, uint8_t fill_b)
+                             const char *label, bool weather_mode, bool weather_right_aligned,
+                             const char *weather_text, uint8_t fill_r, uint8_t fill_g,
+                             uint8_t fill_b)
 {
     uint8_t text_r, text_g, text_b;
     agenda_safe_text_color(fill_r, fill_g, fill_b, &text_r, &text_g, &text_b);
@@ -675,7 +681,8 @@ static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t 
             weather_clipped[max_weather_chars] = '\0';
         }
         weather_w = (int) strlen(weather_clipped) * IMAGE_PROCESSOR_FONT_WIDTH;
-        weather_x = rect.x + AGENDA_PADDING + (total_w - weather_w) / 2;
+        weather_x = weather_right_aligned ? (right_end - weather_w)
+                                          : (rect.x + AGENDA_PADDING + (total_w - weather_w) / 2);
         int min_weather_x = label_x + label_w + dash_len;
         if (weather_w > 0 && weather_x < min_weather_x) {
             weather_x = min_weather_x;
@@ -959,6 +966,7 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
     // draw_day_divider()'s comment), independent of whether any specific
     // day within the window happens to have its own forecast entry.
     bool weather_mode = cal_weather && cal_weather->valid;
+    bool weather_right_aligned = config_manager_get_agenda_cal_weather_right_aligned();
 
     int rows_used = 0;
     int instances_shown = 0;
@@ -978,8 +986,8 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
             snprintf(weather_buf, sizeof(weather_buf), "[%d/%d %s]", tmin, tmax, cond);
         }
         draw_day_divider(rgb, width, height, rect, content_top + rows_used * row_h, label,
-                         weather_mode, weather_buf[0] ? weather_buf : NULL, body_r, body_g,
-                         body_b);
+                         weather_mode, weather_right_aligned, weather_buf[0] ? weather_buf : NULL,
+                         body_r, body_g, body_b);
         rows_used++;
 
         for (int i = 0; i < tagged_count && rows_used < budget; i++) {

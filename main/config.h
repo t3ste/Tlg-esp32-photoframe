@@ -502,6 +502,14 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // in the evening - see calendar_ics.c) simply shows no forecast, same as
 // any other day the forecast doesn't happen to cover.
 #define NVS_AGENDA_CAL_WEATHER_KEY "agenda_cal_wthr"
+// Opt-in: right-align the forecast chip instead of centering it (day label
+// stays left-aligned either way). Purely a placement preference - the
+// available space reserved for the forecast (and therefore how much of it
+// can fit before being clipped) is identical either way, see
+// draw_day_divider()'s max_weather_chars computation, so this can't lose
+// any information a centered layout would have kept, in either the
+// stacked or side-by-side column layout.
+#define NVS_AGENDA_CAL_WTHR_ALIGN_KEY "agenda_cal_wal"
 // Opt-in: a multi-day event is shown once (on the first day of the visible
 // window it touches) with an "N/M: " position-within-span prefix, instead
 // of being repeated under every day it spans - see agenda_renderer.c's

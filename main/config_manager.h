@@ -386,6 +386,11 @@ int config_manager_get_agenda_cal_days(void);
 void config_manager_set_agenda_cal_weather_enabled(bool enabled);
 bool config_manager_get_agenda_cal_weather_enabled(void);
 
+// Opt-in right-alignment of the forecast chip (default: centered) - see
+// NVS_AGENDA_CAL_WTHR_ALIGN_KEY in config.h.
+void config_manager_set_agenda_cal_weather_right_aligned(bool enabled);
+bool config_manager_get_agenda_cal_weather_right_aligned(void);
+
 // Opt-in compact multi-day event display - see NVS_AGENDA_CAL_COMPACT_KEY
 // in config.h.
 void config_manager_set_agenda_cal_compact_multiday(bool enabled);

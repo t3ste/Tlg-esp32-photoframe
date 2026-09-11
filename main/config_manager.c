@@ -119,6 +119,7 @@ static bool low_battery_overlay_active = false;
 static bool agenda_todo_enabled = false;
 static bool agenda_cal_enabled = false;
 static bool agenda_cal_weather_enabled = false;
+static bool agenda_cal_weather_right_aligned = false;
 static bool agenda_cal_compact_multiday = false;
 static char agenda_cal_name[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_cal_name2[AGENDA_CAL_NAME_MAX_LEN] = {0};
@@ -890,6 +891,11 @@ esp_err_t config_manager_init(void)
         uint8_t stored_agenda_cal_wthr = 0;
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_WEATHER_KEY, &stored_agenda_cal_wthr) == ESP_OK) {
             agenda_cal_weather_enabled = (stored_agenda_cal_wthr != 0);
+        }
+        uint8_t stored_agenda_cal_wal = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_WTHR_ALIGN_KEY, &stored_agenda_cal_wal) ==
+            ESP_OK) {
+            agenda_cal_weather_right_aligned = (stored_agenda_cal_wal != 0);
         }
         uint8_t stored_agenda_cal_cpt = 0;
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_COMPACT_KEY, &stored_agenda_cal_cpt) == ESP_OK) {
@@ -2703,6 +2709,23 @@ void config_manager_set_agenda_cal_weather_enabled(bool enabled)
 bool config_manager_get_agenda_cal_weather_enabled(void)
 {
     return agenda_cal_weather_enabled;
+}
+
+void config_manager_set_agenda_cal_weather_right_aligned(bool enabled)
+{
+    agenda_cal_weather_right_aligned = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_AGENDA_CAL_WTHR_ALIGN_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+bool config_manager_get_agenda_cal_weather_right_aligned(void)
+{
+    return agenda_cal_weather_right_aligned;
 }
 
 void config_manager_set_agenda_cal_compact_multiday(bool enabled)

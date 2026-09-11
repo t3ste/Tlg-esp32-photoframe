@@ -1328,6 +1328,22 @@ async function performFactoryReset() {
               in the evening), that day simply shows no forecast.
             </div>
             <v-switch
+              v-model="settingsStore.deviceSettings.agendaCalWeatherRightAligned"
+              label="Right-align forecast"
+              color="primary"
+              class="mb-1"
+              hide-details
+              :disabled="
+                !settingsStore.deviceSettings.agendaCalEnabled ||
+                !settingsStore.deviceSettings.agendaCalWeatherEnabled
+              "
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Off (default): forecast centered on the divider line. On: forecast flush against the
+              right edge instead - just a placement preference, doesn't change how much of it fits
+              (works the same in both the stacked and side-by-side layout).
+            </div>
+            <v-switch
               v-model="settingsStore.deviceSettings.agendaCalCompactMultiday"
               label="Compact multi-day events"
               color="primary"

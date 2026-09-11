@@ -698,6 +698,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_cal_weather_enabled(cJSON_IsTrue(item));
     }
+    item = cJSON_GetObjectItem(root, "agenda_cal_weather_right_aligned");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_weather_right_aligned(cJSON_IsTrue(item));
+    }
     item = cJSON_GetObjectItem(root, "agenda_cal_compact_multiday");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_cal_compact_multiday(cJSON_IsTrue(item));
