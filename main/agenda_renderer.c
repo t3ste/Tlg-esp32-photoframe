@@ -206,6 +206,55 @@ static void hue_contrast_text(uint8_t hue_r, uint8_t hue_g, uint8_t hue_b, uint8
     }
 }
 
+// Resolves a user-configurable *chip* role (a role that draws its own
+// background fill): looks up `role_name`'s hue (role_hue()), then either
+// fills a chip with contrasting text (hue_contrast_text() - the common
+// case), or, if that hue would exactly match the page background and the
+// chip would otherwise vanish, falls back to a plain (no-fill) safe-
+// contrast text color instead - the same idea agenda_avoid_bg_collision()
+// applies to plain text, just for a chip's own fill. Shared by every
+// chip role (priority A-D, due-overdue, due-today) so this "resolve hue,
+// check collision, chip-or-plain" sequence exists in exactly one place
+// rather than being repeated at every call site.
+static void resolve_chip_color(const char *role_name, uint8_t default_r, uint8_t default_g,
+                               uint8_t default_b, uint8_t bg_r, uint8_t bg_g, uint8_t bg_b,
+                               uint8_t *fr, uint8_t *fg, uint8_t *fb, bool *has_bg, uint8_t *br,
+                               uint8_t *bgg, uint8_t *bb)
+{
+    uint8_t hue_r, hue_g, hue_b;
+    role_hue(role_name, default_r, default_g, default_b, &hue_r, &hue_g, &hue_b);
+    if (agenda_colors_equal(hue_r, hue_g, hue_b, bg_r, bg_g, bg_b)) {
+        *has_bg = false;
+        agenda_safe_text_color(bg_r, bg_g, bg_b, fr, fg, fb);
+        return;
+    }
+    *has_bg = true;
+    hue_contrast_text(hue_r, hue_g, hue_b, fr, fg, fb);
+    *br = hue_r;
+    *bgg = hue_g;
+    *bb = hue_b;
+}
+
+// Resolves a user-configurable *plain* role (no own fill): grayscale
+// always renders it as plain black (no spare hue to assign - see
+// priority_color()'s grayscale comment for why); a color board resolves
+// the role's hue then swaps it for a safe contrasting color if it happens
+// to exactly match the page background (agenda_avoid_bg_collision()).
+// Shared by every no-chip role (due-later, +project, @context, and each
+// Calendar source) so this "grayscale-or-hue, then collision check"
+// sequence exists in exactly one place.
+static void resolve_plain_color(const char *role_name, bool grayscale, uint8_t default_r,
+                                uint8_t default_g, uint8_t default_b, uint8_t bg_r, uint8_t bg_g,
+                                uint8_t bg_b, uint8_t *fr, uint8_t *fg, uint8_t *fb)
+{
+    if (grayscale) {
+        *fr = *fg = *fb = 0;
+    } else {
+        role_hue(role_name, default_r, default_g, default_b, fr, fg, fb);
+    }
+    agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
+}
+
 // Used by the per-element ToDo coloring below: compares `due_date`
 // ("YYYY-MM-DD") against `now`'s calendar date. All three flags are left
 // false if there's no due date at all.
@@ -290,48 +339,27 @@ static void priority_color(char priority, bool grayscale, uint8_t bg_r, uint8_t 
         agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
         return;  // plain black, no fill - matches every other unhighlighted role
     }
-    const char *role_name = NULL;
-    uint8_t default_r = 0, default_g = 0, default_b = 0;
     switch (priority) {
     case 'A':
-        role_name = config_manager_get_agenda_pri_a_color();
-        default_r = 255;
-        default_g = 0;
-        default_b = 0;  // red
-        break;
+        resolve_chip_color(config_manager_get_agenda_pri_a_color(), 255, 0, 0, bg_r, bg_g, bg_b, fr,
+                           fg, fb, has_bg, br, bgg, bb);
+        return;
     case 'B':
-        role_name = config_manager_get_agenda_pri_b_color();
-        default_r = 255;
-        default_g = 255;
-        default_b = 0;  // yellow
-        break;
+        resolve_chip_color(config_manager_get_agenda_pri_b_color(), 255, 255, 0, bg_r, bg_g, bg_b,
+                           fr, fg, fb, has_bg, br, bgg, bb);
+        return;
     case 'C':
-        role_name = config_manager_get_agenda_pri_c_color();
-        default_r = 0;
-        default_g = 255;
-        default_b = 0;  // green
-        break;
+        resolve_chip_color(config_manager_get_agenda_pri_c_color(), 0, 255, 0, bg_r, bg_g, bg_b, fr,
+                           fg, fb, has_bg, br, bgg, bb);
+        return;
     case 'D':
-        role_name = config_manager_get_agenda_pri_d_color();
-        default_r = 0;
-        default_g = 0;
-        default_b = 255;  // blue
-        break;
+        resolve_chip_color(config_manager_get_agenda_pri_d_color(), 0, 0, 255, bg_r, bg_g, bg_b, fr,
+                           fg, fb, has_bg, br, bgg, bb);
+        return;
     default:
         agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
         return;  // no priority letter beyond D: plain black text, no fill
     }
-    uint8_t hue_r, hue_g, hue_b;
-    role_hue(role_name, default_r, default_g, default_b, &hue_r, &hue_g, &hue_b);
-    if (agenda_colors_equal(hue_r, hue_g, hue_b, bg_r, bg_g, bg_b)) {
-        agenda_safe_text_color(bg_r, bg_g, bg_b, fr, fg, fb);
-        return;
-    }
-    *has_bg = true;
-    hue_contrast_text(hue_r, hue_g, hue_b, fr, fg, fb);
-    *br = hue_r;
-    *bgg = hue_g;
-    *bb = hue_b;
 }
 
 // Due-date urgency -> foreground + optional background chip. Independent of
@@ -349,17 +377,8 @@ static void due_color(bool overdue, bool today, bool grayscale, uint8_t bg_r, ui
             *br = *bgg = *bb = 0;  // full inversion
             return;
         }
-        uint8_t hue_r, hue_g, hue_b;
-        role_hue(config_manager_get_agenda_due_overdue_color(), 255, 0, 0, &hue_r, &hue_g, &hue_b);
-        if (agenda_colors_equal(hue_r, hue_g, hue_b, bg_r, bg_g, bg_b)) {
-            agenda_safe_text_color(bg_r, bg_g, bg_b, fr, fg, fb);
-            return;
-        }
-        *has_bg = true;
-        hue_contrast_text(hue_r, hue_g, hue_b, fr, fg, fb);
-        *br = hue_r;
-        *bgg = hue_g;
-        *bb = hue_b;
+        resolve_chip_color(config_manager_get_agenda_due_overdue_color(), 255, 0, 0, bg_r, bg_g,
+                           bg_b, fr, fg, fb, has_bg, br, bgg, bb);
         return;
     }
     if (today) {
@@ -369,29 +388,16 @@ static void due_color(bool overdue, bool today, bool grayscale, uint8_t bg_r, ui
             *br = *bgg = *bb = 136;  // level 8
             return;
         }
-        uint8_t hue_r, hue_g, hue_b;
-        role_hue(config_manager_get_agenda_due_today_color(), 255, 255, 0, &hue_r, &hue_g, &hue_b);
-        if (agenda_colors_equal(hue_r, hue_g, hue_b, bg_r, bg_g, bg_b)) {
-            agenda_safe_text_color(bg_r, bg_g, bg_b, fr, fg, fb);
-            return;
-        }
-        *has_bg = true;
-        hue_contrast_text(hue_r, hue_g, hue_b, fr, fg, fb);
-        *br = hue_r;
-        *bgg = hue_g;
-        *bb = hue_b;
+        resolve_chip_color(config_manager_get_agenda_due_today_color(), 255, 255, 0, bg_r, bg_g,
+                           bg_b, fr, fg, fb, has_bg, br, bgg, bb);
         return;
     }
     // Future due date, or no due date at all (caller only invokes this when
     // there is one): plain, no fill. Grayscale has no spare channel left
     // after overdue/today claim the two inversion levels, so it falls back
     // to plain body-text black - see docs/AGENDA_COLORS.html.
-    if (grayscale) {
-        *fr = *fg = *fb = 0;
-    } else {
-        role_hue(config_manager_get_agenda_due_later_color(), 0, 0, 255, fr, fg, fb);
-    }
-    agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
+    resolve_plain_color(config_manager_get_agenda_due_later_color(), grayscale, 0, 0, 255, bg_r,
+                        bg_g, bg_b, fr, fg, fb);
 }
 
 // Builds the full display line for one ToDo item - priority marker, body
@@ -438,12 +444,8 @@ static void build_todo_line(const todo_item_t *item, time_t now, bool grayscale,
     // No run added: falls through to draw_text_runs()'s default (body) color.
 
     uint8_t proj_r, proj_g, proj_b;
-    if (grayscale) {
-        proj_r = proj_g = proj_b = 0;
-    } else {
-        role_hue(config_manager_get_agenda_project_color(), 0, 0, 255, &proj_r, &proj_g, &proj_b);
-    }
-    agenda_avoid_bg_collision(bg_r, bg_g, bg_b, &proj_r, &proj_g, &proj_b);
+    resolve_plain_color(config_manager_get_agenda_project_color(), grayscale, 0, 0, 255, bg_r, bg_g,
+                        bg_b, &proj_r, &proj_g, &proj_b);
     for (int i = 0; i < item->project_count && pos < cap; i++) {
         int n = snprintf(out->text + pos, cap - pos + 1, " +%s", item->projects[i]);
         if (n <= 0) {
@@ -460,12 +462,8 @@ static void build_todo_line(const todo_item_t *item, time_t now, bool grayscale,
     // comment on priority_color() above for why anything off-palette risks
     // dithering into visual noise (or vanishing) rather than rendering solid.
     uint8_t ctx_r, ctx_g, ctx_b;
-    if (grayscale) {
-        ctx_r = ctx_g = ctx_b = 0;
-    } else {
-        role_hue(config_manager_get_agenda_context_color(), 0, 255, 0, &ctx_r, &ctx_g, &ctx_b);
-    }
-    agenda_avoid_bg_collision(bg_r, bg_g, bg_b, &ctx_r, &ctx_g, &ctx_b);
+    resolve_plain_color(config_manager_get_agenda_context_color(), grayscale, 0, 255, 0, bg_r, bg_g,
+                        bg_b, &ctx_r, &ctx_g, &ctx_b);
     for (int i = 0; i < item->context_count && pos < cap; i++) {
         int n = snprintf(out->text + pos, cap - pos + 1, " @%s", item->contexts[i]);
         if (n <= 0) {
@@ -535,14 +533,13 @@ static void calendar_source_color(int calendar_index, bool grayscale, uint8_t bg
                                   uint8_t bg_b, uint8_t *fr, uint8_t *fg, uint8_t *fb, bool *has_bg)
 {
     *has_bg = false;
-    if (grayscale) {
-        *fr = *fg = *fb = 0;
-    } else if (calendar_index == 0) {
-        role_hue(config_manager_get_agenda_cal_a_color(), 0, 0, 255, fr, fg, fb);
+    if (calendar_index == 0) {
+        resolve_plain_color(config_manager_get_agenda_cal_a_color(), grayscale, 0, 0, 255, bg_r,
+                            bg_g, bg_b, fr, fg, fb);
     } else {
-        role_hue(config_manager_get_agenda_cal_b_color(), 0, 255, 0, fr, fg, fb);
+        resolve_plain_color(config_manager_get_agenda_cal_b_color(), grayscale, 0, 255, 0, bg_r,
+                            bg_g, bg_b, fr, fg, fb);
     }
-    agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
 }
 
 // Builds one event's display text - "HH:MM " (omitted for an all-day

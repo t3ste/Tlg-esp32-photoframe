@@ -362,6 +362,16 @@ bool config_manager_get_weather_multiline_enabled(void);
 // overlay. See NVS_AGENDA_*_KEY in config.h and agenda_manager.h.
 // ============================================================================
 
+// Brackets a run of agenda_*_set_* calls so they share one NVS open/commit
+// instead of one each - utils.c's apply_config_from_json() wraps its whole
+// agenda field-handling block in these. Purely a performance/flash-wear
+// optimization: every agenda_*_set_* function still works correctly (with
+// its own open/commit) when called outside a batch, exactly as before this
+// existed. Safe to call config_manager_end_agenda_batch() even if begin
+// failed to open NVS (no-op in that case).
+void config_manager_begin_agenda_batch(void);
+void config_manager_end_agenda_batch(void);
+
 void config_manager_set_agenda_todo_enabled(bool enabled);
 bool config_manager_get_agenda_todo_enabled(void);
 void config_manager_set_agenda_cal_enabled(bool enabled);

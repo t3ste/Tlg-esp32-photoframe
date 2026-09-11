@@ -200,6 +200,26 @@ const agendaHueOptions = [
   { title: "Green", value: "green" },
 ];
 
+// Drives the two v-for color-picker grids below (same "field list + v-for"
+// shape PaletteCalibration.vue already uses for its own per-color inputs) -
+// one array entry per settingsStore.deviceSettings key, instead of a
+// hand-written <v-select> block per role.
+const agendaTodoColorFields = [
+  { key: "agendaPriAColor", label: "Priority (A)" },
+  { key: "agendaPriBColor", label: "Priority (B)" },
+  { key: "agendaPriCColor", label: "Priority (C)" },
+  { key: "agendaPriDColor", label: "Priority (D)" },
+  { key: "agendaDueOverdueColor", label: "Overdue" },
+  { key: "agendaDueTodayColor", label: "Due today" },
+  { key: "agendaDueLaterColor", label: "Due later" },
+  { key: "agendaProjectColor", label: "+Project" },
+  { key: "agendaContextColor", label: "@Context" },
+];
+const agendaCalendarColorFields = [
+  { key: "agendaCalAColor", label: "Calendar A" },
+  { key: "agendaCalBColor", label: "Calendar B" },
+];
+
 // 90/270 would swap the panel's logical dimensions, which the streaming
 // pipeline and dimensionless .epdgz payloads can't represent; portrait
 // mounting is handled by the orientation setting instead
@@ -1414,91 +1434,17 @@ async function performFactoryReset() {
               </div>
               <div class="text-caption text-medium-emphasis mb-1">ToDo</div>
               <v-row dense>
-                <v-col cols="6" sm="4" md="3">
+                <v-col
+                  v-for="field in agendaTodoColorFields"
+                  :key="field.key"
+                  cols="6"
+                  sm="4"
+                  md="3"
+                >
                   <v-select
-                    v-model="settingsStore.deviceSettings.agendaPriAColor"
+                    v-model="settingsStore.deviceSettings[field.key]"
                     :items="agendaHueOptions"
-                    label="Priority (A)"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4" md="3">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaPriBColor"
-                    :items="agendaHueOptions"
-                    label="Priority (B)"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4" md="3">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaPriCColor"
-                    :items="agendaHueOptions"
-                    label="Priority (C)"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4" md="3">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaPriDColor"
-                    :items="agendaHueOptions"
-                    label="Priority (D)"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4" md="3">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaDueOverdueColor"
-                    :items="agendaHueOptions"
-                    label="Overdue"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4" md="3">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaDueTodayColor"
-                    :items="agendaHueOptions"
-                    label="Due today"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4" md="3">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaDueLaterColor"
-                    :items="agendaHueOptions"
-                    label="Due later"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4" md="3">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaProjectColor"
-                    :items="agendaHueOptions"
-                    label="+Project"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4" md="3">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaContextColor"
-                    :items="agendaHueOptions"
-                    label="@Context"
+                    :label="field.label"
                     variant="outlined"
                     density="compact"
                     hide-details
@@ -1507,21 +1453,17 @@ async function performFactoryReset() {
               </v-row>
               <div class="text-caption text-medium-emphasis mb-1 mt-3">Calendar</div>
               <v-row dense>
-                <v-col cols="6" sm="4" md="3">
+                <v-col
+                  v-for="field in agendaCalendarColorFields"
+                  :key="field.key"
+                  cols="6"
+                  sm="4"
+                  md="3"
+                >
                   <v-select
-                    v-model="settingsStore.deviceSettings.agendaCalAColor"
+                    v-model="settingsStore.deviceSettings[field.key]"
                     :items="agendaHueOptions"
-                    label="Calendar A"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4" md="3">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaCalBColor"
-                    :items="agendaHueOptions"
-                    label="Calendar B"
+                    :label="field.label"
                     variant="outlined"
                     density="compact"
                     hide-details

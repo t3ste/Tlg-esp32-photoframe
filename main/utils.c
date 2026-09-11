@@ -665,6 +665,14 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_low_battery_overlay_threshold(item->valueint);
     }
 
+    // Batches every agenda_*_set_* call below into one NVS open/commit
+    // instead of one each (~25 fields can appear in one Agenda settings
+    // save) - see config_manager_begin_agenda_batch()'s own comment. Every
+    // early return between here and the matching _end_agenda_batch() call
+    // near the bottom of this block closes the batch first so a rejected
+    // cron expression can't leave the NVS handle open uncommitted.
+    config_manager_begin_agenda_batch();
+
     item = cJSON_GetObjectItem(root, "agenda_todo_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_todo_enabled(cJSON_IsTrue(item));
@@ -728,6 +736,7 @@ esp_err_t apply_config_from_json(cJSON *root)
             char msg[64];
             snprintf(msg, sizeof(msg), "Too many agenda schedule rules (max %d)", MAX_CRON_RULES);
             utils_set_config_error(msg);
+            config_manager_end_agenda_batch();
             return ESP_FAIL;
         }
         const char *rules[MAX_CRON_RULES];
@@ -737,11 +746,13 @@ esp_err_t apply_config_from_json(cJSON *root)
         {
             if (!cJSON_IsString(el)) {
                 utils_set_config_error("Agenda schedule rule must be a string");
+                config_manager_end_agenda_batch();
                 return ESP_FAIL;
             }
             const char *expr = cJSON_GetStringValue(el);
             if (strlen(expr) >= CRON_RULE_MAX_LEN) {
                 utils_set_config_error("Cron expression too long");
+                config_manager_end_agenda_batch();
                 return ESP_FAIL;
             }
             cron_rule_t tmp;
@@ -749,6 +760,7 @@ esp_err_t apply_config_from_json(cJSON *root)
                 char msg[96];
                 snprintf(msg, sizeof(msg), "Invalid agenda cron expression: %s", expr);
                 utils_set_config_error(msg);
+                config_manager_end_agenda_batch();
                 return ESP_FAIL;
             }
             if (n < MAX_CRON_RULES) {
@@ -812,6 +824,7 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
         config_manager_set_agenda_cal_b_color(cJSON_GetStringValue(item));
     }
+    config_manager_end_agenda_batch();
 
     return ESP_OK;
 }

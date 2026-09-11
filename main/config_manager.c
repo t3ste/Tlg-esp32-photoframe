@@ -129,6 +129,15 @@ static char agenda_cal_url2[AGENDA_CAL_URL2_MAX_LEN] = {0};
 static uint8_t agenda_cal_days = AGENDA_CAL_DAYS_DEFAULT;
 static char agenda_cron_rules_store[MAX_CRON_RULES][CRON_RULE_MAX_LEN] = {{0}};
 static int agenda_cron_rule_count = 0;
+// Memoizes config_manager_get_compiled_agenda_cron_rules()'s cron_parse()
+// pass - main.c's agenda-wake decision and power_manager.c's next-wake-time
+// calculation both call it independently within the same wake cycle, which
+// otherwise re-parses the same tiny rule strings twice for no reason.
+// -1 means "stale, recompute on next call"; invalidated by both places that
+// can change agenda_cron_rules_store (agenda_cron_load_from_joined() and
+// config_manager_set_agenda_cron_rules() below).
+static cron_rule_t agenda_cron_compiled[MAX_CRON_RULES];
+static int agenda_cron_compiled_count = -1;
 static bool agenda_stack_layout = AGENDA_STACK_DEFAULT;
 static char agenda_bg_color[AGENDA_BG_MAX_LEN] = AGENDA_BG_DEFAULT;
 static char agenda_pri_a_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PRI_A_DEFAULT;
@@ -215,6 +224,95 @@ static void cron_persist(void)
 }
 
 // ----------------------------------------------------------------------------
+// Shared agenda NVS write helpers - every agenda_*_set_* function (cron
+// schedule included) writes through these three instead of hand-rolling its
+// own open/set/commit/close. Normally each still opens/commits/closes
+// independently (identical behavior to before this existed), but while
+// config_manager_begin_agenda_batch()/_end_agenda_batch() bracket a run of
+// calls (utils.c's apply_config_from_json() does this around the whole
+// agenda field block), they share one already-open handle and defer the
+// commit to the end instead. A single Web UI Agenda settings save can touch
+// on the order of 25 separate fields; without batching that was 25
+// independent flash erase/write cycles for one logical save.
+// ----------------------------------------------------------------------------
+
+static bool agenda_nvs_batching = false;
+static nvs_handle_t agenda_nvs_batch_handle;
+
+static void agenda_nvs_set_u8(const char *key, uint8_t value)
+{
+    if (agenda_nvs_batching) {
+        nvs_set_u8(agenda_nvs_batch_handle, key, value);
+        return;
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, key, value);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+static void agenda_nvs_set_str(const char *key, const char *value)
+{
+    if (agenda_nvs_batching) {
+        nvs_set_str(agenda_nvs_batch_handle, key, value);
+        return;
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_str(h, key, value);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+// Same as agenda_nvs_set_str(), but an empty `value` erases the key instead
+// of storing it - the write-only-credential fields (agenda_cal_url etc.)
+// and the joined cron list use this so clearing the field back to empty
+// actually clears NVS too, rather than persisting a stored empty string.
+static void agenda_nvs_set_str_or_erase(const char *key, const char *value)
+{
+    nvs_handle_t local_h;
+    nvs_handle_t h = agenda_nvs_batching ? agenda_nvs_batch_handle : 0;
+    if (!agenda_nvs_batching) {
+        if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &local_h) != ESP_OK) {
+            return;
+        }
+        h = local_h;
+    }
+    if (value[0] != '\0') {
+        nvs_set_str(h, key, value);
+    } else {
+        nvs_erase_key(h, key);
+    }
+    if (!agenda_nvs_batching) {
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+void config_manager_begin_agenda_batch(void)
+{
+    if (agenda_nvs_batching) {
+        return;  // already batching - nested call, no-op (shouldn't happen)
+    }
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &agenda_nvs_batch_handle) == ESP_OK) {
+        agenda_nvs_batching = true;
+    }
+}
+
+void config_manager_end_agenda_batch(void)
+{
+    if (!agenda_nvs_batching) {
+        return;
+    }
+    nvs_commit(agenda_nvs_batch_handle);
+    nvs_close(agenda_nvs_batch_handle);
+    agenda_nvs_batching = false;
+}
+
+// ----------------------------------------------------------------------------
 // Agenda cron schedule helpers - independent second schedule (ToDo/Calendar
 // full-screen mode), same '\n'-joined NVS encoding as the rotate schedule
 // above, just its own store/key so the two never interfere.
@@ -223,6 +321,7 @@ static void cron_persist(void)
 static void agenda_cron_load_from_joined(const char *joined)
 {
     agenda_cron_rule_count = 0;
+    agenda_cron_compiled_count = -1;  // rule strings changed - stale compiled cache
     if (!joined) {
         return;
     }
@@ -270,16 +369,7 @@ static void agenda_cron_persist(void)
         off += n;
     }
 
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        if (agenda_cron_rule_count > 0) {
-            nvs_set_str(nvs_handle, NVS_AGENDA_CRON_KEY, joined);
-        } else {
-            nvs_erase_key(nvs_handle, NVS_AGENDA_CRON_KEY);
-        }
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CRON_KEY, joined);
 }
 
 // ----------------------------------------------------------------------------
@@ -2669,14 +2759,7 @@ bool config_manager_get_low_battery_overlay_active(void)
 void config_manager_set_agenda_todo_enabled(bool enabled)
 {
     agenda_todo_enabled = enabled;
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_AGENDA_TODO_ENABLED_KEY, enabled ? 1 : 0);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
-
+    agenda_nvs_set_u8(NVS_AGENDA_TODO_ENABLED_KEY, enabled ? 1 : 0);
     ESP_LOGI(TAG, "Agenda ToDo %s", enabled ? "enabled" : "disabled");
 }
 
@@ -2688,14 +2771,7 @@ bool config_manager_get_agenda_todo_enabled(void)
 void config_manager_set_agenda_cal_enabled(bool enabled)
 {
     agenda_cal_enabled = enabled;
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_AGENDA_CAL_ENABLED_KEY, enabled ? 1 : 0);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
-
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_ENABLED_KEY, enabled ? 1 : 0);
     ESP_LOGI(TAG, "Agenda Calendar %s", enabled ? "enabled" : "disabled");
 }
 
@@ -2707,14 +2783,7 @@ bool config_manager_get_agenda_cal_enabled(void)
 void config_manager_set_agenda_cal_weather_enabled(bool enabled)
 {
     agenda_cal_weather_enabled = enabled;
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_AGENDA_CAL_WEATHER_KEY, enabled ? 1 : 0);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
-
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_WEATHER_KEY, enabled ? 1 : 0);
     ESP_LOGI(TAG, "Agenda Calendar weather annotation %s", enabled ? "enabled" : "disabled");
 }
 
@@ -2726,13 +2795,7 @@ bool config_manager_get_agenda_cal_weather_enabled(void)
 void config_manager_set_agenda_cal_weather_right_aligned(bool enabled)
 {
     agenda_cal_weather_right_aligned = enabled;
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_AGENDA_CAL_WTHR_ALIGN_KEY, enabled ? 1 : 0);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_WTHR_ALIGN_KEY, enabled ? 1 : 0);
 }
 
 bool config_manager_get_agenda_cal_weather_right_aligned(void)
@@ -2743,13 +2806,7 @@ bool config_manager_get_agenda_cal_weather_right_aligned(void)
 void config_manager_set_agenda_cal_compact_multiday(bool enabled)
 {
     agenda_cal_compact_multiday = enabled;
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_AGENDA_CAL_COMPACT_KEY, enabled ? 1 : 0);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_COMPACT_KEY, enabled ? 1 : 0);
 }
 
 bool config_manager_get_agenda_cal_compact_multiday(void)
@@ -2761,13 +2818,7 @@ void config_manager_set_agenda_cal_name(const char *name)
 {
     strncpy(agenda_cal_name, name ? name : "", sizeof(agenda_cal_name) - 1);
     agenda_cal_name[sizeof(agenda_cal_name) - 1] = '\0';
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_str(nvs_handle, NVS_AGENDA_CAL_NAME_KEY, agenda_cal_name);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    agenda_nvs_set_str(NVS_AGENDA_CAL_NAME_KEY, agenda_cal_name);
 }
 
 const char *config_manager_get_agenda_cal_name(void)
@@ -2779,13 +2830,7 @@ void config_manager_set_agenda_cal_name2(const char *name)
 {
     strncpy(agenda_cal_name2, name ? name : "", sizeof(agenda_cal_name2) - 1);
     agenda_cal_name2[sizeof(agenda_cal_name2) - 1] = '\0';
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_str(nvs_handle, NVS_AGENDA_CAL_NAME2_KEY, agenda_cal_name2);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    agenda_nvs_set_str(NVS_AGENDA_CAL_NAME2_KEY, agenda_cal_name2);
 }
 
 const char *config_manager_get_agenda_cal_name2(void)
@@ -2798,17 +2843,7 @@ void config_manager_set_agenda_todo_url(const char *url)
     const char *new_url = url ? url : "";
     strncpy(agenda_todo_url, new_url, AGENDA_TODO_URL_MAX_LEN - 1);
     agenda_todo_url[AGENDA_TODO_URL_MAX_LEN - 1] = '\0';
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        if (agenda_todo_url[0] != '\0') {
-            nvs_set_str(nvs_handle, NVS_AGENDA_TODO_URL_KEY, agenda_todo_url);
-        } else {
-            nvs_erase_key(nvs_handle, NVS_AGENDA_TODO_URL_KEY);
-        }
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_TODO_URL_KEY, agenda_todo_url);
 }
 
 const char *config_manager_get_agenda_todo_url(void)
@@ -2824,18 +2859,7 @@ void config_manager_set_agenda_cal_url(const char *url)
     const char *new_url = url ? url : "";
     strncpy(agenda_cal_url, new_url, AGENDA_CAL_URL_MAX_LEN - 1);
     agenda_cal_url[AGENDA_CAL_URL_MAX_LEN - 1] = '\0';
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        if (agenda_cal_url[0] != '\0') {
-            nvs_set_str(nvs_handle, NVS_AGENDA_CAL_URL_KEY, agenda_cal_url);
-        } else {
-            nvs_erase_key(nvs_handle, NVS_AGENDA_CAL_URL_KEY);
-        }
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
-
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_URL_KEY, agenda_cal_url);
     ESP_LOGI(TAG, "Agenda Calendar URL set (length: %zu)", strlen(agenda_cal_url));
 }
 
@@ -2849,18 +2873,7 @@ void config_manager_set_agenda_cal_url2(const char *url)
     const char *new_url = url ? url : "";
     strncpy(agenda_cal_url2, new_url, AGENDA_CAL_URL2_MAX_LEN - 1);
     agenda_cal_url2[AGENDA_CAL_URL2_MAX_LEN - 1] = '\0';
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        if (agenda_cal_url2[0] != '\0') {
-            nvs_set_str(nvs_handle, NVS_AGENDA_CAL_URL2_KEY, agenda_cal_url2);
-        } else {
-            nvs_erase_key(nvs_handle, NVS_AGENDA_CAL_URL2_KEY);
-        }
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
-
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_URL2_KEY, agenda_cal_url2);
     ESP_LOGI(TAG, "Agenda Calendar URL 2 set (length: %zu)", strlen(agenda_cal_url2));
 }
 
@@ -2877,13 +2890,7 @@ void config_manager_set_agenda_cal_days(int days)
         days = AGENDA_CAL_DAYS_MAX;
     }
     agenda_cal_days = (uint8_t) days;
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_AGENDA_CAL_DAYS_KEY, agenda_cal_days);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_DAYS_KEY, agenda_cal_days);
 }
 
 int config_manager_get_agenda_cal_days(void)
@@ -2910,6 +2917,7 @@ void config_manager_set_agenda_cron_rules(const char *const *rules, int count)
         count = 0;
     }
     agenda_cron_rule_count = 0;
+    agenda_cron_compiled_count = -1;  // rule strings changed - stale compiled cache
     for (int i = 0; i < count && agenda_cron_rule_count < MAX_CRON_RULES; i++) {
         if (!rules[i] || rules[i][0] == '\0' || strlen(rules[i]) >= CRON_RULE_MAX_LEN) {
             continue;
@@ -2925,11 +2933,23 @@ void config_manager_set_agenda_cron_rules(const char *const *rules, int count)
 
 int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max)
 {
-    int n = 0;
-    for (int i = 0; i < agenda_cron_rule_count && n < max; i++) {
-        if (cron_parse(agenda_cron_rules_store[i], &out[n])) {
-            n++;
+    // Compile once per rule-set change, not once per call - the wake-decision
+    // (main.c) and next-wake-time (power_manager.c) call sites both need this
+    // within the same wake cycle, and re-running cron_parse() on the same
+    // strings a second time is pure waste (the parse result can't have
+    // changed unless one of the two invalidation points above ran).
+    if (agenda_cron_compiled_count < 0) {
+        int n = 0;
+        for (int i = 0; i < agenda_cron_rule_count && n < MAX_CRON_RULES; i++) {
+            if (cron_parse(agenda_cron_rules_store[i], &agenda_cron_compiled[n])) {
+                n++;
+            }
         }
+        agenda_cron_compiled_count = n;
+    }
+    int n = (agenda_cron_compiled_count < max) ? agenda_cron_compiled_count : max;
+    for (int i = 0; i < n; i++) {
+        out[i] = agenda_cron_compiled[i];
     }
     return n;
 }
@@ -2937,13 +2957,7 @@ int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max)
 void config_manager_set_agenda_stack_layout(bool stacked)
 {
     agenda_stack_layout = stacked;
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_u8(nvs_handle, NVS_AGENDA_STACK_KEY, agenda_stack_layout ? 1 : 0);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    agenda_nvs_set_u8(NVS_AGENDA_STACK_KEY, agenda_stack_layout ? 1 : 0);
 }
 
 bool config_manager_get_agenda_stack_layout(void)
@@ -2958,13 +2972,7 @@ void config_manager_set_agenda_bg_color(const char *color)
     }
     strncpy(agenda_bg_color, color, sizeof(agenda_bg_color) - 1);
     agenda_bg_color[sizeof(agenda_bg_color) - 1] = '\0';
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_str(nvs_handle, NVS_AGENDA_BG_KEY, agenda_bg_color);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    agenda_nvs_set_str(NVS_AGENDA_BG_KEY, agenda_bg_color);
 }
 
 const char *config_manager_get_agenda_bg_color(void)
@@ -2981,13 +2989,7 @@ static void agenda_role_color_set(char *buf, size_t buf_size, const char *nvs_ke
     }
     strncpy(buf, color, buf_size - 1);
     buf[buf_size - 1] = '\0';
-
-    nvs_handle_t nvs_handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
-        nvs_set_str(nvs_handle, nvs_key, buf);
-        nvs_commit(nvs_handle);
-        nvs_close(nvs_handle);
-    }
+    agenda_nvs_set_str(nvs_key, buf);
 }
 
 void config_manager_set_agenda_pri_a_color(const char *color)
