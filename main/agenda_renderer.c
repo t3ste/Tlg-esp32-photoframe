@@ -587,24 +587,28 @@ static void build_event_line(const ics_event_t *ev, int calendar_index, bool gra
 }
 
 // Draws a day-separator row: a dashed horizontal line with a chip showing
-// the weekday + day number, and (if `weather_text` is non-NULL/non-empty)
-// a second chip with that day's forecast. Inverts polarity with the page
-// background (dark-on-light fill/dashes normally, light-on-dark when the
-// background is dark) rather than staying black-fixed, so it's never
-// invisible against a dark chosen background - `fill_r/g/b` is whichever
-// of black/white agenda_is_light() picked for the CURRENT background
-// (i.e. body_r/g/b from the caller), and the label text is simply the
-// opposite of that.
+// the weekday + day number, plus (if `weather_mode` is on and this
+// particular day has one) a second chip with that day's forecast. Inverts
+// polarity with the page background (dark-on-light fill/dashes normally,
+// light-on-dark when the background is dark) rather than staying
+// black-fixed, so it's never invisible against a dark chosen background -
+// `fill_r/g/b` is whichever of black/white agenda_is_light() picked for
+// the CURRENT background (i.e. body_r/g/b from the caller), and the label
+// text is simply the opposite of that.
 //
-// With no weather, the day label is centered on the line (dashes both
-// sides) - unchanged from before this feature. With weather present, the
-// day label moves to the left edge and the weather chip is centered,
-// dashes filling the two remaining gaps - keeping the day label flush left
-// reads better once there's a second chip on the same line to balance
-// against, per live user feedback.
+// `weather_mode` reflects whether the weather annotation feature is on and
+// actually returned data this cycle - it is NOT the same thing as whether
+// `weather_text` happens to be set for *this* day. With weather_mode off,
+// the day label is always centered on the line (dashes both sides) -
+// unchanged from before this feature. With weather_mode on, every day
+// uses the same left-aligned-label layout, even a day with no forecast
+// entry of its own (most commonly a 4th calendar day, since
+// WEATHER_FORECAST_DAYS is 3) - it just gets one continuous dashed run
+// instead of a second chip, rather than reverting to the centered layout
+// for that one day, which would look inconsistent against its neighbors.
 static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t rect, int y,
-                             const char *label, const char *weather_text, uint8_t fill_r,
-                             uint8_t fill_g, uint8_t fill_b)
+                             const char *label, bool weather_mode, const char *weather_text,
+                             uint8_t fill_r, uint8_t fill_g, uint8_t fill_b)
 {
     uint8_t text_r, text_g, text_b;
     agenda_safe_text_color(fill_r, fill_g, fill_b, &text_r, &text_g, &text_b);
@@ -613,7 +617,7 @@ static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t 
     int line_y = y + IMAGE_PROCESSOR_FONT_HEIGHT / 2 - 1;
     const int dash_len = 4, gap_len = 3, dash_h = 2;
 
-    if (!weather_text || weather_text[0] == '\0') {
+    if (!weather_mode) {
         int label_w = (int) strlen(label) * IMAGE_PROCESSOR_FONT_WIDTH;
         if (label_w > total_w) {
             label_w = total_w;  // pathologically narrow column - clip rather than overflow
@@ -645,35 +649,44 @@ static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t 
         label_w = total_w;
     }
     int label_x = rect.x + AGENDA_PADDING;  // left-aligned
+    int right_end = rect.x + AGENDA_PADDING + total_w;
 
-    // Clip the weather chip to whatever's left after the label plus a
-    // minimum gap, rather than letting it overlap - a narrow column with a
-    // long day label (unlikely, but the label itself is already clipped
-    // above for the same reason) is the only case this ever triggers.
-    int max_weather_chars = (total_w - label_w - (dash_len + gap_len)) / IMAGE_PROCESSOR_FONT_WIDTH;
-    if (max_weather_chars < 0) {
-        max_weather_chars = 0;
-    }
-    char weather_clipped[WEATHER_DAY_LINE_MAX_LEN];
-    strncpy(weather_clipped, weather_text, sizeof(weather_clipped) - 1);
-    weather_clipped[sizeof(weather_clipped) - 1] = '\0';
-    if ((int) strlen(weather_clipped) > max_weather_chars) {
-        weather_clipped[max_weather_chars] = '\0';
-    }
-    int weather_w = (int) strlen(weather_clipped) * IMAGE_PROCESSOR_FONT_WIDTH;
-    int weather_x = rect.x + AGENDA_PADDING + (total_w - weather_w) / 2;
-    int min_weather_x = label_x + label_w + dash_len;
-    if (weather_w > 0 && weather_x < min_weather_x) {
-        weather_x = min_weather_x;
+    // No forecast entry for this specific day: weather_w stays 0 and
+    // weather_x defaults to the row's right edge, which collapses the two
+    // dash runs below into a single continuous one spanning the whole gap
+    // after the label - not two runs that happen to line up.
+    int weather_w = 0;
+    int weather_x = right_end;
+    char weather_clipped[WEATHER_DAY_LINE_MAX_LEN] = "";
+    if (weather_text && weather_text[0] != '\0') {
+        // Clip the weather chip to whatever's left after the label plus a
+        // minimum gap, rather than letting it overlap - a narrow column
+        // with a long day label (unlikely, but the label itself is
+        // already clipped above for the same reason) is the only case
+        // this ever triggers.
+        int max_weather_chars =
+            (total_w - label_w - (dash_len + gap_len)) / IMAGE_PROCESSOR_FONT_WIDTH;
+        if (max_weather_chars < 0) {
+            max_weather_chars = 0;
+        }
+        strncpy(weather_clipped, weather_text, sizeof(weather_clipped) - 1);
+        weather_clipped[sizeof(weather_clipped) - 1] = '\0';
+        if ((int) strlen(weather_clipped) > max_weather_chars) {
+            weather_clipped[max_weather_chars] = '\0';
+        }
+        weather_w = (int) strlen(weather_clipped) * IMAGE_PROCESSOR_FONT_WIDTH;
+        weather_x = rect.x + AGENDA_PADDING + (total_w - weather_w) / 2;
+        int min_weather_x = label_x + label_w + dash_len;
+        if (weather_w > 0 && weather_x < min_weather_x) {
+            weather_x = min_weather_x;
+        }
     }
 
-    int mid_end = weather_x;
-    for (int x = label_x + label_w; x + dash_len <= mid_end; x += dash_len + gap_len) {
+    for (int x = label_x + label_w; x + dash_len <= weather_x; x += dash_len + gap_len) {
         image_processor_fill_rect(rgb, width, height, x, line_y, dash_len, dash_h, fill_r, fill_g,
                                   fill_b);
     }
     int right_start = weather_x + weather_w;
-    int right_end = rect.x + AGENDA_PADDING + total_w;
     for (int x = right_start; x + dash_len <= right_end; x += dash_len + gap_len) {
         image_processor_fill_rect(rgb, width, height, x, line_y, dash_len, dash_h, fill_r, fill_g,
                                   fill_b);
@@ -751,6 +764,19 @@ typedef struct {
     const agenda_event_line_t *line;
 } agenda_tagged_event_t;
 
+// One calendar source's header display name plus the color swatch to draw
+// before it - see draw_calendar_column()'s header-drawing comment. `show`
+// and `has_swatch` are independent: a source with events always shows its
+// name, but only gets a swatch on a color-capable board (grayscale has no
+// spare hue to legend at all - calendar_source_color() already gives every
+// source the same plain black there).
+typedef struct {
+    bool show;
+    bool has_swatch;
+    const char *name;
+    uint8_t r, g, b;
+} agenda_cal_name_tag_t;
+
 static int compare_tagged_by_start(const void *a, const void *b)
 {
     const agenda_tagged_event_t *ta = (const agenda_tagged_event_t *) a;
@@ -804,27 +830,64 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
                                  time_t now, int lookahead_days, uint8_t body_r, uint8_t body_g,
                                  uint8_t body_b, const agenda_tagged_event_t *tagged,
                                  int tagged_count, const weather_forecast_t *cal_weather,
-                                 const char *header_title)
+                                 agenda_cal_name_tag_t name_a, agenda_cal_name_tag_t name_b)
 {
     uint8_t header_text_r, header_text_g, header_text_b;
     agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g,
                            &header_text_b);
 
-    struct tm now_tm;
-    localtime_r(&now, &now_tm);
-    // Oversized vs. the typical ~30-char result - GCC's format-truncation
-    // checker can't prove tm_year+1900 always fits in 4 digits from this
-    // call site alone (same reason todo_item_role() widened its own date
-    // buffer earlier in this feature).
-    char header[80];
-    snprintf(header, sizeof(header), "%s - %02d.%02d.%04d %02d:%02d", header_title, now_tm.tm_mday,
-             now_tm.tm_mon + 1, now_tm.tm_year + 1900, now_tm.tm_hour, now_tm.tm_min);
-
     int header_h = IMAGE_PROCESSOR_FONT_HEIGHT + 2 * AGENDA_PADDING;
     image_processor_fill_rect(rgb, width, height, rect.x, rect.y, rect.w, header_h, body_r, body_g,
                               body_b);
-    image_processor_draw_text(rgb, width, height, rect.x + AGENDA_PADDING, rect.y + AGENDA_PADDING,
-                              header, header_text_r, header_text_g, header_text_b);
+
+    // Each shown calendar's name gets a small colored "swatch" immediately
+    // before it - a single blank character cell filled with that source's
+    // actual event text color (name_a/name_b.r/g/b, already resolved by
+    // the caller including any background-collision fallback) - so the
+    // header doubles as a color legend for which name maps to which
+    // color, without any new visible glyph. Skipped on grayscale (the
+    // caller passes show=false there, since calendar_source_color()
+    // already gives every source the same plain black there - no color to
+    // legend in the first place).
+    int hx = rect.x + AGENDA_PADDING;
+    int hy = rect.y + AGENDA_PADDING;
+    if (name_a.show) {
+        if (name_a.has_swatch) {
+            image_processor_fill_rect(rgb, width, height, hx, hy, IMAGE_PROCESSOR_FONT_WIDTH,
+                                      IMAGE_PROCESSOR_FONT_HEIGHT, name_a.r, name_a.g, name_a.b);
+            hx += IMAGE_PROCESSOR_FONT_WIDTH;
+        }
+        image_processor_draw_text(rgb, width, height, hx, hy, name_a.name, header_text_r,
+                                  header_text_g, header_text_b);
+        hx += (int) strlen(name_a.name) * IMAGE_PROCESSOR_FONT_WIDTH;
+    }
+    if (name_a.show && name_b.show) {
+        image_processor_draw_text(rgb, width, height, hx, hy, ", ", header_text_r, header_text_g,
+                                  header_text_b);
+        hx += 2 * IMAGE_PROCESSOR_FONT_WIDTH;
+    }
+    if (name_b.show) {
+        if (name_b.has_swatch) {
+            image_processor_fill_rect(rgb, width, height, hx, hy, IMAGE_PROCESSOR_FONT_WIDTH,
+                                      IMAGE_PROCESSOR_FONT_HEIGHT, name_b.r, name_b.g, name_b.b);
+            hx += IMAGE_PROCESSOR_FONT_WIDTH;
+        }
+        image_processor_draw_text(rgb, width, height, hx, hy, name_b.name, header_text_r,
+                                  header_text_g, header_text_b);
+        hx += (int) strlen(name_b.name) * IMAGE_PROCESSOR_FONT_WIDTH;
+    }
+
+    struct tm now_tm;
+    localtime_r(&now, &now_tm);
+    // Oversized vs. the typical ~20-char result - GCC's format-truncation
+    // checker can't prove tm_year+1900 always fits in 4 digits from this
+    // call site alone (same reason todo_item_role() widened its own date
+    // buffer earlier in this feature).
+    char datetime[40];
+    snprintf(datetime, sizeof(datetime), " - %02d.%02d.%04d %02d:%02d", now_tm.tm_mday,
+             now_tm.tm_mon + 1, now_tm.tm_year + 1900, now_tm.tm_hour, now_tm.tm_min);
+    image_processor_draw_text(rgb, width, height, hx, hy, datetime, header_text_r, header_text_g,
+                              header_text_b);
 
     int row_h = IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
     int content_top = rect.y + header_h + AGENDA_PADDING;
@@ -891,6 +954,12 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         budget = 0;
     }
 
+    // Whether the weather annotation feature is on and actually returned
+    // data this cycle - decides the day divider's overall layout (see
+    // draw_day_divider()'s comment), independent of whether any specific
+    // day within the window happens to have its own forecast entry.
+    bool weather_mode = cal_weather && cal_weather->valid;
+
     int rows_used = 0;
     int instances_shown = 0;
     for (int di = 0; di < day_count && rows_used < budget; di++) {
@@ -909,7 +978,8 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
             snprintf(weather_buf, sizeof(weather_buf), "[%d/%d %s]", tmin, tmax, cond);
         }
         draw_day_divider(rgb, width, height, rect, content_top + rows_used * row_h, label,
-                         weather_buf[0] ? weather_buf : NULL, body_r, body_g, body_b);
+                         weather_mode, weather_buf[0] ? weather_buf : NULL, body_r, body_g,
+                         body_b);
         rows_used++;
 
         for (int i = 0; i < tagged_count && rows_used < budget; i++) {
@@ -1162,7 +1232,14 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
             // whichever have a URL configured, since a configured-but-
             // currently-failed source contributes nothing to show a name
             // for. Falls back to "Calendar A"/"Calendar B" if the user
-            // hasn't set a custom display name for that source.
+            // hasn't set a custom display name for that source. Each
+            // shown name's color swatch reuses lines_a[0]/lines_b[0]'s
+            // already-resolved event text color (fr/fg/fb) rather than
+            // re-deriving the hue, so it's guaranteed to exactly match
+            // what that source's events are actually drawn in this cycle,
+            // collision-avoidance fallback included - skipped on
+            // grayscale, where that color is always plain black anyway
+            // (see calendar_source_color()) and so carries no legend value.
             const char *name_a = config_manager_get_agenda_cal_name();
             if (!name_a || name_a[0] == '\0') {
                 name_a = "Calendar A";
@@ -1171,16 +1248,22 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
             if (!name_b || name_b[0] == '\0') {
                 name_b = "Calendar B";
             }
-            char header_title[64];
-            if (have_a && have_b) {
-                snprintf(header_title, sizeof(header_title), "%s, %s", name_a, name_b);
-            } else if (have_a) {
-                snprintf(header_title, sizeof(header_title), "%s", name_a);
-            } else {
-                snprintf(header_title, sizeof(header_title), "%s", name_b);
+            agenda_cal_name_tag_t tag_a = {.show = have_a, .has_swatch = have_a && !grayscale,
+                                           .name = name_a};
+            if (tag_a.has_swatch) {
+                tag_a.r = lines_a[0].fr;
+                tag_a.g = lines_a[0].fg;
+                tag_a.b = lines_a[0].fb;
+            }
+            agenda_cal_name_tag_t tag_b = {.show = have_b, .has_swatch = have_b && !grayscale,
+                                           .name = name_b};
+            if (tag_b.has_swatch) {
+                tag_b.r = lines_b[0].fr;
+                tag_b.g = lines_b[0].fg;
+                tag_b.b = lines_b[0].fb;
             }
             draw_calendar_column(rgb, width, height, cal_rect, now, lookahead_days, body_r,
-                                 body_g, body_b, tagged, tagged_count, cal_weather, header_title);
+                                 body_g, body_b, tagged, tagged_count, cal_weather, tag_a, tag_b);
         } else {
             ESP_LOGW(TAG, "Failed to allocate Calendar render scratch buffers - skipping column");
         }
