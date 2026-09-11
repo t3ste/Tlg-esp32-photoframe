@@ -85,6 +85,17 @@ void weather_format_day_lines(const weather_forecast_t *f,
                               int *out_count);
 
 /**
+ * @brief Short weekday abbreviation (e.g. "Fri"/"Fr"), English/German - the
+ * same table weather_format_line()/weather_format_day_lines() use
+ * internally, exposed so a caller that needs just the weekday word for an
+ * already-known date (agenda_renderer.c's Calendar day-divider label)
+ * doesn't need its own copy. English abbreviations are 3 letters, German 2
+ * (an existing asymmetry in this table, not introduced here). Unknown
+ * `wday` (outside 0-6) returns "?".
+ */
+const char *weather_weekday_abbr(int wday, bool german);
+
+/**
  * @brief Short condition text for one WMO weather code (e.g. "cloudy"/
  * "bedeckt"), the same abbreviated vocabulary weather_format_line()/
  * weather_format_day_lines() use internally - exposed so a caller that

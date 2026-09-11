@@ -596,7 +596,7 @@ static int weekday_from_date(int year, int month, int day)
     return (year + year / 4 - year / 100 + year / 400 + t[month - 1] + day) % 7;
 }
 
-static const char *weekday_name(int wday, bool german)
+const char *weather_weekday_abbr(int wday, bool german)
 {
     static const char *de[7] = {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"};
     static const char *en[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -657,7 +657,7 @@ static void format_day_line(const weather_day_t *day, bool german, char *out, si
 {
     int year = 0, month = 0, mday = 0;
     sscanf(day->date, "%d-%d-%d", &year, &month, &mday);
-    const char *wd = weekday_name(weekday_from_date(year, month, mday), german);
+    const char *wd = weather_weekday_abbr(weekday_from_date(year, month, mday), german);
     const char *cond = weather_condition_text(day->weather_code, german);
     int tmin = (int) lroundf(day->temp_min_c);
     int tmax = (int) lroundf(day->temp_max_c);

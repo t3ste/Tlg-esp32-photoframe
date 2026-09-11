@@ -41,6 +41,9 @@ photoframe-debug*.log*
 CoreDUMP*.7z
 _BuildCMD.txt
 
+# Local-only audit/working notes - not meant for the repo history.
+docs/AGENDA_AUDIT.md
+
 # Local editor/tool configs - not project-wide settings
 .claude/
 .vscode/
