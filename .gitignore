@@ -54,6 +54,7 @@ _BATT_ANAL/
 
 # Local-only audit/working notes - not meant for the repo history.
 docs/AGENDA_AUDIT.md
+docs/FIRMWARE_AUDIT.md
 docs/examples/
 
 # Local editor/tool configs - not project-wide settings
