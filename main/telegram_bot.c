@@ -1395,7 +1395,18 @@ static esp_err_t telegram_bot_send_photo_file(const char *file_path, const char 
 // rotation (i.e. NOT from a Telegram push) - see
 // config_manager_get_telegram_rotation_notify_enabled(). Sends the image's
 // thumbnail sidecar if one exists (much smaller/faster to upload than the
-// full display-resolution image), falling back to the full image otherwise.
+// full display-resolution image); if not - the common case for a plain
+// Storage/Auto-Rotate album image, since that sidecar is otherwise only
+// ever created for images that went through the Telegram ingestion
+// pipeline (generate_original_thumbnail()/generate_processed_thumbnail()
+// above) - generates one on demand via image_processor_make_thumbnail()
+// (handles both PNG and EPDGZ sources, auto-detected) rather than ever
+// falling back to uploading the raw album file itself. That fallback used
+// to be the actual behavior here, and for an EPDGZ source (this project's
+// own palette-indexed/gzip format, not a real image Telegram can decode at
+// all) it always failed with sendPhoto's generic "Bad Request:
+// IMAGE_PROCESS_FAILED" - confirmed live from a real device's debug log
+// after a user reported never receiving the promised notification.
 esp_err_t telegram_bot_notify_fallback_image(const char *image_path)
 {
     if (!image_path || image_path[0] == '\0') {
@@ -1406,12 +1417,23 @@ esp_err_t telegram_bot_notify_fallback_image(const char *image_path)
     strncpy(thumb_path, image_path, sizeof(thumb_path) - 1);
     thumb_path[sizeof(thumb_path) - 1] = '\0';
     char *ext = strrchr(thumb_path, '.');
-    const char *send_path = image_path;
+    const char *send_path = NULL;
     if (ext && (size_t) (ext - thumb_path) + 4 < sizeof(thumb_path)) {
         strcpy(ext, ".jpg");
         struct stat st;
         if (strcmp(thumb_path, image_path) != 0 && stat(thumb_path, &st) == 0) {
             send_path = thumb_path;
+        }
+    }
+
+    if (!send_path) {
+        if (image_processor_make_thumbnail(image_path, TELEGRAM_THUMBNAIL_MAX_DIMENSION,
+                                           TELEGRAM_NOTIFY_THUMB_PATH) == ESP_OK) {
+            send_path = TELEGRAM_NOTIFY_THUMB_PATH;
+        } else {
+            ESP_LOGW(TAG, "Rotation notify: could not thumbnail %s, skipping Telegram upload",
+                    image_path);
+            return ESP_FAIL;
         }
     }
 
