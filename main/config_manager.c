@@ -119,6 +119,9 @@ static bool low_battery_overlay_active = false;
 static bool agenda_todo_enabled = false;
 static bool agenda_cal_enabled = false;
 static bool agenda_cal_weather_enabled = false;
+static bool agenda_cal_compact_multiday = false;
+static char agenda_cal_name[AGENDA_CAL_NAME_MAX_LEN] = {0};
+static char agenda_cal_name2[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_todo_url[AGENDA_TODO_URL_MAX_LEN] = {0};
 static char agenda_cal_url[AGENDA_CAL_URL_MAX_LEN] = {0};
 static char agenda_cal_url2[AGENDA_CAL_URL2_MAX_LEN] = {0};
@@ -888,6 +891,14 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_WEATHER_KEY, &stored_agenda_cal_wthr) == ESP_OK) {
             agenda_cal_weather_enabled = (stored_agenda_cal_wthr != 0);
         }
+        uint8_t stored_agenda_cal_cpt = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_COMPACT_KEY, &stored_agenda_cal_cpt) == ESP_OK) {
+            agenda_cal_compact_multiday = (stored_agenda_cal_cpt != 0);
+        }
+        size_t agenda_cal_name_len = sizeof(agenda_cal_name);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_NAME_KEY, agenda_cal_name, &agenda_cal_name_len);
+        size_t agenda_cal_name2_len = sizeof(agenda_cal_name2);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_NAME2_KEY, agenda_cal_name2, &agenda_cal_name2_len);
         size_t agenda_todo_url_len = sizeof(agenda_todo_url);
         nvs_get_str(nvs_handle, NVS_AGENDA_TODO_URL_KEY, agenda_todo_url, &agenda_todo_url_len);
         size_t agenda_cal_url_len = sizeof(agenda_cal_url);
@@ -2692,6 +2703,59 @@ void config_manager_set_agenda_cal_weather_enabled(bool enabled)
 bool config_manager_get_agenda_cal_weather_enabled(void)
 {
     return agenda_cal_weather_enabled;
+}
+
+void config_manager_set_agenda_cal_compact_multiday(bool enabled)
+{
+    agenda_cal_compact_multiday = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_AGENDA_CAL_COMPACT_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+bool config_manager_get_agenda_cal_compact_multiday(void)
+{
+    return agenda_cal_compact_multiday;
+}
+
+void config_manager_set_agenda_cal_name(const char *name)
+{
+    strncpy(agenda_cal_name, name ? name : "", sizeof(agenda_cal_name) - 1);
+    agenda_cal_name[sizeof(agenda_cal_name) - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_AGENDA_CAL_NAME_KEY, agenda_cal_name);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_agenda_cal_name(void)
+{
+    return agenda_cal_name;
+}
+
+void config_manager_set_agenda_cal_name2(const char *name)
+{
+    strncpy(agenda_cal_name2, name ? name : "", sizeof(agenda_cal_name2) - 1);
+    agenda_cal_name2[sizeof(agenda_cal_name2) - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_AGENDA_CAL_NAME2_KEY, agenda_cal_name2);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_agenda_cal_name2(void)
+{
+    return agenda_cal_name2;
 }
 
 void config_manager_set_agenda_todo_url(const char *url)

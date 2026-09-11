@@ -586,34 +586,93 @@ static void build_event_line(const ics_event_t *ev, int calendar_index, bool gra
                           &out->has_bg);
 }
 
-// Draws a day-separator row: a dashed horizontal line with a chip centered
-// on it showing the weekday + day number. Inverts polarity with the page
+// Draws a day-separator row: a dashed horizontal line with a chip showing
+// the weekday + day number, and (if `weather_text` is non-NULL/non-empty)
+// a second chip with that day's forecast. Inverts polarity with the page
 // background (dark-on-light fill/dashes normally, light-on-dark when the
 // background is dark) rather than staying black-fixed, so it's never
 // invisible against a dark chosen background - `fill_r/g/b` is whichever
 // of black/white agenda_is_light() picked for the CURRENT background
 // (i.e. body_r/g/b from the caller), and the label text is simply the
 // opposite of that.
+//
+// With no weather, the day label is centered on the line (dashes both
+// sides) - unchanged from before this feature. With weather present, the
+// day label moves to the left edge and the weather chip is centered,
+// dashes filling the two remaining gaps - keeping the day label flush left
+// reads better once there's a second chip on the same line to balance
+// against, per live user feedback.
 static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t rect, int y,
-                             const char *label, uint8_t fill_r, uint8_t fill_g, uint8_t fill_b)
+                             const char *label, const char *weather_text, uint8_t fill_r,
+                             uint8_t fill_g, uint8_t fill_b)
 {
     uint8_t text_r, text_g, text_b;
     agenda_safe_text_color(fill_r, fill_g, fill_b, &text_r, &text_g, &text_b);
 
     int total_w = rect.w - 2 * AGENDA_PADDING;
+    int line_y = y + IMAGE_PROCESSOR_FONT_HEIGHT / 2 - 1;
+    const int dash_len = 4, gap_len = 3, dash_h = 2;
+
+    if (!weather_text || weather_text[0] == '\0') {
+        int label_w = (int) strlen(label) * IMAGE_PROCESSOR_FONT_WIDTH;
+        if (label_w > total_w) {
+            label_w = total_w;  // pathologically narrow column - clip rather than overflow
+        }
+        int label_x = rect.x + AGENDA_PADDING + (total_w - label_w) / 2;
+
+        for (int x = rect.x + AGENDA_PADDING; x + dash_len <= label_x; x += dash_len + gap_len) {
+            image_processor_fill_rect(rgb, width, height, x, line_y, dash_len, dash_h, fill_r,
+                                      fill_g, fill_b);
+        }
+        int right_start = label_x + label_w;
+        int right_end = rect.x + AGENDA_PADDING + total_w;
+        for (int x = right_start; x + dash_len <= right_end; x += dash_len + gap_len) {
+            image_processor_fill_rect(rgb, width, height, x, line_y, dash_len, dash_h, fill_r,
+                                      fill_g, fill_b);
+        }
+
+        if (label_w > 0) {
+            image_processor_fill_rect(rgb, width, height, label_x - 2, y, label_w + 4,
+                                      IMAGE_PROCESSOR_FONT_HEIGHT, fill_r, fill_g, fill_b);
+            image_processor_draw_text(rgb, width, height, label_x, y, label, text_r, text_g,
+                                      text_b);
+        }
+        return;
+    }
+
     int label_w = (int) strlen(label) * IMAGE_PROCESSOR_FONT_WIDTH;
     if (label_w > total_w) {
-        label_w = total_w;  // pathologically narrow column - clip rather than overflow
+        label_w = total_w;
     }
-    int label_x = rect.x + AGENDA_PADDING + (total_w - label_w) / 2;
-    int line_y = y + IMAGE_PROCESSOR_FONT_HEIGHT / 2 - 1;
+    int label_x = rect.x + AGENDA_PADDING;  // left-aligned
 
-    const int dash_len = 4, gap_len = 3, dash_h = 2;
-    for (int x = rect.x + AGENDA_PADDING; x + dash_len <= label_x; x += dash_len + gap_len) {
+    // Clip the weather chip to whatever's left after the label plus a
+    // minimum gap, rather than letting it overlap - a narrow column with a
+    // long day label (unlikely, but the label itself is already clipped
+    // above for the same reason) is the only case this ever triggers.
+    int max_weather_chars = (total_w - label_w - (dash_len + gap_len)) / IMAGE_PROCESSOR_FONT_WIDTH;
+    if (max_weather_chars < 0) {
+        max_weather_chars = 0;
+    }
+    char weather_clipped[WEATHER_DAY_LINE_MAX_LEN];
+    strncpy(weather_clipped, weather_text, sizeof(weather_clipped) - 1);
+    weather_clipped[sizeof(weather_clipped) - 1] = '\0';
+    if ((int) strlen(weather_clipped) > max_weather_chars) {
+        weather_clipped[max_weather_chars] = '\0';
+    }
+    int weather_w = (int) strlen(weather_clipped) * IMAGE_PROCESSOR_FONT_WIDTH;
+    int weather_x = rect.x + AGENDA_PADDING + (total_w - weather_w) / 2;
+    int min_weather_x = label_x + label_w + dash_len;
+    if (weather_w > 0 && weather_x < min_weather_x) {
+        weather_x = min_weather_x;
+    }
+
+    int mid_end = weather_x;
+    for (int x = label_x + label_w; x + dash_len <= mid_end; x += dash_len + gap_len) {
         image_processor_fill_rect(rgb, width, height, x, line_y, dash_len, dash_h, fill_r, fill_g,
                                   fill_b);
     }
-    int right_start = label_x + label_w;
+    int right_start = weather_x + weather_w;
     int right_end = rect.x + AGENDA_PADDING + total_w;
     for (int x = right_start; x + dash_len <= right_end; x += dash_len + gap_len) {
         image_processor_fill_rect(rgb, width, height, x, line_y, dash_len, dash_h, fill_r, fill_g,
@@ -624,6 +683,12 @@ static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t 
         image_processor_fill_rect(rgb, width, height, label_x - 2, y, label_w + 4,
                                   IMAGE_PROCESSOR_FONT_HEIGHT, fill_r, fill_g, fill_b);
         image_processor_draw_text(rgb, width, height, label_x, y, label, text_r, text_g, text_b);
+    }
+    if (weather_w > 0) {
+        image_processor_fill_rect(rgb, width, height, weather_x - 2, y, weather_w + 4,
+                                  IMAGE_PROCESSOR_FONT_HEIGHT, fill_r, fill_g, fill_b);
+        image_processor_draw_text(rgb, width, height, weather_x, y, weather_clipped, text_r,
+                                  text_g, text_b);
     }
 }
 
@@ -651,6 +716,26 @@ static bool event_touches_day(const ics_event_t *ev, time_t day)
     time_t last_instant = (ev->end > ev->start) ? ev->end - 1 : ev->start;
     time_t ev_day_end = day_start(last_instant);
     return day >= ev_day_start && day <= ev_day_end;
+}
+
+// Total whole days `ev` spans (inclusive of both its first and last day) -
+// used only by the opt-in "compact multi-day" display below. A 1-day event
+// (the overwhelming majority) returns 1.
+static int event_total_days(const ics_event_t *ev)
+{
+    time_t ev_day_start = day_start(ev->start);
+    time_t last_instant = (ev->end > ev->start) ? ev->end - 1 : ev->start;
+    time_t ev_day_end = day_start(last_instant);
+    return (int) ((ev_day_end - ev_day_start) / 86400) + 1;
+}
+
+// 1-based position of `day` within `ev`'s own full span, counting from its
+// actual start date regardless of whether that start is inside the visible
+// lookahead window - e.g. an 8-day event whose day 4 is the first day
+// visible in a 3-day window still reports "4", not "1".
+static int event_day_index(const ics_event_t *ev, time_t day)
+{
+    return (int) ((day - day_start(ev->start)) / 86400) + 1;
 }
 
 #define AGENDA_MAX_CAL_DAYS 8  // generous vs. the 1-4 calendar days a 1-3 day lookahead can touch
@@ -718,7 +803,8 @@ static bool find_weather_for_day(const weather_forecast_t *weather, time_t day,
 static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rect_t rect,
                                  time_t now, int lookahead_days, uint8_t body_r, uint8_t body_g,
                                  uint8_t body_b, const agenda_tagged_event_t *tagged,
-                                 int tagged_count, const weather_forecast_t *cal_weather)
+                                 int tagged_count, const weather_forecast_t *cal_weather,
+                                 const char *header_title)
 {
     uint8_t header_text_r, header_text_g, header_text_b;
     agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g,
@@ -731,7 +817,7 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
     // call site alone (same reason todo_item_role() widened its own date
     // buffer earlier in this feature).
     char header[80];
-    snprintf(header, sizeof(header), "CALENDAR - %02d.%02d.%04d %02d:%02d", now_tm.tm_mday,
+    snprintf(header, sizeof(header), "%s - %02d.%02d.%04d %02d:%02d", header_title, now_tm.tm_mday,
              now_tm.tm_mon + 1, now_tm.tm_year + 1900, now_tm.tm_hour, now_tm.tm_min);
 
     int header_h = IMAGE_PROCESSOR_FONT_HEIGHT + 2 * AGENDA_PADDING;
@@ -762,16 +848,41 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         }
     }
 
+    // Opt-in: a multi-day event is shown only once, on the first day of the
+    // *visible* window it touches, with an "N/M: " prefix (N = its position
+    // within its own full span, M = that span's total length) instead of
+    // being repeated under every day it spans. Precomputed once per tagged
+    // event rather than re-derived per day, since both the budgeting pass
+    // and the render pass below need the same answer.
+    bool compact_multiday = config_manager_get_agenda_cal_compact_multiday();
+    bool is_multiday[AGENDA_MAX_TAGGED_EVENTS];
+    int first_visible_idx[AGENDA_MAX_TAGGED_EVENTS];
+    for (int k = 0; k < tagged_count; k++) {
+        is_multiday[k] = event_total_days(tagged[k].ev) > 1;
+        first_visible_idx[k] = -1;
+        for (int di = 0; di < day_count; di++) {
+            if (event_touches_day(tagged[k].ev, days[di])) {
+                first_visible_idx[k] = di;
+                break;
+            }
+        }
+    }
+
     // Two-pass budgeting, same "reserve a row for +N more" idea as
     // draw_todo_column() - here a single event can occupy more than one
-    // row total (once per day it touches), so the total has to be counted
-    // up front rather than just compared against tagged_count.
+    // row total (once per day it touches, unless compacted above), so the
+    // total has to be counted up front rather than just compared against
+    // tagged_count.
     int total_event_instances = 0;
     for (int di = 0; di < day_count; di++) {
         for (int k = 0; k < tagged_count; k++) {
-            if (event_touches_day(tagged[k].ev, days[di])) {
-                total_event_instances++;
+            if (!event_touches_day(tagged[k].ev, days[di])) {
+                continue;
             }
+            if (compact_multiday && is_multiday[k] && di != first_visible_idx[k]) {
+                continue;
+            }
+            total_event_instances++;
         }
     }
     int total_rows_needed = day_count + total_event_instances;
@@ -785,40 +896,62 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
     for (int di = 0; di < day_count && rows_used < budget; di++) {
         struct tm day_tm;
         localtime_r(&days[di], &day_tm);
-        char label[48];
-        int label_len = snprintf(label, sizeof(label), "%s %d.", agenda_weekday_abbr(day_tm.tm_wday),
-                                 day_tm.tm_mday);
+        char label[16];
+        snprintf(label, sizeof(label), "%s %d.", agenda_weekday_abbr(day_tm.tm_wday),
+                day_tm.tm_mday);
+        char weather_buf[WEATHER_DAY_LINE_MAX_LEN] = "";
         const weather_day_t *wday;
-        if (label_len > 0 && find_weather_for_day(cal_weather, days[di], &wday)) {
+        if (find_weather_for_day(cal_weather, days[di], &wday)) {
             bool german = (strcmp(config_manager_get_overlay_language(), "de") == 0);
             int tmin = (int) lroundf(wday->temp_min_c);
             int tmax = (int) lroundf(wday->temp_max_c);
             const char *cond = weather_condition_text(wday->weather_code, german);
-            snprintf(label + label_len, sizeof(label) - (size_t) label_len, " [%d/%d %s]", tmin,
-                    tmax, cond);
+            snprintf(weather_buf, sizeof(weather_buf), "[%d/%d %s]", tmin, tmax, cond);
         }
-        draw_day_divider(rgb, width, height, rect, content_top + rows_used * row_h, label, body_r,
-                         body_g, body_b);
+        draw_day_divider(rgb, width, height, rect, content_top + rows_used * row_h, label,
+                         weather_buf[0] ? weather_buf : NULL, body_r, body_g, body_b);
         rows_used++;
 
         for (int i = 0; i < tagged_count && rows_used < budget; i++) {
             if (!event_touches_day(tagged[i].ev, days[di])) {
                 continue;
             }
+            if (compact_multiday && is_multiday[i] && di != first_visible_idx[i]) {
+                continue;
+            }
             const agenda_event_line_t *line = tagged[i].line;
+
+            char prefix[16] = "";
+            int prefix_len = 0;
+            if (compact_multiday && is_multiday[i]) {
+                prefix_len = snprintf(prefix, sizeof(prefix), "%d/%d: ",
+                                      event_day_index(tagged[i].ev, days[di]),
+                                      event_total_days(tagged[i].ev));
+            }
+            int avail_width = text_width - prefix_len * IMAGE_PROCESSOR_FONT_WIDTH;
+            if (avail_width < IMAGE_PROCESSOR_FONT_WIDTH) {
+                avail_width = IMAGE_PROCESSOR_FONT_WIDTH;
+            }
+
             char wrapped[1][OVERLAY_LINE_MAX_CHARS];
-            int wrapped_count = image_processor_wrap_text(line->text, text_width, 1, wrapped);
+            int wrapped_count = image_processor_wrap_text(line->text, avail_width, 1, wrapped);
             if (wrapped_count > 0) {
                 int y = content_top + rows_used * row_h;
+                int x = rect.x + AGENDA_PADDING;
+                if (prefix_len > 0) {
+                    image_processor_draw_text(rgb, width, height, x, y, prefix, body_r, body_g,
+                                              body_b);
+                    x += prefix_len * IMAGE_PROCESSOR_FONT_WIDTH;
+                }
                 int visible_len = (int) strlen(wrapped[0]);
                 if (line->has_bg) {
-                    image_processor_fill_rect(rgb, width, height, rect.x + AGENDA_PADDING, y,
+                    image_processor_fill_rect(rgb, width, height, x, y,
                                               visible_len * IMAGE_PROCESSOR_FONT_WIDTH,
                                               IMAGE_PROCESSOR_FONT_HEIGHT, line->br, line->bgg,
                                               line->bb);
                 }
-                image_processor_draw_text(rgb, width, height, rect.x + AGENDA_PADDING, y,
-                                          wrapped[0], line->fr, line->fg, line->fb);
+                image_processor_draw_text(rgb, width, height, x, y, wrapped[0], line->fr,
+                                          line->fg, line->fb);
                 rows_used++;
                 instances_shown++;
             }
@@ -1023,8 +1156,31 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                 qsort(tagged, (size_t) tagged_count, sizeof(agenda_tagged_event_t),
                      compare_tagged_by_start);
             }
+            // Header shows the actual calendar source name(s) instead of a
+            // generic "CALENDAR" label - just whichever one(s) actually
+            // contributed events this cycle (have_a/have_b), not simply
+            // whichever have a URL configured, since a configured-but-
+            // currently-failed source contributes nothing to show a name
+            // for. Falls back to "Calendar A"/"Calendar B" if the user
+            // hasn't set a custom display name for that source.
+            const char *name_a = config_manager_get_agenda_cal_name();
+            if (!name_a || name_a[0] == '\0') {
+                name_a = "Calendar A";
+            }
+            const char *name_b = config_manager_get_agenda_cal_name2();
+            if (!name_b || name_b[0] == '\0') {
+                name_b = "Calendar B";
+            }
+            char header_title[64];
+            if (have_a && have_b) {
+                snprintf(header_title, sizeof(header_title), "%s, %s", name_a, name_b);
+            } else if (have_a) {
+                snprintf(header_title, sizeof(header_title), "%s", name_a);
+            } else {
+                snprintf(header_title, sizeof(header_title), "%s", name_b);
+            }
             draw_calendar_column(rgb, width, height, cal_rect, now, lookahead_days, body_r,
-                                 body_g, body_b, tagged, tagged_count, cal_weather);
+                                 body_g, body_b, tagged, tagged_count, cal_weather, header_title);
         } else {
             ESP_LOGW(TAG, "Failed to allocate Calendar render scratch buffers - skipping column");
         }

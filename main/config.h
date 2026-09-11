@@ -502,6 +502,18 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // in the evening - see calendar_ics.c) simply shows no forecast, same as
 // any other day the forecast doesn't happen to cover.
 #define NVS_AGENDA_CAL_WEATHER_KEY "agenda_cal_wthr"
+// Opt-in: a multi-day event is shown once (on the first day of the visible
+// window it touches) with an "N/M: " position-within-span prefix, instead
+// of being repeated under every day it spans - see agenda_renderer.c's
+// event_total_days()/event_day_index().
+#define NVS_AGENDA_CAL_COMPACT_KEY "agenda_cal_cpt"
+// Optional display name shown in the Calendar column header instead of the
+// generic "Calendar A"/"Calendar B" fallback (agenda_renderer.c) - e.g.
+// "Private"/"Work". Not a credential, unlike the URL fields above - shown
+// as-is in GET /api/config.
+#define NVS_AGENDA_CAL_NAME_KEY "agenda_cal_nm"
+#define NVS_AGENDA_CAL_NAME2_KEY "agenda_cal_nm2"
+#define AGENDA_CAL_NAME_MAX_LEN 24
 // Independent schedule - same simplified 3-field cron grammar/limits as
 // DEFAULT_ROTATE_CRON/MAX_CRON_RULES/CRON_RULE_MAX_LEN above (reused
 // as-is, just a second rule set under its own NVS key). E.g. "0 6-18 *"

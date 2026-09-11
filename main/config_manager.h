@@ -386,6 +386,20 @@ int config_manager_get_agenda_cal_days(void);
 void config_manager_set_agenda_cal_weather_enabled(bool enabled);
 bool config_manager_get_agenda_cal_weather_enabled(void);
 
+// Opt-in compact multi-day event display - see NVS_AGENDA_CAL_COMPACT_KEY
+// in config.h.
+void config_manager_set_agenda_cal_compact_multiday(bool enabled);
+bool config_manager_get_agenda_cal_compact_multiday(void);
+
+// Optional display names for the Calendar header - see
+// NVS_AGENDA_CAL_NAME_KEY/_NAME2_KEY in config.h. May return "" (never
+// set/cleared) - agenda_renderer.c falls back to "Calendar A"/"Calendar B"
+// itself when rendering.
+void config_manager_set_agenda_cal_name(const char *name);
+const char *config_manager_get_agenda_cal_name(void);
+void config_manager_set_agenda_cal_name2(const char *name);
+const char *config_manager_get_agenda_cal_name2(void);
+
 // Independent schedule, same cron grammar/storage shape as the rotate
 // schedule above (config_manager_get/set_cron_rules()) but its own rule
 // set - see agenda_manager_wake_matches_now()/agenda_manager_seconds_until_next_wake().

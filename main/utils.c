@@ -698,6 +698,21 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_cal_weather_enabled(cJSON_IsTrue(item));
     }
+    item = cJSON_GetObjectItem(root, "agenda_cal_compact_multiday");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_compact_multiday(cJSON_IsTrue(item));
+    }
+    // Plain display names, not credentials - unlike agenda_cal_url above,
+    // applied even when empty (an empty save genuinely means "cleared back
+    // to the generic default", not "field left untouched").
+    item = cJSON_GetObjectItem(root, "agenda_cal_name");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_cal_name(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_name2");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_cal_name2(cJSON_GetStringValue(item));
+    }
     // Agenda schedule: same shape/validation as rotate_cron above, but an
     // empty array is allowed here (agenda_manager_is_enabled() already
     // requires a non-empty schedule before agenda mode can ever fire, so

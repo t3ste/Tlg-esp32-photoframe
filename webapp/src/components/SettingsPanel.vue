@@ -1249,7 +1249,7 @@ async function performFactoryReset() {
               dark one - see Appearance below).
             </div>
             <v-row dense>
-              <v-col cols="12" sm="8">
+              <v-col cols="12" sm="6">
                 <v-text-field
                   v-model="settingsStore.deviceSettings.agendaCalUrl"
                   label="Calendar A ICS URL"
@@ -1262,7 +1262,19 @@ async function performFactoryReset() {
                   :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 />
               </v-col>
-              <v-col cols="12" sm="4">
+              <v-col cols="8" sm="3">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.agendaCalName"
+                  label="Display name"
+                  variant="outlined"
+                  density="compact"
+                  placeholder="Calendar A"
+                  hint="Shown in the Calendar header instead of &quot;Calendar A&quot;"
+                  persistent-hint
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+              </v-col>
+              <v-col cols="4" sm="3">
                 <v-select
                   v-model="settingsStore.deviceSettings.agendaCalDays"
                   :items="[1, 2, 3]"
@@ -1273,23 +1285,38 @@ async function performFactoryReset() {
                 />
               </v-col>
             </v-row>
-            <v-text-field
-              v-model="settingsStore.deviceSettings.agendaCalUrl2"
-              label="Calendar B ICS URL (optional)"
-              type="password"
-              variant="outlined"
-              density="compact"
-              hint="Leave empty to keep the current URL, or to use only one calendar"
-              persistent-hint
-              placeholder="••••••••"
-              class="mb-2"
-              :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
-            />
+            <v-row dense>
+              <v-col cols="12" sm="8">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.agendaCalUrl2"
+                  label="Calendar B ICS URL (optional)"
+                  type="password"
+                  variant="outlined"
+                  density="compact"
+                  hint="Leave empty to keep the current URL, or to use only one calendar"
+                  persistent-hint
+                  placeholder="••••••••"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+              </v-col>
+              <v-col cols="12" sm="4">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.agendaCalName2"
+                  label="Display name"
+                  variant="outlined"
+                  density="compact"
+                  placeholder="Calendar B"
+                  hint="Shown in the Calendar header instead of &quot;Calendar B&quot;"
+                  persistent-hint
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+              </v-col>
+            </v-row>
             <v-switch
               v-model="settingsStore.deviceSettings.agendaCalWeatherEnabled"
               label="Show forecast on day dividers"
               color="primary"
-              class="mb-1"
+              class="mt-2 mb-1"
               hide-details
               :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
             />
@@ -1299,6 +1326,20 @@ async function performFactoryReset() {
               Weather + Headline Overlays), just for this independent display path. The forecast
               only covers 3 days, so if the lookahead window reaches into a 4th day (possible late
               in the evening), that day simply shows no forecast.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.agendaCalCompactMultiday"
+              label="Compact multi-day events"
+              color="primary"
+              class="mb-1"
+              hide-details
+              :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Shows a multi-day event only once, on the first visible day, with an "N/M:" prefix
+              (which day of the event's full span, out of how many) instead of repeating it under
+              every day it spans - e.g. an 8-day trip whose 4th day is the first one visible shows
+              "4/8: Trip" that one time only.
             </div>
 
             <v-divider class="mb-4 mt-2" />

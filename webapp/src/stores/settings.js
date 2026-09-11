@@ -116,11 +116,19 @@ export const useSettingsStore = defineStore("settings", () => {
     // first at render time, colored per its own origin. Same write-only
     // treatment as agendaCalUrl above.
     agendaCalUrl2: "",
+    // Optional display names shown in the Calendar header instead of the
+    // generic "Calendar A"/"Calendar B" fallback - not secrets, always
+    // returned/saved plainly (unlike the URL fields above).
+    agendaCalName: "",
+    agendaCalName2: "",
     agendaCalDays: 2,
     // Annotates each Calendar day divider with that day's forecast (reuses
     // the same weather settings/provider as the photo weather overlay -
     // see weatherLocationName/weatherProvider etc. below). Off by default.
     agendaCalWeatherEnabled: false,
+    // A multi-day event is shown once (first visible day) with an "N/M: "
+    // position prefix instead of repeated under every day it spans.
+    agendaCalCompactMultiday: false,
     agendaCron: ["0 6-18 *"],
     // true = ToDo above Calendar (default), false = side by side. Portrait
     // boards always stack regardless of this setting - see agenda_renderer.c.
@@ -327,8 +335,11 @@ export const useSettingsStore = defineStore("settings", () => {
       // agenda_cal_url is intentionally never present in this response (see
       // config_manager.c) - stays empty even when a URL is actually
       // configured, same write-only treatment as wifiPassword above.
+      deviceSettings.value.agendaCalName = data.agenda_cal_name || "";
+      deviceSettings.value.agendaCalName2 = data.agenda_cal_name2 || "";
       deviceSettings.value.agendaCalDays = data.agenda_cal_days ?? 2;
       deviceSettings.value.agendaCalWeatherEnabled = data.agenda_cal_weather_enabled === true;
+      deviceSettings.value.agendaCalCompactMultiday = data.agenda_cal_compact_multiday === true;
       deviceSettings.value.agendaCron =
         Array.isArray(data.agenda_cron) && data.agenda_cron.length
           ? data.agenda_cron
@@ -458,8 +469,11 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
       agenda_todo_url: deviceSettings.value.agendaTodoUrl,
+      agenda_cal_name: deviceSettings.value.agendaCalName,
+      agenda_cal_name2: deviceSettings.value.agendaCalName2,
       agenda_cal_days: deviceSettings.value.agendaCalDays,
       agenda_cal_weather_enabled: deviceSettings.value.agendaCalWeatherEnabled,
+      agenda_cal_compact_multiday: deviceSettings.value.agendaCalCompactMultiday,
       agenda_cron: deviceSettings.value.agendaCron,
       agenda_stack_layout: deviceSettings.value.agendaStackLayout,
       agenda_bg_color: deviceSettings.value.agendaBgColor,
