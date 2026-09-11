@@ -468,6 +468,18 @@ static esp_err_t ota_check_periodic_callback(void)
         return ESP_OK;
     }
 
+    if (ota_status.state == OTA_STATE_CHECKING || ota_status.state == OTA_STATE_DOWNLOADING ||
+        ota_status.state == OTA_STATE_INSTALLING) {
+        // ota_check_for_update()/ota_start_update() both refuse to start a
+        // second check/update while one is already in progress, but this
+        // periodic path used to skip that guard entirely and could spawn a
+        // second concurrent ota_check_task, corrupting shared state
+        // (ota_status, firmware_url) mid-update. Skip this cycle instead;
+        // the next periodic tick retries.
+        ESP_LOGI(TAG, "OTA check/update already in progress, skipping periodic check");
+        return ESP_OK;
+    }
+
     ESP_LOGI(TAG, "Periodic OTA check triggered");
 
     // Check for updates without notifying HA (HA will poll for status)
