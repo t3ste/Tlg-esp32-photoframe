@@ -403,6 +403,13 @@ int wifi_manager_scan(wifi_ap_record_t *results, int max_results)
             ESP_LOGE(TAG, "Failed to set APSTA mode: %s", esp_err_to_name(err));
             return 0;
         }
+        // The STA driver isn't fully up the instant esp_wifi_set_mode()
+        // returns - scanning immediately after switching from AP-only mode
+        // reproducibly returns 0 APs every time (confirmed live: a real scan
+        // takes 100ms+ per channel, but "No APs found" was logged ~100ms
+        // after the mode switch, i.e. before the STA side had actually
+        // started). A short settle delay lets it finish coming up first.
+        vTaskDelay(pdMS_TO_TICKS(150));
     }
 
     // Start blocking scan on all channels
