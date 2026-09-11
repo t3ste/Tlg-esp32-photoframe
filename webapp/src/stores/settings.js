@@ -105,9 +105,13 @@ export const useSettingsStore = defineStore("settings", () => {
     lowBatteryOverlayEnabled: false,
     lowBatteryOverlayThreshold: 16,
     // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
-    // overlay. agendaCalUrl is write-only (never returned by GET
-    // /api/config, same treatment as wifiPassword above) - starts empty
-    // even when a URL is actually configured on the device.
+    // overlay. agendaTodoUrl/agendaCalUrl are write-only (never returned by
+    // GET /api/config, same treatment as wifiPassword above) - both start
+    // empty even when a URL is actually configured on the device, since
+    // either can carry a credential embedded as a query param (not just
+    // the Calendar URL - a security review found the original assumption
+    // that a ToDo feed is always a public, non-secret gist doesn't hold in
+    // general).
     agendaTodoEnabled: false,
     agendaCalEnabled: false,
     agendaTodoUrl: "",
@@ -334,9 +338,8 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.lowBatteryOverlayThreshold = data.low_battery_overlay_threshold ?? 16;
       deviceSettings.value.agendaTodoEnabled = data.agenda_todo_enabled === true;
       deviceSettings.value.agendaCalEnabled = data.agenda_cal_enabled === true;
-      deviceSettings.value.agendaTodoUrl = data.agenda_todo_url || "";
-      // agenda_cal_url is intentionally never present in this response (see
-      // config_manager.c) - stays empty even when a URL is actually
+      // agenda_todo_url/agenda_cal_url are intentionally never present in
+      // this response (see http_server.c) - stay empty even when a URL is actually
       // configured, same write-only treatment as wifiPassword above.
       deviceSettings.value.agendaCalName = data.agenda_cal_name || "";
       deviceSettings.value.agendaCalName2 = data.agenda_cal_name2 || "";
@@ -473,7 +476,6 @@ export const useSettingsStore = defineStore("settings", () => {
       low_battery_overlay_threshold: deviceSettings.value.lowBatteryOverlayThreshold,
       agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
-      agenda_todo_url: deviceSettings.value.agendaTodoUrl,
       agenda_cal_name: deviceSettings.value.agendaCalName,
       agenda_cal_name2: deviceSettings.value.agendaCalName2,
       agenda_cal_days: deviceSettings.value.agendaCalDays,
@@ -519,10 +521,14 @@ export const useSettingsStore = defineStore("settings", () => {
       currentConfig.wifi_password = deviceSettings.value.wifiPassword;
     }
 
-    // Same write-only treatment for the Calendar ICS URL (a credential,
-    // per Google's own "secret address" warning) - never round-tripped
-    // from GET /api/config, so only send it when the user actually typed
-    // a new one.
+    // Same write-only treatment for the ToDo/Calendar feed URLs (any of
+    // them can carry a credential embedded as a query param, not just the
+    // Calendar URL's Google-documented "secret address" case) - never
+    // round-tripped from GET /api/config, so only send one when the user
+    // actually typed a new value.
+    if (deviceSettings.value.agendaTodoUrl && deviceSettings.value.agendaTodoUrl.length > 0) {
+      currentConfig.agenda_todo_url = deviceSettings.value.agendaTodoUrl;
+    }
     if (deviceSettings.value.agendaCalUrl && deviceSettings.value.agendaCalUrl.length > 0) {
       currentConfig.agenda_cal_url = deviceSettings.value.agendaCalUrl;
     }

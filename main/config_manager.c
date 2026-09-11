@@ -7,6 +7,8 @@
 #include "board_hal.h"
 #include "config.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "nvs.h"
 #include "storage.h"
 
@@ -234,9 +236,27 @@ static void cron_persist(void)
 // commit to the end instead. A single Web UI Agenda settings save can touch
 // on the order of 25 separate fields; without batching that was 25
 // independent flash erase/write cycles for one logical save.
+//
+// apply_config_from_json() (the sole caller of begin/end) has two call
+// sites that run on different FreeRTOS tasks - the httpd task (Web UI
+// PATCH) and the URL-mode rotation task's remote-config-payload handling -
+// which the rest of this project already treats as genuinely concurrent
+// (see main.c's HTTP-server-stays-up-during-rotation comment). Without a
+// lock here, both could open/write through the same shared
+// agenda_nvs_batch_handle at once, and whichever finishes its batch first
+// would close a handle the other is still mid-write on, silently dropping
+// part of that request's save. agenda_nvs_batch_mutex serializes the
+// begin/end window itself (not each individual write) so at most one
+// caller is ever "inside" a batch at a time - the other simply falls back
+// to its own independent per-field open/commit/close for the (rare, brief)
+// duration it has to wait, rather than corrupting shared state.
 // ----------------------------------------------------------------------------
 
+#define AGENDA_BATCH_LOCK_TIMEOUT_MS 5000
+
+static SemaphoreHandle_t agenda_nvs_batch_mutex = NULL;
 static bool agenda_nvs_batching = false;
+static bool agenda_nvs_batch_locked = false;  // true only while this call holds the mutex
 static nvs_handle_t agenda_nvs_batch_handle;
 
 static void agenda_nvs_set_u8(const char *key, uint8_t value)
@@ -294,22 +314,42 @@ static void agenda_nvs_set_str_or_erase(const char *key, const char *value)
 
 void config_manager_begin_agenda_batch(void)
 {
-    if (agenda_nvs_batching) {
-        return;  // already batching - nested call, no-op (shouldn't happen)
+    if (!agenda_nvs_batch_mutex) {
+        return;  // mutex not initialized (shouldn't happen) - callers fall
+                 // back to their own independent open/commit/close, same as
+                 // a timed-out lock below
     }
+    if (xSemaphoreTake(agenda_nvs_batch_mutex, pdMS_TO_TICKS(AGENDA_BATCH_LOCK_TIMEOUT_MS)) !=
+        pdTRUE) {
+        // Another task is mid-batch and didn't finish in time - rather than
+        // block indefinitely (or worse, proceed and corrupt the other
+        // task's in-progress batch), skip batching for this call entirely;
+        // every agenda_nvs_set_* helper below already handles
+        // agenda_nvs_batching == false by opening/committing/closing on
+        // its own.
+        ESP_LOGW(TAG, "Agenda config batch: lock timed out, saving unbatched");
+        return;
+    }
+    agenda_nvs_batch_locked = true;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &agenda_nvs_batch_handle) == ESP_OK) {
         agenda_nvs_batching = true;
+    } else {
+        xSemaphoreGive(agenda_nvs_batch_mutex);
+        agenda_nvs_batch_locked = false;
     }
 }
 
 void config_manager_end_agenda_batch(void)
 {
-    if (!agenda_nvs_batching) {
-        return;
+    if (agenda_nvs_batching) {
+        nvs_commit(agenda_nvs_batch_handle);
+        nvs_close(agenda_nvs_batch_handle);
+        agenda_nvs_batching = false;
     }
-    nvs_commit(agenda_nvs_batch_handle);
-    nvs_close(agenda_nvs_batch_handle);
-    agenda_nvs_batching = false;
+    if (agenda_nvs_batch_locked) {
+        xSemaphoreGive(agenda_nvs_batch_mutex);
+        agenda_nvs_batch_locked = false;
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -530,6 +570,14 @@ static void cron_from_legacy_interval(int seconds, char *out, size_t out_len)
 esp_err_t config_manager_init(void)
 {
     ESP_LOGI(TAG, "Initializing config manager");
+
+    // See the comment above config_manager_begin_agenda_batch()'s
+    // definition - serializes the two concurrent-task call sites of
+    // apply_config_from_json()'s agenda batch window.
+    agenda_nvs_batch_mutex = xSemaphoreCreateMutex();
+    if (!agenda_nvs_batch_mutex) {
+        ESP_LOGW(TAG, "Failed to create agenda NVS batch mutex - agenda saves will be unbatched");
+    }
 
     // Rotation-schedule load is resolved after the read-only NVS handle closes
     // (migration / default seeding may need a read-write handle).

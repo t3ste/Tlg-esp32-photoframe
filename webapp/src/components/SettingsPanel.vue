@@ -311,6 +311,7 @@ async function exportConfig() {
       const config = await configRes.json();
       // Remove sensitive fields
       delete config.wifi_password;
+      delete config.agenda_todo_url;
       delete config.agenda_cal_url;
       delete config.agenda_cal_url2;
       exported.config = config;
@@ -1237,14 +1238,19 @@ async function performFactoryReset() {
             />
             <div class="text-caption text-medium-emphasis mb-2">
               A plain todo.txt file, fetched fresh every agenda wake - no API key, no on-device
-              caching. Completed tasks ("x " prefix) are never shown.
+              caching. Completed tasks ("x " prefix) are never shown. Treated like a password
+              field (never shown back to you) since a private feed's URL can embed an access
+              token, the same way a Google Calendar link can.
             </div>
             <v-text-field
               v-model="settingsStore.deviceSettings.agendaTodoUrl"
               label="todo.txt URL"
+              type="password"
               variant="outlined"
               density="compact"
-              placeholder="https://example.com/todo.txt"
+              hint="Leave empty to keep the current URL"
+              persistent-hint
+              placeholder="••••••••"
               class="mb-4"
               :disabled="!settingsStore.deviceSettings.agendaTodoEnabled"
             />

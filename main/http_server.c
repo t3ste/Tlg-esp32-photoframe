@@ -1639,15 +1639,19 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddNumberToObject(root, "low_battery_overlay_threshold",
                                 config_manager_get_low_battery_overlay_threshold());
 
-        // Agenda (ToDo + Calendar). agenda_cal_url is deliberately NEVER
-        // added here - it's a credential (Google: "only you should know
-        // this address"), same write-only treatment as wifi_password
-        // above, which is also absent from this response.
+        // Agenda (ToDo + Calendar). agenda_cal_url/agenda_todo_url are
+        // deliberately NEVER added here - either can carry a credential
+        // (Google's Calendar "secret address" is the obvious case, but a
+        // ToDo feed URL can just as easily embed an auth token as a query
+        // param - todo_fetch()/http_fetch_get() don't care what kind of
+        // URL they're given), same write-only treatment as wifi_password
+        // above, which is also absent from this response. (Originally only
+        // agenda_cal_url got this treatment, on the assumption a ToDo feed
+        // is typically a public gist - found during a security review that
+        // the assumption doesn't hold for every possible ToDo source.)
         cJSON_AddBoolToObject(root, "agenda_todo_enabled",
                               config_manager_get_agenda_todo_enabled());
         cJSON_AddBoolToObject(root, "agenda_cal_enabled", config_manager_get_agenda_cal_enabled());
-        const char *agenda_todo_url = config_manager_get_agenda_todo_url();
-        cJSON_AddStringToObject(root, "agenda_todo_url", agenda_todo_url ? agenda_todo_url : "");
         cJSON_AddNumberToObject(root, "agenda_cal_days", config_manager_get_agenda_cal_days());
         cJSON_AddBoolToObject(root, "agenda_cal_weather_enabled",
                               config_manager_get_agenda_cal_weather_enabled());
