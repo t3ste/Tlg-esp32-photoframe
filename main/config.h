@@ -96,6 +96,18 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // overlay paths above).
 #define AGENDA_OUTPUT_PATH FS_MOUNT_POINT "/.agenda.png"
 
+// On-demand thumbnail scratch file for telegram_bot_notify_fallback_image() -
+// generated only when the image being reported has no pre-existing ".jpg"
+// sidecar (true for any plain Storage/Auto-Rotate album image, since that
+// sidecar is otherwise only ever created for images that went through the
+// Telegram ingestion pipeline). Named ".jpg" to match what Telegram's
+// sendPhoto expects, even though image_processor_make_thumbnail() actually
+// writes PNG content - the existing Telegram-ingestion thumbnails already
+// do the same, and Telegram's API sniffs actual content, not the extension.
+// Deliberately outside every album directory (a stray file inside one would
+// otherwise show up as a "new" photo to album_manager/gallery/rotation).
+#define TELEGRAM_NOTIFY_THUMB_PATH FS_MOUNT_POINT "/.tg_notify_thumb.jpg"
+
 // Display-history file (one shown image's full path per line) - lets random
 // rotation and the Telegram fallback rotation cycle through every image once
 // before repeating. See history_manager.[ch].
