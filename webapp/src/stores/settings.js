@@ -695,7 +695,7 @@ export const useSettingsStore = defineStore("settings", () => {
         originalParams = JSON.parse(JSON.stringify(params.value));
       }
       return response.ok;
-    } catch (_error) {
+    } catch (error) {
       console.error("Failed to save settings:", error);
       return false;
     }
@@ -709,7 +709,7 @@ export const useSettingsStore = defineStore("settings", () => {
         body: JSON.stringify(palette.value),
       });
       return response.ok;
-    } catch (_error) {
+    } catch (error) {
       console.error("Failed to save palette:", error);
       return false;
     }
@@ -730,7 +730,7 @@ export const useSettingsStore = defineStore("settings", () => {
       } else {
         return { success: false, message: "Failed to perform factory reset" };
       }
-    } catch (_error) {
+    } catch (error) {
       console.error("Error performing factory reset:", error);
       return { success: false, message: "Error performing factory reset" };
     }

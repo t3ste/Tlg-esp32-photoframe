@@ -309,11 +309,17 @@ async function exportConfig() {
 
     if (configRes.ok) {
       const config = await configRes.json();
-      // Remove sensitive fields
+      // Remove sensitive fields - anything GET /api/config returns in
+      // plaintext that should never end up in a downloadable file
       delete config.wifi_password;
       delete config.agenda_todo_url;
       delete config.agenda_cal_url;
       delete config.agenda_cal_url2;
+      delete config.access_token;
+      delete config.http_header_value;
+      delete config.telegram_bot_token;
+      delete config.openai_api_key;
+      delete config.google_api_key;
       exported.config = config;
     }
     if (processingRes.ok) exported.processing = await processingRes.json();
