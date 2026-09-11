@@ -1285,6 +1285,21 @@ async function performFactoryReset() {
               class="mb-2"
               :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
             />
+            <v-switch
+              v-model="settingsStore.deviceSettings.agendaCalWeatherEnabled"
+              label="Show forecast on day dividers"
+              color="primary"
+              class="mb-1"
+              hide-details
+              :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Appends each day's forecast to its divider, e.g. "Fr 11. [18/25 cloudy]" - reuses the
+              same location/provider settings as the photo Weather Overlay (Settings → Power →
+              Weather + Headline Overlays), just for this independent display path. The forecast
+              only covers 3 days, so if the lookahead window reaches into a 4th day (possible late
+              in the evening), that day simply shows no forecast.
+            </div>
 
             <v-divider class="mb-4 mt-2" />
 

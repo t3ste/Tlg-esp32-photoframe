@@ -1649,6 +1649,8 @@ static esp_err_t config_handler(httpd_req_t *req)
         const char *agenda_todo_url = config_manager_get_agenda_todo_url();
         cJSON_AddStringToObject(root, "agenda_todo_url", agenda_todo_url ? agenda_todo_url : "");
         cJSON_AddNumberToObject(root, "agenda_cal_days", config_manager_get_agenda_cal_days());
+        cJSON_AddBoolToObject(root, "agenda_cal_weather_enabled",
+                              config_manager_get_agenda_cal_weather_enabled());
         cJSON *agenda_cron_arr = cJSON_CreateArray();
         int agenda_cron_count = config_manager_get_agenda_cron_rule_count();
         for (int i = 0; i < agenda_cron_count; i++) {

@@ -480,6 +480,16 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define AGENDA_CAL_DAYS_DEFAULT 2
 #define AGENDA_CAL_DAYS_MIN 1
 #define AGENDA_CAL_DAYS_MAX 3
+// Opt-in: annotates each Calendar day divider with that day's forecast
+// (min/max temp + short condition, e.g. "Fr 11. [18/25 cloudy]"), reusing
+// the same weather_fetch_forecast() / location / provider settings as the
+// existing photo weather overlay - a separate toggle since Agenda mode is
+// an independent display path from the photo overlay pipeline, not because
+// the underlying weather data or config differs. WEATHER_FORECAST_DAYS is
+// 3, so a 4th calendar day (agenda_cal_days can reach into a 4th day late
+// in the evening - see calendar_ics.c) simply shows no forecast, same as
+// any other day the forecast doesn't happen to cover.
+#define NVS_AGENDA_CAL_WEATHER_KEY "agenda_cal_wthr"
 // Independent schedule - same simplified 3-field cron grammar/limits as
 // DEFAULT_ROTATE_CRON/MAX_CRON_RULES/CRON_RULE_MAX_LEN above (reused
 // as-is, just a second rule set under its own NVS key). E.g. "0 6-18 *"

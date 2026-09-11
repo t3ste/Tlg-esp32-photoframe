@@ -401,6 +401,8 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - feat: per-element ToDo coloring (priority, `+project`/`@context` tags, due-date urgency, each colored independently) and per-calendar-source coloring (Calendar A/B get their own color); day-grouped Calendar view with a divider per day, correctly showing multi-day events under every day they span
 - feat: configurable shared background (white/black/any hardware-supported color) with automatic fallback if a text color would otherwise match it; landscape layout choice between stacked and side-by-side ToDo/Calendar columns
 - feat: adjustable Calendar lookahead window (1-3 days, Web UI: Agenda settings)
+- feat: full per-role Web UI color picker for every ToDo/Calendar color (Spectra6/color boards)
+- feat: opt-in weather forecast annotation on each Calendar day divider (e.g. "Fri 11. [18/25 cloudy]"), reusing the same location/provider settings as the existing photo weather overlay, independent toggle
 - fix: a Calendar event's `VALARM` reminder block could overwrite the real event's title if the alarm itself carried its own `SUMMARY`
 - fix: TLS fetch failure against calendars whose certificate chain terminates at a cross-signed root (affects Google Calendar's current chain) — enabled cross-signed root verification in the mbedTLS certificate bundle
 
@@ -423,6 +425,8 @@ Planned for upcoming work on this fork:
 - ~~Display delta updates instead of a full refresh~~ — investigated, not possible on the required `waveshare_photopainter_73` board (or any other color board this project targets): 6-color e-paper panels have no partial-refresh mode at the protocol or physical level. See [docs/OVERLAYS.md → Why there's no partial-refresh ("delta update") mode](docs/OVERLAYS.md#why-theres-no-partial-refresh-delta-update-mode) for the full explanation, including why the grayscale boards' IT8951 controller (which does support it) isn't pursued as a partial fix either.
 - Performance/resource-usage optimization — album scanning/management via lightweight index files (txt/JSON) instead of repeated directory walks, and a configurable wake-cycle time budget (e.g. "spend at most 20 seconds on network activity, then go back to sleep"), including capping how much of a wake cycle a burst of new Telegram messages can consume
 - Document the recommended course of action when a device's orientation is changed between landscape and portrait after the fact, since `process-cli`'s rendered Cover/Fit variants and face-crop metadata are generated for one specific target orientation and don't automatically adapt to a later change
+- Agenda mode: multi-line ToDo/Calendar entries with word-wrap and a leading bullet character, as a selectable display option (currently every row is truncated to one physical line)
+- Agenda mode: incremental/streaming ICS parsing, so the Calendar column's response-size cap doesn't need to keep being raised as a linked calendar's exported file grows over time (currently a flat 2MB buffer)
 
 ## License
 

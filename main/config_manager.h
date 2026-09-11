@@ -381,6 +381,11 @@ const char *config_manager_get_agenda_cal_url2(void);
 void config_manager_set_agenda_cal_days(int days);
 int config_manager_get_agenda_cal_days(void);
 
+// Opt-in per-day weather annotation on the Calendar column - see
+// NVS_AGENDA_CAL_WEATHER_KEY in config.h.
+void config_manager_set_agenda_cal_weather_enabled(bool enabled);
+bool config_manager_get_agenda_cal_weather_enabled(void);
+
 // Independent schedule, same cron grammar/storage shape as the rotate
 // schedule above (config_manager_get/set_cron_rules()) but its own rule
 // set - see agenda_manager_wake_matches_now()/agenda_manager_seconds_until_next_wake().

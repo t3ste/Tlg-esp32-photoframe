@@ -1,5 +1,6 @@
 #include "agenda_renderer.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -689,10 +690,35 @@ static int compare_tagged_by_start(const void *a, const void *b)
 // extend past the window on either side even though it overlaps it. Stops
 // once the column runs out of vertical room, reserving a row for "+N more"
 // only if not everything actually fits.
+// Finds `day`'s forecast entry (matched by "YYYY-MM-DD", same format
+// ics_event_t/todo_item_t dates already use elsewhere in this file), if
+// `weather` is present and actually covers that date. WEATHER_FORECAST_DAYS
+// is 3, so a day past that (most commonly a 4th calendar day reached late
+// in the evening - see calendar_ics.c) simply has no entry, same as
+// `weather` being NULL outright.
+static bool find_weather_for_day(const weather_forecast_t *weather, time_t day,
+                                 const weather_day_t **out)
+{
+    if (!weather || !weather->valid) {
+        return false;
+    }
+    struct tm tm;
+    localtime_r(&day, &tm);
+    char date_str[11];
+    strftime(date_str, sizeof(date_str), "%Y-%m-%d", &tm);
+    for (int i = 0; i < weather->count; i++) {
+        if (strcmp(weather->days[i].date, date_str) == 0) {
+            *out = &weather->days[i];
+            return true;
+        }
+    }
+    return false;
+}
+
 static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rect_t rect,
                                  time_t now, int lookahead_days, uint8_t body_r, uint8_t body_g,
                                  uint8_t body_b, const agenda_tagged_event_t *tagged,
-                                 int tagged_count)
+                                 int tagged_count, const weather_forecast_t *cal_weather)
 {
     uint8_t header_text_r, header_text_g, header_text_b;
     agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g,
@@ -759,9 +785,18 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
     for (int di = 0; di < day_count && rows_used < budget; di++) {
         struct tm day_tm;
         localtime_r(&days[di], &day_tm);
-        char label[16];
-        snprintf(label, sizeof(label), "%s %d.", agenda_weekday_abbr(day_tm.tm_wday),
-                 day_tm.tm_mday);
+        char label[48];
+        int label_len = snprintf(label, sizeof(label), "%s %d.", agenda_weekday_abbr(day_tm.tm_wday),
+                                 day_tm.tm_mday);
+        const weather_day_t *wday;
+        if (label_len > 0 && find_weather_for_day(cal_weather, days[di], &wday)) {
+            bool german = (strcmp(config_manager_get_overlay_language(), "de") == 0);
+            int tmin = (int) lroundf(wday->temp_min_c);
+            int tmax = (int) lroundf(wday->temp_max_c);
+            const char *cond = weather_condition_text(wday->weather_code, german);
+            snprintf(label + label_len, sizeof(label) - (size_t) label_len, " [%d/%d %s]", tmin,
+                    tmax, cond);
+        }
         draw_day_divider(rgb, width, height, rect, content_top + rows_used * row_h, label, body_r,
                          body_g, body_b);
         rows_used++;
@@ -876,7 +911,8 @@ static void draw_todo_column(uint8_t *rgb, int width, int height, agenda_rect_t 
 }
 
 esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t *events_a,
-                                 const ics_event_list_t *events_b, int lookahead_days,
+                                 const ics_event_list_t *events_b,
+                                 const weather_forecast_t *cal_weather, int lookahead_days,
                                  const char *output_path, image_format_t out_format)
 {
     if (!output_path) {
@@ -988,7 +1024,7 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                      compare_tagged_by_start);
             }
             draw_calendar_column(rgb, width, height, cal_rect, now, lookahead_days, body_r,
-                                 body_g, body_b, tagged, tagged_count);
+                                 body_g, body_b, tagged, tagged_count, cal_weather);
         } else {
             ESP_LOGW(TAG, "Failed to allocate Calendar render scratch buffers - skipping column");
         }

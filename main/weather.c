@@ -197,7 +197,7 @@ static esp_err_t fetch_open_meteo(const char *lat, const char *lon, weather_fore
 
 // wttr.in's ?format=j1 uses worldweatheronline.com's numeric weather codes,
 // a different scheme than Open-Meteo's WMO codes. Approximates each into the
-// closest WMO code from condition_text()'s table above, rather than
+// closest WMO code from weather_condition_text()'s table above, rather than
 // introducing a second condition-text vocabulary - close enough for a short
 // display line, not claiming meteorological precision.
 static int wttrin_code_to_wmo(int code)
@@ -271,7 +271,7 @@ static int wttrin_code_to_wmo(int code)
     case 395:
         return 99;  // Heavy snow with thunder
     default:
-        return -1;  // Unmapped - condition_text() falls back to "unknown"
+        return -1;  // Unmapped - weather_condition_text() falls back to "unknown"
     }
 }
 
@@ -615,7 +615,7 @@ static const char *weekday_name(int wday, bool german)
 // Unlisted codes (e.g. 56/57 freezing drizzle, 66/67 freezing rain, 77 snow
 // grains) intentionally fall through to the "unknown" fallback instead of
 // being folded into a nearby bucket.
-static const char *condition_text(int code, bool german)
+const char *weather_condition_text(int code, bool german)
 {
     typedef struct {
         int code;
@@ -658,7 +658,7 @@ static void format_day_line(const weather_day_t *day, bool german, char *out, si
     int year = 0, month = 0, mday = 0;
     sscanf(day->date, "%d-%d-%d", &year, &month, &mday);
     const char *wd = weekday_name(weekday_from_date(year, month, mday), german);
-    const char *cond = condition_text(day->weather_code, german);
+    const char *cond = weather_condition_text(day->weather_code, german);
     int tmin = (int) lroundf(day->temp_min_c);
     int tmax = (int) lroundf(day->temp_max_c);
     snprintf(out, out_len, "%s %d/%d %s", wd, tmin, tmax, cond);

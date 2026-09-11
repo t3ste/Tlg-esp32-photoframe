@@ -84,4 +84,14 @@ void weather_format_day_lines(const weather_forecast_t *f,
                               char out_lines[WEATHER_FORECAST_DAYS][WEATHER_DAY_LINE_MAX_LEN],
                               int *out_count);
 
+/**
+ * @brief Short condition text for one WMO weather code (e.g. "cloudy"/
+ * "bedeckt"), the same abbreviated vocabulary weather_format_line()/
+ * weather_format_day_lines() use internally - exposed so a caller that
+ * wants only the condition word for one already-fetched day (agenda_renderer.c's
+ * Calendar day-divider weather annotation) doesn't need its own copy of the
+ * WMO-code table. Unmapped codes return "unknown"/"unbekannt".
+ */
+const char *weather_condition_text(int code, bool german);
+
 #endif

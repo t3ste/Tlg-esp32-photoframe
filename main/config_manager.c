@@ -118,6 +118,7 @@ static bool low_battery_overlay_active = false;
 // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo overlay
 static bool agenda_todo_enabled = false;
 static bool agenda_cal_enabled = false;
+static bool agenda_cal_weather_enabled = false;
 static char agenda_todo_url[AGENDA_TODO_URL_MAX_LEN] = {0};
 static char agenda_cal_url[AGENDA_CAL_URL_MAX_LEN] = {0};
 static char agenda_cal_url2[AGENDA_CAL_URL2_MAX_LEN] = {0};
@@ -882,6 +883,10 @@ esp_err_t config_manager_init(void)
         uint8_t stored_agenda_cal_en = 0;
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_ENABLED_KEY, &stored_agenda_cal_en) == ESP_OK) {
             agenda_cal_enabled = (stored_agenda_cal_en != 0);
+        }
+        uint8_t stored_agenda_cal_wthr = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_WEATHER_KEY, &stored_agenda_cal_wthr) == ESP_OK) {
+            agenda_cal_weather_enabled = (stored_agenda_cal_wthr != 0);
         }
         size_t agenda_todo_url_len = sizeof(agenda_todo_url);
         nvs_get_str(nvs_handle, NVS_AGENDA_TODO_URL_KEY, agenda_todo_url, &agenda_todo_url_len);
@@ -2668,6 +2673,25 @@ void config_manager_set_agenda_cal_enabled(bool enabled)
 bool config_manager_get_agenda_cal_enabled(void)
 {
     return agenda_cal_enabled;
+}
+
+void config_manager_set_agenda_cal_weather_enabled(bool enabled)
+{
+    agenda_cal_weather_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_AGENDA_CAL_WEATHER_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Agenda Calendar weather annotation %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_agenda_cal_weather_enabled(void)
+{
+    return agenda_cal_weather_enabled;
 }
 
 void config_manager_set_agenda_todo_url(const char *url)

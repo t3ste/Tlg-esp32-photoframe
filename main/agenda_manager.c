@@ -1,6 +1,7 @@
 #include "agenda_manager.h"
 
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #include "agenda_renderer.h"
@@ -13,6 +14,7 @@
 #include "esp_log.h"
 #include "todo.h"
 #include "utils.h"
+#include "weather.h"
 
 static const char *TAG = "agenda_manager";
 
@@ -130,6 +132,24 @@ esp_err_t agenda_manager_run(void)
         }
     }
 
+    // Opt-in per-day forecast annotation on the Calendar column's day
+    // dividers - reuses the exact same weather_fetch_forecast() the photo
+    // weather overlay already calls (same location/provider settings, own
+    // toggle since this is a separate display path). Small enough
+    // (WEATHER_FORECAST_DAYS=3 days of a few fields each) to keep as a
+    // stack local, unlike todo/events above - no risk of repeating that
+    // stack-overflow bug. Skipped entirely if neither calendar source
+    // actually fetched anything, since there would be no day divider to
+    // annotate either way.
+    weather_forecast_t cal_weather;
+    memset(&cal_weather, 0, sizeof(cal_weather));
+    bool have_cal_weather = false;
+    if ((have_events_a || have_events_b) && config_manager_get_agenda_cal_weather_enabled()) {
+        bool ok = (weather_fetch_forecast(&cal_weather) == ESP_OK);
+        utils_record_internet_attempt(ok);
+        have_cal_weather = ok && cal_weather.valid;
+    }
+
     bool have_todo = false;
     if (want_todo) {
         const char *url = config_manager_get_agenda_todo_url();
@@ -153,7 +173,8 @@ esp_err_t agenda_manager_run(void)
         result = ESP_FAIL;
     } else {
         result = agenda_renderer_render(have_todo ? todo : NULL, have_events_a ? events_a : NULL,
-                                        have_events_b ? events_b : NULL, cal_days,
+                                        have_events_b ? events_b : NULL,
+                                        have_cal_weather ? &cal_weather : NULL, cal_days,
                                         AGENDA_OUTPUT_PATH, IMAGE_FORMAT_PNG);
         if (result != ESP_OK) {
             ESP_LOGE(TAG, "Failed to render agenda screen: %s", esp_err_to_name(result));

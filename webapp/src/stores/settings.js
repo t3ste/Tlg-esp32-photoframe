@@ -117,6 +117,10 @@ export const useSettingsStore = defineStore("settings", () => {
     // treatment as agendaCalUrl above.
     agendaCalUrl2: "",
     agendaCalDays: 2,
+    // Annotates each Calendar day divider with that day's forecast (reuses
+    // the same weather settings/provider as the photo weather overlay -
+    // see weatherLocationName/weatherProvider etc. below). Off by default.
+    agendaCalWeatherEnabled: false,
     agendaCron: ["0 6-18 *"],
     // true = ToDo above Calendar (default), false = side by side. Portrait
     // boards always stack regardless of this setting - see agenda_renderer.c.
@@ -324,6 +328,7 @@ export const useSettingsStore = defineStore("settings", () => {
       // config_manager.c) - stays empty even when a URL is actually
       // configured, same write-only treatment as wifiPassword above.
       deviceSettings.value.agendaCalDays = data.agenda_cal_days ?? 2;
+      deviceSettings.value.agendaCalWeatherEnabled = data.agenda_cal_weather_enabled === true;
       deviceSettings.value.agendaCron =
         Array.isArray(data.agenda_cron) && data.agenda_cron.length
           ? data.agenda_cron
@@ -454,6 +459,7 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
       agenda_todo_url: deviceSettings.value.agendaTodoUrl,
       agenda_cal_days: deviceSettings.value.agendaCalDays,
+      agenda_cal_weather_enabled: deviceSettings.value.agendaCalWeatherEnabled,
       agenda_cron: deviceSettings.value.agendaCron,
       agenda_stack_layout: deviceSettings.value.agendaStackLayout,
       agenda_bg_color: deviceSettings.value.agendaBgColor,

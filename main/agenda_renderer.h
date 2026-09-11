@@ -5,6 +5,7 @@
 #include "esp_err.h"
 #include "image_processor.h"
 #include "todo.h"
+#include "weather.h"
 
 /**
  * @brief Renders ToDo and/or Calendar content as a full-screen grid - no
@@ -30,6 +31,15 @@
  * dark and vice versa) rather than staying black-fixed like other chips
  * that draw their own always-black/white fill.
  *
+ * @param cal_weather Optional (NULL if the opt-in
+ * config_manager_get_agenda_cal_weather_enabled() setting is off, or the
+ * fetch failed) - when present, each Calendar day divider whose date has a
+ * matching entry in `cal_weather->days[]` gets a " [min/max condition]"
+ * suffix appended to its "<weekday> <day>." label (e.g. "Fr 11. [18/25
+ * cloudy]"). A day with no matching forecast entry (most commonly the 4th
+ * day, since WEATHER_FORECAST_DAYS is 3 but the lookahead window can reach
+ * a 4th calendar day late in the evening) simply shows the plain label,
+ * same as before this setting existed.
  * @param lookahead_days Only used for the Calendar column's day-window
  * bookkeeping (the actual event filtering already happened when
  * `events_a`/`events_b` were fetched) - no longer shown in the header text.
@@ -40,7 +50,8 @@
  * whatever image_processor_write_rgb_to_fmt() returns.
  */
 esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t *events_a,
-                                 const ics_event_list_t *events_b, int lookahead_days,
+                                 const ics_event_list_t *events_b,
+                                 const weather_forecast_t *cal_weather, int lookahead_days,
                                  const char *output_path, image_format_t out_format);
 
 #endif
