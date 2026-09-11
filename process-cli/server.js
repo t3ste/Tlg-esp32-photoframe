@@ -132,13 +132,19 @@ export async function createImageServer(
       const image = allImages[randomIndex];
 
       try {
-        // Get display dimensions from headers or use defaults
+        // Get display dimensions from headers or use defaults. Headers are
+        // client-controlled and unbounded - clamp to a sane max here too
+        // (matching the /thumbnail endpoint's own guard below) so a bogus
+        // value can't flow into a canvas allocation that size.
+        const MAX_HEADER_DIMENSION = 4096;
+        const parsedWidth = parseInt(req.headers["x-display-width"]);
+        const parsedHeight = parseInt(req.headers["x-display-height"]);
         let width =
-          parseInt(req.headers["x-display-width"]) ||
+          (parsedWidth > 0 && parsedWidth <= MAX_HEADER_DIMENSION && parsedWidth) ||
           baseOptions.displayWidth ||
           DEFAULT_DISPLAY_WIDTH;
         let height =
-          parseInt(req.headers["x-display-height"]) ||
+          (parsedHeight > 0 && parsedHeight <= MAX_HEADER_DIMENSION && parsedHeight) ||
           baseOptions.displayHeight ||
           DEFAULT_DISPLAY_HEIGHT;
 
