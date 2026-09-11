@@ -329,6 +329,18 @@ static void expand_rrule(const ics_rrule_t *rule, time_t base_start, time_t dura
 
     time_t diff = window_start - base_start;
     long k0 = (diff <= 0) ? 0 : (long) ((diff + period_secs - 1) / period_secs);
+    // Back up one occurrence: the ceiling division above finds the first
+    // occurrence whose START is >= window_start, but an occurrence that
+    // started just before window_start can still overlap it if `duration`
+    // carries its end past window_start (e.g. an in-progress multi-day
+    // recurring event, "today" falling inside a multi-day trip that
+    // started yesterday) - without this, that occurrence is silently
+    // skipped even though it's actively ongoing. time_overlaps_window()
+    // below correctly rejects this extra candidate if it doesn't actually
+    // overlap, so this is always safe to check.
+    if (k0 > 0) {
+        k0--;
+    }
 
     // Hard safety cap regardless of inputs: a window of at most a few days
     // can never legitimately need more than window_days+1 occurrences at

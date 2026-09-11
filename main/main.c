@@ -336,6 +336,20 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
         // the trustworthy anchor on RTC-less boards.
         ESP_LOGI(TAG, "Checking periodic tasks...");
         periodic_tasks_check_and_run();
+
+        // Re-derive whether this is still an agenda wake now that the clock
+        // may have just been corrected by SNTP - mirrors the early_seconds
+        // recheck just below for the same RTC-less-board reason. The
+        // WiFi-bring-up decision above necessarily used the pre-sync clock
+        // (SNTP itself needs WiFi already connected, so that half of the
+        // asymmetry can't be fixed within the same wake) - this only
+        // catches the other half: a stale pre-sync clock that wrongly
+        // matched the agenda cron, which the corrected clock says it
+        // shouldn't have. A wake that WiFi never came up for because the
+        // stale clock said "no match" can't be recovered here either way.
+        if (agenda_wake) {
+            agenda_wake = agenda_manager_wake_matches_now();
+        }
     }
 
     // Re-check now that the clock is as corrected as it will get (NTP sync

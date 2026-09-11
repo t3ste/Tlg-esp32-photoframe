@@ -932,6 +932,18 @@ esp_err_t config_manager_init(void)
                 ESP_OK) {
                 agenda_cron_load_from_joined(agenda_cron_buf);
                 ESP_LOGI(TAG, "Loaded %d agenda cron rule(s) from NVS", agenda_cron_rule_count);
+            } else {
+                // Fresh device (or agenda enabled via some path other than
+                // the Web UI, which always saves a schedule alongside the
+                // enable toggles): seed default in memory only, same
+                // "persists on first user save" convention as the rotate
+                // schedule's own seed_default_cron path above - without
+                // this, agenda_manager_is_enabled() would stay permanently
+                // false (it requires a non-empty schedule) even with
+                // ToDo/Calendar enabled, and DEFAULT_AGENDA_CRON would be
+                // dead code.
+                agenda_cron_load_from_joined(DEFAULT_AGENDA_CRON);
+                ESP_LOGI(TAG, "No agenda schedule in NVS, using default: %s", DEFAULT_AGENDA_CRON);
             }
         }
         uint8_t stored_agenda_stack = AGENDA_STACK_DEFAULT ? 1 : 0;

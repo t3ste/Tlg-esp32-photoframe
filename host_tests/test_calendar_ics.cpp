@@ -298,6 +298,29 @@ TEST_F(CalendarIcs, WeeklyRruleExpandsOnCorrectDays)
     EXPECT_EQ(out.events[1].start, make_utc(2024, 1, 15, 10, 0, 0));
 }
 
+TEST_F(CalendarIcs, MultiDayWeeklyOccurrenceInProgressAtWindowStartIncluded)
+{
+    // DTSTART is a Monday, each occurrence spans 2 days (09:00 Mon to 09:00
+    // Wed). The window starts mid-occurrence (Tuesday), after the first
+    // occurrence's own start but before its end - the closed-form k0 jump
+    // (which only finds the first occurrence whose START is >= window
+    // start) must back up one period to still find this in-progress
+    // occurrence, not silently skip it.
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240101T090000Z\n"
+        "DTEND:20240103T090000Z\n"
+        "SUMMARY:Multi-day trip\n"
+        "RRULE:FREQ=WEEKLY\n"
+        "END:VEVENT\n";
+
+    ics_event_list_t out =
+        parse(ics, make_utc(2024, 1, 2, 0, 0, 0), make_utc(2024, 1, 4, 0, 0, 0));
+    ASSERT_EQ(out.count, 1);
+    EXPECT_EQ(out.events[0].start, make_utc(2024, 1, 1, 9, 0, 0));
+    EXPECT_EQ(out.events[0].end, make_utc(2024, 1, 3, 9, 0, 0));
+}
+
 TEST_F(CalendarIcs, IntervalTwoLandsOnCorrectBoundary)
 {
     // DTSTART 2024-01-01, INTERVAL=2 (every other day): occurrences on

@@ -13,10 +13,17 @@
 
 static const char *TAG = "agenda_renderer";
 
-// Generous enough for a ToDo line (priority + text + due date suffix) or a
-// Calendar line (date/time prefix + summary) after image_processor_wrap_text()
-// has already truncated the underlying text to fit the column width.
-#define AGENDA_ROW_BUF_LEN 200
+// Holds one row's fully-assembled text (priority + body + tags + due-date
+// suffix for ToDo, or time prefix + summary for Calendar) *before*
+// image_processor_wrap_text() truncates it to fit the actual column width -
+// wrap_text() only ever shortens further, so undersizing this buffer can't
+// overflow, but it can silently drop the due-date suffix (and its color
+// highlight) off the end of the string before wrap_text ever gets a chance
+// to decide what's actually worth keeping. Kept with real headroom above
+// TODO_LINE_MAX_LEN (200) rather than matching it exactly, since a
+// body-text-only line already uses the ToDo source's full budget, leaving
+// nothing for anything appended after it.
+#define AGENDA_ROW_BUF_LEN 256
 #define AGENDA_PADDING 4
 
 typedef struct {
