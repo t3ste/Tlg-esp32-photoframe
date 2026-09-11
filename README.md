@@ -48,6 +48,19 @@ A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently 
 
 ![Overlay options: none, weather, headlines, weather+headlines combined, error banner](.img/overlay_showcase.png)
 
+**Agenda Mode** renders ToDo and Calendar content full-screen on its own independent wake schedule, with color-coded priorities/tags/due dates and per-calendar-source colors ([color scheme docs](docs/AGENDA_COLORS.html)):
+
+<table>
+<tr>
+<td align="center"><b>Agenda → ToDo</b></td>
+<td align="center"><b>Agenda → Calendar</b></td>
+</tr>
+<tr>
+<td><img src=".img/agenda_todo.png" width="380"/></td>
+<td><img src=".img/agenda_calendar.png" width="380"/></td>
+</tr>
+</table>
+
 <table>
 <tr>
 <td align="center"><b>Settings → Auto Rotate</b></td>
@@ -388,6 +401,8 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - feat: real top-level tabs (Gallery / Settings / Battery History / Updates) instead of one long stacked page
 - feat: on-display error banner, testable on demand via a Web UI button
 - feat: WiFi TX-power cap for Waveshare PhotoPainter battery-brownout mitigation, now user-toggleable (default on)
+- feat: opt-in checkbox to include credentials (Telegram bot token, AI API keys, access token, custom auth header) in an exported config backup — off by default since an export is a plaintext JSON file; WiFi password and Calendar/ToDo URLs can never be included since the device never returns them at all
+- fix: three Settings-panel actions (save settings, save palette, factory reset) referenced the wrong variable name in their error handler, throwing an unhandled `ReferenceError` on any real failure instead of surfacing it
 
 **Stability fixes**:
 - fix: resolve battery-wake stability issues on Waveshare PhotoPainter — a dynamic-frequency-scaling/WiFi-interrupt race and a main-task stack overflow, both confirmed via on-device coredump
@@ -395,6 +410,11 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - fix: several task stack-overflow crashes in the Telegram/rotation pipeline (button task, deep-sleep wake, HTTP `/api/rotate`), each confirmed via live coredump and moved off the shared main-task stack where possible
 - fix: `album_manager_delete_album()` failed to delete an album containing a subdirectory
 - fix: `build.py` couldn't find `idf.py` on a standard Windows ESP-IDF PowerShell install
+- fix: the WiFi captive-portal setup page's network scan could return zero SSIDs — the AP→APSTA mode switch hadn't actually settled before the scan started; added a short settle delay plus an automatic retry on the setup page
+- fix: unsynchronized concurrent access to shared in-memory state in the display-history, per-album-enabled, and OTA periodic-check managers, each now mutex-protected (or, for the album-list read path, snapshotted under a lock before parsing) against a genuine race between an HTTP request and a background task
+- security: `agenda_todo_url` was logged/persisted in a way that could leak it in plaintext; config-exporting a device now also strips the Telegram bot token, AI API keys, access token, and custom auth header in addition to the fields already excluded (WiFi password, Calendar/ToDo URLs), unless the new opt-in checkbox above is used
+- fix (process-cli): the `/image` endpoint accepted client-supplied dimension headers without an upper bound, unlike the already-clamped `/thumbnail` endpoint — now clamped identically to prevent an oversized native canvas allocation
+- fix (process-cli): the face-crop engine's final pixel-rounding step could push a crop rectangle up to 1px past the source image's edge after independently rounding x/y/w/h — now re-clamped against the image bounds after rounding
 
 **Agenda Mode** ([colors doc](docs/AGENDA_COLORS.html)):
 - feat: full-screen ToDo (todo.txt-format URL) + Calendar (up to two ICS/iCal URLs, merged and sorted together) mode on its own independent cron schedule, rendering directly to the panel and skipping the normal photo pipeline entirely for that wake
@@ -405,6 +425,7 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - feat: opt-in weather forecast annotation on each Calendar day divider (e.g. "Fri 11. [18/25 cloudy]"), reusing the same location/provider settings as the existing photo weather overlay, independent toggle
 - fix: a Calendar event's `VALARM` reminder block could overwrite the real event's title if the alarm itself carried its own `SUMMARY`
 - fix: TLS fetch failure against calendars whose certificate chain terminates at a cross-signed root (affects Google Calendar's current chain) — enabled cross-signed root verification in the mbedTLS certificate bundle
+- fix: a batched Agenda-settings save could race with a concurrent NVS write and drop part of the update; saved as a single atomic batch now
 
 **Reliability & infrastructure**:
 - feat: DNS backup/fallback servers (Cloudflare `1.1.1.1`, Google `8.8.8.8`) now populate lwIP's built-in multi-server fallback slots, previously left empty — a single flaky or unreachable DNS server (typically the router's own, handed out via DHCP) could otherwise fail to resolve *any* hostname (weather, Telegram, headlines alike) for a whole wake cycle with no automatic recovery
