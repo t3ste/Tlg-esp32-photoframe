@@ -1761,7 +1761,14 @@ esp_err_t trigger_image_rotation(void)
                     // album - see telegram_bot_poll()).
                     ESP_LOGI(TAG, "No new Telegram image, falling back to local rotation");
 
-                    char prev_image[64];
+                    // 256, matching display_manager.c's own current_image[]
+                    // buffer this is copied from - a smaller size here could
+                    // silently truncate a long real path (e.g. a Google
+                    // Pixel Motion Photo filename) differently than the
+                    // untruncated `after` read below ever would, making the
+                    // strcmp() further down spuriously see a "change" (or
+                    // miss one) that never actually happened.
+                    char prev_image[256];
                     const char *before = display_manager_get_current_image();
                     strncpy(prev_image, before ? before : "", sizeof(prev_image) - 1);
                     prev_image[sizeof(prev_image) - 1] = '\0';

@@ -432,12 +432,26 @@ int wifi_manager_scan(wifi_ap_record_t *results, int max_results)
             ESP_LOGE(TAG, "Failed to set APSTA mode: %s", esp_err_to_name(err));
             return 0;
         }
+        // Switching to APSTA starts the STA netif, which fires
+        // WIFI_EVENT_STA_START - and event_handler() above unconditionally
+        // calls esp_wifi_connect() on that event. If a wifi_config is still
+        // set from an earlier connection attempt (e.g. the provisioning
+        // page's own "test this SSID/password" call), that auto-triggers a
+        // real association attempt right as this function wants to scan,
+        // and esp_wifi_scan_start() below fails outright with
+        // ESP_ERR_WIFI_STATE ("STA is connecting, scan are not allowed") -
+        // confirmed live in the debug log (2026-09). The earlier fix here
+        // (a settle delay alone, no disconnect) only ever masked this by
+        // accident, whenever the stale connection attempt happened to fail
+        // on its own within the delay window - explaining why "0 APs found"
+        // could still recur intermittently even after that fix.
+        // esp_wifi_disconnect() cancels that auto-triggered attempt outright
+        // (ESP_ERR_WIFI_NOT_CONNECT if there was nothing to cancel is
+        // expected and harmless) so the scan gets the radio to itself.
+        esp_wifi_disconnect();
         // The STA driver isn't fully up the instant esp_wifi_set_mode()
-        // returns - scanning immediately after switching from AP-only mode
-        // reproducibly returns 0 APs every time (confirmed live: a real scan
-        // takes 100ms+ per channel, but "No APs found" was logged ~100ms
-        // after the mode switch, i.e. before the STA side had actually
-        // started). A short settle delay lets it finish coming up first.
+        // returns either - a short settle delay lets it finish coming up
+        // before scanning, on top of the disconnect above.
         vTaskDelay(pdMS_TO_TICKS(150));
     }
 
