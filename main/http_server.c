@@ -2307,11 +2307,19 @@ static esp_err_t factory_reset_handler(httpd_req_t *req)
     // NVS - erasing NVS alone would leave them orphaned (their matching NVS
     // ETag validators are gone, so they'd never be read again, just sitting
     // there unused). Best-effort: a factory reset should leave storage as
-    // clean as the config it just wiped. unlink() on a file that was never
-    // created (e.g. Agenda was never enabled) is expected, not an error.
-    unlink(AGENDA_TODO_CACHE_PATH);
-    unlink(AGENDA_CAL_CACHE_PATH);
-    unlink(AGENDA_CAL_CACHE_PATH2);
+    // clean as the config it just wiped. A missing file (e.g. Agenda was
+    // never enabled) is expected, not an error - logged at INFO either way
+    // so a factory reset's actual cleanup effect is visible in the log
+    // rather than silently assumed.
+    const char *agenda_cache_paths[] = {AGENDA_TODO_CACHE_PATH, AGENDA_CAL_CACHE_PATH,
+                                        AGENDA_CAL_CACHE_PATH2};
+    for (size_t i = 0; i < sizeof(agenda_cache_paths) / sizeof(agenda_cache_paths[0]); i++) {
+        if (unlink(agenda_cache_paths[i]) == 0) {
+            ESP_LOGI(TAG, "Removed orphaned Agenda cache file: %s", agenda_cache_paths[i]);
+        } else {
+            ESP_LOGI(TAG, "No Agenda cache file to remove at: %s", agenda_cache_paths[i]);
+        }
+    }
 
     // Send success response
     httpd_resp_set_type(req, "application/json");
