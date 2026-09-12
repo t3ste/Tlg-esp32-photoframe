@@ -140,11 +140,15 @@ export async function createImageServer(
         const parsedWidth = parseInt(req.headers["x-display-width"]);
         const parsedHeight = parseInt(req.headers["x-display-height"]);
         let width =
-          (parsedWidth > 0 && parsedWidth <= MAX_HEADER_DIMENSION && parsedWidth) ||
+          (parsedWidth > 0 &&
+            parsedWidth <= MAX_HEADER_DIMENSION &&
+            parsedWidth) ||
           baseOptions.displayWidth ||
           DEFAULT_DISPLAY_WIDTH;
         let height =
-          (parsedHeight > 0 && parsedHeight <= MAX_HEADER_DIMENSION && parsedHeight) ||
+          (parsedHeight > 0 &&
+            parsedHeight <= MAX_HEADER_DIMENSION &&
+            parsedHeight) ||
           baseOptions.displayHeight ||
           DEFAULT_DISPLAY_HEIGHT;
 

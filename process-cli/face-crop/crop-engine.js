@@ -183,7 +183,11 @@ export function fallbackCrop(imgWidth, imgHeight, target) {
   const { w, h } = maxBoxForAspect(imgWidth, imgHeight, target.aspectRatio);
   const x = (imgWidth - w) / 2;
   const y = (imgHeight - h) / 2;
-  return roundCrop(clampCropToImage({ x, y, w, h }, imgWidth, imgHeight), imgWidth, imgHeight);
+  return roundCrop(
+    clampCropToImage({ x, y, w, h }, imgWidth, imgHeight),
+    imgWidth,
+    imgHeight,
+  );
 }
 
 /**
@@ -264,5 +268,9 @@ export function computeRecommendedCrop(
     imgHeight,
     target.aspectRatio,
   );
-  return roundCrop(clampCropToImage(grown, imgWidth, imgHeight), imgWidth, imgHeight);
+  return roundCrop(
+    clampCropToImage(grown, imgWidth, imgHeight),
+    imgWidth,
+    imgHeight,
+  );
 }
