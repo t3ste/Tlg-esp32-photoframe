@@ -96,6 +96,16 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // overlay paths above).
 #define AGENDA_OUTPUT_PATH FS_MOUNT_POINT "/.agenda.png"
 
+// Raw-body caches for the ToDo/Calendar sources' conditional GET (see
+// NVS_AGENDA_TODO_ETAG_KEY etc. below) - todo.c/calendar_ics.c fall back to
+// re-parsing whichever of these is relevant when the server replies 304 Not
+// Modified, since the day-relative rendering (due-today coloring, which
+// calendar days fall in the lookahead window) still needs to be redone every
+// agenda wake even when the source content itself hasn't changed.
+#define AGENDA_TODO_CACHE_PATH FS_MOUNT_POINT "/.agenda_todo_cache.txt"
+#define AGENDA_CAL_CACHE_PATH FS_MOUNT_POINT "/.agenda_cal_cache.ics"
+#define AGENDA_CAL_CACHE_PATH2 FS_MOUNT_POINT "/.agenda_cal_cache2.ics"
+
 // On-demand thumbnail scratch file for telegram_bot_notify_fallback_image() -
 // generated only when the image being reported has no pre-existing ".jpg"
 // sidecar (true for any plain Storage/Auto-Rotate album image, since that
@@ -470,8 +480,9 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // keeps running on its own separate schedule. See agenda_manager.h.
 #define NVS_AGENDA_TODO_ENABLED_KEY "agenda_todo_en"
 #define NVS_AGENDA_CAL_ENABLED_KEY "agenda_cal_en"
-// A plain todo.txt file, fetched fresh on every agenda wake (no on-device
-// caching) - see todo.h for the parsed grammar.
+// A plain todo.txt file, re-validated on every agenda wake via a
+// conditional GET (see NVS_AGENDA_TODO_ETAG_KEY below) - see todo.h for the
+// parsed grammar.
 #define NVS_AGENDA_TODO_URL_KEY "agenda_todo_url"
 #define AGENDA_TODO_URL_MAX_LEN 256
 // An iCalendar/ICS feed - e.g. a Google Calendar "secret address in iCal
@@ -487,6 +498,17 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // remains the only one required to enable Calendar at all.
 #define NVS_AGENDA_CAL_URL2_KEY "agenda_cal_url2"
 #define AGENDA_CAL_URL2_MAX_LEN 256
+// Cached ETag validators for the conditional GET above - same purpose as
+// NVS_IMAGE_ETAG_KEY for the rotation image fetch, one per source URL. A
+// 304 reply skips the download but not the re-parse: see
+// AGENDA_TODO_CACHE_PATH etc. above. Internal only - not a credential (an
+// ETag is an opaque cache-validation token, not secret), never surfaced via
+// the HTTP API either way, and irrelevant to config export/import (a
+// stale/missing value after an import just means the next fetch is
+// unconditional).
+#define NVS_AGENDA_TODO_ETAG_KEY "agenda_todo_et"
+#define NVS_AGENDA_CAL_ETAG_KEY "agenda_cal_et"
+#define NVS_AGENDA_CAL_ETAG2_KEY "agenda_cal_et2"
 // How many upcoming days (including today) of calendar events to show.
 #define NVS_AGENDA_CAL_DAYS_KEY "agenda_cal_days"
 #define AGENDA_CAL_DAYS_DEFAULT 2

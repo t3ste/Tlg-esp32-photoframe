@@ -24,14 +24,25 @@ typedef struct {
     size_t cap;
     size_t max_len;
     bool overflow;
+    char *etag_out;      // NULL if the caller doesn't want the ETag captured
+    size_t etag_out_len;
 } http_body_buf_t;
 
 static esp_err_t body_capture_handler(esp_http_client_event_t *evt)
 {
+    http_body_buf_t *ctx = (http_body_buf_t *) evt->user_data;
+
+    if (evt->event_id == HTTP_EVENT_ON_HEADER) {
+        if (ctx->etag_out && ctx->etag_out_len > 0 && strcasecmp(evt->header_key, "ETag") == 0) {
+            strncpy(ctx->etag_out, evt->header_value, ctx->etag_out_len - 1);
+            ctx->etag_out[ctx->etag_out_len - 1] = '\0';
+        }
+        return ESP_OK;
+    }
+
     if (evt->event_id != HTTP_EVENT_ON_DATA) {
         return ESP_OK;
     }
-    http_body_buf_t *ctx = (http_body_buf_t *) evt->user_data;
     if (ctx->overflow || evt->data_len <= 0) {
         return ESP_OK;
     }
@@ -73,9 +84,14 @@ static esp_err_t body_capture_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
-esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_bytes,
-                         char **out_body, size_t *out_len, bool *out_truncated,
-                         const char *user_agent)
+// Shared retry/client-setup core behind both http_fetch_get() and
+// http_fetch_get_conditional() - the two differ only in whether they send
+// If-None-Match and whether a 304 is treated as success-with-no-body rather
+// than a retry-worthy failure.
+static esp_err_t do_http_fetch(const char *url, int timeout_ms, size_t max_response_bytes,
+                               const char *if_none_match, char **out_body, size_t *out_len,
+                               bool *out_truncated, char *out_etag, size_t out_etag_len,
+                               bool *out_not_modified, const char *user_agent)
 {
     *out_body = NULL;
     if (out_len) {
@@ -83,6 +99,12 @@ esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_by
     }
     if (out_truncated) {
         *out_truncated = false;
+    }
+    if (out_not_modified) {
+        *out_not_modified = false;
+    }
+    if (out_etag && out_etag_len > 0) {
+        out_etag[0] = '\0';
     }
 
     esp_err_t last_err = ESP_FAIL;
@@ -94,7 +116,11 @@ esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_by
             vTaskDelay(pdMS_TO_TICKS(HTTP_FETCH_RETRY_DELAY_MS));
         }
 
-        http_body_buf_t ctx = {.max_len = max_response_bytes};
+        if (out_etag && out_etag_len > 0) {
+            out_etag[0] = '\0';  // don't carry a partial value across retries
+        }
+        http_body_buf_t ctx = {
+            .max_len = max_response_bytes, .etag_out = out_etag, .etag_out_len = out_etag_len};
 
         esp_http_client_config_t config = {
             .url = url,
@@ -126,6 +152,10 @@ esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_by
             continue;
         }
 
+        if (if_none_match && if_none_match[0] != '\0') {
+            esp_http_client_set_header(client, "If-None-Match", if_none_match);
+        }
+
         esp_err_t err = esp_http_client_perform(client);
         int status = esp_http_client_get_status_code(client);
         esp_http_client_cleanup(client);
@@ -136,6 +166,16 @@ esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_by
             last_err = err;
             continue;
         }
+
+        if (status == 304) {
+            ESP_LOGI(TAG, "GET returned HTTP 304 Not Modified");
+            free(ctx.buf);
+            if (out_not_modified) {
+                *out_not_modified = true;
+            }
+            return ESP_OK;
+        }
+
         if (status != 200 || !ctx.buf) {
             ESP_LOGE(TAG, "GET returned HTTP %d", status);
             free(ctx.buf);
@@ -154,4 +194,21 @@ esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_by
     }
 
     return last_err;
+}
+
+esp_err_t http_fetch_get(const char *url, int timeout_ms, size_t max_response_bytes,
+                         char **out_body, size_t *out_len, bool *out_truncated,
+                         const char *user_agent)
+{
+    return do_http_fetch(url, timeout_ms, max_response_bytes, NULL, out_body, out_len,
+                         out_truncated, NULL, 0, NULL, user_agent);
+}
+
+esp_err_t http_fetch_get_conditional(const char *url, int timeout_ms, size_t max_response_bytes,
+                                     const char *if_none_match, char **out_body, size_t *out_len,
+                                     bool *out_truncated, char *out_etag, size_t out_etag_len,
+                                     bool *out_not_modified, const char *user_agent)
+{
+    return do_http_fetch(url, timeout_ms, max_response_bytes, if_none_match, out_body, out_len,
+                         out_truncated, out_etag, out_etag_len, out_not_modified, user_agent);
 }

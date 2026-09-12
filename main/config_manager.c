@@ -128,6 +128,9 @@ static char agenda_cal_name2[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_todo_url[AGENDA_TODO_URL_MAX_LEN] = {0};
 static char agenda_cal_url[AGENDA_CAL_URL_MAX_LEN] = {0};
 static char agenda_cal_url2[AGENDA_CAL_URL2_MAX_LEN] = {0};
+static char agenda_todo_etag[HTTP_ETAG_MAX_LEN] = {0};
+static char agenda_cal_etag[HTTP_ETAG_MAX_LEN] = {0};
+static char agenda_cal_etag2[HTTP_ETAG_MAX_LEN] = {0};
 static uint8_t agenda_cal_days = AGENDA_CAL_DAYS_DEFAULT;
 static char agenda_cron_rules_store[MAX_CRON_RULES][CRON_RULE_MAX_LEN] = {{0}};
 static int agenda_cron_rule_count = 0;
@@ -1049,6 +1052,12 @@ esp_err_t config_manager_init(void)
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_URL_KEY, agenda_cal_url, &agenda_cal_url_len);
         size_t agenda_cal_url2_len = sizeof(agenda_cal_url2);
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_URL2_KEY, agenda_cal_url2, &agenda_cal_url2_len);
+        size_t agenda_todo_etag_len = sizeof(agenda_todo_etag);
+        nvs_get_str(nvs_handle, NVS_AGENDA_TODO_ETAG_KEY, agenda_todo_etag, &agenda_todo_etag_len);
+        size_t agenda_cal_etag_len = sizeof(agenda_cal_etag);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_ETAG_KEY, agenda_cal_etag, &agenda_cal_etag_len);
+        size_t agenda_cal_etag2_len = sizeof(agenda_cal_etag2);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_ETAG2_KEY, agenda_cal_etag2, &agenda_cal_etag2_len);
         uint8_t stored_agenda_cal_days = AGENDA_CAL_DAYS_DEFAULT;
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_DAYS_KEY, &stored_agenda_cal_days) == ESP_OK &&
             stored_agenda_cal_days >= AGENDA_CAL_DAYS_MIN &&
@@ -2889,6 +2898,13 @@ const char *config_manager_get_agenda_cal_name2(void)
 void config_manager_set_agenda_todo_url(const char *url)
 {
     const char *new_url = url ? url : "";
+    // A stale ETag from the previous URL would be meaningless (worst case
+    // harmless - the new server just won't match it and returns 200 as
+    // normal), but clearing it on a genuine URL change keeps the cached
+    // validator honest rather than relying on that.
+    if (strncmp(agenda_todo_url, new_url, AGENDA_TODO_URL_MAX_LEN) != 0) {
+        config_manager_set_agenda_todo_etag("");
+    }
     strncpy(agenda_todo_url, new_url, AGENDA_TODO_URL_MAX_LEN - 1);
     agenda_todo_url[AGENDA_TODO_URL_MAX_LEN - 1] = '\0';
     agenda_nvs_set_str_or_erase(NVS_AGENDA_TODO_URL_KEY, agenda_todo_url);
@@ -2899,12 +2915,31 @@ const char *config_manager_get_agenda_todo_url(void)
     return agenda_todo_url;
 }
 
+void config_manager_set_agenda_todo_etag(const char *etag)
+{
+    const char *new_etag = etag ? etag : "";
+    if (strncmp(agenda_todo_etag, new_etag, HTTP_ETAG_MAX_LEN) == 0) {
+        return;
+    }
+    strncpy(agenda_todo_etag, new_etag, HTTP_ETAG_MAX_LEN - 1);
+    agenda_todo_etag[HTTP_ETAG_MAX_LEN - 1] = '\0';
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_TODO_ETAG_KEY, agenda_todo_etag);
+}
+
+const char *config_manager_get_agenda_todo_etag(void)
+{
+    return agenda_todo_etag;
+}
+
 // The ICS URL is a credential (Google: "only you should know this
 // address") - logged only by length, never by value, matching
 // config_manager_set_wifi_password()'s own discipline.
 void config_manager_set_agenda_cal_url(const char *url)
 {
     const char *new_url = url ? url : "";
+    if (strncmp(agenda_cal_url, new_url, AGENDA_CAL_URL_MAX_LEN) != 0) {
+        config_manager_set_agenda_cal_etag("");
+    }
     strncpy(agenda_cal_url, new_url, AGENDA_CAL_URL_MAX_LEN - 1);
     agenda_cal_url[AGENDA_CAL_URL_MAX_LEN - 1] = '\0';
     agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_URL_KEY, agenda_cal_url);
@@ -2916,9 +2951,28 @@ const char *config_manager_get_agenda_cal_url(void)
     return agenda_cal_url;
 }
 
+void config_manager_set_agenda_cal_etag(const char *etag)
+{
+    const char *new_etag = etag ? etag : "";
+    if (strncmp(agenda_cal_etag, new_etag, HTTP_ETAG_MAX_LEN) == 0) {
+        return;
+    }
+    strncpy(agenda_cal_etag, new_etag, HTTP_ETAG_MAX_LEN - 1);
+    agenda_cal_etag[HTTP_ETAG_MAX_LEN - 1] = '\0';
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_ETAG_KEY, agenda_cal_etag);
+}
+
+const char *config_manager_get_agenda_cal_etag(void)
+{
+    return agenda_cal_etag;
+}
+
 void config_manager_set_agenda_cal_url2(const char *url)
 {
     const char *new_url = url ? url : "";
+    if (strncmp(agenda_cal_url2, new_url, AGENDA_CAL_URL2_MAX_LEN) != 0) {
+        config_manager_set_agenda_cal_etag2("");
+    }
     strncpy(agenda_cal_url2, new_url, AGENDA_CAL_URL2_MAX_LEN - 1);
     agenda_cal_url2[AGENDA_CAL_URL2_MAX_LEN - 1] = '\0';
     agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_URL2_KEY, agenda_cal_url2);
@@ -2928,6 +2982,22 @@ void config_manager_set_agenda_cal_url2(const char *url)
 const char *config_manager_get_agenda_cal_url2(void)
 {
     return agenda_cal_url2;
+}
+
+void config_manager_set_agenda_cal_etag2(const char *etag)
+{
+    const char *new_etag = etag ? etag : "";
+    if (strncmp(agenda_cal_etag2, new_etag, HTTP_ETAG_MAX_LEN) == 0) {
+        return;
+    }
+    strncpy(agenda_cal_etag2, new_etag, HTTP_ETAG_MAX_LEN - 1);
+    agenda_cal_etag2[HTTP_ETAG_MAX_LEN - 1] = '\0';
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_ETAG2_KEY, agenda_cal_etag2);
+}
+
+const char *config_manager_get_agenda_cal_etag2(void)
+{
+    return agenda_cal_etag2;
 }
 
 void config_manager_set_agenda_cal_days(int days)

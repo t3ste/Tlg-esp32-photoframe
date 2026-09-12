@@ -37,10 +37,22 @@ typedef struct {
  * dropped or aborting the fetch, matching this project's fail-soft
  * philosophy elsewhere (see weather.c/headlines.c).
  *
+ * If `cache_path` is non-NULL, this is a conditional GET: `etag_in` (may be
+ * NULL/empty) is sent as If-None-Match, and on a 304 reply the body cached
+ * at `cache_path` from the last successful 200 is re-parsed instead of
+ * re-downloading (the parse itself is still redone every call - due-today
+ * coloring etc. depends on the current date, not just the source content).
+ * `etag_out`/`etag_out_len` receive the validator to persist for next time
+ * (already carries forward `etag_in` if this response didn't repeat an
+ * ETag) - the caller owns actually persisting it (see config_manager.h's
+ * agenda ETag getters/setters). Pass cache_path/etag_in/etag_out as NULL to
+ * skip conditional-GET entirely and always fetch unconditionally.
+ *
  * Best-effort: a fetch failure returns an error and leaves *out zeroed
  * (count = 0).
  */
-esp_err_t todo_fetch(const char *url, int timeout_ms, todo_list_t *out);
+esp_err_t todo_fetch(const char *url, int timeout_ms, const char *cache_path,
+                     const char *etag_in, char *etag_out, size_t etag_out_len, todo_list_t *out);
 
 /**
  * @brief Pure parsing logic behind todo_fetch(), split out so it's

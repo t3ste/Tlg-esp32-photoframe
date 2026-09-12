@@ -1258,8 +1258,9 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              A plain todo.txt file, fetched fresh every agenda wake - no API key, no on-device
-              caching. Completed tasks ("x " prefix) are never shown. Treated like a password
+              A plain todo.txt file, re-checked every agenda wake - no API key needed. An
+              unchanged file is detected via a conditional request and skips re-downloading.
+              Completed tasks ("x " prefix) are never shown. Treated like a password
               field (never shown back to you) since a private feed's URL can embed an access
               token, the same way a Google Calendar link can.
             </div>

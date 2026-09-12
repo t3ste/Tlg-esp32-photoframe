@@ -32,11 +32,24 @@ typedef struct {
  * An RRULE'd event with none of the supported forms is silently skipped
  * (fail-soft: better to omit one event than show a wrong occurrence).
  *
+ * If `cache_path` is non-NULL, this is a conditional GET: `etag_in` (may be
+ * NULL/empty) is sent as If-None-Match, and on a 304 reply the body cached
+ * at `cache_path` from the last successful 200 is re-parsed instead of
+ * re-downloading - the parse itself is still redone every call, since which
+ * events fall in [window_start, window_end) shifts day to day even when the
+ * feed's content hasn't changed at all. `etag_out`/`etag_out_len` receive
+ * the validator to persist for next time (already carries forward `etag_in`
+ * if this response didn't repeat an ETag) - the caller owns actually
+ * persisting it (see config_manager.h's agenda ETag getters/setters). Pass
+ * cache_path/etag_in/etag_out as NULL to skip conditional-GET entirely and
+ * always fetch unconditionally.
+ *
  * Best-effort: a fetch failure returns an error and leaves *out zeroed
  * (count = 0).
  */
 esp_err_t calendar_ics_fetch(const char *url, int timeout_ms, time_t window_start,
-                             time_t window_end, ics_event_list_t *out);
+                             time_t window_end, const char *cache_path, const char *etag_in,
+                             char *etag_out, size_t etag_out_len, ics_event_list_t *out);
 
 /**
  * @brief Pure parsing logic behind calendar_ics_fetch(), split out so it's

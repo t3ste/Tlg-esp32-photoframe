@@ -387,6 +387,18 @@ const char *config_manager_get_agenda_cal_url(void);
 void config_manager_set_agenda_cal_url2(const char *url);
 const char *config_manager_get_agenda_cal_url2(void);
 
+// Cached ETag validators for each source's conditional GET (see
+// AGENDA_TODO_CACHE_PATH etc. in config.h) - internal fetch-cache state,
+// not user data: not exposed via the HTTP API, same as the getters above are
+// (deliberately) not either. Automatically cleared by the matching URL
+// setter above when the URL actually changes.
+void config_manager_set_agenda_todo_etag(const char *etag);
+const char *config_manager_get_agenda_todo_etag(void);
+void config_manager_set_agenda_cal_etag(const char *etag);
+const char *config_manager_get_agenda_cal_etag(void);
+void config_manager_set_agenda_cal_etag2(const char *etag);
+const char *config_manager_get_agenda_cal_etag2(void);
+
 // Clamped [AGENDA_CAL_DAYS_MIN, AGENDA_CAL_DAYS_MAX].
 void config_manager_set_agenda_cal_days(int days);
 int config_manager_get_agenda_cal_days(void);

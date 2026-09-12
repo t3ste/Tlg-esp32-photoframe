@@ -1,6 +1,7 @@
 #include "calendar_ics.h"
 
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -526,13 +527,48 @@ esp_err_t calendar_ics_parse(char *body, size_t body_len, time_t window_start, t
     return ESP_OK;  // an empty (no matching events) feed is not an error
 }
 
+// Reads the entire contents of `path` into a freshly malloc'd, NUL-terminated
+// buffer. Returns NULL (and logs nothing - a missing cache file on the very
+// first fetch, or after it was never written, is an expected, silent case)
+// on any failure.
+static char *read_whole_file(const char *path, size_t *out_len)
+{
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        return NULL;
+    }
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (size <= 0) {
+        fclose(fp);
+        return NULL;
+    }
+    char *buf = malloc((size_t) size + 1);
+    if (!buf) {
+        fclose(fp);
+        return NULL;
+    }
+    size_t read = fread(buf, 1, (size_t) size, fp);
+    fclose(fp);
+    buf[read] = '\0';
+    if (out_len) {
+        *out_len = read;
+    }
+    return buf;
+}
+
 esp_err_t calendar_ics_fetch(const char *url, int timeout_ms, time_t window_start,
-                             time_t window_end, ics_event_list_t *out)
+                             time_t window_end, const char *cache_path, const char *etag_in,
+                             char *etag_out, size_t etag_out_len, ics_event_list_t *out)
 {
     if (!out) {
         return ESP_ERR_INVALID_ARG;
     }
     memset(out, 0, sizeof(*out));
+    if (etag_out && etag_out_len > 0) {
+        etag_out[0] = '\0';
+    }
     if (!url || url[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
@@ -540,15 +576,47 @@ esp_err_t calendar_ics_fetch(const char *url, int timeout_ms, time_t window_star
     char *body = NULL;
     size_t body_len = 0;
     bool truncated = false;
-    esp_err_t err = http_fetch_get(url, timeout_ms > 0 ? timeout_ms : ICS_HTTP_TIMEOUT_MS,
-                                   ICS_MAX_RESPONSE_BYTES, &body, &body_len, &truncated, NULL);
+    bool not_modified = false;
+    esp_err_t err = http_fetch_get_conditional(
+        url, timeout_ms > 0 ? timeout_ms : ICS_HTTP_TIMEOUT_MS, ICS_MAX_RESPONSE_BYTES, etag_in,
+        &body, &body_len, &truncated, etag_out, etag_out_len, &not_modified, NULL);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Calendar fetch failed: %s", esp_err_to_name(err));
         return err;
     }
-    if (truncated) {
-        ESP_LOGW(TAG, "Calendar response truncated at %d bytes - parsing what was captured",
-                 ICS_MAX_RESPONSE_BYTES);
+
+    if (not_modified) {
+        // Server didn't necessarily repeat the ETag on a 304 - keep sending
+        // the one that got us this 304 in the first place.
+        if (etag_out && etag_out_len > 0 && etag_out[0] == '\0' && etag_in) {
+            strncpy(etag_out, etag_in, etag_out_len - 1);
+            etag_out[etag_out_len - 1] = '\0';
+        }
+        if (!cache_path) {
+            ESP_LOGW(TAG,
+                    "Calendar 304 Not Modified but no cache configured - treating as failure");
+            return ESP_FAIL;
+        }
+        body = read_whole_file(cache_path, &body_len);
+        if (!body) {
+            ESP_LOGW(TAG, "Calendar 304 Not Modified but no cached copy available");
+            return ESP_FAIL;
+        }
+        ESP_LOGI(TAG, "Calendar feed unchanged (304) - reusing cached copy");
+    } else {
+        if (truncated) {
+            ESP_LOGW(TAG, "Calendar response truncated at %d bytes - parsing what was captured",
+                     ICS_MAX_RESPONSE_BYTES);
+        }
+        if (cache_path) {
+            FILE *fp = fopen(cache_path, "wb");
+            if (fp) {
+                fwrite(body, 1, body_len, fp);
+                fclose(fp);
+            } else {
+                ESP_LOGW(TAG, "Could not write Calendar cache file");
+            }
+        }
     }
 
     err = calendar_ics_parse(body, body_len, window_start, window_end, out);

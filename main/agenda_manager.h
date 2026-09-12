@@ -35,9 +35,12 @@ int agenda_manager_seconds_until_next_wake(void);
 /**
  * @brief Runs one agenda cycle: fetches whichever of ToDo/Calendar is
  * enabled (each independently fail-soft - one source failing doesn't blank
- * the other), renders the full-screen grid, and displays it. Always a
- * fresh network fetch, no on-device caching, so whatever the configured
- * URL(s) serve at this exact moment is what gets shown.
+ * the other), renders the full-screen grid, and displays it. Each fetch is
+ * a conditional GET (If-None-Match against the previous cycle's ETag) - an
+ * unchanged source skips the download and re-parses a small on-device
+ * cache instead, but the render itself is always redone (day-relative
+ * coloring/grouping still depends on the current date, not just the source
+ * content).
  *
  * Caller (deep_sleep_wake_main()) is responsible for having WiFi already
  * connected and for going back to sleep afterward - this function neither
