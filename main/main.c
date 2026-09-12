@@ -580,11 +580,18 @@ void app_main(void)
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // This wipes the ENTIRE NVS partition (WiFi credentials, Telegram
         // token, every setting) - loud and unmistakable in the log on
-        // purpose, to either confirm or rule out NVS-partition exhaustion
-        // (only 24KB / 6 pages currently) as the cause of field reports of
-        // WiFi needing reprovisioning after a reflash that never touched the
-        // NVS region at 0x9000. `ret` here is the specific ESP-IDF error
-        // that triggered the erase - logged before it's overwritten below.
+        // purpose. A round of field reports of WiFi needing reprovisioning
+        // after a reflash that never touched the NVS region at 0x9000 was
+        // investigated against this exact mechanism (2026-09) and ruled out
+        // for those specific incidents (nvs_get_stats() below showed 465/756
+        // entries free at the time, and the real cause was found instead in
+        // main.c's cold-boot WiFi-connect-failure handling - see
+        // WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS below). Kept as cheap,
+        // permanent health telemetry regardless, since a genuinely exhausted
+        // NVS partition would still hit this path eventually over a long
+        // enough real-world device lifetime. `ret` here is the specific
+        // ESP-IDF error that triggered the erase - logged before it's
+        // overwritten below.
         ESP_LOGE(TAG, "*** NVS init failed (%s) - erasing ENTIRE NVS partition ***",
                  esp_err_to_name(ret));
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -824,7 +831,41 @@ void app_main(void)
         }
     }
 
-    if (connect_to_wifi_with_timeout(30)) {
+    // A single failed attempt isn't enough to conclude the saved credentials
+    // are actually wrong - transient conditions (router mid-reboot, brief
+    // congestion, a DHCP server slow to respond) produce exactly the same
+    // "failed to connect" result as a genuinely wrong password, but are
+    // expected to clear up within a few seconds/attempts. Retry up to
+    // WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS times UNLESS the AP itself
+    // explicitly rejected the credentials (a failed 4-way handshake/MIC
+    // failure/auth-fail - see wifi_manager_last_failure_is_credential_reject()) -
+    // that specific rejection can't un-happen on a retry with the same
+    // password, so it short-circuits straight to clearing after just one.
+#define WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS 3
+#define WIFI_COLD_BOOT_CONNECT_RETRY_DELAY_MS 3000
+    bool wifi_ok = false;
+    bool credential_reject = false;
+    for (int attempt = 1; attempt <= WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS; attempt++) {
+        wifi_ok = connect_to_wifi_with_timeout(30);
+        if (wifi_ok) {
+            break;
+        }
+        credential_reject = wifi_manager_last_failure_is_credential_reject();
+        if (credential_reject) {
+            ESP_LOGW(TAG, "WiFi credentials rejected by AP (attempt %d/%d) - not retrying",
+                     attempt, WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS);
+            break;
+        }
+        if (attempt < WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS) {
+            ESP_LOGW(TAG, "WiFi connect attempt %d/%d failed (not a credential rejection) - "
+                          "retrying in %d ms",
+                     attempt, WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS,
+                     WIFI_COLD_BOOT_CONNECT_RETRY_DELAY_MS);
+            vTaskDelay(pdMS_TO_TICKS(WIFI_COLD_BOOT_CONNECT_RETRY_DELAY_MS));
+        }
+    }
+
+    if (wifi_ok) {
         // Check and run periodic tasks (OTA check, SNTP sync if due)
         // Note: If RTC was invalid at boot, sntp_sync was already forced via
         // periodic_tasks_force_run()
@@ -834,7 +875,8 @@ void app_main(void)
         // Start mDNS service
         ESP_ERROR_CHECK(mdns_service_init());
     } else {
-        ESP_LOGW(TAG, "Failed to connect to WiFi - clearing credentials");
+        ESP_LOGW(TAG, "Failed to connect to WiFi after %d attempt(s) - clearing credentials",
+                 credential_reject ? 1 : WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS);
         nvs_handle_t nvs_handle;
         if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
             nvs_erase_key(nvs_handle, NVS_WIFI_SSID_KEY);

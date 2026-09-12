@@ -30,6 +30,7 @@ static int s_retry_num = 0;
 static int s_max_retries = 5;
 static bool s_is_connected = false;
 static esp_netif_t *s_sta_netif = NULL;
+static wifi_err_reason_t s_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
 
 static void apply_dns_override(void);
 
@@ -45,15 +46,17 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         // before falling back to the A record.
         esp_netif_create_ip6_linklocal(s_sta_netif);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *disconnected = (wifi_event_sta_disconnected_t *) event_data;
+        s_last_disconnect_reason = (wifi_err_reason_t) disconnected->reason;
         if (s_retry_num < s_max_retries) {
             esp_wifi_connect();
             s_retry_num++;
-            ESP_LOGI(TAG, "retry to connect to the AP");
+            ESP_LOGI(TAG, "retry to connect to the AP (reason %d)", disconnected->reason);
         } else {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
         s_is_connected = false;
-        ESP_LOGI(TAG, "connect to the AP fail");
+        ESP_LOGI(TAG, "connect to the AP fail (reason %d)", disconnected->reason);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
@@ -268,6 +271,8 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password, int timeo
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));  // Enable power save at boot/connect
 
     s_retry_num = 0;
+    s_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;  // stale value from a previous
+                                                          // attempt must not leak into this one
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
     // Bounded wait - previously portMAX_DELAY, which could hang forever if
     // association succeeded but DHCP never completed (no further
@@ -285,6 +290,30 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password, int timeo
     } else {
         ESP_LOGE(TAG, "Timed out waiting to connect to SSID:%s (%d ms)", ssid, timeout_ms);
         return ESP_ERR_TIMEOUT;
+    }
+}
+
+bool wifi_manager_last_failure_is_credential_reject(void)
+{
+    // These are the reason codes the AP/STA driver uses specifically when a
+    // WPA2-PSK handshake can't complete because the two sides derived
+    // different keys (i.e. the password is wrong) - or, for
+    // WIFI_REASON_AUTH_FAIL/802_1X_AUTH_FAILED, an explicit authentication
+    // rejection. Retrying with the exact same (wrong) password would only
+    // ever reproduce the same result, so a caller can treat this as final
+    // after a single attempt. Every other reason (AP not currently found,
+    // beacon timeout, general association/connection failure, or plain
+    // ESP_ERR_TIMEOUT with no disconnect event at all - e.g. DHCP stalling)
+    // is at least plausibly transient and worth retrying before giving up.
+    switch (s_last_disconnect_reason) {
+    case WIFI_REASON_MIC_FAILURE:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_802_1X_AUTH_FAILED:
+        return true;
+    default:
+        return false;
     }
 }
 
