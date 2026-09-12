@@ -51,8 +51,8 @@ typedef struct {
  * Best-effort: a fetch failure returns an error and leaves *out zeroed
  * (count = 0).
  */
-esp_err_t todo_fetch(const char *url, int timeout_ms, const char *cache_path,
-                     const char *etag_in, char *etag_out, size_t etag_out_len, todo_list_t *out);
+esp_err_t todo_fetch(const char *url, int timeout_ms, const char *cache_path, const char *etag_in,
+                     char *etag_out, size_t etag_out_len, todo_list_t *out);
 
 /**
  * @brief Pure parsing logic behind todo_fetch(), split out so it's

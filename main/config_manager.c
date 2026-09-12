@@ -3100,7 +3100,8 @@ const char *config_manager_get_agenda_bg_color(void)
 
 // Shared by the 11 agenda per-role color setters below - identical
 // "copy into this role's static buffer, then persist" shape.
-static void agenda_role_color_set(char *buf, size_t buf_size, const char *nvs_key, const char *color)
+static void agenda_role_color_set(char *buf, size_t buf_size, const char *nvs_key,
+                                  const char *color)
 {
     if (!color || color[0] == '\0') {
         return;
@@ -3112,7 +3113,8 @@ static void agenda_role_color_set(char *buf, size_t buf_size, const char *nvs_ke
 
 void config_manager_set_agenda_pri_a_color(const char *color)
 {
-    agenda_role_color_set(agenda_pri_a_color, sizeof(agenda_pri_a_color), NVS_AGENDA_PRI_A_KEY, color);
+    agenda_role_color_set(agenda_pri_a_color, sizeof(agenda_pri_a_color), NVS_AGENDA_PRI_A_KEY,
+                          color);
 }
 
 const char *config_manager_get_agenda_pri_a_color(void)
@@ -3122,7 +3124,8 @@ const char *config_manager_get_agenda_pri_a_color(void)
 
 void config_manager_set_agenda_pri_b_color(const char *color)
 {
-    agenda_role_color_set(agenda_pri_b_color, sizeof(agenda_pri_b_color), NVS_AGENDA_PRI_B_KEY, color);
+    agenda_role_color_set(agenda_pri_b_color, sizeof(agenda_pri_b_color), NVS_AGENDA_PRI_B_KEY,
+                          color);
 }
 
 const char *config_manager_get_agenda_pri_b_color(void)
@@ -3132,7 +3135,8 @@ const char *config_manager_get_agenda_pri_b_color(void)
 
 void config_manager_set_agenda_pri_c_color(const char *color)
 {
-    agenda_role_color_set(agenda_pri_c_color, sizeof(agenda_pri_c_color), NVS_AGENDA_PRI_C_KEY, color);
+    agenda_role_color_set(agenda_pri_c_color, sizeof(agenda_pri_c_color), NVS_AGENDA_PRI_C_KEY,
+                          color);
 }
 
 const char *config_manager_get_agenda_pri_c_color(void)
@@ -3142,7 +3146,8 @@ const char *config_manager_get_agenda_pri_c_color(void)
 
 void config_manager_set_agenda_pri_d_color(const char *color)
 {
-    agenda_role_color_set(agenda_pri_d_color, sizeof(agenda_pri_d_color), NVS_AGENDA_PRI_D_KEY, color);
+    agenda_role_color_set(agenda_pri_d_color, sizeof(agenda_pri_d_color), NVS_AGENDA_PRI_D_KEY,
+                          color);
 }
 
 const char *config_manager_get_agenda_pri_d_color(void)

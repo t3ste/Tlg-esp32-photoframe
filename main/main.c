@@ -513,8 +513,8 @@ static void log_coredump_summary(void)
         // (LoadProhibited=28/StoreProhibited=29, exc_vaddr = the bad address)
         // from other fault classes - not previously logged, so every past
         // crash summary only had the backtrace to go on.
-        ESP_LOGE(TAG, "COREDUMP   exc_cause=%u exc_vaddr=0x%08x", (unsigned) summary.ex_info.exc_cause,
-                 (unsigned) summary.ex_info.exc_vaddr);
+        ESP_LOGE(TAG, "COREDUMP   exc_cause=%u exc_vaddr=0x%08x",
+                 (unsigned) summary.ex_info.exc_cause, (unsigned) summary.ex_info.exc_vaddr);
         for (uint32_t i = 0; i < summary.exc_bt_info.depth; i++) {
             ESP_LOGE(TAG, "COREDUMP   bt[%u] 0x%08x", (unsigned) i,
                      (unsigned) summary.exc_bt_info.bt[i]);
@@ -852,13 +852,14 @@ void app_main(void)
         }
         credential_reject = wifi_manager_last_failure_is_credential_reject();
         if (credential_reject) {
-            ESP_LOGW(TAG, "WiFi credentials rejected by AP (attempt %d/%d) - not retrying",
-                     attempt, WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS);
+            ESP_LOGW(TAG, "WiFi credentials rejected by AP (attempt %d/%d) - not retrying", attempt,
+                     WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS);
             break;
         }
         if (attempt < WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS) {
-            ESP_LOGW(TAG, "WiFi connect attempt %d/%d failed (not a credential rejection) - "
-                          "retrying in %d ms",
+            ESP_LOGW(TAG,
+                     "WiFi connect attempt %d/%d failed (not a credential rejection) - "
+                     "retrying in %d ms",
                      attempt, WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS,
                      WIFI_COLD_BOOT_CONNECT_RETRY_DELAY_MS);
             vTaskDelay(pdMS_TO_TICKS(WIFI_COLD_BOOT_CONNECT_RETRY_DELAY_MS));

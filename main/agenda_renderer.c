@@ -297,13 +297,13 @@ typedef struct {
     int bg_run_count;
 } agenda_line_t;
 
-static void add_run(image_processor_text_run_t *runs, int *count, int start, int length,
-                    uint8_t r, uint8_t g, uint8_t b)
+static void add_run(image_processor_text_run_t *runs, int *count, int start, int length, uint8_t r,
+                    uint8_t g, uint8_t b)
 {
     if (*count >= AGENDA_MAX_RUNS_PER_LINE || length <= 0) {
         return;
     }
-    runs[*count] = (image_processor_text_run_t) {start, length, r, g, b};
+    runs[*count] = (image_processor_text_run_t){start, length, r, g, b};
     (*count)++;
 }
 
@@ -423,8 +423,8 @@ static void build_todo_line(const todo_item_t *item, time_t now, bool grayscale,
             pos += written;
             uint8_t fr, fg, fb, br, bg, bb;
             bool has_bg;
-            priority_color(item->priority, grayscale, bg_r, bg_g, bg_b, &fr, &fg, &fb, &has_bg,
-                           &br, &bg, &bb);
+            priority_color(item->priority, grayscale, bg_r, bg_g, bg_b, &fr, &fg, &fb, &has_bg, &br,
+                           &bg, &bb);
             // Exclude the trailing separator space from both runs so the
             // chip (if any) doesn't visually merge into the body text.
             int len = (int) written > 0 ? (int) written - 1 : 0;
@@ -484,8 +484,8 @@ static void build_todo_line(const todo_item_t *item, time_t now, bool grayscale,
             due_status(item->due_date, now, &overdue, &today, &future);
             uint8_t fr, fg, fb, br, bg, bb;
             bool has_bg;
-            due_color(overdue, today, grayscale, bg_r, bg_g, bg_b, &fr, &fg, &fb, &has_bg, &br,
-                     &bg, &bb);
+            due_color(overdue, today, grayscale, bg_r, bg_g, bg_b, &fr, &fg, &fb, &has_bg, &br, &bg,
+                      &bb);
             int len = (int) written > 0 ? (int) written - 1 : 0;
             add_run(out->fg_runs, &out->fg_run_count, start, len, fr, fg, fb);
             if (has_bg) {
@@ -698,8 +698,8 @@ static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t 
     if (weather_w > 0) {
         image_processor_fill_rect(rgb, width, height, weather_x - 2, y, weather_w + 4,
                                   IMAGE_PROCESSOR_FONT_HEIGHT, fill_r, fill_g, fill_b);
-        image_processor_draw_text(rgb, width, height, weather_x, y, weather_clipped, text_r,
-                                  text_g, text_b);
+        image_processor_draw_text(rgb, width, height, weather_x, y, weather_clipped, text_r, text_g,
+                                  text_b);
     }
 }
 
@@ -831,8 +831,7 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
                                  agenda_cal_name_tag_t name_a, agenda_cal_name_tag_t name_b)
 {
     uint8_t header_text_r, header_text_g, header_text_b;
-    agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g,
-                           &header_text_b);
+    agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g, &header_text_b);
 
     int header_h = IMAGE_PROCESSOR_FONT_HEIGHT + 2 * AGENDA_PADDING;
     image_processor_fill_rect(rgb, width, height, rect.x, rect.y, rect.w, header_h, body_r, body_g,
@@ -974,7 +973,7 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         localtime_r(&days[di], &day_tm);
         char label[16];
         snprintf(label, sizeof(label), "%s %d.", weather_weekday_abbr(day_tm.tm_wday, german),
-                day_tm.tm_mday);
+                 day_tm.tm_mday);
         char weather_buf[WEATHER_DAY_LINE_MAX_LEN] = "";
         const weather_day_t *wday;
         if (find_weather_for_day(cal_weather, days[di], &wday)) {
@@ -1000,8 +999,8 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
             char prefix[16] = "";
             int prefix_len = 0;
             if (compact_multiday && is_multiday[i]) {
-                prefix_len = snprintf(prefix, sizeof(prefix), "%d/%d: ",
-                                      event_day_index(tagged[i].ev, days[di]),
+                prefix_len = snprintf(prefix, sizeof(prefix),
+                                      "%d/%d: ", event_day_index(tagged[i].ev, days[di]),
                                       event_total_days(tagged[i].ev));
             }
             int avail_width = text_width - prefix_len * IMAGE_PROCESSOR_FONT_WIDTH;
@@ -1021,13 +1020,12 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
                 }
                 int visible_len = (int) strlen(wrapped[0]);
                 if (line->has_bg) {
-                    image_processor_fill_rect(rgb, width, height, x, y,
-                                              visible_len * IMAGE_PROCESSOR_FONT_WIDTH,
-                                              IMAGE_PROCESSOR_FONT_HEIGHT, line->br, line->bgg,
-                                              line->bb);
+                    image_processor_fill_rect(
+                        rgb, width, height, x, y, visible_len * IMAGE_PROCESSOR_FONT_WIDTH,
+                        IMAGE_PROCESSOR_FONT_HEIGHT, line->br, line->bgg, line->bb);
                 }
-                image_processor_draw_text(rgb, width, height, x, y, wrapped[0], line->fr,
-                                          line->fg, line->fb);
+                image_processor_draw_text(rgb, width, height, x, y, wrapped[0], line->fr, line->fg,
+                                          line->fb);
                 rows_used++;
                 instances_shown++;
             }
@@ -1054,8 +1052,7 @@ static void draw_todo_column(uint8_t *rgb, int width, int height, agenda_rect_t 
                              const agenda_line_t *todo_lines, int line_count)
 {
     uint8_t header_text_r, header_text_g, header_text_b;
-    agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g,
-                           &header_text_b);
+    agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g, &header_text_b);
 
     struct tm now_tm;
     localtime_r(&now, &now_tm);
@@ -1102,9 +1099,10 @@ static void draw_todo_column(uint8_t *rgb, int width, int height, agenda_rect_t 
             if (run->start + len > visible_len) {
                 len = visible_len - run->start;
             }
-            image_processor_fill_rect(rgb, width, height, x + run->start * IMAGE_PROCESSOR_FONT_WIDTH,
-                                      y, len * IMAGE_PROCESSOR_FONT_WIDTH,
-                                      IMAGE_PROCESSOR_FONT_HEIGHT, run->r, run->g, run->b);
+            image_processor_fill_rect(rgb, width, height,
+                                      x + run->start * IMAGE_PROCESSOR_FONT_WIDTH, y,
+                                      len * IMAGE_PROCESSOR_FONT_WIDTH, IMAGE_PROCESSOR_FONT_HEIGHT,
+                                      run->r, run->g, run->b);
         }
         image_processor_draw_text_runs(rgb, width, height, x, y, wrapped[0], line->fg_runs,
                                        line->fg_run_count, body_r, body_g, body_b);
@@ -1190,11 +1188,10 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
             heap_caps_malloc((size_t) todo->count * sizeof(agenda_line_t), MALLOC_CAP_SPIRAM);
         if (todo_lines) {
             for (int i = 0; i < todo->count; i++) {
-                build_todo_line(&todo->items[i], now, grayscale, bg_r, bg_g, bg_b,
-                               &todo_lines[i]);
+                build_todo_line(&todo->items[i], now, grayscale, bg_r, bg_g, bg_b, &todo_lines[i]);
             }
-            draw_todo_column(rgb, width, height, todo_rect, now, body_r, body_g, body_b,
-                             todo_lines, todo->count);
+            draw_todo_column(rgb, width, height, todo_rect, now, body_r, body_g, body_b, todo_lines,
+                             todo->count);
         } else {
             ESP_LOGW(TAG, "Failed to allocate ToDo render scratch buffers - skipping ToDo column");
         }
@@ -1205,12 +1202,10 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
         int count_a = have_a ? events_a->count : 0;
         int count_b = have_b ? events_b->count : 0;
 
-        agenda_event_line_t *lines_a =
-            heap_caps_malloc((size_t) (count_a > 0 ? count_a : 1) * sizeof(agenda_event_line_t),
-                            MALLOC_CAP_SPIRAM);
-        agenda_event_line_t *lines_b =
-            heap_caps_malloc((size_t) (count_b > 0 ? count_b : 1) * sizeof(agenda_event_line_t),
-                            MALLOC_CAP_SPIRAM);
+        agenda_event_line_t *lines_a = heap_caps_malloc(
+            (size_t) (count_a > 0 ? count_a : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
+        agenda_event_line_t *lines_b = heap_caps_malloc(
+            (size_t) (count_b > 0 ? count_b : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
         agenda_tagged_event_t *tagged = heap_caps_malloc(
             AGENDA_MAX_TAGGED_EVENTS * sizeof(agenda_tagged_event_t), MALLOC_CAP_SPIRAM);
 
@@ -1230,7 +1225,7 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
             }
             if (tagged_count > 1) {
                 qsort(tagged, (size_t) tagged_count, sizeof(agenda_tagged_event_t),
-                     compare_tagged_by_start);
+                      compare_tagged_by_start);
             }
             // Header shows the actual calendar source name(s) instead of a
             // generic "CALENDAR" label - just whichever one(s) actually
@@ -1254,22 +1249,22 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
             if (!name_b || name_b[0] == '\0') {
                 name_b = "Calendar B";
             }
-            agenda_cal_name_tag_t tag_a = {.show = have_a, .has_swatch = have_a && !grayscale,
-                                           .name = name_a};
+            agenda_cal_name_tag_t tag_a = {
+                .show = have_a, .has_swatch = have_a && !grayscale, .name = name_a};
             if (tag_a.has_swatch) {
                 tag_a.r = lines_a[0].fr;
                 tag_a.g = lines_a[0].fg;
                 tag_a.b = lines_a[0].fb;
             }
-            agenda_cal_name_tag_t tag_b = {.show = have_b, .has_swatch = have_b && !grayscale,
-                                           .name = name_b};
+            agenda_cal_name_tag_t tag_b = {
+                .show = have_b, .has_swatch = have_b && !grayscale, .name = name_b};
             if (tag_b.has_swatch) {
                 tag_b.r = lines_b[0].fr;
                 tag_b.g = lines_b[0].fg;
                 tag_b.b = lines_b[0].fb;
             }
-            draw_calendar_column(rgb, width, height, cal_rect, now, lookahead_days, body_r,
-                                 body_g, body_b, tagged, tagged_count, cal_weather, tag_a, tag_b);
+            draw_calendar_column(rgb, width, height, cal_rect, now, lookahead_days, body_r, body_g,
+                                 body_b, tagged, tagged_count, cal_weather, tag_a, tag_b);
         } else {
             ESP_LOGW(TAG, "Failed to allocate Calendar render scratch buffers - skipping column");
         }

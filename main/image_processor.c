@@ -3432,7 +3432,7 @@ void image_processor_draw_text_runs(uint8_t *rgb_buffer, int width, int height, 
         rgb_t color = default_color;
         for (int i = 0; i < run_count; i++) {
             if (index >= runs[i].start && index < runs[i].start + runs[i].length) {
-                color = (rgb_t) {runs[i].r, runs[i].g, runs[i].b};
+                color = (rgb_t){runs[i].r, runs[i].g, runs[i].b};
                 break;
             }
         }

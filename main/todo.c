@@ -243,8 +243,8 @@ static char *read_whole_file(const char *path, size_t *out_len)
     return buf;
 }
 
-esp_err_t todo_fetch(const char *url, int timeout_ms, const char *cache_path,
-                     const char *etag_in, char *etag_out, size_t etag_out_len, todo_list_t *out)
+esp_err_t todo_fetch(const char *url, int timeout_ms, const char *cache_path, const char *etag_in,
+                     char *etag_out, size_t etag_out_len, todo_list_t *out)
 {
     if (!out) {
         return ESP_ERR_INVALID_ARG;

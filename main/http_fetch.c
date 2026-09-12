@@ -24,7 +24,7 @@ typedef struct {
     size_t cap;
     size_t max_len;
     bool overflow;
-    char *etag_out;      // NULL if the caller doesn't want the ETag captured
+    char *etag_out;  // NULL if the caller doesn't want the ETag captured
     size_t etag_out_len;
 } http_body_buf_t;
 

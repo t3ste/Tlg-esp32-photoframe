@@ -112,7 +112,7 @@ esp_err_t agenda_manager_run(void)
         time_t window_end = now + (time_t) cal_days * 86400;
         if (url[0] != '\0') {
             ESP_LOGI(TAG, "Free internal heap before Calendar fetch: %u bytes",
-                    (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+                     (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             char etag_out[HTTP_ETAG_MAX_LEN];
             bool ok = (calendar_ics_fetch(url, 0, now, window_end, AGENDA_CAL_CACHE_PATH,
                                           config_manager_get_agenda_cal_etag(), etag_out,
@@ -127,7 +127,7 @@ esp_err_t agenda_manager_run(void)
         }
         if (url2[0] != '\0') {
             ESP_LOGI(TAG, "Free internal heap before Calendar 2 fetch: %u bytes",
-                    (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+                     (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             char etag_out[HTTP_ETAG_MAX_LEN];
             bool ok = (calendar_ics_fetch(url2, 0, now, window_end, AGENDA_CAL_CACHE_PATH2,
                                           config_manager_get_agenda_cal_etag2(), etag_out,
@@ -167,11 +167,11 @@ esp_err_t agenda_manager_run(void)
             ESP_LOGW(TAG, "ToDo enabled but no URL configured");
         } else {
             ESP_LOGI(TAG, "Free internal heap before ToDo fetch: %u bytes",
-                    (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+                     (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             char etag_out[HTTP_ETAG_MAX_LEN];
-            bool ok = (todo_fetch(url, 0, AGENDA_TODO_CACHE_PATH,
-                                  config_manager_get_agenda_todo_etag(), etag_out,
-                                  sizeof(etag_out), todo) == ESP_OK);
+            bool ok =
+                (todo_fetch(url, 0, AGENDA_TODO_CACHE_PATH, config_manager_get_agenda_todo_etag(),
+                            etag_out, sizeof(etag_out), todo) == ESP_OK);
             utils_record_internet_attempt(ok);
             have_todo = ok;
             if (ok) {

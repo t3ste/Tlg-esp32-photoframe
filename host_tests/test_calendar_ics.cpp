@@ -314,8 +314,7 @@ TEST_F(CalendarIcs, MultiDayWeeklyOccurrenceInProgressAtWindowStartIncluded)
         "RRULE:FREQ=WEEKLY\n"
         "END:VEVENT\n";
 
-    ics_event_list_t out =
-        parse(ics, make_utc(2024, 1, 2, 0, 0, 0), make_utc(2024, 1, 4, 0, 0, 0));
+    ics_event_list_t out = parse(ics, make_utc(2024, 1, 2, 0, 0, 0), make_utc(2024, 1, 4, 0, 0, 0));
     ASSERT_EQ(out.count, 1);
     EXPECT_EQ(out.events[0].start, make_utc(2024, 1, 1, 9, 0, 0));
     EXPECT_EQ(out.events[0].end, make_utc(2024, 1, 3, 9, 0, 0));

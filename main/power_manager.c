@@ -116,8 +116,9 @@ static void rotation_timer_task(void *arg)
                 // lands on its real next scheduled slot, not an immediate
                 // retry on the following 1-second tick.
                 if (agenda_due) {
-                    ESP_LOGI(TAG, "Rotation due but Agenda render took priority this tick - "
-                                  "skipping, rotation continues on its own schedule");
+                    ESP_LOGI(TAG,
+                             "Rotation due but Agenda render took priority this tick - "
+                             "skipping, rotation continues on its own schedule");
                 } else {
                     const char *reason =
                         board_hal_is_usb_connected() ? "USB powered" : "deep sleep disabled";

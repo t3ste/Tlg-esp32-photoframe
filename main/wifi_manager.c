@@ -272,7 +272,7 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password, int timeo
 
     s_retry_num = 0;
     s_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;  // stale value from a previous
-                                                          // attempt must not leak into this one
+                                                         // attempt must not leak into this one
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
     // Bounded wait - previously portMAX_DELAY, which could hang forever if
     // association succeeded but DHCP never completed (no further

@@ -594,7 +594,7 @@ esp_err_t calendar_ics_fetch(const char *url, int timeout_ms, time_t window_star
         }
         if (!cache_path) {
             ESP_LOGW(TAG,
-                    "Calendar 304 Not Modified but no cache configured - treating as failure");
+                     "Calendar 304 Not Modified but no cache configured - treating as failure");
             return ESP_FAIL;
         }
         body = read_whole_file(cache_path, &body_len);

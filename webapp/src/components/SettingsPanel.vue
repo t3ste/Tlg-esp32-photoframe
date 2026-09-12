@@ -1258,11 +1258,11 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              A plain todo.txt file, re-checked every agenda wake - no API key needed. An
-              unchanged file is detected via a conditional request and skips re-downloading.
-              Completed tasks ("x " prefix) are never shown. Treated like a password
-              field (never shown back to you) since a private feed's URL can embed an access
-              token, the same way a Google Calendar link can.
+              A plain todo.txt file, re-checked every agenda wake - no API key needed. An unchanged
+              file is detected via a conditional request and skips re-downloading. Completed tasks
+              ("x " prefix) are never shown. Treated like a password field (never shown back to you)
+              since a private feed's URL can embed an access token, the same way a Google Calendar
+              link can.
             </div>
             <v-text-field
               v-model="settingsStore.deviceSettings.agendaTodoUrl"
@@ -1292,9 +1292,9 @@ async function performFactoryReset() {
               (Calendar Settings → Integrate calendar). Google's own docs warn that only you should
               know this address - treat it like a password, never share it. A second calendar is
               optional (e.g. work alongside personal) - events from both are merged into one list,
-              sorted by time, and colored by origin: Calendar A is blue, Calendar B is green
-              (shown as a filled background on a light agenda background, plain colored text on a
-              dark one - see Appearance below).
+              sorted by time, and colored by origin: Calendar A is blue, Calendar B is green (shown
+              as a filled background on a light agenda background, plain colored text on a dark one
+              - see Appearance below).
             </div>
             <v-row dense>
               <v-col cols="12" sm="6">
@@ -1317,7 +1317,7 @@ async function performFactoryReset() {
                   variant="outlined"
                   density="compact"
                   placeholder="Calendar A"
-                  hint="Shown in the Calendar header instead of &quot;Calendar A&quot;"
+                  hint='Shown in the Calendar header instead of "Calendar A"'
                   persistent-hint
                   :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 />
@@ -1354,7 +1354,7 @@ async function performFactoryReset() {
                   variant="outlined"
                   density="compact"
                   placeholder="Calendar B"
-                  hint="Shown in the Calendar header instead of &quot;Calendar B&quot;"
+                  hint='Shown in the Calendar header instead of "Calendar B"'
                   persistent-hint
                   :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 />
@@ -1965,10 +1965,10 @@ async function performFactoryReset() {
                   label="Include credentials in export (Telegram bot token, AI API keys, access token, custom auth header)"
                 />
                 <div class="text-caption text-grey mb-3">
-                  Off by default: an export is a plaintext JSON file. Enable this for a
-                  fully self-contained backup, e.g. before restoring to a fresh device.
-                  WiFi password and Calendar/ToDo URLs can never be included (the device
-                  never returns them at all) - re-enter those manually after importing.
+                  Off by default: an export is a plaintext JSON file. Enable this for a fully
+                  self-contained backup, e.g. before restoring to a fresh device. WiFi password and
+                  Calendar/ToDo URLs can never be included (the device never returns them at all) -
+                  re-enter those manually after importing.
                 </div>
                 <v-btn variant="outlined" class="mr-2" @click="exportConfig">
                   <v-icon start>mdi-download</v-icon>

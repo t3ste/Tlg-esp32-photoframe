@@ -1432,7 +1432,7 @@ esp_err_t telegram_bot_notify_fallback_image(const char *image_path)
             send_path = TELEGRAM_NOTIFY_THUMB_PATH;
         } else {
             ESP_LOGW(TAG, "Rotation notify: could not thumbnail %s, skipping Telegram upload",
-                    image_path);
+                     image_path);
             return ESP_FAIL;
         }
     }
