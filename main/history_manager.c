@@ -6,6 +6,8 @@
 
 #include "config.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "storage.h"
 
 static const char *TAG = "history_manager";
@@ -13,6 +15,14 @@ static const char *TAG = "history_manager";
 static char **s_paths = NULL;
 static int s_count = 0;
 static int s_capacity = 0;
+
+// s_paths/s_count/s_capacity are read and mutated from multiple FreeRTOS
+// tasks (auto-rotate, the HTTP server, the Telegram bot task) - grow_if_needed()'s
+// realloc() can move or free the backing array out from under a concurrent
+// reader, and clear()'s free() can race a concurrent read/append. Guard every
+// access with this mutex.
+#define HISTORY_LOCK_TIMEOUT_MS (5 * 1000)
+static SemaphoreHandle_t history_mutex = NULL;
 
 static bool grow_if_needed(void)
 {
@@ -30,8 +40,24 @@ static bool grow_if_needed(void)
     return true;
 }
 
+static bool history_has_shown_locked(const char *image_path)
+{
+    for (int i = 0; i < s_count; i++) {
+        if (strcmp(s_paths[i], image_path) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 esp_err_t history_manager_init(void)
 {
+    history_mutex = xSemaphoreCreateMutex();
+    if (!history_mutex) {
+        ESP_LOGE(TAG, "Failed to create history mutex");
+        return ESP_ERR_NO_MEM;
+    }
+
     if (!storage_has_persistent_storage()) {
         ESP_LOGI(TAG, "No persistent storage - display history is RAM-only for this session");
         return ESP_OK;
@@ -66,27 +92,36 @@ bool history_manager_has_shown(const char *image_path)
     if (!image_path) {
         return false;
     }
-    for (int i = 0; i < s_count; i++) {
-        if (strcmp(s_paths[i], image_path) == 0) {
-            return true;
-        }
+    if (xSemaphoreTake(history_mutex, pdMS_TO_TICKS(HISTORY_LOCK_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Timed out acquiring history mutex (has_shown)");
+        return false;
     }
-    return false;
+    bool shown = history_has_shown_locked(image_path);
+    xSemaphoreGive(history_mutex);
+    return shown;
 }
 
 void history_manager_mark_shown(const char *image_path)
 {
-    if (!image_path || history_manager_has_shown(image_path)) {
+    if (!image_path) {
         return;
     }
-    if (!grow_if_needed()) {
+    if (xSemaphoreTake(history_mutex, pdMS_TO_TICKS(HISTORY_LOCK_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Timed out acquiring history mutex (mark_shown)");
+        return;
+    }
+
+    if (history_has_shown_locked(image_path) || !grow_if_needed()) {
+        xSemaphoreGive(history_mutex);
         return;
     }
     s_paths[s_count] = strdup(image_path);
     if (!s_paths[s_count]) {
+        xSemaphoreGive(history_mutex);
         return;
     }
     s_count++;
+    xSemaphoreGive(history_mutex);
 
     if (!storage_has_persistent_storage()) {
         return;
@@ -102,10 +137,15 @@ void history_manager_mark_shown(const char *image_path)
 
 void history_manager_clear(void)
 {
+    if (xSemaphoreTake(history_mutex, pdMS_TO_TICKS(HISTORY_LOCK_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Timed out acquiring history mutex (clear)");
+        return;
+    }
     for (int i = 0; i < s_count; i++) {
         free(s_paths[i]);
     }
     s_count = 0;
+    xSemaphoreGive(history_mutex);
 
     if (storage_has_persistent_storage()) {
         remove(DISPLAY_HISTORY_PATH);

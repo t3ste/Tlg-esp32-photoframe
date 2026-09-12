@@ -58,7 +58,15 @@ static UWORD display_white_color(void)
 }
 
 static SemaphoreHandle_t display_mutex = NULL;
-static char current_image[64] = {0};
+// 256, not some smaller "just a filename" size: display_manager_show_image()
+// documents that callers pass an absolute path, and real-world filenames
+// (e.g. Google Pixel Motion Photos' "<timestamp>.RAW-01.MP.COVER.epdgz")
+// combined with an album subdirectory prefix routinely exceed 64 bytes -
+// confirmed live (2026-09): a silently truncated path here made
+// display_error_overlay() fail to open the "current" file for its format
+// check, falling back to a blank canvas instead of overlaying onto the
+// actual displayed photo. Matches last_displayed_image[] just below.
+static char current_image[256] = {0};
 static char last_displayed_image[256] = {0};  // Internal state: last displayed image path
 
 static uint8_t *epd_image_buffer = NULL;

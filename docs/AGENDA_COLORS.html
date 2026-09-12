@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agenda ToDo Color Scheme</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1a1a1a;
+        --muted: #5a5a5a;
+        --border: #d8d8d8;
+        --code-bg: #f2f2f2;
+        --thead-bg: #eef0f3;
+        --note-bg: #fff8e6;
+        --note-border: #e0c264;
+        --link: #2b5fb0;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14161a;
+          --fg: #e6e6e6;
+          --muted: #a0a4ab;
+          --border: #33363c;
+          --code-bg: #1e2126;
+          --thead-bg: #1e2126;
+          --note-bg: #2a2410;
+          --note-border: #6b5a1e;
+          --link: #7fb0ff;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+          Cantarell, sans-serif;
+        line-height: 1.55;
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 32px 24px 80px;
+      }
+      h1 {
+        font-size: 1.9rem;
+        margin-bottom: 6px;
+      }
+      h2 {
+        font-size: 1.35rem;
+        margin-top: 2.4em;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 6px;
+      }
+      h3 {
+        font-size: 1.1rem;
+        margin-top: 1.8em;
+      }
+      p {
+        margin: 0.9em 0;
+      }
+      code {
+        background: var(--code-bg);
+        padding: 0.1em 0.4em;
+        border-radius: 4px;
+        font-size: 0.92em;
+      }
+      a {
+        color: var(--link);
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1.2em 0;
+        font-size: 0.94rem;
+      }
+      caption {
+        caption-side: top;
+        text-align: left;
+        color: var(--muted);
+        font-size: 0.88rem;
+        margin-bottom: 4px;
+      }
+      th,
+      td {
+        border: 1px solid var(--border);
+        padding: 8px 10px;
+        vertical-align: middle;
+        text-align: left;
+      }
+      thead th {
+        background: var(--thead-bg);
+      }
+      .swatch-cell {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+      }
+      .swatch {
+        width: 22px;
+        height: 22px;
+        border-radius: 4px;
+        border: 1px solid rgba(128, 128, 128, 0.5);
+        flex: none;
+      }
+      .chip {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 0.92rem;
+        border: 1px solid rgba(128, 128, 128, 0.35);
+      }
+      .note {
+        background: var(--note-bg);
+        border: 1px solid var(--note-border);
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin: 1em 0;
+        font-size: 0.94rem;
+      }
+      .profile-heading {
+        margin-top: 1.6em;
+      }
+      footer {
+        margin-top: 3em;
+        color: var(--muted);
+        font-size: 0.85rem;
+        border-top: 1px solid var(--border);
+        padding-top: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Agenda ToDo Color Scheme</h1>
+    <p>
+      The full-screen Agenda ToDo/Calendar mode (see the main project plan) renders
+      <a href="https://github.com/todotxt/todo.txt" target="_blank" rel="noopener">todo.txt</a>-format
+      items on the panel, styled after
+      <a href="https://github.com/webstonehq/tuxedo" target="_blank" rel="noopener">webstonehq/tuxedo</a>'s
+      color-coded terminal look. This firmware targets several very different e-paper panels — some with a
+      handful of fixed colors, some grayscale-only — so tuxedo's palette can only be an <em>inspiration</em>,
+      not a literal copy: it has to be re-derived per panel type from the colors actually available, while
+      staying true to tuxedo's intent (which element gets emphasized, and how strongly).
+    </p>
+    <p>
+      This document records that derivation — tuxedo's own colors, what each supported board can actually
+      display — and then the resulting, actually-shipping per-hardware color assignment for both the ToDo
+      and Calendar columns, plus the configurable shared background and its collision-avoidance rule, with
+      every color shown as an actual rendered swatch, not just a hex code (plain Markdown/GitHub cannot
+      render inline colors, hence this page).
+    </p>
+
+    <h2>1. Tuxedo's own color scheme</h2>
+    <p>
+      Source:
+      <a
+        href="https://github.com/webstonehq/tuxedo/blob/main/src/theme.rs"
+        target="_blank"
+        rel="noopener"
+        ><code>src/theme.rs</code></a
+      >
+      in the tuxedo repo. Tuxedo ships five built-in themes (<code>Muted Slate</code>,
+      <code>Dawn</code>, <code>Nord</code>, <code>Matrix</code>, <code>Terminal</code>);
+      <strong>&ldquo;Muted Slate&rdquo; is the default</strong> (index 0, selected whenever no
+      <code>theme =</code> line is set in the user's config). The table below is Muted Slate, restricted to
+      the fields relevant to rendering a todo.txt line (tuxedo also defines UI-chrome colors — panel
+      background, borders, status bar, selection highlight, search-match highlight — which have no
+      equivalent in this firmware's single-purpose ToDo screen and are omitted).
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>todo.txt element</th>
+          <th>Tuxedo field</th>
+          <th>Color</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Priority <code>(A)</code></td>
+          <td><code>pri_a</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#e07a7a"></span><code>#E07A7A</code> muted red</td>
+        </tr>
+        <tr>
+          <td>Priority <code>(B)</code></td>
+          <td><code>pri_b</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#d4b06a"></span><code>#D4B06A</code> muted gold/amber</td>
+        </tr>
+        <tr>
+          <td>Priority <code>(C)</code></td>
+          <td><code>pri_c</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#7aa67a"></span><code>#7AA67A</code> muted green</td>
+        </tr>
+        <tr>
+          <td>Priority <code>(D)</code></td>
+          <td><code>pri_d</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#7a9ec9"></span><code>#7A9EC9</code> muted blue</td>
+        </tr>
+        <tr>
+          <td>Priority <code>(E)</code>&ndash;<code>(Z)</code></td>
+          <td><code>pri_other</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#9a8fc4"></span><code>#9A8FC4</code> muted purple</td>
+        </tr>
+        <tr>
+          <td><code>+Project</code></td>
+          <td><code>project</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#7fb3a8"></span><code>#7FB3A8</code> teal/seafoam</td>
+        </tr>
+        <tr>
+          <td><code>@Context</code></td>
+          <td><code>context</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#c89a6e"></span><code>#C89A6E</code> tan/orange-brown</td>
+        </tr>
+        <tr>
+          <td><code>due:</code> (future, not yet overdue)</td>
+          <td><code>due</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#d4b06a"></span><code>#D4B06A</code> same as <code>pri_b</code></td>
+        </tr>
+        <tr>
+          <td>Overdue</td>
+          <td><code>overdue</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#e07a7a"></span><code>#E07A7A</code> same as <code>pri_a</code></td>
+        </tr>
+        <tr>
+          <td>Due today</td>
+          <td><code>today</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#e07a7a"></span><code>#E07A7A</code> same as <code>overdue</code>/<code>pri_a</code></td>
+        </tr>
+        <tr>
+          <td>Completed (<code>x </code>)</td>
+          <td><code>done</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#5a6270"></span><code>#5A6270</code> dim gray</td>
+        </tr>
+        <tr>
+          <td>Plain body text</td>
+          <td><code>fg</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#c8ccd4"></span><code>#C8CCD4</code> light gray</td>
+        </tr>
+        <tr>
+          <td>Screen background</td>
+          <td><code>bg</code></td>
+          <td class="swatch-cell"><span class="swatch" style="background:#1a1d23"></span><code>#1A1D23</code> near-black</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      Two things worth noting, since they directly inform the hardware-constrained assignment below:
+      <ul>
+        <li>
+          <strong>Tuxedo itself reuses colors across closely-related fields</strong>: <code>overdue</code>,
+          <code>today</code>, and <code>pri_a</code> are the identical red; <code>due</code> and
+          <code>pri_b</code> are the identical amber. Tuxedo doesn't treat every concept as needing its own
+          unique hue — it groups by <em>urgency meaning</em>. This firmware's palette is far more
+          constrained than a 24-bit terminal, so the same grouping strategy is used deliberately below, not
+          as a fallback compromise.
+        </li>
+        <li>
+          Tuxedo is a <strong>dark theme</strong> (light text on a near-black background). This firmware's
+          overlay conventions are the opposite (black text on a white background, matching every existing
+          overlay — weather bar, captions, battery badge). Colors are re-picked for legibility on white, not
+          transplanted by RGB value.
+        </li>
+      </ul>
+    </div>
+
+    <h2>2. Hardware color capability</h2>
+    <p>
+      From <code>boards/boards.json</code> and <code>BOARD_HAL_DISPLAY_TYPE</code>
+      (<code>components/board_hal/include/*.h</code>). Seven boards are supported, but they reduce to
+      exactly two distinct color capability profiles — every board in a profile is driven through the
+      identical palette/dithering code in <code>image_processor.c</code>, so there is no per-board variation
+      to document within a profile.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Profile</th>
+          <th>Boards</th>
+          <th><code>BOARD_HAL_DISPLAY_TYPE</code></th>
+          <th>Available colors</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Spectra6 (6-color)</strong></td>
+          <td>
+            <code>waveshare_photopainter_73</code>, <code>seeedstudio_xiao_ee02</code>,
+            <code>seeedstudio_xiao_ee04</code>, <code>seeedstudio_reterminal_e1002</code>,
+            <code>seeedstudio_reterminal_e1004</code>
+          </td>
+          <td><code>spectra6</code></td>
+          <td>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+              <span class="chip" style="background:#000;color:#fff;">Black</span>
+              <span class="chip" style="background:#fff;color:#000;">White</span>
+              <span class="chip" style="background:#ffff00;color:#000;">Yellow</span>
+              <span class="chip" style="background:#ff0000;color:#fff;">Red</span>
+              <span class="chip" style="background:#0000ff;color:#fff;">Blue</span>
+              <span class="chip" style="background:#00ff00;color:#000;">Green</span>
+            </div>
+            <div style="margin-top:6px;">
+              6 fixed, undithered colors (<code>palette[7]</code> in <code>image_processor.c</code>; index 4
+              is reserved/unused)
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Grayscale (16-level)</strong></td>
+          <td><code>seeedstudio_xiao_ee03</code>, <code>seeedstudio_reterminal_e1003</code></td>
+          <td><code>gc16</code></td>
+          <td>
+            <div style="display:flex;flex-wrap:nowrap;gap:2px;margin-bottom:6px;">
+              <span class="swatch" style="background:#000000;border-radius:0;"></span>
+              <span class="swatch" style="background:#111111;border-radius:0;"></span>
+              <span class="swatch" style="background:#222222;border-radius:0;"></span>
+              <span class="swatch" style="background:#333333;border-radius:0;"></span>
+              <span class="swatch" style="background:#444444;border-radius:0;"></span>
+              <span class="swatch" style="background:#555555;border-radius:0;"></span>
+              <span class="swatch" style="background:#666666;border-radius:0;"></span>
+              <span class="swatch" style="background:#777777;border-radius:0;"></span>
+              <span class="swatch" style="background:#888888;border-radius:0;"></span>
+              <span class="swatch" style="background:#999999;border-radius:0;"></span>
+              <span class="swatch" style="background:#aaaaaa;border-radius:0;"></span>
+              <span class="swatch" style="background:#bbbbbb;border-radius:0;"></span>
+              <span class="swatch" style="background:#cccccc;border-radius:0;"></span>
+              <span class="swatch" style="background:#dddddd;border-radius:0;"></span>
+              <span class="swatch" style="background:#eeeeee;border-radius:0;"></span>
+              <span class="swatch" style="background:#ffffff;border-radius:0;"></span>
+            </div>
+            16 gray levels, <code>0</code> (black) to <code>255</code> (white) in steps of 17
+            (<code>gray_theoretical[16]</code>) — no chromatic hue at all
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      Every other board field (resolution, storage, panel size) varies per board, but has no bearing on
+      color — only these two profiles matter for the tables below. <code>board_is_grayscale()</code> (and
+      the Agenda renderer's own copy, <code>agenda_board_is_grayscale()</code>) distinguish them at runtime
+      via <code>strncmp(BOARD_HAL_DISPLAY_TYPE, "gc", 2)</code>.
+    </p>
+
+    <h2>3. ToDo column — as implemented</h2>
+    <p>
+      Priority, <code>+project</code>/<code>@context</code> tags, and due-date urgency are colored
+      <strong>independently within one row</strong> via <code>image_processor_draw_text_runs()</code>
+      (<code>image_processor.c</code>) — a sibling to <code>image_processor_draw_text()</code> that colors
+      each character from whichever <code>image_processor_text_run_t {start, length, r, g, b}</code> range
+      covers its index, falling back to the row's default (body) color otherwise.
+      <code>agenda_renderer.c</code>'s <code>build_todo_line()</code> builds the display text (priority
+      marker, body text, tags — never shown before this feature, since <code>todo.c</code> parses them out
+      of <code>item-&gt;text</code> but nothing displayed them — then the due-date suffix) and tracks each
+      segment's exact range as it goes. An item can carry both a priority marker and a due date, each with
+      its own independent color.
+    </p>
+    <p>
+      Every priority letter A&ndash;D gets the <strong>same treatment</strong> on Spectra6: a full-strength
+      background chip plus a text color picked for contrast against it, rather than mixing plain-colored
+      text and chips per letter. This is deliberate, not just cosmetic — Spectra6 dithers any RGB value
+      that isn't one of its 6 exact palette colors, so a softer/blended shade (an earlier version of this
+      renderer used <code>rgb(0,179,0)</code> for a calmer green) can render as visual noise or vanish
+      entirely instead of a solid fill; only the 6 exact hues are guaranteed to render solid. Priority
+      <code>C</code>'s chip uses <strong>white</strong> text, not black — confirmed live on real Spectra6
+      hardware that the panel's actual green ink prints noticeably darker than the sRGB
+      <code>(0,255,0)</code> preview suggests, so black text on it reads poorly (unlike yellow for
+      <code>B</code>, where black stays correct).
+    </p>
+    <p style="color:var(--muted);font-size:0.88rem;">
+      Every hue in the Spectra6 table below is the <em>default</em> for its role, not fixed — each is
+      individually reassignable to any of the 4 chromatic hues via the Web UI (§6).
+    </p>
+
+    <h3 class="profile-heading">Spectra6 (color) boards</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>todo.txt element</th>
+          <th>Rendered</th>
+          <th>Colors</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Priority <code>(A)</code></td>
+          <td><span class="chip" style="background:#ff0000;color:#fff;">(A) Priority A</span></td>
+          <td>White text on red chip</td>
+        </tr>
+        <tr>
+          <td>Priority <code>(B)</code></td>
+          <td><span class="chip" style="background:#ffff00;color:#000;">(B) Priority B</span></td>
+          <td>Black text on yellow chip</td>
+        </tr>
+        <tr>
+          <td>Priority <code>(C)</code></td>
+          <td><span class="chip" style="background:#00ff00;color:#fff;">(C) Priority C</span></td>
+          <td>White text on green chip</td>
+        </tr>
+        <tr>
+          <td>Priority <code>(D)</code></td>
+          <td><span class="chip" style="background:#0000ff;color:#fff;">(D) Priority D</span></td>
+          <td>White text on blue chip</td>
+        </tr>
+        <tr>
+          <td>Priority <code>(E)</code>&ndash;<code>(Z)</code> / none</td>
+          <td><span class="chip" style="background:#fff;color:#000;border:1px solid #ccc;">Buy milk</span></td>
+          <td>Plain body-text color, no chip (see §5 for the collision-avoidance fallback)</td>
+        </tr>
+        <tr>
+          <td>Overdue (<code>due:</code> in the past)</td>
+          <td><span class="chip" style="background:#ff0000;color:#fff;">(due 2026-09-01)</span></td>
+          <td>White text on red chip — same treatment as priority <code>A</code>, but on the due-date
+          suffix, independent of any priority marker on the same row</td>
+        </tr>
+        <tr>
+          <td>Due today</td>
+          <td><span class="chip" style="background:#ffff00;color:#000;">(due 2026-09-10)</span></td>
+          <td>Black text on yellow chip</td>
+        </tr>
+        <tr>
+          <td>Due later / no due date</td>
+          <td><span class="chip" style="background:#fff;color:#0000ff;border:1px solid #ccc;">(due 2026-09-20)</span></td>
+          <td>Plain blue text, no chip</td>
+        </tr>
+        <tr>
+          <td><code>+Project</code></td>
+          <td><span class="chip" style="background:#fff;color:#0000ff;border:1px solid #ccc;">+Project</span></td>
+          <td>Plain blue text, no chip</td>
+        </tr>
+        <tr>
+          <td><code>@Context</code></td>
+          <td><span class="chip" style="background:#fff;color:#00ff00;border:1px solid #ccc;">@Context</span></td>
+          <td>Plain (exact) green text, no chip</td>
+        </tr>
+        <tr>
+          <td>Plain body text</td>
+          <td><span class="chip" style="background:#fff;color:#000;border:1px solid #ccc;">Buy milk</span></td>
+          <td>Black on a white page background; flips to white if the configured background is black (see
+          §5) — matches every other overlay in this firmware</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 class="profile-heading">Grayscale (16-level) boards</h3>
+    <p>
+      No chromatic hue exists at all, and unlike the priority chips above, grayscale keeps its original
+      plain-black treatment throughout — there was no legibility bug to fix here, and 16 gray levels aren't
+      enough to give every one of these roles its own distinguishable fill without them blurring together.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>todo.txt element</th>
+          <th>Rendered</th>
+          <th>Colors</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Priority (any letter), <code>+Project</code>, <code>@Context</code>, plain body text</td>
+          <td><span class="chip" style="background:#fff;color:#000;border:1px solid #ccc;">Buy milk</span></td>
+          <td>Plain black text, no chip (flips to white if the configured background is black)</td>
+        </tr>
+        <tr>
+          <td>Overdue</td>
+          <td><span class="chip" style="background:#000;color:#fff;">(due 2026-09-01)</span></td>
+          <td>Full inversion — white text on black chip</td>
+        </tr>
+        <tr>
+          <td>Due today</td>
+          <td><span class="chip" style="background:#888888;color:#000;">(due 2026-09-10)</span></td>
+          <td>Black text on a level-8 (136) gray chip</td>
+        </tr>
+        <tr>
+          <td>Due later / no due date</td>
+          <td><span class="chip" style="background:#fff;color:#000;border:1px solid #ccc;">(due 2026-09-20)</span></td>
+          <td>Plain black text, no chip</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="color:var(--muted);font-size:0.88rem;">
+      Note: the on-screen font is a fixed monochrome bitmap font (<code>Font24</code>), so
+      <code>image_processor_draw_text()</code>/<code>_draw_text_runs()</code> can only paint solid glyph
+      pixels in one color per call — the chips above use a bold sans-serif purely to preview the color
+      pairing on this page; actual panel text looks like the rest of this firmware's overlay text (plain,
+      not bold).
+    </p>
+
+    <h2>4. Calendar column — as implemented</h2>
+    <p>
+      Up to <strong>two independent calendar sources</strong> (Calendar A / Calendar B — e.g. a private and
+      a work calendar) are fetched, merged, and sorted by start time into one list. Events are grouped under
+      a dashed <strong>day divider</strong> (weekday abbreviation + day number, e.g. &ldquo;Fr 11.&rdquo;)
+      rather than repeating a date on every line, and a multi-day event is shown under every day it spans,
+      not just its start day. This replaced an earlier per-row &ldquo;today = yellow / later = blue&rdquo;
+      scheme entirely, which both had the same low-contrast yellow-on-white problem the ToDo column's
+      due-today role had, and (with day-grouping) is redundant anyway — &ldquo;today&rdquo; is already
+      obvious as the first group under the header.
+    </p>
+    <p>
+      Each event's color now depends only on <strong>which calendar it came from</strong>, not on
+      today/later. Colors are always plain text with no background chip, on either a light or dark page
+      background — an earlier version filled a chip behind the text on a light background, but live testing
+      found that background distracting against the actual event rows, so both background choices now use
+      the same plain-text treatment.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>Spectra6</th>
+          <th>Grayscale</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Calendar A</td>
+          <td><span class="chip" style="background:#fff;color:#0000ff;border:1px solid #ccc;">09:00 Team meeting</span></td>
+          <td rowspan="2" style="vertical-align:middle;">
+            <span class="chip" style="background:#fff;color:#000;border:1px solid #ccc;">09:00 Team meeting</span>
+            &mdash; both sources render identically (plain black), no per-source distinction
+          </td>
+        </tr>
+        <tr>
+          <td>Calendar B</td>
+          <td><span class="chip" style="background:#fff;color:#00ff00;border:1px solid #ccc;">18:00 Dinner</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="color:var(--muted);font-size:0.88rem;">
+      Blue/green are the defaults, not fixed — see §6 for the full per-role Web UI color picker.
+    </p>
+    <p>
+      The day divider itself and both column headers (&ldquo;TODO&hellip;&rdquo;/&ldquo;CALENDAR&hellip;&rdquo;)
+      always draw a solid fill in the page's body-text color, with the label/title text color computed for
+      contrast against <em>that fill</em> — so on the default white page background they render as a black
+      chip with white text, and on a black page background they invert to a white chip with black text.
+    </p>
+
+    <h2>5. Configurable shared background + collision avoidance</h2>
+    <p>
+      The ToDo/Calendar page background (<code>agenda_bg_color</code>, Web UI: Agenda &rarr; Appearance) is
+      user-selectable per hardware profile, defaulting to <strong>white</strong>:
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Profile</th>
+          <th>Selectable backgrounds</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Spectra6</td>
+          <td>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+              <span class="chip" style="background:#fff;color:#000;border:1px solid #ccc;">White (default)</span>
+              <span class="chip" style="background:#000;color:#fff;">Black</span>
+              <span class="chip" style="background:#ffff00;color:#000;">Yellow</span>
+              <span class="chip" style="background:#ff0000;color:#fff;">Red</span>
+              <span class="chip" style="background:#0000ff;color:#fff;">Blue</span>
+              <span class="chip" style="background:#00ff00;color:#000;">Green</span>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td>Grayscale</td>
+          <td>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+              <span class="chip" style="background:#fff;color:#000;border:1px solid #ccc;">White (default)</span>
+              <span class="chip" style="background:#bfbfbf;color:#000;">Gray75</span>
+              <span class="chip" style="background:#808080;color:#fff;">Gray50</span>
+              <span class="chip" style="background:#404040;color:#fff;">Gray25</span>
+              <span class="chip" style="background:#000;color:#fff;">Black</span>
+            </div>
+            (a curated 5-level subset of the full 16, not every gray level)
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      Every <em>plain, no-own-fill</em> text color (body text, priority-other, due-later,
+      <code>+project</code>, <code>@context</code>, Calendar A/B) is automatically swapped to a safe
+      fallback (black on a light background, white on a dark one) if — and only if — it would otherwise
+      exactly match the chosen background, so nothing can silently disappear. Elements that draw their own
+      background chip (priority A&ndash;D, due-today/overdue) get the equivalent protection for their
+      <em>fill</em> instead: since §6 below makes every one of those fill hues user-configurable too, a
+      chip's fill can now, in principle, be set to the exact same color as the page background — in that
+      case the chip is dropped entirely and the role falls back to the same plain safe-contrast text every
+      other collision fallback uses, rather than rendering an invisible box. The day divider and both
+      headers are unaffected either way, since their fill is always derived from the page background itself
+      (§4), never independently configurable.
+    </p>
+
+    <h2>6. Per-role color picker (Web UI: Agenda &rarr; Appearance &rarr; Colors)</h2>
+    <p>
+      Every hue used above — both ToDo's per-element colors and each Calendar source's color — is
+      individually user-configurable on Spectra6/color boards, not just derivable from this document.
+      Grayscale boards have no picker here at all: with only one channel to work with, there's no spare hue
+      to reassign (see §3's grayscale table — nothing there was ever a bug to begin with). Every picker
+      offers the same 4 chromatic Spectra6 hues; nothing else is offered, since (as covered in §3) anything
+      off this exact palette risks dithering into visual noise on real hardware rather than rendering solid:
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Config key</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Priority (A)</td><td><code>agenda_pri_a_color</code></td><td>Red</td></tr>
+        <tr><td>Priority (B)</td><td><code>agenda_pri_b_color</code></td><td>Yellow</td></tr>
+        <tr><td>Priority (C)</td><td><code>agenda_pri_c_color</code></td><td>Green</td></tr>
+        <tr><td>Priority (D)</td><td><code>agenda_pri_d_color</code></td><td>Blue</td></tr>
+        <tr><td>Overdue</td><td><code>agenda_due_overdue_color</code></td><td>Red</td></tr>
+        <tr><td>Due today</td><td><code>agenda_due_today_color</code></td><td>Yellow</td></tr>
+        <tr><td>Due later</td><td><code>agenda_due_later_color</code></td><td>Blue</td></tr>
+        <tr><td><code>+Project</code></td><td><code>agenda_project_color</code></td><td>Blue</td></tr>
+        <tr><td><code>@Context</code></td><td><code>agenda_context_color</code></td><td>Green</td></tr>
+        <tr><td>Calendar A</td><td><code>agenda_cal_a_color</code></td><td>Blue</td></tr>
+        <tr><td>Calendar B</td><td><code>agenda_cal_b_color</code></td><td>Green</td></tr>
+      </tbody>
+    </table>
+    <p>
+      A chip role's <em>text</em> color is never picked separately from its hue — reassigning e.g. Priority
+      A to green automatically gets green's own correct contrast text (white), the same hardware-verified
+      per-hue table this document already uses elsewhere (see §3's note on Priority C), not a
+      formula-derived guess that would get real Spectra6 ink wrong the way a plain luminance check did during
+      this feature's own development.
+    </p>
+
+    <h2>7. Open items</h2>
+    <ul>
+      <li>
+        Multi-line notes/calendar entries with word-wrap and a leading bullet character, as a selectable
+        display option — backlogged, not started.
+      </li>
+    </ul>
+
+    <footer>
+      This page documents the actual, currently-shipping color behavior of <code>agenda_renderer.c</code> —
+      not a proposal. It exists as HTML specifically to show real rendered colors, which plain Markdown
+      (including on GitHub) cannot do.
+    </footer>
+  </body>
+</html>

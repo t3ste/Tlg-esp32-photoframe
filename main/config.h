@@ -90,6 +90,22 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // scratch file's extension always matches its actual content.
 #define CURRENT_OVERLAY_EPDGZ_PATH FS_MOUNT_POINT "/.overlay.epdgz"
 
+// Agenda (ToDo + Calendar) full-screen render scratch file - always PNG,
+// no EPDGZ variant needed (this is a from-scratch canvas, never decoded
+// back, so there's no "matches the source format" concern like the
+// overlay paths above).
+#define AGENDA_OUTPUT_PATH FS_MOUNT_POINT "/.agenda.png"
+
+// Raw-body caches for the ToDo/Calendar sources' conditional GET (see
+// NVS_AGENDA_TODO_ETAG_KEY etc. below) - todo.c/calendar_ics.c fall back to
+// re-parsing whichever of these is relevant when the server replies 304 Not
+// Modified, since the day-relative rendering (due-today coloring, which
+// calendar days fall in the lookahead window) still needs to be redone every
+// agenda wake even when the source content itself hasn't changed.
+#define AGENDA_TODO_CACHE_PATH FS_MOUNT_POINT "/.agenda_todo_cache.txt"
+#define AGENDA_CAL_CACHE_PATH FS_MOUNT_POINT "/.agenda_cal_cache.ics"
+#define AGENDA_CAL_CACHE_PATH2 FS_MOUNT_POINT "/.agenda_cal_cache2.ics"
+
 // On-demand thumbnail scratch file for telegram_bot_notify_fallback_image() -
 // generated only when the image being reported has no pre-existing ".jpg"
 // sidecar (true for any plain Storage/Auto-Rotate album image, since that
@@ -101,6 +117,7 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // Deliberately outside every album directory (a stray file inside one would
 // otherwise show up as a "new" photo to album_manager/gallery/rotation).
 #define TELEGRAM_NOTIFY_THUMB_PATH FS_MOUNT_POINT "/.tg_notify_thumb.jpg"
+
 // Display-history file (one shown image's full path per line) - lets random
 // rotation and the Telegram fallback rotation cycle through every image once
 // before repeating. See history_manager.[ch].
@@ -455,6 +472,133 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // UI (same as NVS_TELEGRAM_LOW_BATT_WARNED_KEY). Must be NVS-persisted, not
 // just held in memory, since deep sleep reboots the device every wake.
 #define NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY "lowbatt_ov_act"
+
+// Agenda mode (ToDo + Calendar) - a full-screen display mode, NOT a photo
+// overlay: whenever a wake matches its own independent schedule below, the
+// device renders ToDo/Calendar content instead of a photo for that wake,
+// then goes back to sleep. Normal photo auto-rotation is unaffected and
+// keeps running on its own separate schedule. See agenda_manager.h.
+#define NVS_AGENDA_TODO_ENABLED_KEY "agenda_todo_en"
+#define NVS_AGENDA_CAL_ENABLED_KEY "agenda_cal_en"
+// A plain todo.txt file, re-validated on every agenda wake via a
+// conditional GET (see NVS_AGENDA_TODO_ETAG_KEY below) - see todo.h for the
+// parsed grammar.
+#define NVS_AGENDA_TODO_URL_KEY "agenda_todo_url"
+#define AGENDA_TODO_URL_MAX_LEN 256
+// An iCalendar/ICS feed - e.g. a Google Calendar "secret address in iCal
+// format" (plain HTTPS GET, no OAuth). Treated like a credential: never
+// surfaced via GET /api/config, same write-only treatment as
+// NVS_WIFI_PASS_KEY (see config_manager.c).
+#define NVS_AGENDA_CAL_URL_KEY "agenda_cal_url"
+#define AGENDA_CAL_URL_MAX_LEN 256
+// Optional second calendar (e.g. work vs. personal) - merged with the first
+// at render time, each colored per its own origin (agenda_renderer.c's
+// calendar_source_color()). Same write-only credential treatment as the
+// first URL. Only this second feed is disabled if left empty; the first
+// remains the only one required to enable Calendar at all.
+#define NVS_AGENDA_CAL_URL2_KEY "agenda_cal_url2"
+#define AGENDA_CAL_URL2_MAX_LEN 256
+// Cached ETag validators for the conditional GET above - same purpose as
+// NVS_IMAGE_ETAG_KEY for the rotation image fetch, one per source URL. A
+// 304 reply skips the download but not the re-parse: see
+// AGENDA_TODO_CACHE_PATH etc. above. Internal only - not a credential (an
+// ETag is an opaque cache-validation token, not secret), never surfaced via
+// the HTTP API either way, and irrelevant to config export/import (a
+// stale/missing value after an import just means the next fetch is
+// unconditional).
+#define NVS_AGENDA_TODO_ETAG_KEY "agenda_todo_et"
+#define NVS_AGENDA_CAL_ETAG_KEY "agenda_cal_et"
+#define NVS_AGENDA_CAL_ETAG2_KEY "agenda_cal_et2"
+// How many upcoming days (including today) of calendar events to show.
+#define NVS_AGENDA_CAL_DAYS_KEY "agenda_cal_days"
+#define AGENDA_CAL_DAYS_DEFAULT 2
+#define AGENDA_CAL_DAYS_MIN 1
+#define AGENDA_CAL_DAYS_MAX 3
+// Opt-in: annotates each Calendar day divider with that day's forecast
+// (min/max temp + short condition, e.g. "Fr 11. [18/25 cloudy]"), reusing
+// the same weather_fetch_forecast() / location / provider settings as the
+// existing photo weather overlay - a separate toggle since Agenda mode is
+// an independent display path from the photo overlay pipeline, not because
+// the underlying weather data or config differs. WEATHER_FORECAST_DAYS is
+// 3, so a 4th calendar day (agenda_cal_days can reach into a 4th day late
+// in the evening - see calendar_ics.c) simply shows no forecast, same as
+// any other day the forecast doesn't happen to cover.
+#define NVS_AGENDA_CAL_WEATHER_KEY "agenda_cal_wthr"
+// Opt-in: right-align the forecast chip instead of centering it (day label
+// stays left-aligned either way). Purely a placement preference - the
+// available space reserved for the forecast (and therefore how much of it
+// can fit before being clipped) is identical either way, see
+// draw_day_divider()'s max_weather_chars computation, so this can't lose
+// any information a centered layout would have kept, in either the
+// stacked or side-by-side column layout.
+#define NVS_AGENDA_CAL_WTHR_ALIGN_KEY "agenda_cal_wal"
+// Opt-in: a multi-day event is shown once (on the first day of the visible
+// window it touches) with an "N/M: " position-within-span prefix, instead
+// of being repeated under every day it spans - see agenda_renderer.c's
+// event_total_days()/event_day_index().
+#define NVS_AGENDA_CAL_COMPACT_KEY "agenda_cal_cpt"
+// Optional display name shown in the Calendar column header instead of the
+// generic "Calendar A"/"Calendar B" fallback (agenda_renderer.c) - e.g.
+// "Private"/"Work". Not a credential, unlike the URL fields above - shown
+// as-is in GET /api/config.
+#define NVS_AGENDA_CAL_NAME_KEY "agenda_cal_nm"
+#define NVS_AGENDA_CAL_NAME2_KEY "agenda_cal_nm2"
+#define AGENDA_CAL_NAME_MAX_LEN 24
+// Independent schedule - same simplified 3-field cron grammar/limits as
+// DEFAULT_ROTATE_CRON/MAX_CRON_RULES/CRON_RULE_MAX_LEN above (reused
+// as-is, just a second rule set under its own NVS key). E.g. "0 6-18 *"
+// for hourly, 6am-6pm, every day.
+#define NVS_AGENDA_CRON_KEY "agenda_cron"
+#define DEFAULT_AGENDA_CRON "0 6-18 *"
+// Landscape layout only (portrait always stacks top/bottom - too narrow
+// otherwise): true stacks ToDo above Calendar, false shows them side by
+// side. Default stacked, per user preference - side-by-side was the
+// original default and is kept as an option.
+#define NVS_AGENDA_STACK_KEY "agenda_stack"
+#define AGENDA_STACK_DEFAULT true
+// Shared by both the ToDo and Calendar columns (one setting, not two - a
+// mismatched split background was explicitly rejected). One of "white"
+// (default), "black", or a hardware-specific name (agenda_renderer.c's
+// agenda_background_color() has the authoritative list per display
+// profile) - an unrecognized or hardware-inapplicable value falls back to
+// white rather than erroring, matching this project's fail-soft style.
+#define NVS_AGENDA_BG_KEY "agenda_bg"
+#define AGENDA_BG_MAX_LEN 16
+#define AGENDA_BG_DEFAULT "white"
+
+// Per-role color customization (Spectra6/color boards only - grayscale has
+// no spare hue to pick between, see agenda_renderer.c's role_hue()). Every
+// value is one of "red"/"yellow"/"blue"/"green" (the 4 chromatic Spectra6
+// hues) - never a free RGB value, since anything off this exact palette
+// dithers into visual noise on real hardware (see agenda_renderer.c's
+// priority_color() comment for the full story). Each role falls back to its
+// original hardcoded default if unset/unrecognized. A role whose chosen hue
+// exactly matches the current agenda_bg_color automatically falls back to
+// the same black/white polarity the day divider and column headers use,
+// rather than silently disappearing into the page background.
+#define AGENDA_ROLE_COLOR_MAX_LEN 8
+#define NVS_AGENDA_PRI_A_KEY "agenda_pri_a"
+#define AGENDA_PRI_A_DEFAULT "red"
+#define NVS_AGENDA_PRI_B_KEY "agenda_pri_b"
+#define AGENDA_PRI_B_DEFAULT "yellow"
+#define NVS_AGENDA_PRI_C_KEY "agenda_pri_c"
+#define AGENDA_PRI_C_DEFAULT "green"
+#define NVS_AGENDA_PRI_D_KEY "agenda_pri_d"
+#define AGENDA_PRI_D_DEFAULT "blue"
+#define NVS_AGENDA_DUE_OD_KEY "agenda_due_od"
+#define AGENDA_DUE_OD_DEFAULT "red"
+#define NVS_AGENDA_DUE_TDY_KEY "agenda_due_tdy"
+#define AGENDA_DUE_TDY_DEFAULT "yellow"
+#define NVS_AGENDA_DUE_LTR_KEY "agenda_due_ltr"
+#define AGENDA_DUE_LTR_DEFAULT "blue"
+#define NVS_AGENDA_PROJ_C_KEY "agenda_proj_c"
+#define AGENDA_PROJ_C_DEFAULT "blue"
+#define NVS_AGENDA_CTX_C_KEY "agenda_ctx_c"
+#define AGENDA_CTX_C_DEFAULT "green"
+#define NVS_AGENDA_CAL_A_C_KEY "agenda_cal_a_c"
+#define AGENDA_CAL_A_C_DEFAULT "blue"
+#define NVS_AGENDA_CAL_B_C_KEY "agenda_cal_b_c"
+#define AGENDA_CAL_B_C_DEFAULT "green"
 
 // WiFi association draws a brief high-current TX burst; whenever a battery
 // is in the loop (battery-only, or USB+battery together - see

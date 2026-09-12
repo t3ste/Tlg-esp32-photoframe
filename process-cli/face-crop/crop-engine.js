@@ -165,14 +165,17 @@ export function clampCropToImage(crop, imgWidth, imgHeight) {
 
 // Rounds a crop's fields to whole pixels - only ever applied at the true
 // final output (see clampCropToImage's own doc comment for why intermediate
-// containment checks must not round).
-function roundCrop(crop) {
-  return {
-    x: Math.round(crop.x),
-    y: Math.round(crop.y),
-    w: Math.round(crop.w),
-    h: Math.round(crop.h),
-  };
+// containment checks must not round). clampCropToImage guarantees
+// containment in float precision, but rounding x/y/w/h independently can
+// still push the rectangle up to 1px past the image edge (e.g. x=10.5->11,
+// w=89.5->90 with imgWidth=100); re-clamp x/y after rounding so the integer
+// result never exceeds imgWidth/imgHeight either.
+function roundCrop(crop, imgWidth, imgHeight) {
+  const w = Math.round(crop.w);
+  const h = Math.round(crop.h);
+  const x = Math.min(Math.round(crop.x), imgWidth - w);
+  const y = Math.min(Math.round(crop.y), imgHeight - h);
+  return { x, y, w, h };
 }
 
 /** Center-crop matching target's aspect ratio - used when no faces are found. */
@@ -180,7 +183,7 @@ export function fallbackCrop(imgWidth, imgHeight, target) {
   const { w, h } = maxBoxForAspect(imgWidth, imgHeight, target.aspectRatio);
   const x = (imgWidth - w) / 2;
   const y = (imgHeight - h) / 2;
-  return roundCrop(clampCropToImage({ x, y, w, h }, imgWidth, imgHeight));
+  return roundCrop(clampCropToImage({ x, y, w, h }, imgWidth, imgHeight), imgWidth, imgHeight);
 }
 
 /**
@@ -261,5 +264,5 @@ export function computeRecommendedCrop(
     imgHeight,
     target.aspectRatio,
   );
-  return roundCrop(clampCropToImage(grown, imgWidth, imgHeight));
+  return roundCrop(clampCropToImage(grown, imgWidth, imgHeight), imgWidth, imgHeight);
 }

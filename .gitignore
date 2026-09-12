@@ -36,10 +36,26 @@ demo/seeedstudio_xiao_ee04
 demo/seeedstudio_reterminal_e1002
 
 # Local-only debug artifacts - device coredumps/logs can contain WiFi/device
-# details and must never be committed; never commit these.
+# details and must never be committed; never commit these. The two `debug*`
+# patterns cover both this project's own download naming and a browser's
+# "(1)" duplicate-download suffix (found live: a real `debug (1).log` sat
+# untracked in a battery-analysis scratch folder below, matched by neither
+# the old pattern nor any other rule here).
 photoframe-debug*.log*
+debug*.log*
 CoreDUMP*.7z
 _BuildCMD.txt
+# Found live: a user-created battery-analysis scratch folder holding a
+# downloaded debug log, battery-history export, and system-info export -
+# same "device debug artifact" category as the log patterns above (a MAC
+# address alone in system-info.json's device_id, plus whatever the log
+# contains), just under a folder name the log/coredump patterns don't reach.
+_BATT_ANAL/
+
+# Local-only audit/working notes - not meant for the repo history.
+docs/AGENDA_AUDIT.md
+docs/FIRMWARE_AUDIT.md
+docs/examples/
 
 # Local editor/tool configs - not project-wide settings
 .claude/

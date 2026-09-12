@@ -358,6 +358,122 @@ void config_manager_set_weather_multiline_enabled(bool enabled);
 bool config_manager_get_weather_multiline_enabled(void);
 
 // ============================================================================
+// Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
+// overlay. See NVS_AGENDA_*_KEY in config.h and agenda_manager.h.
+// ============================================================================
+
+// Brackets a run of agenda_*_set_* calls so they share one NVS open/commit
+// instead of one each - utils.c's apply_config_from_json() wraps its whole
+// agenda field-handling block in these. Purely a performance/flash-wear
+// optimization: every agenda_*_set_* function still works correctly (with
+// its own open/commit) when called outside a batch, exactly as before this
+// existed. Safe to call config_manager_end_agenda_batch() even if begin
+// failed to open NVS (no-op in that case).
+void config_manager_begin_agenda_batch(void);
+void config_manager_end_agenda_batch(void);
+
+void config_manager_set_agenda_todo_enabled(bool enabled);
+bool config_manager_get_agenda_todo_enabled(void);
+void config_manager_set_agenda_cal_enabled(bool enabled);
+bool config_manager_get_agenda_cal_enabled(void);
+
+void config_manager_set_agenda_todo_url(const char *url);
+const char *config_manager_get_agenda_todo_url(void);
+// Write-only from the Web UI's perspective - never included in GET
+// /api/config, same treatment as the WiFi password. See http_server.c.
+void config_manager_set_agenda_cal_url(const char *url);
+const char *config_manager_get_agenda_cal_url(void);
+// Optional second calendar - same write-only treatment.
+void config_manager_set_agenda_cal_url2(const char *url);
+const char *config_manager_get_agenda_cal_url2(void);
+
+// Cached ETag validators for each source's conditional GET (see
+// AGENDA_TODO_CACHE_PATH etc. in config.h) - internal fetch-cache state,
+// not user data: not exposed via the HTTP API, same as the getters above are
+// (deliberately) not either. Automatically cleared by the matching URL
+// setter above when the URL actually changes.
+void config_manager_set_agenda_todo_etag(const char *etag);
+const char *config_manager_get_agenda_todo_etag(void);
+void config_manager_set_agenda_cal_etag(const char *etag);
+const char *config_manager_get_agenda_cal_etag(void);
+void config_manager_set_agenda_cal_etag2(const char *etag);
+const char *config_manager_get_agenda_cal_etag2(void);
+
+// Clamped [AGENDA_CAL_DAYS_MIN, AGENDA_CAL_DAYS_MAX].
+void config_manager_set_agenda_cal_days(int days);
+int config_manager_get_agenda_cal_days(void);
+
+// Opt-in per-day weather annotation on the Calendar column - see
+// NVS_AGENDA_CAL_WEATHER_KEY in config.h.
+void config_manager_set_agenda_cal_weather_enabled(bool enabled);
+bool config_manager_get_agenda_cal_weather_enabled(void);
+
+// Opt-in right-alignment of the forecast chip (default: centered) - see
+// NVS_AGENDA_CAL_WTHR_ALIGN_KEY in config.h.
+void config_manager_set_agenda_cal_weather_right_aligned(bool enabled);
+bool config_manager_get_agenda_cal_weather_right_aligned(void);
+
+// Opt-in compact multi-day event display - see NVS_AGENDA_CAL_COMPACT_KEY
+// in config.h.
+void config_manager_set_agenda_cal_compact_multiday(bool enabled);
+bool config_manager_get_agenda_cal_compact_multiday(void);
+
+// Optional display names for the Calendar header - see
+// NVS_AGENDA_CAL_NAME_KEY/_NAME2_KEY in config.h. May return "" (never
+// set/cleared) - agenda_renderer.c falls back to "Calendar A"/"Calendar B"
+// itself when rendering.
+void config_manager_set_agenda_cal_name(const char *name);
+const char *config_manager_get_agenda_cal_name(void);
+void config_manager_set_agenda_cal_name2(const char *name);
+const char *config_manager_get_agenda_cal_name2(void);
+
+// Independent schedule, same cron grammar/storage shape as the rotate
+// schedule above (config_manager_get/set_cron_rules()) but its own rule
+// set - see agenda_manager_wake_matches_now()/agenda_manager_seconds_until_next_wake().
+int config_manager_get_agenda_cron_rule_count(void);
+const char *config_manager_get_agenda_cron_rule(int index);
+void config_manager_set_agenda_cron_rules(const char *const *rules, int count);
+int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max);
+
+// Landscape-only layout choice (portrait always stacks) - see
+// AGENDA_STACK_DEFAULT in config.h.
+void config_manager_set_agenda_stack_layout(bool stacked);
+bool config_manager_get_agenda_stack_layout(void);
+
+// Shared ToDo+Calendar background color name - see AGENDA_BG_DEFAULT in
+// config.h and agenda_renderer.c's agenda_background_color() for the
+// authoritative per-hardware value list.
+void config_manager_set_agenda_bg_color(const char *color);
+const char *config_manager_get_agenda_bg_color(void);
+
+// Per-role color customization (Spectra6/color boards only) - each is one
+// of "red"/"yellow"/"blue"/"green", see the NVS_AGENDA_*_DEFAULT comment in
+// config.h for why free RGB isn't offered here. agenda_renderer.c's
+// role_hue() is the sole reader.
+void config_manager_set_agenda_pri_a_color(const char *color);
+const char *config_manager_get_agenda_pri_a_color(void);
+void config_manager_set_agenda_pri_b_color(const char *color);
+const char *config_manager_get_agenda_pri_b_color(void);
+void config_manager_set_agenda_pri_c_color(const char *color);
+const char *config_manager_get_agenda_pri_c_color(void);
+void config_manager_set_agenda_pri_d_color(const char *color);
+const char *config_manager_get_agenda_pri_d_color(void);
+void config_manager_set_agenda_due_overdue_color(const char *color);
+const char *config_manager_get_agenda_due_overdue_color(void);
+void config_manager_set_agenda_due_today_color(const char *color);
+const char *config_manager_get_agenda_due_today_color(void);
+void config_manager_set_agenda_due_later_color(const char *color);
+const char *config_manager_get_agenda_due_later_color(void);
+void config_manager_set_agenda_project_color(const char *color);
+const char *config_manager_get_agenda_project_color(void);
+void config_manager_set_agenda_context_color(const char *color);
+const char *config_manager_get_agenda_context_color(void);
+void config_manager_set_agenda_cal_a_color(const char *color);
+const char *config_manager_get_agenda_cal_a_color(void);
+void config_manager_set_agenda_cal_b_color(const char *color);
+const char *config_manager_get_agenda_cal_b_color(void);
+
+// ============================================================================
 // OTA
 // ============================================================================
 

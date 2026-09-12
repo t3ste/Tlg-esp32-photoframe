@@ -665,6 +665,170 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_low_battery_overlay_threshold(item->valueint);
     }
 
+    // Batches every agenda_*_set_* call below into one NVS open/commit
+    // instead of one each (~25 fields can appear in one Agenda settings
+    // save) - see config_manager_begin_agenda_batch()'s own comment. Every
+    // early return between here and the matching _end_agenda_batch() call
+    // near the bottom of this block closes the batch first so a rejected
+    // cron expression can't leave the NVS handle open uncommitted.
+    config_manager_begin_agenda_batch();
+
+    item = cJSON_GetObjectItem(root, "agenda_todo_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_todo_enabled(cJSON_IsTrue(item));
+        power_manager_reset_agenda_timer();
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_enabled(cJSON_IsTrue(item));
+        power_manager_reset_agenda_timer();
+    }
+    item = cJSON_GetObjectItem(root, "agenda_todo_url");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_todo_url(cJSON_GetStringValue(item));
+    }
+    // Write-only, like wifi_password above: only ever applied when the
+    // client actually sent a non-empty value (an empty string here just
+    // means "the user didn't touch this field," not "clear the URL" - see
+    // config_manager_get_agenda_cal_url()'s doc comment).
+    item = cJSON_GetObjectItem(root, "agenda_cal_url");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_url(cJSON_GetStringValue(item));
+    }
+    // Optional second calendar - same write-only treatment.
+    item = cJSON_GetObjectItem(root, "agenda_cal_url2");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_url2(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_days");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_agenda_cal_days(item->valueint);
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_weather_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_weather_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_weather_right_aligned");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_weather_right_aligned(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_compact_multiday");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_compact_multiday(cJSON_IsTrue(item));
+    }
+    // Plain display names, not credentials - unlike agenda_cal_url above,
+    // applied even when empty (an empty save genuinely means "cleared back
+    // to the generic default", not "field left untouched").
+    item = cJSON_GetObjectItem(root, "agenda_cal_name");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_cal_name(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_name2");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_cal_name2(cJSON_GetStringValue(item));
+    }
+    // Agenda schedule: same shape/validation as rotate_cron above, but an
+    // empty array is allowed here (agenda_manager_is_enabled() already
+    // requires a non-empty schedule before agenda mode can ever fire, so
+    // an empty schedule is just "not configured yet," not an error).
+    item = cJSON_GetObjectItem(root, "agenda_cron");
+    if (item && cJSON_IsArray(item)) {
+        int count = cJSON_GetArraySize(item);
+        if (count > MAX_CRON_RULES) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Too many agenda schedule rules (max %d)", MAX_CRON_RULES);
+            utils_set_config_error(msg);
+            config_manager_end_agenda_batch();
+            return ESP_FAIL;
+        }
+        const char *rules[MAX_CRON_RULES];
+        int n = 0;
+        cJSON *el;
+        cJSON_ArrayForEach(el, item)
+        {
+            if (!cJSON_IsString(el)) {
+                utils_set_config_error("Agenda schedule rule must be a string");
+                config_manager_end_agenda_batch();
+                return ESP_FAIL;
+            }
+            const char *expr = cJSON_GetStringValue(el);
+            if (strlen(expr) >= CRON_RULE_MAX_LEN) {
+                utils_set_config_error("Cron expression too long");
+                config_manager_end_agenda_batch();
+                return ESP_FAIL;
+            }
+            cron_rule_t tmp;
+            if (!cron_parse(expr, &tmp)) {
+                char msg[96];
+                snprintf(msg, sizeof(msg), "Invalid agenda cron expression: %s", expr);
+                utils_set_config_error(msg);
+                config_manager_end_agenda_batch();
+                return ESP_FAIL;
+            }
+            if (n < MAX_CRON_RULES) {
+                rules[n++] = expr;
+            }
+        }
+        config_manager_set_agenda_cron_rules(rules, n);
+        power_manager_reset_agenda_timer();
+    }
+    item = cJSON_GetObjectItem(root, "agenda_stack_layout");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_stack_layout(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_bg_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_bg_color(cJSON_GetStringValue(item));
+    }
+    // Per-role color pickers - all optional, non-secret, plain strings (one
+    // of "red"/"yellow"/"blue"/"green"); an invalid/unrecognized value is
+    // handled fail-soft by agenda_renderer.c's role_hue(), not rejected here.
+    item = cJSON_GetObjectItem(root, "agenda_pri_a_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_pri_a_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_pri_b_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_pri_b_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_pri_c_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_pri_c_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_pri_d_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_pri_d_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_due_overdue_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_due_overdue_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_due_today_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_due_today_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_due_later_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_due_later_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_project_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_project_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_context_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_context_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_a_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_a_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_b_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_b_color(cJSON_GetStringValue(item));
+    }
+    config_manager_end_agenda_batch();
+
     return ESP_OK;
 }
 
@@ -1597,7 +1761,14 @@ esp_err_t trigger_image_rotation(void)
                     // album - see telegram_bot_poll()).
                     ESP_LOGI(TAG, "No new Telegram image, falling back to local rotation");
 
-                    char prev_image[64];
+                    // 256, matching display_manager.c's own current_image[]
+                    // buffer this is copied from - a smaller size here could
+                    // silently truncate a long real path (e.g. a Google
+                    // Pixel Motion Photo filename) differently than the
+                    // untruncated `after` read below ever would, making the
+                    // strcmp() further down spuriously see a "change" (or
+                    // miss one) that never actually happened.
+                    char prev_image[256];
                     const char *before = display_manager_get_current_image();
                     strncpy(prev_image, before ? before : "", sizeof(prev_image) - 1);
                     prev_image[sizeof(prev_image) - 1] = '\0';

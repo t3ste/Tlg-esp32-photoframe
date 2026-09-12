@@ -47,6 +47,7 @@ function signalIcon(rssi) {
 
 async function scanNetworks() {
   scanning.value = true;
+  let count = 0;
   try {
     const response = await fetch("/api/wifi/scan");
     if (response.ok) {
@@ -58,18 +59,35 @@ async function scanNetworks() {
         rssi: n.rssi,
         iconPath: signalIcon(n.rssi),
       }));
+      count = networks.value.length;
     }
   } catch (e) {
     console.error("WiFi scan failed:", e);
   } finally {
     scanning.value = false;
   }
+  return count;
+}
+
+// The very first scan often comes back empty: this page is itself served
+// over the phone's just-established link to the device's provisioning AP,
+// and an active full-channel scan briefly hops the radio off that AP's
+// channel to probe others - which can disrupt the request enough to lose
+// the results (or the AP link itself, right as it was still settling).
+// Retry a few times with a short pause so that usually-transient empty
+// result doesn't force the user into typing the SSID by hand.
+async function scanNetworksWithRetry(maxAttempts = 4, delayMs = 1500) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const count = await scanNetworks();
+    if (count > 0 || attempt === maxAttempts) return;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
 }
 
 let keepAliveInterval = null;
 
 onMounted(() => {
-  scanNetworks();
+  scanNetworksWithRetry();
   keepAliveInterval = setInterval(() => {
     fetch("/api/keep_alive").catch(() => {});
   }, 60000);

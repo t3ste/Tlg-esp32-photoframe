@@ -6,6 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "agenda_manager.h"
 #include "album_manager.h"
 #include "board_hal.h"
 #include "color_palette.h"
@@ -291,12 +292,22 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
         // Won't reach here after sleep
     }
 
+    // Whether THIS wake is an agenda (ToDo + Calendar) wake, decided once
+    // here (not re-derived later) since it also affects the WiFi-init
+    // decision immediately below - agenda mode always needs WiFi, since
+    // ToDo/Calendar are fetched fresh over HTTP every cycle, independent of
+    // rotation_mode/HA configuration. A manual ROTATE button press never
+    // counts as an agenda wake - it always means "rotate the photo now."
+    bool agenda_wake = !is_button_wake && wakeup_src == WAKEUP_SOURCE_TIMER &&
+                       agenda_manager_is_enabled() && agenda_manager_wake_matches_now();
+
     // Initialize WiFi if needed (URL/Telegram modes always need it, SD card mode only if HA
-    // configured)
+    // configured, agenda mode always does)
     if (rotation_mode == ROTATION_MODE_URL || rotation_mode == ROTATION_MODE_TELEGRAM ||
-        ha_configured) {
+        ha_configured || agenda_wake) {
         ESP_LOGI(TAG, "Initializing WiFi for %s",
-                 rotation_mode == ROTATION_MODE_URL
+                 agenda_wake ? "agenda mode"
+                 : rotation_mode == ROTATION_MODE_URL
                      ? "URL rotation"
                      : (rotation_mode == ROTATION_MODE_TELEGRAM ? "Telegram rotation"
                                                                 : "HA battery post"));
@@ -325,6 +336,20 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
         // the trustworthy anchor on RTC-less boards.
         ESP_LOGI(TAG, "Checking periodic tasks...");
         periodic_tasks_check_and_run();
+
+        // Re-derive whether this is still an agenda wake now that the clock
+        // may have just been corrected by SNTP - mirrors the early_seconds
+        // recheck just below for the same RTC-less-board reason. The
+        // WiFi-bring-up decision above necessarily used the pre-sync clock
+        // (SNTP itself needs WiFi already connected, so that half of the
+        // asymmetry can't be fixed within the same wake) - this only
+        // catches the other half: a stale pre-sync clock that wrongly
+        // matched the agenda cron, which the corrected clock says it
+        // shouldn't have. A wake that WiFi never came up for because the
+        // stale clock said "no match" can't be recovered here either way.
+        if (agenda_wake) {
+            agenda_wake = agenda_manager_wake_matches_now();
+        }
     }
 
     // Re-check now that the clock is as corrected as it will get (NTP sync
@@ -333,6 +358,26 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
     if (!is_button_wake && early_seconds > EARLY_WAKE_TOLERANCE_SEC) {
         ESP_LOGI(TAG, "Woke %d seconds before scheduled rotation, going back to sleep",
                  early_seconds);
+        power_manager_enter_sleep();
+        // Won't reach here after sleep
+    }
+
+    // An agenda wake takes over the display exclusively for ToDo/Calendar
+    // content and skips the entire photo pipeline below (HA veto ask,
+    // trigger_image_rotation(), Telegram command drain, post-rotate HTTP
+    // hold window) - none of that applies when no photo is being shown
+    // this cycle. If the normal rotate schedule happens to match the exact
+    // same minute, the agenda wake wins; the rotate schedule simply fires
+    // on its own next natural boundary next time around (no makeup logic -
+    // same "just skip, don't special-case a retry" spirit already used for
+    // an HA-vetoed rotation below).
+    if (agenda_wake) {
+        ESP_LOGI(TAG,
+                 "Agenda wake matched - rendering ToDo/Calendar screen, skipping photo rotation");
+        power_manager_reset_sleep_timer();
+        agenda_manager_run();
+        utils_finalize_internet_health();
+        ESP_LOGI(TAG, "Agenda render complete, going back to sleep");
         power_manager_enter_sleep();
         // Won't reach here after sleep
     }
@@ -461,8 +506,15 @@ static void log_coredump_summary(void)
     }
     esp_core_dump_summary_t summary;
     if (esp_core_dump_get_summary(&summary) == ESP_OK) {
-        ESP_LOGE(TAG, "COREDUMP: task '%s' crashed at PC 0x%08x (%u frames)", summary.exc_task,
-                 (unsigned) summary.exc_pc, (unsigned) summary.exc_bt_info.depth);
+        ESP_LOGE(TAG, "COREDUMP: task '%s' crashed at PC 0x%08x (%u frames%s)", summary.exc_task,
+                 (unsigned) summary.exc_pc, (unsigned) summary.exc_bt_info.depth,
+                 summary.exc_bt_info.corrupted ? ", CORRUPTED" : "");
+        // exc_cause/exc_vaddr distinguish a null/dangling-pointer access
+        // (LoadProhibited=28/StoreProhibited=29, exc_vaddr = the bad address)
+        // from other fault classes - not previously logged, so every past
+        // crash summary only had the backtrace to go on.
+        ESP_LOGE(TAG, "COREDUMP   exc_cause=%u exc_vaddr=0x%08x", (unsigned) summary.ex_info.exc_cause,
+                 (unsigned) summary.ex_info.exc_vaddr);
         for (uint32_t i = 0; i < summary.exc_bt_info.depth; i++) {
             ESP_LOGE(TAG, "COREDUMP   bt[%u] 0x%08x", (unsigned) i,
                      (unsigned) summary.exc_bt_info.bt[i]);
@@ -526,10 +578,36 @@ void app_main(void)
     // None of these depend on the RTC or the AXP2101 power-rail delay.
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // This wipes the ENTIRE NVS partition (WiFi credentials, Telegram
+        // token, every setting) - loud and unmistakable in the log on
+        // purpose. A round of field reports of WiFi needing reprovisioning
+        // after a reflash that never touched the NVS region at 0x9000 was
+        // investigated against this exact mechanism (2026-09) and ruled out
+        // for those specific incidents (nvs_get_stats() below showed 465/756
+        // entries free at the time, and the real cause was found instead in
+        // main.c's cold-boot WiFi-connect-failure handling - see
+        // WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS below). Kept as cheap,
+        // permanent health telemetry regardless, since a genuinely exhausted
+        // NVS partition would still hit this path eventually over a long
+        // enough real-world device lifetime. `ret` here is the specific
+        // ESP-IDF error that triggered the erase - logged before it's
+        // overwritten below.
+        ESP_LOGE(TAG, "*** NVS init failed (%s) - erasing ENTIRE NVS partition ***",
+                 esp_err_to_name(ret));
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    // Diagnostic only (see the erase-on-failure block above): free/used NVS
+    // entry counts on every boot, so a slow drift toward exhaustion is
+    // visible in the debug log well before it actually triggers an erase.
+    nvs_stats_t nvs_stats;
+    if (nvs_get_stats(NULL, &nvs_stats) == ESP_OK) {
+        ESP_LOGI(TAG, "NVS stats: %d used, %d free, %d total entries (%d namespaces)",
+                 (int) nvs_stats.used_entries, (int) nvs_stats.free_entries,
+                 (int) nvs_stats.total_entries, (int) nvs_stats.namespace_count);
+    }
 
     ESP_ERROR_CHECK(config_manager_init());
 
@@ -753,7 +831,41 @@ void app_main(void)
         }
     }
 
-    if (connect_to_wifi_with_timeout(30)) {
+    // A single failed attempt isn't enough to conclude the saved credentials
+    // are actually wrong - transient conditions (router mid-reboot, brief
+    // congestion, a DHCP server slow to respond) produce exactly the same
+    // "failed to connect" result as a genuinely wrong password, but are
+    // expected to clear up within a few seconds/attempts. Retry up to
+    // WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS times UNLESS the AP itself
+    // explicitly rejected the credentials (a failed 4-way handshake/MIC
+    // failure/auth-fail - see wifi_manager_last_failure_is_credential_reject()) -
+    // that specific rejection can't un-happen on a retry with the same
+    // password, so it short-circuits straight to clearing after just one.
+#define WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS 3
+#define WIFI_COLD_BOOT_CONNECT_RETRY_DELAY_MS 3000
+    bool wifi_ok = false;
+    bool credential_reject = false;
+    for (int attempt = 1; attempt <= WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS; attempt++) {
+        wifi_ok = connect_to_wifi_with_timeout(30);
+        if (wifi_ok) {
+            break;
+        }
+        credential_reject = wifi_manager_last_failure_is_credential_reject();
+        if (credential_reject) {
+            ESP_LOGW(TAG, "WiFi credentials rejected by AP (attempt %d/%d) - not retrying",
+                     attempt, WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS);
+            break;
+        }
+        if (attempt < WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS) {
+            ESP_LOGW(TAG, "WiFi connect attempt %d/%d failed (not a credential rejection) - "
+                          "retrying in %d ms",
+                     attempt, WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS,
+                     WIFI_COLD_BOOT_CONNECT_RETRY_DELAY_MS);
+            vTaskDelay(pdMS_TO_TICKS(WIFI_COLD_BOOT_CONNECT_RETRY_DELAY_MS));
+        }
+    }
+
+    if (wifi_ok) {
         // Check and run periodic tasks (OTA check, SNTP sync if due)
         // Note: If RTC was invalid at boot, sntp_sync was already forced via
         // periodic_tasks_force_run()
@@ -763,7 +875,8 @@ void app_main(void)
         // Start mDNS service
         ESP_ERROR_CHECK(mdns_service_init());
     } else {
-        ESP_LOGW(TAG, "Failed to connect to WiFi - clearing credentials");
+        ESP_LOGW(TAG, "Failed to connect to WiFi after %d attempt(s) - clearing credentials",
+                 credential_reject ? 1 : WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS);
         nvs_handle_t nvs_handle;
         if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
             nvs_erase_key(nvs_handle, NVS_WIFI_SSID_KEY);

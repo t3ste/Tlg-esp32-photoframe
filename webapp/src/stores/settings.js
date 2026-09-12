@@ -104,6 +104,60 @@ export const useSettingsStore = defineStore("settings", () => {
     showExifDatetimeEnabled: false,
     lowBatteryOverlayEnabled: false,
     lowBatteryOverlayThreshold: 16,
+    // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
+    // overlay. agendaTodoUrl/agendaCalUrl are write-only (never returned by
+    // GET /api/config, same treatment as wifiPassword above) - both start
+    // empty even when a URL is actually configured on the device, since
+    // either can carry a credential embedded as a query param (not just
+    // the Calendar URL - a security review found the original assumption
+    // that a ToDo feed is always a public, non-secret gist doesn't hold in
+    // general).
+    agendaTodoEnabled: false,
+    agendaCalEnabled: false,
+    agendaTodoUrl: "",
+    agendaCalUrl: "",
+    // Optional second calendar (e.g. work vs. personal) - merged with the
+    // first at render time, colored per its own origin. Same write-only
+    // treatment as agendaCalUrl above.
+    agendaCalUrl2: "",
+    // Optional display names shown in the Calendar header instead of the
+    // generic "Calendar A"/"Calendar B" fallback - not secrets, always
+    // returned/saved plainly (unlike the URL fields above).
+    agendaCalName: "",
+    agendaCalName2: "",
+    agendaCalDays: 2,
+    // Annotates each Calendar day divider with that day's forecast (reuses
+    // the same weather settings/provider as the photo weather overlay -
+    // see weatherLocationName/weatherProvider etc. below). Off by default.
+    agendaCalWeatherEnabled: false,
+    // Placement only - centered (default) or right-aligned; doesn't change
+    // how much forecast text can fit (see agenda_renderer.c).
+    agendaCalWeatherRightAligned: false,
+    // A multi-day event is shown once (first visible day) with an "N/M: "
+    // position prefix instead of repeated under every day it spans.
+    agendaCalCompactMultiday: false,
+    agendaCron: ["0 6-18 *"],
+    // true = ToDo above Calendar (default), false = side by side. Portrait
+    // boards always stack regardless of this setting - see agenda_renderer.c.
+    agendaStackLayout: true,
+    // Shared by both columns - one of "white" (default), "black", or a
+    // hardware-specific name (see SettingsPanel.vue's per-display-type
+    // option list). An unrecognized/inapplicable value falls back to white.
+    agendaBgColor: "white",
+    // Per-role color pickers (Spectra6/color boards only - grayscale has no
+    // spare hue to choose between). Each is one of "red"/"yellow"/"blue"/
+    // "green"; defaults match this feature's original hardcoded colors.
+    agendaPriAColor: "red",
+    agendaPriBColor: "yellow",
+    agendaPriCColor: "green",
+    agendaPriDColor: "blue",
+    agendaDueOverdueColor: "red",
+    agendaDueTodayColor: "yellow",
+    agendaDueLaterColor: "blue",
+    agendaProjectColor: "blue",
+    agendaContextColor: "green",
+    agendaCalAColor: "blue",
+    agendaCalBColor: "green",
     // Debugging
     debugLogEnabled: false,
     errorOverlayEnabled: false,
@@ -282,6 +336,35 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.showExifDatetimeEnabled = data.show_exif_datetime_enabled === true;
       deviceSettings.value.lowBatteryOverlayEnabled = data.low_battery_overlay_enabled === true;
       deviceSettings.value.lowBatteryOverlayThreshold = data.low_battery_overlay_threshold ?? 16;
+      deviceSettings.value.agendaTodoEnabled = data.agenda_todo_enabled === true;
+      deviceSettings.value.agendaCalEnabled = data.agenda_cal_enabled === true;
+      // agenda_todo_url/agenda_cal_url are intentionally never present in
+      // this response (see http_server.c) - stay empty even when a URL is actually
+      // configured, same write-only treatment as wifiPassword above.
+      deviceSettings.value.agendaCalName = data.agenda_cal_name || "";
+      deviceSettings.value.agendaCalName2 = data.agenda_cal_name2 || "";
+      deviceSettings.value.agendaCalDays = data.agenda_cal_days ?? 2;
+      deviceSettings.value.agendaCalWeatherEnabled = data.agenda_cal_weather_enabled === true;
+      deviceSettings.value.agendaCalWeatherRightAligned =
+        data.agenda_cal_weather_right_aligned === true;
+      deviceSettings.value.agendaCalCompactMultiday = data.agenda_cal_compact_multiday === true;
+      deviceSettings.value.agendaCron =
+        Array.isArray(data.agenda_cron) && data.agenda_cron.length
+          ? data.agenda_cron
+          : ["0 6-18 *"];
+      deviceSettings.value.agendaStackLayout = data.agenda_stack_layout !== false;
+      deviceSettings.value.agendaBgColor = data.agenda_bg_color || "white";
+      deviceSettings.value.agendaPriAColor = data.agenda_pri_a_color || "red";
+      deviceSettings.value.agendaPriBColor = data.agenda_pri_b_color || "yellow";
+      deviceSettings.value.agendaPriCColor = data.agenda_pri_c_color || "green";
+      deviceSettings.value.agendaPriDColor = data.agenda_pri_d_color || "blue";
+      deviceSettings.value.agendaDueOverdueColor = data.agenda_due_overdue_color || "red";
+      deviceSettings.value.agendaDueTodayColor = data.agenda_due_today_color || "yellow";
+      deviceSettings.value.agendaDueLaterColor = data.agenda_due_later_color || "blue";
+      deviceSettings.value.agendaProjectColor = data.agenda_project_color || "blue";
+      deviceSettings.value.agendaContextColor = data.agenda_context_color || "green";
+      deviceSettings.value.agendaCalAColor = data.agenda_cal_a_color || "blue";
+      deviceSettings.value.agendaCalBColor = data.agenda_cal_b_color || "green";
       deviceSettings.value.debugLogEnabled = data.debug_log_enabled === true;
       deviceSettings.value.errorOverlayEnabled = data.error_overlay_enabled === true;
       deviceSettings.value.haUrl = data.ha_url || "";
@@ -391,6 +474,28 @@ export const useSettingsStore = defineStore("settings", () => {
       show_exif_datetime_enabled: deviceSettings.value.showExifDatetimeEnabled,
       low_battery_overlay_enabled: deviceSettings.value.lowBatteryOverlayEnabled,
       low_battery_overlay_threshold: deviceSettings.value.lowBatteryOverlayThreshold,
+      agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
+      agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
+      agenda_cal_name: deviceSettings.value.agendaCalName,
+      agenda_cal_name2: deviceSettings.value.agendaCalName2,
+      agenda_cal_days: deviceSettings.value.agendaCalDays,
+      agenda_cal_weather_enabled: deviceSettings.value.agendaCalWeatherEnabled,
+      agenda_cal_weather_right_aligned: deviceSettings.value.agendaCalWeatherRightAligned,
+      agenda_cal_compact_multiday: deviceSettings.value.agendaCalCompactMultiday,
+      agenda_cron: deviceSettings.value.agendaCron,
+      agenda_stack_layout: deviceSettings.value.agendaStackLayout,
+      agenda_bg_color: deviceSettings.value.agendaBgColor,
+      agenda_pri_a_color: deviceSettings.value.agendaPriAColor,
+      agenda_pri_b_color: deviceSettings.value.agendaPriBColor,
+      agenda_pri_c_color: deviceSettings.value.agendaPriCColor,
+      agenda_pri_d_color: deviceSettings.value.agendaPriDColor,
+      agenda_due_overdue_color: deviceSettings.value.agendaDueOverdueColor,
+      agenda_due_today_color: deviceSettings.value.agendaDueTodayColor,
+      agenda_due_later_color: deviceSettings.value.agendaDueLaterColor,
+      agenda_project_color: deviceSettings.value.agendaProjectColor,
+      agenda_context_color: deviceSettings.value.agendaContextColor,
+      agenda_cal_a_color: deviceSettings.value.agendaCalAColor,
+      agenda_cal_b_color: deviceSettings.value.agendaCalBColor,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,
       error_overlay_enabled: deviceSettings.value.errorOverlayEnabled,
       save_downloaded_images: deviceSettings.value.saveDownloadedImages,
@@ -414,6 +519,21 @@ export const useSettingsStore = defineStore("settings", () => {
     // Only include password if it's been changed (not empty)
     if (deviceSettings.value.wifiPassword && deviceSettings.value.wifiPassword.length > 0) {
       currentConfig.wifi_password = deviceSettings.value.wifiPassword;
+    }
+
+    // Same write-only treatment for the ToDo/Calendar feed URLs (any of
+    // them can carry a credential embedded as a query param, not just the
+    // Calendar URL's Google-documented "secret address" case) - never
+    // round-tripped from GET /api/config, so only send one when the user
+    // actually typed a new value.
+    if (deviceSettings.value.agendaTodoUrl && deviceSettings.value.agendaTodoUrl.length > 0) {
+      currentConfig.agenda_todo_url = deviceSettings.value.agendaTodoUrl;
+    }
+    if (deviceSettings.value.agendaCalUrl && deviceSettings.value.agendaCalUrl.length > 0) {
+      currentConfig.agenda_cal_url = deviceSettings.value.agendaCalUrl;
+    }
+    if (deviceSettings.value.agendaCalUrl2 && deviceSettings.value.agendaCalUrl2.length > 0) {
+      currentConfig.agenda_cal_url2 = deviceSettings.value.agendaCalUrl2;
     }
 
     // Compare with original config and only send changed fields.
@@ -575,7 +695,7 @@ export const useSettingsStore = defineStore("settings", () => {
         originalParams = JSON.parse(JSON.stringify(params.value));
       }
       return response.ok;
-    } catch (_error) {
+    } catch (error) {
       console.error("Failed to save settings:", error);
       return false;
     }
@@ -589,7 +709,7 @@ export const useSettingsStore = defineStore("settings", () => {
         body: JSON.stringify(palette.value),
       });
       return response.ok;
-    } catch (_error) {
+    } catch (error) {
       console.error("Failed to save palette:", error);
       return false;
     }
@@ -610,7 +730,7 @@ export const useSettingsStore = defineStore("settings", () => {
       } else {
         return { success: false, message: "Failed to perform factory reset" };
       }
-    } catch (_error) {
+    } catch (error) {
       console.error("Error performing factory reset:", error);
       return { success: false, message: "Error performing factory reset" };
     }

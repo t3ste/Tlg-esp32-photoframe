@@ -1639,6 +1639,57 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddNumberToObject(root, "low_battery_overlay_threshold",
                                 config_manager_get_low_battery_overlay_threshold());
 
+        // Agenda (ToDo + Calendar). agenda_cal_url/agenda_todo_url are
+        // deliberately NEVER added here - either can carry a credential
+        // (Google's Calendar "secret address" is the obvious case, but a
+        // ToDo feed URL can just as easily embed an auth token as a query
+        // param - todo_fetch()/http_fetch_get() don't care what kind of
+        // URL they're given), same write-only treatment as wifi_password
+        // above, which is also absent from this response. (Originally only
+        // agenda_cal_url got this treatment, on the assumption a ToDo feed
+        // is typically a public gist - found during a security review that
+        // the assumption doesn't hold for every possible ToDo source.)
+        cJSON_AddBoolToObject(root, "agenda_todo_enabled",
+                              config_manager_get_agenda_todo_enabled());
+        cJSON_AddBoolToObject(root, "agenda_cal_enabled", config_manager_get_agenda_cal_enabled());
+        cJSON_AddNumberToObject(root, "agenda_cal_days", config_manager_get_agenda_cal_days());
+        cJSON_AddBoolToObject(root, "agenda_cal_weather_enabled",
+                              config_manager_get_agenda_cal_weather_enabled());
+        cJSON_AddBoolToObject(root, "agenda_cal_weather_right_aligned",
+                              config_manager_get_agenda_cal_weather_right_aligned());
+        cJSON_AddBoolToObject(root, "agenda_cal_compact_multiday",
+                              config_manager_get_agenda_cal_compact_multiday());
+        cJSON_AddStringToObject(root, "agenda_cal_name", config_manager_get_agenda_cal_name());
+        cJSON_AddStringToObject(root, "agenda_cal_name2", config_manager_get_agenda_cal_name2());
+        cJSON *agenda_cron_arr = cJSON_CreateArray();
+        int agenda_cron_count = config_manager_get_agenda_cron_rule_count();
+        for (int i = 0; i < agenda_cron_count; i++) {
+            const char *rule = config_manager_get_agenda_cron_rule(i);
+            if (rule) {
+                cJSON_AddItemToArray(agenda_cron_arr, cJSON_CreateString(rule));
+            }
+        }
+        cJSON_AddItemToObject(root, "agenda_cron", agenda_cron_arr);
+        cJSON_AddBoolToObject(root, "agenda_stack_layout",
+                              config_manager_get_agenda_stack_layout());
+        cJSON_AddStringToObject(root, "agenda_bg_color", config_manager_get_agenda_bg_color());
+        cJSON_AddStringToObject(root, "agenda_pri_a_color", config_manager_get_agenda_pri_a_color());
+        cJSON_AddStringToObject(root, "agenda_pri_b_color", config_manager_get_agenda_pri_b_color());
+        cJSON_AddStringToObject(root, "agenda_pri_c_color", config_manager_get_agenda_pri_c_color());
+        cJSON_AddStringToObject(root, "agenda_pri_d_color", config_manager_get_agenda_pri_d_color());
+        cJSON_AddStringToObject(root, "agenda_due_overdue_color",
+                                config_manager_get_agenda_due_overdue_color());
+        cJSON_AddStringToObject(root, "agenda_due_today_color",
+                                config_manager_get_agenda_due_today_color());
+        cJSON_AddStringToObject(root, "agenda_due_later_color",
+                                config_manager_get_agenda_due_later_color());
+        cJSON_AddStringToObject(root, "agenda_project_color",
+                                config_manager_get_agenda_project_color());
+        cJSON_AddStringToObject(root, "agenda_context_color",
+                                config_manager_get_agenda_context_color());
+        cJSON_AddStringToObject(root, "agenda_cal_a_color", config_manager_get_agenda_cal_a_color());
+        cJSON_AddStringToObject(root, "agenda_cal_b_color", config_manager_get_agenda_cal_b_color());
+
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, json_str);
@@ -2251,6 +2302,24 @@ static esp_err_t factory_reset_handler(httpd_req_t *req)
     }
 
     ESP_LOGI(TAG, "NVS erased successfully");
+
+    // The Agenda ETag cache files live on the SD card/internal flash, not in
+    // NVS - erasing NVS alone would leave them orphaned (their matching NVS
+    // ETag validators are gone, so they'd never be read again, just sitting
+    // there unused). Best-effort: a factory reset should leave storage as
+    // clean as the config it just wiped. A missing file (e.g. Agenda was
+    // never enabled) is expected, not an error - logged at INFO either way
+    // so a factory reset's actual cleanup effect is visible in the log
+    // rather than silently assumed.
+    const char *agenda_cache_paths[] = {AGENDA_TODO_CACHE_PATH, AGENDA_CAL_CACHE_PATH,
+                                        AGENDA_CAL_CACHE_PATH2};
+    for (size_t i = 0; i < sizeof(agenda_cache_paths) / sizeof(agenda_cache_paths[0]); i++) {
+        if (unlink(agenda_cache_paths[i]) == 0) {
+            ESP_LOGI(TAG, "Removed orphaned Agenda cache file: %s", agenda_cache_paths[i]);
+        } else {
+            ESP_LOGI(TAG, "No Agenda cache file to remove at: %s", agenda_cache_paths[i]);
+        }
+    }
 
     // Send success response
     httpd_resp_set_type(req, "application/json");

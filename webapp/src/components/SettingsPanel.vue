@@ -154,6 +154,72 @@ const orientationOptions = computed(() => {
   ];
 });
 
+// Mirrors agenda_renderer.c's agenda_background_color() exactly - the value
+// list a board can actually display depends on its BOARD_HAL_DISPLAY_TYPE
+// ("gc..." = grayscale, otherwise Spectra6 6-color), so this can't be one
+// static list. An element/text color that happens to collide with whatever
+// is picked here is automatically swapped to a safe fallback on-device
+// (agenda_avoid_bg_collision()) - no need to warn about that in this UI.
+const agendaBgOptions = computed(() => {
+  const displayType = appStore.systemInfo.display_type || "";
+  if (displayType.startsWith("gc")) {
+    return [
+      { title: "White", value: "white" },
+      { title: "Light gray", value: "gray75" },
+      { title: "Mid gray", value: "gray50" },
+      { title: "Dark gray", value: "gray25" },
+      { title: "Black", value: "black" },
+    ];
+  }
+  return [
+    { title: "White", value: "white" },
+    { title: "Black", value: "black" },
+    { title: "Yellow", value: "yellow" },
+    { title: "Red", value: "red" },
+    { title: "Blue", value: "blue" },
+    { title: "Green", value: "green" },
+  ];
+});
+
+// Per-role color pickers (agendaPriAColor etc.) only make sense on a color
+// panel - grayscale has no spare hue to assign, see agenda_renderer.c's
+// role_hue() comment.
+const agendaIsGrayscaleBoard = computed(() => {
+  const displayType = appStore.systemInfo.display_type || "";
+  return displayType.startsWith("gc");
+});
+
+// Mirrors role_hue() in agenda_renderer.c exactly - only these 4 chromatic
+// Spectra6 hues are ever offered, never a free color, since anything
+// off-palette dithers into visual noise on real hardware (see
+// priority_color()'s comment there for the full story).
+const agendaHueOptions = [
+  { title: "Yellow", value: "yellow" },
+  { title: "Red", value: "red" },
+  { title: "Blue", value: "blue" },
+  { title: "Green", value: "green" },
+];
+
+// Drives the two v-for color-picker grids below (same "field list + v-for"
+// shape PaletteCalibration.vue already uses for its own per-color inputs) -
+// one array entry per settingsStore.deviceSettings key, instead of a
+// hand-written <v-select> block per role.
+const agendaTodoColorFields = [
+  { key: "agendaPriAColor", label: "Priority (A)" },
+  { key: "agendaPriBColor", label: "Priority (B)" },
+  { key: "agendaPriCColor", label: "Priority (C)" },
+  { key: "agendaPriDColor", label: "Priority (D)" },
+  { key: "agendaDueOverdueColor", label: "Overdue" },
+  { key: "agendaDueTodayColor", label: "Due today" },
+  { key: "agendaDueLaterColor", label: "Due later" },
+  { key: "agendaProjectColor", label: "+Project" },
+  { key: "agendaContextColor", label: "@Context" },
+];
+const agendaCalendarColorFields = [
+  { key: "agendaCalAColor", label: "Calendar A" },
+  { key: "agendaCalBColor", label: "Calendar B" },
+];
+
 // 90/270 would swap the panel's logical dimensions, which the streaming
 // pipeline and dimensionless .epdgz payloads can't represent; portrait
 // mounting is handled by the orientation setting instead
@@ -230,6 +296,16 @@ async function resetDisplayHistory() {
   }
 }
 
+// Default OFF: an export is downloaded to disk as plaintext JSON, so
+// credentials should only end up in it when the user explicitly opts in
+// (e.g. to get a fully self-contained backup for re-import elsewhere).
+// Note this can only cover fields GET /api/config actually returns -
+// wifi_password/agenda_todo_url/agenda_cal_url/agenda_cal_url2 are
+// deliberately write-only at the device level (never in the GET response
+// at all), so no frontend checkbox can include them; those must always be
+// re-entered by hand after an import.
+const exportIncludeSecrets = ref(false);
+
 async function exportConfig() {
   try {
     const [configRes, processingRes, paletteRes, albumsRes] = await Promise.all([
@@ -243,8 +319,22 @@ async function exportConfig() {
 
     if (configRes.ok) {
       const config = await configRes.json();
-      // Remove sensitive fields
+      // Always write-only at the device level - never returned by GET, so
+      // these deletes are belt-and-suspenders and unaffected by the
+      // checkbox below.
       delete config.wifi_password;
+      delete config.agenda_todo_url;
+      delete config.agenda_cal_url;
+      delete config.agenda_cal_url2;
+      // These 5 ARE returned by GET /api/config in plaintext - only strip
+      // them when the user hasn't opted in to a full-credentials export.
+      if (!exportIncludeSecrets.value) {
+        delete config.access_token;
+        delete config.http_header_value;
+        delete config.telegram_bot_token;
+        delete config.openai_api_key;
+        delete config.google_api_key;
+      }
       exported.config = config;
     }
     if (processingRes.ok) exported.processing = await processingRes.json();
@@ -503,6 +593,7 @@ async function performFactoryReset() {
       <v-tabs v-model="tab" color="primary" show-arrows density="compact">
         <v-tab value="general"> General </v-tab>
         <v-tab value="autoRotate"> Auto Rotate </v-tab>
+        <v-tab value="agenda"> Agenda </v-tab>
         <v-tab value="power"> Power </v-tab>
         <v-tab value="homeAssistant"> Home Assistant </v-tab>
         <v-tab value="processing"> Processing </v-tab>
@@ -1149,6 +1240,267 @@ async function performFactoryReset() {
             </div>
           </v-tabs-window-item>
 
+          <!-- Agenda Tab (ToDo + Calendar) -->
+          <v-tabs-window-item value="agenda">
+            <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+              Not an overlay on a photo - whenever a wake matches the schedule below, the display is
+              used exclusively to show ToDo and/or Calendar content instead of a photo, then goes
+              back to sleep. Normal photo auto-rotation is unaffected and keeps running on its own
+              separate schedule.
+            </v-alert>
+
+            <div class="text-subtitle-2 mb-2">ToDo</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.agendaTodoEnabled"
+              label="Show ToDo list"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              A plain todo.txt file, re-checked every agenda wake - no API key needed. An
+              unchanged file is detected via a conditional request and skips re-downloading.
+              Completed tasks ("x " prefix) are never shown. Treated like a password
+              field (never shown back to you) since a private feed's URL can embed an access
+              token, the same way a Google Calendar link can.
+            </div>
+            <v-text-field
+              v-model="settingsStore.deviceSettings.agendaTodoUrl"
+              label="todo.txt URL"
+              type="password"
+              variant="outlined"
+              density="compact"
+              hint="Leave empty to keep the current URL"
+              persistent-hint
+              placeholder="••••••••"
+              class="mb-4"
+              :disabled="!settingsStore.deviceSettings.agendaTodoEnabled"
+            />
+
+            <v-divider class="mb-4" />
+
+            <div class="text-subtitle-2 mb-2">Calendar</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.agendaCalEnabled"
+              label="Show upcoming events"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              An iCalendar/ICS feed - e.g. a Google Calendar "Secret address in iCal format"
+              (Calendar Settings → Integrate calendar). Google's own docs warn that only you should
+              know this address - treat it like a password, never share it. A second calendar is
+              optional (e.g. work alongside personal) - events from both are merged into one list,
+              sorted by time, and colored by origin: Calendar A is blue, Calendar B is green
+              (shown as a filled background on a light agenda background, plain colored text on a
+              dark one - see Appearance below).
+            </div>
+            <v-row dense>
+              <v-col cols="12" sm="6">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.agendaCalUrl"
+                  label="Calendar A ICS URL"
+                  type="password"
+                  variant="outlined"
+                  density="compact"
+                  hint="Leave empty to keep the current URL"
+                  persistent-hint
+                  placeholder="••••••••"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+              </v-col>
+              <v-col cols="8" sm="3">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.agendaCalName"
+                  label="Display name"
+                  variant="outlined"
+                  density="compact"
+                  placeholder="Calendar A"
+                  hint="Shown in the Calendar header instead of &quot;Calendar A&quot;"
+                  persistent-hint
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+              </v-col>
+              <v-col cols="4" sm="3">
+                <v-select
+                  v-model="settingsStore.deviceSettings.agendaCalDays"
+                  :items="[1, 2, 3]"
+                  label="Days ahead"
+                  variant="outlined"
+                  density="compact"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+              </v-col>
+            </v-row>
+            <v-row dense>
+              <v-col cols="12" sm="8">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.agendaCalUrl2"
+                  label="Calendar B ICS URL (optional)"
+                  type="password"
+                  variant="outlined"
+                  density="compact"
+                  hint="Leave empty to keep the current URL, or to use only one calendar"
+                  persistent-hint
+                  placeholder="••••••••"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+              </v-col>
+              <v-col cols="12" sm="4">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.agendaCalName2"
+                  label="Display name"
+                  variant="outlined"
+                  density="compact"
+                  placeholder="Calendar B"
+                  hint="Shown in the Calendar header instead of &quot;Calendar B&quot;"
+                  persistent-hint
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+              </v-col>
+            </v-row>
+            <v-switch
+              v-model="settingsStore.deviceSettings.agendaCalWeatherEnabled"
+              label="Show forecast on day dividers"
+              color="primary"
+              class="mt-2 mb-1"
+              hide-details
+              :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Appends each day's forecast to its divider, e.g. "Fr 11. [18/25 cloudy]" - reuses the
+              same location/provider settings as the photo Weather Overlay (Settings → Power →
+              Weather + Headline Overlays), just for this independent display path. The forecast
+              only covers 3 days, so if the lookahead window reaches into a 4th day (possible late
+              in the evening), that day simply shows no forecast.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.agendaCalWeatherRightAligned"
+              label="Right-align forecast"
+              color="primary"
+              class="mb-1"
+              hide-details
+              :disabled="
+                !settingsStore.deviceSettings.agendaCalEnabled ||
+                !settingsStore.deviceSettings.agendaCalWeatherEnabled
+              "
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Off (default): forecast centered on the divider line. On: forecast flush against the
+              right edge instead - just a placement preference, doesn't change how much of it fits
+              (works the same in both the stacked and side-by-side layout).
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.agendaCalCompactMultiday"
+              label="Compact multi-day events"
+              color="primary"
+              class="mb-1"
+              hide-details
+              :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Shows a multi-day event only once, on the first visible day, with an "N/M:" prefix
+              (which day of the event's full span, out of how many) instead of repeating it under
+              every day it spans - e.g. an 8-day trip whose 4th day is the first one visible shows
+              "4/8: Trip" that one time only.
+            </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Schedule</div>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Independent from the Auto-Rotate schedule above - only applies while ToDo and/or
+              Calendar is enabled.
+            </div>
+            <RotationSchedule
+              v-model="settingsStore.deviceSettings.agendaCron"
+              :disabled="
+                !(
+                  settingsStore.deviceSettings.agendaTodoEnabled ||
+                  settingsStore.deviceSettings.agendaCalEnabled
+                )
+              "
+            />
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Appearance</div>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Layout only matters when both ToDo and Calendar are shown together - portrait boards
+              always stack them regardless of this setting (a side-by-side split would make each
+              column too narrow there).
+            </div>
+            <v-radio-group
+              v-model="settingsStore.deviceSettings.agendaStackLayout"
+              inline
+              density="compact"
+              hide-details
+              class="mb-4"
+            >
+              <v-radio label="Stacked (ToDo above Calendar)" :value="true" />
+              <v-radio label="Side by side" :value="false" />
+            </v-radio-group>
+            <v-select
+              v-model="settingsStore.deviceSettings.agendaBgColor"
+              :items="agendaBgOptions"
+              label="Background color"
+              variant="outlined"
+              density="compact"
+              hint="Shared by both columns. If an element's own color happens to match this background, it's automatically swapped for a safe fallback."
+              persistent-hint
+              style="max-width: 320px"
+            />
+
+            <template v-if="!agendaIsGrayscaleBoard">
+              <v-divider class="mb-4 mt-4" />
+              <div class="text-subtitle-2 mb-2">Colors</div>
+              <div class="text-caption text-medium-emphasis mb-3">
+                Color panels only - grayscale boards have no spare hue to assign here. Any color
+                that happens to match the background above is automatically swapped for a safe
+                fallback, so nothing can silently disappear.
+              </div>
+              <div class="text-caption text-medium-emphasis mb-1">ToDo</div>
+              <v-row dense>
+                <v-col
+                  v-for="field in agendaTodoColorFields"
+                  :key="field.key"
+                  cols="6"
+                  sm="4"
+                  md="3"
+                >
+                  <v-select
+                    v-model="settingsStore.deviceSettings[field.key]"
+                    :items="agendaHueOptions"
+                    :label="field.label"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+              </v-row>
+              <div class="text-caption text-medium-emphasis mb-1 mt-3">Calendar</div>
+              <v-row dense>
+                <v-col
+                  v-for="field in agendaCalendarColorFields"
+                  :key="field.key"
+                  cols="6"
+                  sm="4"
+                  md="3"
+                >
+                  <v-select
+                    v-model="settingsStore.deviceSettings[field.key]"
+                    :items="agendaHueOptions"
+                    :label="field.label"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+              </v-row>
+            </template>
+          </v-tabs-window-item>
+
           <!-- Power Tab -->
           <v-tabs-window-item value="power">
             <v-switch
@@ -1605,6 +1957,19 @@ async function performFactoryReset() {
             <div class="text-subtitle-1 mt-2 mb-4">Config Backup</div>
             <v-row>
               <v-col cols="12">
+                <v-checkbox
+                  v-model="exportIncludeSecrets"
+                  density="compact"
+                  hide-details
+                  class="mb-2"
+                  label="Include credentials in export (Telegram bot token, AI API keys, access token, custom auth header)"
+                />
+                <div class="text-caption text-grey mb-3">
+                  Off by default: an export is a plaintext JSON file. Enable this for a
+                  fully self-contained backup, e.g. before restoring to a fresh device.
+                  WiFi password and Calendar/ToDo URLs can never be included (the device
+                  never returns them at all) - re-enter those manually after importing.
+                </div>
                 <v-btn variant="outlined" class="mr-2" @click="exportConfig">
                   <v-icon start>mdi-download</v-icon>
                   Export Config
