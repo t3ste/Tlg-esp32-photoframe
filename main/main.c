@@ -578,10 +578,29 @@ void app_main(void)
     // None of these depend on the RTC or the AXP2101 power-rail delay.
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // This wipes the ENTIRE NVS partition (WiFi credentials, Telegram
+        // token, every setting) - loud and unmistakable in the log on
+        // purpose, to either confirm or rule out NVS-partition exhaustion
+        // (only 24KB / 6 pages currently) as the cause of field reports of
+        // WiFi needing reprovisioning after a reflash that never touched the
+        // NVS region at 0x9000. `ret` here is the specific ESP-IDF error
+        // that triggered the erase - logged before it's overwritten below.
+        ESP_LOGE(TAG, "*** NVS init failed (%s) - erasing ENTIRE NVS partition ***",
+                 esp_err_to_name(ret));
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    // Diagnostic only (see the erase-on-failure block above): free/used NVS
+    // entry counts on every boot, so a slow drift toward exhaustion is
+    // visible in the debug log well before it actually triggers an erase.
+    nvs_stats_t nvs_stats;
+    if (nvs_get_stats(NULL, &nvs_stats) == ESP_OK) {
+        ESP_LOGI(TAG, "NVS stats: %d used, %d free, %d total entries (%d namespaces)",
+                 (int) nvs_stats.used_entries, (int) nvs_stats.free_entries,
+                 (int) nvs_stats.total_entries, (int) nvs_stats.namespace_count);
+    }
 
     ESP_ERROR_CHECK(config_manager_init());
 
