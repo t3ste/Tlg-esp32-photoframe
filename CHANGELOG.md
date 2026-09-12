@@ -19,7 +19,7 @@ All notable changes to this fork are documented here. See [README.md → Changes
 
 ### Fixed
 
-- WiFi captive-portal setup page's network scan could return zero SSIDs — the AP→APSTA mode switch hadn't actually settled before the scan started; added a short settle delay plus an automatic retry on the setup page
+- WiFi captive-portal setup page's network scan could return zero SSIDs — root-caused via live log analysis to switching AP-only→APSTA auto-triggering a stale connection attempt that blocked the scan outright (`ESP_ERR_WIFI_STATE`); now explicitly cancelled before scanning (an earlier settle-delay-only fix had just masked this by lucky timing)
 - A Calendar event's `VALARM` reminder block could overwrite the real event's title if the alarm itself carried its own `SUMMARY`
 - TLS fetch failure against calendars whose certificate chain terminates at a cross-signed root (affects Google Calendar's current chain) — enabled cross-signed root verification in the mbedTLS certificate bundle
 - A batched Agenda-settings save could race with a concurrent NVS write and drop part of the update — now saved as a single atomic batch
@@ -33,6 +33,7 @@ All notable changes to this fork are documented here. See [README.md → Changes
 - Agenda Mode only ever fired from the deep-sleep timer-wake path, so it silently never ran with Deep Sleep disabled (Home Assistant / always-on use) — the always-on rotation task now runs Agenda on its own independent schedule too
 - A single failed WiFi connection attempt during the always-on cold-boot path immediately erased the saved SSID/password and restarted into captive-portal provisioning, even for a merely transient failure (router mid-reboot, brief congestion) rather than genuinely wrong credentials — now retries up to 3 times unless the AP's disconnect reason explicitly confirms rejected credentials (failed 4-way handshake/MIC failure/auth-fail), which still clears after one attempt as before
 - Factory reset erased the Agenda ETag cache validators from NVS but left the matching `.agenda_*_cache.*` files behind on storage — now removed too
+- The in-memory "current displayed image" path buffer (and a second local copy of it) were only 64 bytes, too small for a real absolute path with a long filename — confirmed live truncating one, which made the on-display error-overlay feature silently fall back to a blank canvas instead of overlaying onto the actual photo; both resized to 256 bytes
 - 4 additional correctness bugs and 3 performance issues (redundant cron re-parsing, duplicated color-selection logic, excessive NVS commit calls) found and fixed during a full-branch code audit
 
 ### Security
