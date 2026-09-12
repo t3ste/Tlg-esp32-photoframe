@@ -2303,6 +2303,16 @@ static esp_err_t factory_reset_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "NVS erased successfully");
 
+    // The Agenda ETag cache files live on the SD card/internal flash, not in
+    // NVS - erasing NVS alone would leave them orphaned (their matching NVS
+    // ETag validators are gone, so they'd never be read again, just sitting
+    // there unused). Best-effort: a factory reset should leave storage as
+    // clean as the config it just wiped. unlink() on a file that was never
+    // created (e.g. Agenda was never enabled) is expected, not an error.
+    unlink(AGENDA_TODO_CACHE_PATH);
+    unlink(AGENDA_CAL_CACHE_PATH);
+    unlink(AGENDA_CAL_CACHE_PATH2);
+
     // Send success response
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req,

@@ -32,6 +32,7 @@ All notable changes to this fork are documented here. See [README.md → Changes
 - `process-cli`'s face-crop engine could round a crop rectangle up to 1px past the source image's edge when independently rounding x/y/w/h — now re-clamped against the image bounds after rounding
 - Agenda Mode only ever fired from the deep-sleep timer-wake path, so it silently never ran with Deep Sleep disabled (Home Assistant / always-on use) — the always-on rotation task now runs Agenda on its own independent schedule too
 - A single failed WiFi connection attempt during the always-on cold-boot path immediately erased the saved SSID/password and restarted into captive-portal provisioning, even for a merely transient failure (router mid-reboot, brief congestion) rather than genuinely wrong credentials — now retries up to 3 times unless the AP's disconnect reason explicitly confirms rejected credentials (failed 4-way handshake/MIC failure/auth-fail), which still clears after one attempt as before
+- Factory reset erased the Agenda ETag cache validators from NVS but left the matching `.agenda_*_cache.*` files behind on storage — now removed too
 - 4 additional correctness bugs and 3 performance issues (redundant cron re-parsing, duplicated color-selection logic, excessive NVS commit calls) found and fixed during a full-branch code audit
 
 ### Security
