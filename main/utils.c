@@ -676,10 +676,12 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "agenda_todo_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_todo_enabled(cJSON_IsTrue(item));
+        power_manager_reset_agenda_timer();
     }
     item = cJSON_GetObjectItem(root, "agenda_cal_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_cal_enabled(cJSON_IsTrue(item));
+        power_manager_reset_agenda_timer();
     }
     item = cJSON_GetObjectItem(root, "agenda_todo_url");
     if (item && cJSON_IsString(item)) {
@@ -768,6 +770,7 @@ esp_err_t apply_config_from_json(cJSON *root)
             }
         }
         config_manager_set_agenda_cron_rules(rules, n);
+        power_manager_reset_agenda_timer();
     }
     item = cJSON_GetObjectItem(root, "agenda_stack_layout");
     if (item && cJSON_IsBool(item)) {

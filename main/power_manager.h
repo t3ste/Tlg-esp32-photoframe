@@ -29,6 +29,15 @@ void power_manager_set_auto_sleep_timeout(uint32_t seconds);
 void power_manager_reset_rotate_timer(void);
 
 /**
+ * @brief Same as power_manager_reset_rotate_timer(), for the always-on
+ * Agenda schedule (rotation_timer_task()'s Agenda check) - call after
+ * changing agenda_todo_enabled/agenda_cal_enabled/the agenda cron rules so
+ * the new schedule takes effect immediately instead of waiting for a stale
+ * cached time to expire.
+ */
+void power_manager_reset_agenda_timer(void);
+
+/**
  * @brief Seconds remaining until the boundary this timer wake was targeting.
  *
  * Based on the current (possibly corrected) system time. If an external RTC

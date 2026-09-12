@@ -46,6 +46,7 @@ static int64_t next_sleep_time = 0;  // Use absolute time for sleep timer
 static uint32_t auto_sleep_timeout_sec = AUTO_SLEEP_TIMEOUT_SEC;
 static wakeup_source_t wakeup_source = WAKEUP_SOURCE_NONE;
 static int64_t next_rotation_time = 0;  // Use absolute time for rotation
+static int64_t next_agenda_time = 0;    // Same convention, for the Agenda schedule below
 static uint64_t ext1_wakeup_pin_mask = 0;
 
 static void rotation_timer_task(void *arg)
@@ -64,10 +65,38 @@ static void rotation_timer_task(void *arg)
             continue;
         }
 
+        int64_t now = esp_timer_get_time();  // Get absolute time in microseconds
+
+        // Agenda: an independent schedule, same "device stays awake" gating
+        // as rotation above - mirrors deep_sleep_wake_main()'s agenda_wake
+        // decision for the case a deep-sleep board never actually sleeps
+        // (USB-powered) or has deep sleep disabled outright (HA/always-on).
+        // Decided before the rotation block below so a same-tick collision
+        // can defer to it, same "agenda wins" rule as the deep-sleep path.
+        bool agenda_due = false;
+        if (agenda_manager_is_enabled()) {
+            if (next_agenda_time == 0) {
+                int seconds_until_next = agenda_manager_seconds_until_next_wake();
+                next_agenda_time = now + (seconds_until_next * 1000000LL);
+                ESP_LOGI(TAG, "Active agenda render scheduled in %d seconds", seconds_until_next);
+            } else if (now >= next_agenda_time) {
+                agenda_due = true;
+            }
+        } else {
+            next_agenda_time = 0;  // Reset if agenda got disabled
+        }
+
+        if (agenda_due) {
+            ESP_LOGI(TAG, "Active agenda render triggered");
+            agenda_manager_run();
+
+            int seconds_until_next = agenda_manager_seconds_until_next_wake();
+            next_agenda_time = now + (seconds_until_next * 1000000LL);
+            ESP_LOGI(TAG, "Next agenda render scheduled in %d seconds", seconds_until_next);
+        }
+
         // Handle active rotation when device stays awake and auto-rotate enabled
         if (config_manager_get_auto_rotate()) {
-            int64_t now = esp_timer_get_time();  // Get absolute time in microseconds
-
             if (next_rotation_time == 0) {
                 // Initialize next rotation time
                 int seconds_until_next = get_seconds_until_next_wakeup();
@@ -78,13 +107,25 @@ static void rotation_timer_task(void *arg)
                 ESP_LOGI(TAG, "Active rotation scheduled in %d seconds (%s, %s)",
                          seconds_until_next, "cron", reason);
             } else if (now >= next_rotation_time) {
-                // Time to rotate
-                const char *reason =
-                    board_hal_is_usb_connected() ? "USB powered" : "deep sleep disabled";
-                ESP_LOGI(TAG, "Active rotation triggered (%s)", reason);
+                // Time to rotate - unless Agenda just took over this same
+                // tick, matching the deep-sleep path's "agenda wake wins;
+                // rotate simply fires on its own next natural boundary" rule
+                // (no makeup logic for the skipped tick). next_rotation_time
+                // is advanced identically either way, from the fresh
+                // schedule computation below, so a skipped rotation still
+                // lands on its real next scheduled slot, not an immediate
+                // retry on the following 1-second tick.
+                if (agenda_due) {
+                    ESP_LOGI(TAG, "Rotation due but Agenda render took priority this tick - "
+                                  "skipping, rotation continues on its own schedule");
+                } else {
+                    const char *reason =
+                        board_hal_is_usb_connected() ? "USB powered" : "deep sleep disabled";
+                    ESP_LOGI(TAG, "Active rotation triggered (%s)", reason);
 
-                trigger_image_rotation();
-                ha_notify_update();
+                    trigger_image_rotation();
+                    ha_notify_update();
+                }
 
                 // Schedule next rotation
                 int seconds_until_next = get_seconds_until_next_wakeup();
@@ -469,6 +510,18 @@ void power_manager_reset_rotate_timer(void)
     next_rotation_time = esp_timer_get_time() + (seconds_until_next * 1000000LL);
     ESP_LOGI(TAG, "Rotation timer reset, next rotation in %d seconds (%s)", seconds_until_next,
              "cron");
+}
+
+// Same idea as power_manager_reset_rotate_timer() above, for the always-on
+// Agenda schedule - called whenever Agenda's own enable toggles or cron
+// rules change via the Web UI, so rotation_timer_task() picks up the new
+// schedule immediately instead of counting down to a stale cached time.
+void power_manager_reset_agenda_timer(void)
+{
+    int seconds_until_next = agenda_manager_seconds_until_next_wake();
+
+    next_agenda_time = esp_timer_get_time() + (seconds_until_next * 1000000LL);
+    ESP_LOGI(TAG, "Agenda timer reset, next agenda render in %d seconds", seconds_until_next);
 }
 
 int power_manager_get_seconds_until_wake_target(void)

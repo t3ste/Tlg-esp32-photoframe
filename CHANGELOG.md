@@ -14,6 +14,7 @@ All notable changes to this fork are documented here. See [README.md → Changes
   - Full per-role Web UI color picker for every ToDo/Calendar color (Spectra6/color boards)
   - Opt-in weather forecast annotation on each Calendar day divider (e.g. "Fri 11. [18/25 cloudy]"), independent toggle reusing the existing photo-overlay weather settings
   - See [docs/AGENDA_COLORS.html](docs/AGENDA_COLORS.html) for the full color scheme reference
+  - Conditional GET (ETag) caching for both the ToDo and Calendar fetches — an unchanged source skips re-downloading on the next agenda wake and re-parses a small on-device cache instead
 - Opt-in checkbox to include credentials (Telegram bot token, AI API keys, access token, custom auth header) in an exported config backup — off by default, since an export is a plaintext JSON file. WiFi password and Calendar/ToDo URLs can never be included, as the device never returns them at all
 
 ### Fixed
@@ -29,6 +30,7 @@ All notable changes to this fork are documented here. See [README.md → Changes
 - Rotation-notify Telegram upload always failed for EPDGZ-format album images
 - `process-cli`'s `/image` endpoint accepted client-supplied dimension headers without an upper bound, unlike the already-clamped `/thumbnail` endpoint — now clamped identically, preventing an oversized native canvas allocation
 - `process-cli`'s face-crop engine could round a crop rectangle up to 1px past the source image's edge when independently rounding x/y/w/h — now re-clamped against the image bounds after rounding
+- Agenda Mode only ever fired from the deep-sleep timer-wake path, so it silently never ran with Deep Sleep disabled (Home Assistant / always-on use) — the always-on rotation task now runs Agenda on its own independent schedule too
 - 4 additional correctness bugs and 3 performance issues (redundant cron re-parsing, duplicated color-selection logic, excessive NVS commit calls) found and fixed during a full-branch code audit
 
 ### Security

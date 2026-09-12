@@ -86,6 +86,8 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - fix: a Calendar event's `VALARM` reminder block could overwrite the real event's title if the alarm itself carried its own `SUMMARY`
 - fix: TLS fetch failure against calendars whose certificate chain terminates at a cross-signed root (affects Google Calendar's current chain) — enabled cross-signed root verification in the mbedTLS certificate bundle
 - fix: a batched Agenda-settings save could race with a concurrent NVS write and drop part of the update; saved as a single atomic batch now
+- feat: conditional GET (ETag) caching for both the ToDo and Calendar fetches — an unchanged source skips re-downloading on the next agenda wake and re-parses a small on-device cache instead, mirroring the same pattern already used for the URL-rotation image fetch
+- fix: Agenda mode only ever fired from the deep-sleep timer-wake path, so it silently never ran at all with Deep Sleep disabled (Home Assistant / always-on use) — the always-on rotation task now runs Agenda on its own independent schedule too, under the same "USB-powered or deep sleep disabled" condition photo rotation already uses there
 
 **Reliability & infrastructure**:
 - feat: DNS backup/fallback servers (Cloudflare `1.1.1.1`, Google `8.8.8.8`) now populate lwIP's built-in multi-server fallback slots, previously left empty — a single flaky or unreachable DNS server (typically the router's own, handed out via DHCP) could otherwise fail to resolve *any* hostname (weather, Telegram, headlines alike) for a whole wake cycle with no automatic recovery
