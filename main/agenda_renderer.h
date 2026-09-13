@@ -19,11 +19,19 @@
  * always stacks, mirroring image_processor_compose_pair_to_rgb()'s own
  * orientation convention).
  *
+ * `events_c`/`events_d`/`events_e` are three additional, independently
+ * enabled ICS sources (e.g. holidays/school-holidays/other special-days
+ * feeds) - unlike A/B they are never auto-refreshed, only fetched/uploaded
+ * on an explicit user action (see agenda_manager.c), but they merge into
+ * the exact same day-grouped, sorted list as A/B and follow the same
+ * multi-day display mode. May be NULL/empty like A/B.
+ *
  * Color-coded per docs/AGENDA_COLORS.html. ToDo rows color priority,
  * +project/@context tags, and due-date urgency independently within one
- * row. Calendar rows are colored by origin (events_a vs. events_b) via
- * calendar_source_color() - plain colored text (blue for A, green for B),
- * no background chip, on any page background. The shared background
+ * row. Calendar rows are colored by origin (events_a/b/c/d/e) via
+ * calendar_source_color() - plain colored text (blue for A, green for B,
+ * red for C, yellow for D, red for E), no background chip, on any page
+ * background. The shared background
  * (config_manager_get_agenda_bg_color()) and its automatic
  * collision-avoidance fallback (agenda_avoid_bg_collision()) apply to
  * every plain (non-chip) text color in both columns, including the day
@@ -50,7 +58,8 @@
  * whatever image_processor_write_rgb_to_fmt() returns.
  */
 esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t *events_a,
-                                 const ics_event_list_t *events_b,
+                                 const ics_event_list_t *events_b, const ics_event_list_t *events_c,
+                                 const ics_event_list_t *events_d, const ics_event_list_t *events_e,
                                  const weather_forecast_t *cal_weather, int lookahead_days,
                                  const char *output_path, image_format_t out_format);
 

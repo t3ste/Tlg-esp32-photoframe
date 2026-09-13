@@ -529,16 +529,35 @@ typedef struct {
 // background. Grayscale boards have no spare hue for this at all (same
 // reasoning as priority_color()'s grayscale fallback) and fall back to
 // plain body-colored text.
+// calendar_index 0/1 are the two auto-refreshing Calendar sources (A/B);
+// 2/3/4 are the three extra, never-auto-refreshed ICS sources (C/D/E - see
+// NVS_AGENDA_CAL_C_URL_KEY etc. in config.h) - same per-source-hue
+// treatment, just three more roles.
 static void calendar_source_color(int calendar_index, bool grayscale, uint8_t bg_r, uint8_t bg_g,
                                   uint8_t bg_b, uint8_t *fr, uint8_t *fg, uint8_t *fb, bool *has_bg)
 {
     *has_bg = false;
-    if (calendar_index == 0) {
+    switch (calendar_index) {
+    case 0:
         resolve_plain_color(config_manager_get_agenda_cal_a_color(), grayscale, 0, 0, 255, bg_r,
                             bg_g, bg_b, fr, fg, fb);
-    } else {
+        break;
+    case 1:
         resolve_plain_color(config_manager_get_agenda_cal_b_color(), grayscale, 0, 255, 0, bg_r,
                             bg_g, bg_b, fr, fg, fb);
+        break;
+    case 2:
+        resolve_plain_color(config_manager_get_agenda_cal_c_color(), grayscale, 255, 0, 0, bg_r,
+                            bg_g, bg_b, fr, fg, fb);
+        break;
+    case 3:
+        resolve_plain_color(config_manager_get_agenda_cal_d_color(), grayscale, 255, 255, 0, bg_r,
+                            bg_g, bg_b, fr, fg, fb);
+        break;
+    default:
+        resolve_plain_color(config_manager_get_agenda_cal_e_color(), grayscale, 255, 0, 0, bg_r,
+                            bg_g, bg_b, fr, fg, fb);
+        break;
     }
 }
 
@@ -750,7 +769,7 @@ static int event_day_index(const ics_event_t *ev, time_t day)
 }
 
 #define AGENDA_MAX_CAL_DAYS 8  // generous vs. the 1-4 calendar days a 1-3 day lookahead can touch
-#define AGENDA_MAX_TAGGED_EVENTS (ICS_MAX_EVENTS * 2)  // events_a + events_b, worst case both full
+#define AGENDA_MAX_TAGGED_EVENTS (ICS_MAX_EVENTS * 5)  // events_a/b/c/d/e, worst case all five full
 
 // One event plus the pre-resolved line/color build_event_line() computed
 // for it (which already baked in which calendar it came from) - merging
@@ -1123,7 +1142,8 @@ static void draw_todo_column(uint8_t *rgb, int width, int height, agenda_rect_t 
 }
 
 esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t *events_a,
-                                 const ics_event_list_t *events_b,
+                                 const ics_event_list_t *events_b, const ics_event_list_t *events_c,
+                                 const ics_event_list_t *events_d, const ics_event_list_t *events_e,
                                  const weather_forecast_t *cal_weather, int lookahead_days,
                                  const char *output_path, image_format_t out_format)
 {
@@ -1133,7 +1153,10 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
     bool show_todo = todo && todo->count > 0;
     bool have_a = events_a && events_a->count > 0;
     bool have_b = events_b && events_b->count > 0;
-    bool show_cal = have_a || have_b;
+    bool have_c = events_c && events_c->count > 0;
+    bool have_d = events_d && events_d->count > 0;
+    bool have_e = events_e && events_e->count > 0;
+    bool show_cal = have_a || have_b || have_c || have_d || have_e;
     if (!show_todo && !show_cal) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -1206,15 +1229,24 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
     if (show_cal) {
         int count_a = have_a ? events_a->count : 0;
         int count_b = have_b ? events_b->count : 0;
+        int count_c = have_c ? events_c->count : 0;
+        int count_d = have_d ? events_d->count : 0;
+        int count_e = have_e ? events_e->count : 0;
 
         agenda_event_line_t *lines_a = heap_caps_malloc(
             (size_t) (count_a > 0 ? count_a : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
         agenda_event_line_t *lines_b = heap_caps_malloc(
             (size_t) (count_b > 0 ? count_b : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
+        agenda_event_line_t *lines_c = heap_caps_malloc(
+            (size_t) (count_c > 0 ? count_c : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
+        agenda_event_line_t *lines_d = heap_caps_malloc(
+            (size_t) (count_d > 0 ? count_d : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
+        agenda_event_line_t *lines_e = heap_caps_malloc(
+            (size_t) (count_e > 0 ? count_e : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
         agenda_tagged_event_t *tagged = heap_caps_malloc(
             AGENDA_MAX_TAGGED_EVENTS * sizeof(agenda_tagged_event_t), MALLOC_CAP_SPIRAM);
 
-        if (lines_a && lines_b && tagged) {
+        if (lines_a && lines_b && lines_c && lines_d && lines_e && tagged) {
             int tagged_count = 0;
             for (int i = 0; i < count_a && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
                 build_event_line(&events_a->events[i], 0, grayscale, bg_r, bg_g, bg_b, &lines_a[i]);
@@ -1226,6 +1258,28 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                 build_event_line(&events_b->events[i], 1, grayscale, bg_r, bg_g, bg_b, &lines_b[i]);
                 tagged[tagged_count].ev = &events_b->events[i];
                 tagged[tagged_count].line = &lines_b[i];
+                tagged_count++;
+            }
+            // C/D/E: same tagging shape as A/B, just a different
+            // calendar_index (2/3/4) so calendar_source_color() picks each
+            // one's own configured hue - see NVS_AGENDA_CAL_C_URL_KEY etc.
+            // in config.h for why these three never auto-refresh.
+            for (int i = 0; i < count_c && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
+                build_event_line(&events_c->events[i], 2, grayscale, bg_r, bg_g, bg_b, &lines_c[i]);
+                tagged[tagged_count].ev = &events_c->events[i];
+                tagged[tagged_count].line = &lines_c[i];
+                tagged_count++;
+            }
+            for (int i = 0; i < count_d && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
+                build_event_line(&events_d->events[i], 3, grayscale, bg_r, bg_g, bg_b, &lines_d[i]);
+                tagged[tagged_count].ev = &events_d->events[i];
+                tagged[tagged_count].line = &lines_d[i];
+                tagged_count++;
+            }
+            for (int i = 0; i < count_e && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
+                build_event_line(&events_e->events[i], 4, grayscale, bg_r, bg_g, bg_b, &lines_e[i]);
+                tagged[tagged_count].ev = &events_e->events[i];
+                tagged[tagged_count].line = &lines_e[i];
                 tagged_count++;
             }
             if (tagged_count > 1) {
@@ -1275,6 +1329,9 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
         }
         heap_caps_free(lines_a);
         heap_caps_free(lines_b);
+        heap_caps_free(lines_c);
+        heap_caps_free(lines_d);
+        heap_caps_free(lines_e);
         heap_caps_free(tagged);
     }
 

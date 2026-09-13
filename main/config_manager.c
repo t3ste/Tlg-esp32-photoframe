@@ -156,6 +156,20 @@ static char agenda_project_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PROJ_C_DEFA
 static char agenda_context_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CTX_C_DEFAULT;
 static char agenda_cal_a_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_A_C_DEFAULT;
 static char agenda_cal_b_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_B_C_DEFAULT;
+// Three extra ICS sources, no auto-refresh - see NVS_AGENDA_CAL_C_URL_KEY
+// etc. in config.h.
+static bool agenda_cal_c_enabled = false;
+static bool agenda_cal_d_enabled = false;
+static bool agenda_cal_e_enabled = false;
+static char agenda_cal_c_url[AGENDA_CAL_C_URL_MAX_LEN] = {0};
+static char agenda_cal_d_url[AGENDA_CAL_D_URL_MAX_LEN] = {0};
+static char agenda_cal_e_url[AGENDA_CAL_E_URL_MAX_LEN] = {0};
+static char agenda_cal_c_name[AGENDA_CAL_CDE_NAME_MAX_LEN] = {0};
+static char agenda_cal_d_name[AGENDA_CAL_CDE_NAME_MAX_LEN] = {0};
+static char agenda_cal_e_name[AGENDA_CAL_CDE_NAME_MAX_LEN] = {0};
+static char agenda_cal_c_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_C_C_DEFAULT;
+static char agenda_cal_d_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_D_C_DEFAULT;
+static char agenda_cal_e_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_E_C_DEFAULT;
 
 // OTA
 static bool ota_check_enabled = true;
@@ -1054,6 +1068,36 @@ esp_err_t config_manager_init(void)
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_URL_KEY, agenda_cal_url, &agenda_cal_url_len);
         size_t agenda_cal_url2_len = sizeof(agenda_cal_url2);
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_URL2_KEY, agenda_cal_url2, &agenda_cal_url2_len);
+        uint8_t stored_agenda_cal_c_en = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_C_ENABLED_KEY, &stored_agenda_cal_c_en) ==
+            ESP_OK) {
+            agenda_cal_c_enabled = (stored_agenda_cal_c_en != 0);
+        }
+        uint8_t stored_agenda_cal_d_en = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_D_ENABLED_KEY, &stored_agenda_cal_d_en) ==
+            ESP_OK) {
+            agenda_cal_d_enabled = (stored_agenda_cal_d_en != 0);
+        }
+        uint8_t stored_agenda_cal_e_en = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_E_ENABLED_KEY, &stored_agenda_cal_e_en) ==
+            ESP_OK) {
+            agenda_cal_e_enabled = (stored_agenda_cal_e_en != 0);
+        }
+        size_t agenda_cal_c_url_len = sizeof(agenda_cal_c_url);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_C_URL_KEY, agenda_cal_c_url, &agenda_cal_c_url_len);
+        size_t agenda_cal_d_url_len = sizeof(agenda_cal_d_url);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_D_URL_KEY, agenda_cal_d_url, &agenda_cal_d_url_len);
+        size_t agenda_cal_e_url_len = sizeof(agenda_cal_e_url);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_E_URL_KEY, agenda_cal_e_url, &agenda_cal_e_url_len);
+        size_t agenda_cal_c_name_len = sizeof(agenda_cal_c_name);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_C_NAME_KEY, agenda_cal_c_name,
+                    &agenda_cal_c_name_len);
+        size_t agenda_cal_d_name_len = sizeof(agenda_cal_d_name);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_D_NAME_KEY, agenda_cal_d_name,
+                    &agenda_cal_d_name_len);
+        size_t agenda_cal_e_name_len = sizeof(agenda_cal_e_name);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_E_NAME_KEY, agenda_cal_e_name,
+                    &agenda_cal_e_name_len);
         size_t agenda_todo_etag_len = sizeof(agenda_todo_etag);
         nvs_get_str(nvs_handle, NVS_AGENDA_TODO_ETAG_KEY, agenda_todo_etag, &agenda_todo_etag_len);
         size_t agenda_cal_etag_len = sizeof(agenda_cal_etag);
@@ -1126,6 +1170,12 @@ esp_err_t config_manager_init(void)
                                sizeof(agenda_cal_a_color), AGENDA_CAL_A_C_DEFAULT);
         agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_B_C_KEY, agenda_cal_b_color,
                                sizeof(agenda_cal_b_color), AGENDA_CAL_B_C_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_C_C_KEY, agenda_cal_c_color,
+                               sizeof(agenda_cal_c_color), AGENDA_CAL_C_C_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_D_C_KEY, agenda_cal_d_color,
+                               sizeof(agenda_cal_d_color), AGENDA_CAL_D_C_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_E_C_KEY, agenda_cal_e_color,
+                               sizeof(agenda_cal_e_color), AGENDA_CAL_E_C_DEFAULT);
 
         {
             static char pending_buf[TELEGRAM_PENDING_JOINED_MAX];
@@ -2989,6 +3039,123 @@ const char *config_manager_get_agenda_cal_url2(void)
     return agenda_cal_url2;
 }
 
+void config_manager_set_agenda_cal_c_enabled(bool enabled)
+{
+    agenda_cal_c_enabled = enabled;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_C_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_agenda_cal_c_enabled(void)
+{
+    return agenda_cal_c_enabled;
+}
+
+void config_manager_set_agenda_cal_d_enabled(bool enabled)
+{
+    agenda_cal_d_enabled = enabled;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_D_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_agenda_cal_d_enabled(void)
+{
+    return agenda_cal_d_enabled;
+}
+
+void config_manager_set_agenda_cal_e_enabled(bool enabled)
+{
+    agenda_cal_e_enabled = enabled;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_E_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_agenda_cal_e_enabled(void)
+{
+    return agenda_cal_e_enabled;
+}
+
+// No etag to clear on change, unlike agenda_cal_url/_url2 above - these
+// three sources have no conditional-GET/periodic refresh at all (see
+// AGENDA_CAL_CACHE_PATH_C etc. in config.h). Whether a URL actually changed
+// (and therefore needs an immediate fetch) is decided by the caller in
+// utils.c's apply_config_from_json(), which compares against the old value
+// before calling this setter.
+void config_manager_set_agenda_cal_c_url(const char *url)
+{
+    const char *new_url = url ? url : "";
+    strncpy(agenda_cal_c_url, new_url, AGENDA_CAL_C_URL_MAX_LEN - 1);
+    agenda_cal_c_url[AGENDA_CAL_C_URL_MAX_LEN - 1] = '\0';
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_C_URL_KEY, agenda_cal_c_url);
+    ESP_LOGI(TAG, "Agenda Calendar URL C set (length: %zu)", strlen(agenda_cal_c_url));
+}
+
+const char *config_manager_get_agenda_cal_c_url(void)
+{
+    return agenda_cal_c_url;
+}
+
+void config_manager_set_agenda_cal_d_url(const char *url)
+{
+    const char *new_url = url ? url : "";
+    strncpy(agenda_cal_d_url, new_url, AGENDA_CAL_D_URL_MAX_LEN - 1);
+    agenda_cal_d_url[AGENDA_CAL_D_URL_MAX_LEN - 1] = '\0';
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_D_URL_KEY, agenda_cal_d_url);
+    ESP_LOGI(TAG, "Agenda Calendar URL D set (length: %zu)", strlen(agenda_cal_d_url));
+}
+
+const char *config_manager_get_agenda_cal_d_url(void)
+{
+    return agenda_cal_d_url;
+}
+
+void config_manager_set_agenda_cal_e_url(const char *url)
+{
+    const char *new_url = url ? url : "";
+    strncpy(agenda_cal_e_url, new_url, AGENDA_CAL_E_URL_MAX_LEN - 1);
+    agenda_cal_e_url[AGENDA_CAL_E_URL_MAX_LEN - 1] = '\0';
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_E_URL_KEY, agenda_cal_e_url);
+    ESP_LOGI(TAG, "Agenda Calendar URL E set (length: %zu)", strlen(agenda_cal_e_url));
+}
+
+const char *config_manager_get_agenda_cal_e_url(void)
+{
+    return agenda_cal_e_url;
+}
+
+void config_manager_set_agenda_cal_c_name(const char *name)
+{
+    strncpy(agenda_cal_c_name, name ? name : "", sizeof(agenda_cal_c_name) - 1);
+    agenda_cal_c_name[sizeof(agenda_cal_c_name) - 1] = '\0';
+    agenda_nvs_set_str(NVS_AGENDA_CAL_C_NAME_KEY, agenda_cal_c_name);
+}
+
+const char *config_manager_get_agenda_cal_c_name(void)
+{
+    return agenda_cal_c_name;
+}
+
+void config_manager_set_agenda_cal_d_name(const char *name)
+{
+    strncpy(agenda_cal_d_name, name ? name : "", sizeof(agenda_cal_d_name) - 1);
+    agenda_cal_d_name[sizeof(agenda_cal_d_name) - 1] = '\0';
+    agenda_nvs_set_str(NVS_AGENDA_CAL_D_NAME_KEY, agenda_cal_d_name);
+}
+
+const char *config_manager_get_agenda_cal_d_name(void)
+{
+    return agenda_cal_d_name;
+}
+
+void config_manager_set_agenda_cal_e_name(const char *name)
+{
+    strncpy(agenda_cal_e_name, name ? name : "", sizeof(agenda_cal_e_name) - 1);
+    agenda_cal_e_name[sizeof(agenda_cal_e_name) - 1] = '\0';
+    agenda_nvs_set_str(NVS_AGENDA_CAL_E_NAME_KEY, agenda_cal_e_name);
+}
+
+const char *config_manager_get_agenda_cal_e_name(void)
+{
+    return agenda_cal_e_name;
+}
+
 void config_manager_set_agenda_cal_etag2(const char *etag)
 {
     const char *new_etag = etag ? etag : "";
@@ -3235,6 +3402,39 @@ void config_manager_set_agenda_cal_b_color(const char *color)
 const char *config_manager_get_agenda_cal_b_color(void)
 {
     return agenda_cal_b_color;
+}
+
+void config_manager_set_agenda_cal_c_color(const char *color)
+{
+    agenda_role_color_set(agenda_cal_c_color, sizeof(agenda_cal_c_color), NVS_AGENDA_CAL_C_C_KEY,
+                          color);
+}
+
+const char *config_manager_get_agenda_cal_c_color(void)
+{
+    return agenda_cal_c_color;
+}
+
+void config_manager_set_agenda_cal_d_color(const char *color)
+{
+    agenda_role_color_set(agenda_cal_d_color, sizeof(agenda_cal_d_color), NVS_AGENDA_CAL_D_C_KEY,
+                          color);
+}
+
+const char *config_manager_get_agenda_cal_d_color(void)
+{
+    return agenda_cal_d_color;
+}
+
+void config_manager_set_agenda_cal_e_color(const char *color)
+{
+    agenda_role_color_set(agenda_cal_e_color, sizeof(agenda_cal_e_color), NVS_AGENDA_CAL_E_C_KEY,
+                          color);
+}
+
+const char *config_manager_get_agenda_cal_e_color(void)
+{
+    return agenda_cal_e_color;
 }
 
 // ============================================================================

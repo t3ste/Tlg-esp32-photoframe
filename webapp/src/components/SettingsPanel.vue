@@ -218,6 +218,9 @@ const agendaTodoColorFields = [
 const agendaCalendarColorFields = [
   { key: "agendaCalAColor", label: "Calendar A" },
   { key: "agendaCalBColor", label: "Calendar B" },
+  { key: "agendaCalCColor", label: "Calendar C" },
+  { key: "agendaCalDColor", label: "Calendar D" },
+  { key: "agendaCalEColor", label: "Calendar E" },
 ];
 
 // 90/270 would swap the panel's logical dimensions, which the streaming
@@ -442,6 +445,75 @@ async function organizeCropVariants() {
   } finally {
     organizingCropVariants.value = false;
   }
+}
+
+// Three extra ICS calendar sources (e.g. holidays/school-holidays) - unlike
+// Calendar A/B, these never refresh themselves, so the Web UI needs two
+// one-shot actions per slot: re-download the currently-saved URL ("refresh
+// now", a bare PATCH flag the backend consumes without persisting it - see
+// utils.c's apply_extra_ics_url()), or upload a replacement .ics file
+// directly (POST /api/agenda/extra-ics?slot=<c|d|e>, raw file content as
+// the body - these are plain text files, not an image, so no multipart
+// form is needed).
+const refreshingExtraIcs = ref({ c: false, d: false, e: false });
+const uploadingExtraIcs = ref({ c: false, d: false, e: false });
+const extraIcsFileC = ref(null);
+const extraIcsFileD = ref(null);
+const extraIcsFileE = ref(null);
+
+async function refreshExtraIcs(slot) {
+  refreshingExtraIcs.value[slot] = true;
+  try {
+    const response = await fetch("/api/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [`agenda_cal_${slot}_refetch`]: true }),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    saveSuccess.value = true;
+    saveMessage.value = `Calendar ${slot.toUpperCase()} refreshed`;
+    setTimeout(() => (saveSuccess.value = false), 3000);
+  } catch (error) {
+    console.error(`Failed to refresh Calendar ${slot}:`, error);
+    saveError.value = true;
+    saveMessage.value = `Failed to refresh Calendar ${slot.toUpperCase()} - check the URL is reachable`;
+    setTimeout(() => (saveError.value = false), 5000);
+  } finally {
+    refreshingExtraIcs.value[slot] = false;
+  }
+}
+
+function onExtraIcsFileSelected(event, slot) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  uploadingExtraIcs.value[slot] = true;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const response = await fetch(`/api/agenda/extra-ics?slot=${slot}`, {
+        method: "POST",
+        headers: { "Content-Type": "text/calendar" },
+        body: e.target.result,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      saveSuccess.value = true;
+      saveMessage.value = `Calendar ${slot.toUpperCase()} updated from file`;
+      setTimeout(() => (saveSuccess.value = false), 3000);
+    } catch (error) {
+      console.error(`Failed to upload ICS file for Calendar ${slot}:`, error);
+      saveError.value = true;
+      saveMessage.value = `Failed to upload file for Calendar ${slot.toUpperCase()} - is it a valid .ics file?`;
+      setTimeout(() => (saveError.value = false), 5000);
+    } finally {
+      uploadingExtraIcs.value[slot] = false;
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = "";
 }
 
 function onImportFileSelected(event) {
@@ -1415,6 +1487,213 @@ async function performFactoryReset() {
               one visible shows "4/8: Trip" that one time only. Repeat + number: combines both -
               still repeated under every day, but each occurrence also gets its own "N/M:" prefix.
             </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Extra ICS Calendars</div>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Up to three additional calendars (e.g. holidays, school holidays, or any other .ics
+              feed) shown in the same Calendar column above, each in its own color (see Appearance
+              tab). Unlike Calendar A/B, these are <strong>never refreshed automatically</strong> -
+              only when you save a new/changed URL, click "Refresh now", or upload a replacement
+              file directly. If a source runs out of upcoming events, a permanent reminder appears
+              in the calendar identifying which one needs updating.
+            </div>
+
+            <v-card variant="tonal" class="mb-3">
+              <v-card-text>
+                <v-switch
+                  v-model="settingsStore.deviceSettings.agendaCalCEnabled"
+                  label="Calendar C enabled"
+                  color="primary"
+                  hide-details
+                  class="mb-2"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+                <v-row dense>
+                  <v-col cols="12" sm="7">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalCUrl"
+                      label="Calendar C ICS URL"
+                      type="password"
+                      variant="outlined"
+                      density="compact"
+                      hint="Leave empty to keep the current URL - fetched once on save, never again automatically"
+                      persistent-hint
+                      placeholder="••••••••"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    />
+                  </v-col>
+                  <v-col cols="12" sm="5">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalCName"
+                      label="Display name"
+                      variant="outlined"
+                      density="compact"
+                      placeholder="Calendar C"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    />
+                  </v-col>
+                </v-row>
+                <div class="d-flex flex-wrap ga-2 mt-1">
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="refreshingExtraIcs.c"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="refreshExtraIcs('c')"
+                  >
+                    Refresh now
+                  </v-btn>
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="uploadingExtraIcs.c"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="extraIcsFileC?.click()"
+                  >
+                    Upload .ics file
+                  </v-btn>
+                  <input
+                    ref="extraIcsFileC"
+                    type="file"
+                    accept=".ics"
+                    hidden
+                    @change="onExtraIcsFileSelected($event, 'c')"
+                  />
+                </div>
+              </v-card-text>
+            </v-card>
+
+            <v-card variant="tonal" class="mb-3">
+              <v-card-text>
+                <v-switch
+                  v-model="settingsStore.deviceSettings.agendaCalDEnabled"
+                  label="Calendar D enabled"
+                  color="primary"
+                  hide-details
+                  class="mb-2"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+                <v-row dense>
+                  <v-col cols="12" sm="7">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalDUrl"
+                      label="Calendar D ICS URL"
+                      type="password"
+                      variant="outlined"
+                      density="compact"
+                      hint="Leave empty to keep the current URL - fetched once on save, never again automatically"
+                      persistent-hint
+                      placeholder="••••••••"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    />
+                  </v-col>
+                  <v-col cols="12" sm="5">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalDName"
+                      label="Display name"
+                      variant="outlined"
+                      density="compact"
+                      placeholder="Calendar D"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    />
+                  </v-col>
+                </v-row>
+                <div class="d-flex flex-wrap ga-2 mt-1">
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="refreshingExtraIcs.d"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="refreshExtraIcs('d')"
+                  >
+                    Refresh now
+                  </v-btn>
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="uploadingExtraIcs.d"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="extraIcsFileD?.click()"
+                  >
+                    Upload .ics file
+                  </v-btn>
+                  <input
+                    ref="extraIcsFileD"
+                    type="file"
+                    accept=".ics"
+                    hidden
+                    @change="onExtraIcsFileSelected($event, 'd')"
+                  />
+                </div>
+              </v-card-text>
+            </v-card>
+
+            <v-card variant="tonal" class="mb-3">
+              <v-card-text>
+                <v-switch
+                  v-model="settingsStore.deviceSettings.agendaCalEEnabled"
+                  label="Calendar E enabled"
+                  color="primary"
+                  hide-details
+                  class="mb-2"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+                <v-row dense>
+                  <v-col cols="12" sm="7">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalEUrl"
+                      label="Calendar E ICS URL"
+                      type="password"
+                      variant="outlined"
+                      density="compact"
+                      hint="Leave empty to keep the current URL - fetched once on save, never again automatically"
+                      persistent-hint
+                      placeholder="••••••••"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    />
+                  </v-col>
+                  <v-col cols="12" sm="5">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalEName"
+                      label="Display name"
+                      variant="outlined"
+                      density="compact"
+                      placeholder="Calendar E"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    />
+                  </v-col>
+                </v-row>
+                <div class="d-flex flex-wrap ga-2 mt-1">
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="refreshingExtraIcs.e"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="refreshExtraIcs('e')"
+                  >
+                    Refresh now
+                  </v-btn>
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="uploadingExtraIcs.e"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="extraIcsFileE?.click()"
+                  >
+                    Upload .ics file
+                  </v-btn>
+                  <input
+                    ref="extraIcsFileE"
+                    type="file"
+                    accept=".ics"
+                    hidden
+                    @change="onExtraIcsFileSelected($event, 'e')"
+                  />
+                </div>
+              </v-card-text>
+            </v-card>
 
             <v-divider class="mb-4 mt-2" />
 

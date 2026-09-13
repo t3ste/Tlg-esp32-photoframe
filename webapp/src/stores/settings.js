@@ -120,6 +120,25 @@ export const useSettingsStore = defineStore("settings", () => {
     // first at render time, colored per its own origin. Same write-only
     // treatment as agendaCalUrl above.
     agendaCalUrl2: "",
+    // Three extra ICS sources (e.g. holidays/school-holidays/other
+    // special-days feeds) shown in the same Calendar column as A/B, each
+    // independently enabled/named/colored. Unlike A/B above, these are
+    // NEVER refreshed automatically - only when the URL is set/changed, the
+    // user clicks "refresh now" (agendaCalCRefetch etc., a one-shot flag,
+    // not a persisted setting), or a file is uploaded directly via
+    // /api/agenda/extra-ics. Same write-only URL treatment as agendaCalUrl.
+    agendaCalCEnabled: false,
+    agendaCalDEnabled: false,
+    agendaCalEEnabled: false,
+    agendaCalCUrl: "",
+    agendaCalDUrl: "",
+    agendaCalEUrl: "",
+    agendaCalCName: "",
+    agendaCalDName: "",
+    agendaCalEName: "",
+    agendaCalCColor: "red",
+    agendaCalDColor: "yellow",
+    agendaCalEColor: "red",
     // Optional display names shown in the Calendar header instead of the
     // generic "Calendar A"/"Calendar B" fallback - not secrets, always
     // returned/saved plainly (unlike the URL fields above).
@@ -344,6 +363,15 @@ export const useSettingsStore = defineStore("settings", () => {
       // agenda_todo_url/agenda_cal_url are intentionally never present in
       // this response (see http_server.c) - stay empty even when a URL is actually
       // configured, same write-only treatment as wifiPassword above.
+      deviceSettings.value.agendaCalCEnabled = data.agenda_cal_c_enabled === true;
+      deviceSettings.value.agendaCalDEnabled = data.agenda_cal_d_enabled === true;
+      deviceSettings.value.agendaCalEEnabled = data.agenda_cal_e_enabled === true;
+      deviceSettings.value.agendaCalCName = data.agenda_cal_c_name || "";
+      deviceSettings.value.agendaCalDName = data.agenda_cal_d_name || "";
+      deviceSettings.value.agendaCalEName = data.agenda_cal_e_name || "";
+      deviceSettings.value.agendaCalCColor = data.agenda_cal_c_color || "red";
+      deviceSettings.value.agendaCalDColor = data.agenda_cal_d_color || "yellow";
+      deviceSettings.value.agendaCalEColor = data.agenda_cal_e_color || "red";
       deviceSettings.value.agendaCalName = data.agenda_cal_name || "";
       deviceSettings.value.agendaCalName2 = data.agenda_cal_name2 || "";
       deviceSettings.value.agendaCalDays = data.agenda_cal_days ?? 2;
@@ -479,6 +507,15 @@ export const useSettingsStore = defineStore("settings", () => {
       low_battery_overlay_threshold: deviceSettings.value.lowBatteryOverlayThreshold,
       agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
+      agenda_cal_c_enabled: deviceSettings.value.agendaCalCEnabled,
+      agenda_cal_d_enabled: deviceSettings.value.agendaCalDEnabled,
+      agenda_cal_e_enabled: deviceSettings.value.agendaCalEEnabled,
+      agenda_cal_c_name: deviceSettings.value.agendaCalCName,
+      agenda_cal_d_name: deviceSettings.value.agendaCalDName,
+      agenda_cal_e_name: deviceSettings.value.agendaCalEName,
+      agenda_cal_c_color: deviceSettings.value.agendaCalCColor,
+      agenda_cal_d_color: deviceSettings.value.agendaCalDColor,
+      agenda_cal_e_color: deviceSettings.value.agendaCalEColor,
       agenda_cal_name: deviceSettings.value.agendaCalName,
       agenda_cal_name2: deviceSettings.value.agendaCalName2,
       agenda_cal_days: deviceSettings.value.agendaCalDays,
@@ -537,6 +574,15 @@ export const useSettingsStore = defineStore("settings", () => {
     }
     if (deviceSettings.value.agendaCalUrl2 && deviceSettings.value.agendaCalUrl2.length > 0) {
       currentConfig.agenda_cal_url2 = deviceSettings.value.agendaCalUrl2;
+    }
+    if (deviceSettings.value.agendaCalCUrl && deviceSettings.value.agendaCalCUrl.length > 0) {
+      currentConfig.agenda_cal_c_url = deviceSettings.value.agendaCalCUrl;
+    }
+    if (deviceSettings.value.agendaCalDUrl && deviceSettings.value.agendaCalDUrl.length > 0) {
+      currentConfig.agenda_cal_d_url = deviceSettings.value.agendaCalDUrl;
+    }
+    if (deviceSettings.value.agendaCalEUrl && deviceSettings.value.agendaCalEUrl.length > 0) {
+      currentConfig.agenda_cal_e_url = deviceSettings.value.agendaCalEUrl;
     }
 
     // Compare with original config and only send changed fields.

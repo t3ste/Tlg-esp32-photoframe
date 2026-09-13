@@ -8,6 +8,7 @@
 
 #include "board_hal.h"
 #include "cJSON.h"
+#include "calendar_ics.h"
 #include "cert_pin.h"
 #include "color_palette.h"
 #include "config.h"
@@ -146,6 +147,48 @@ const char *utils_consume_config_error(void)
     out[sizeof(out) - 1] = '\0';
     last_config_error[0] = '\0';
     return out;
+}
+
+// Applies one of the three extra ICS sources' URL fields (see
+// NVS_AGENDA_CAL_C_URL_KEY etc. in config.h): if the incoming value differs
+// from what's already stored, OR the matching "<field>_refetch" flag was
+// sent (the Web UI's "refresh now" button, which doesn't change the URL
+// itself), does a one-shot, unconditional download into `cache_path` right
+// now - unlike Calendar A/B, these sources are otherwise never fetched
+// again on their own once saved. A fetch failure is logged but doesn't fail
+// the whole config save (the URL is still saved either way - a currently
+// unreachable source may become reachable later, and there's no ETag/prior
+// state to roll back to). `set_url` is one of the config_manager setters
+// for this slot (config_manager_set_agenda_cal_c_url() etc.).
+static void apply_extra_ics_url(cJSON *root, const char *url_field, const char *refetch_field,
+                                const char *old_url, const char *cache_path,
+                                void (*set_url)(const char *))
+{
+    cJSON *url_item = cJSON_GetObjectItem(root, url_field);
+    const char *new_url =
+        (url_item && cJSON_IsString(url_item)) ? cJSON_GetStringValue(url_item) : NULL;
+    // Same "empty means untouched, not cleared" write-only convention as
+    // agenda_cal_url/_url2 above - never treat an empty string as an actual
+    // new value.
+    bool have_new_url = new_url && new_url[0] != '\0';
+    cJSON *refetch_item = cJSON_GetObjectItem(root, refetch_field);
+    bool refetch_requested = refetch_item && cJSON_IsTrue(refetch_item);
+
+    bool url_changed = have_new_url && strcmp(new_url, old_url) != 0;
+    const char *effective_url = have_new_url ? new_url : old_url;
+
+    if ((url_changed || refetch_requested) && effective_url && effective_url[0] != '\0') {
+        esp_err_t err = calendar_ics_fetch_once(effective_url, 0, cache_path);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Fetched extra ICS source (%s)", url_field);
+        } else {
+            ESP_LOGW(TAG, "Failed to fetch extra ICS source (%s): %s", url_field,
+                     esp_err_to_name(err));
+        }
+    }
+    if (have_new_url) {
+        set_url(new_url);
+    }
 }
 
 esp_err_t apply_config_from_json(cJSON *root)
@@ -734,6 +777,44 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsString(item)) {
         config_manager_set_agenda_cal_name2(cJSON_GetStringValue(item));
     }
+    // Three extra ICS sources - no periodic refresh, see
+    // apply_extra_ics_url()'s comment above. Enabled/name are plain
+    // settings; URL is write-only like agenda_cal_url/_url2 above, but
+    // unlike those, an actual change (or an explicit "<x>_refetch": true)
+    // triggers an immediate one-shot download.
+    item = cJSON_GetObjectItem(root, "agenda_cal_c_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_c_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_d_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_d_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_e_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_e_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_c_name");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_cal_c_name(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_d_name");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_cal_d_name(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_e_name");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_cal_e_name(cJSON_GetStringValue(item));
+    }
+    apply_extra_ics_url(root, "agenda_cal_c_url", "agenda_cal_c_refetch",
+                        config_manager_get_agenda_cal_c_url(), AGENDA_CAL_CACHE_PATH_C,
+                        config_manager_set_agenda_cal_c_url);
+    apply_extra_ics_url(root, "agenda_cal_d_url", "agenda_cal_d_refetch",
+                        config_manager_get_agenda_cal_d_url(), AGENDA_CAL_CACHE_PATH_D,
+                        config_manager_set_agenda_cal_d_url);
+    apply_extra_ics_url(root, "agenda_cal_e_url", "agenda_cal_e_refetch",
+                        config_manager_get_agenda_cal_e_url(), AGENDA_CAL_CACHE_PATH_E,
+                        config_manager_set_agenda_cal_e_url);
     // Agenda schedule: same shape/validation as rotate_cron above, but an
     // empty array is allowed here (agenda_manager_is_enabled() already
     // requires a non-empty schedule before agenda mode can ever fire, so
@@ -833,6 +914,18 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "agenda_cal_b_color");
     if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
         config_manager_set_agenda_cal_b_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_c_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_c_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_d_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_d_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_e_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_e_color(cJSON_GetStringValue(item));
     }
     config_manager_end_agenda_batch();
 

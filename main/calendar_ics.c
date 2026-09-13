@@ -623,3 +623,71 @@ esp_err_t calendar_ics_fetch(const char *url, int timeout_ms, time_t window_star
     free(body);
     return err;
 }
+
+esp_err_t calendar_ics_fetch_once(const char *url, int timeout_ms, const char *cache_path)
+{
+    if (!url || url[0] == '\0' || !cache_path) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char *body = NULL;
+    size_t body_len = 0;
+    bool truncated = false;
+    esp_err_t err = http_fetch_get(url, timeout_ms > 0 ? timeout_ms : ICS_HTTP_TIMEOUT_MS,
+                                   ICS_MAX_RESPONSE_BYTES, &body, &body_len, &truncated, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "One-shot Calendar fetch failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    if (truncated) {
+        ESP_LOGW(TAG,
+                 "One-shot Calendar response truncated at %d bytes - caching what was captured",
+                 ICS_MAX_RESPONSE_BYTES);
+    }
+
+    FILE *fp = fopen(cache_path, "wb");
+    if (!fp) {
+        ESP_LOGW(TAG, "Could not write Calendar cache file %s", cache_path);
+        free(body);
+        return ESP_FAIL;
+    }
+    fwrite(body, 1, body_len, fp);
+    fclose(fp);
+    free(body);
+    return ESP_OK;
+}
+
+esp_err_t calendar_ics_read_cache(const char *cache_path, time_t window_start, time_t window_end,
+                                  ics_event_list_t *out)
+{
+    if (!out) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out, 0, sizeof(*out));
+    if (!cache_path) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t body_len = 0;
+    char *body = read_whole_file(cache_path, &body_len);
+    if (!body) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    esp_err_t err = calendar_ics_parse(body, body_len, window_start, window_end, out);
+    free(body);
+    return err;
+}
+
+bool calendar_ics_has_upcoming_event(const ics_event_list_t *list, time_t now)
+{
+    if (!list) {
+        return false;
+    }
+    for (int i = 0; i < list->count; i++) {
+        if (list->events[i].end > now) {
+            return true;
+        }
+    }
+    return false;
+}

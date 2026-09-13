@@ -68,4 +68,34 @@ esp_err_t calendar_ics_fetch(const char *url, int timeout_ms, time_t window_star
 esp_err_t calendar_ics_parse(char *body, size_t body_len, time_t window_start, time_t window_end,
                              ics_event_list_t *out);
 
+/**
+ * @brief One-shot, unconditional fetch: downloads `url` and overwrites
+ * `cache_path` with the raw response body - no ETag/conditional-GET, no
+ * parsing/event extraction. For ICS sources that are only ever meant to be
+ * fetched on an explicit user action (a URL being set/changed, a manual
+ * "refresh now", see agenda_manager.c's extra ICS sources) rather than on
+ * every agenda wake like calendar_ics_fetch() above.
+ */
+esp_err_t calendar_ics_fetch_once(const char *url, int timeout_ms, const char *cache_path);
+
+/**
+ * @brief Reads whatever is currently cached at `cache_path` and parses it
+ * (calendar_ics_parse()) - no network access at all. The per-wake read
+ * path for a source that doesn't auto-refresh (calendar_ics_fetch_once()
+ * above is the only thing that ever updates `cache_path`). Returns
+ * ESP_ERR_NOT_FOUND if the file doesn't exist/is empty - a source that was
+ * never configured, same as a fresh device.
+ */
+esp_err_t calendar_ics_read_cache(const char *cache_path, time_t window_start, time_t window_end,
+                                  ics_event_list_t *out);
+
+/**
+ * @brief True if `list` has at least one event that hasn't fully passed yet
+ * (end > now) - i.e. the source isn't exhausted/stale. Used by callers that
+ * treat "no more upcoming content at all" as actionable, e.g.
+ * agenda_manager.c's extra ICS sources, which never refresh themselves and
+ * so need to flag when they've run dry.
+ */
+bool calendar_ics_has_upcoming_event(const ics_event_list_t *list, time_t now);
+
 #endif

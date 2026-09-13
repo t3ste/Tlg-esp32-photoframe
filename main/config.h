@@ -117,6 +117,16 @@ typedef enum {
 #define AGENDA_CAL_CACHE_PATH FS_MOUNT_POINT "/.agenda_cal_cache.ics"
 #define AGENDA_CAL_CACHE_PATH2 FS_MOUNT_POINT "/.agenda_cal_cache2.ics"
 
+// Three extra, user-supplied ICS sources (e.g. holidays/school-holidays/
+// special-days feeds) - unlike the two caches above, these are NOT
+// refreshed on every agenda wake (see NVS_AGENDA_CAL_C_URL_KEY etc.): the
+// file here is only (re)written when the user sets/changes the source URL,
+// clicks "refresh now," or uploads a replacement directly. Every agenda
+// wake just re-parses whatever's already on disk, no network involved.
+#define AGENDA_CAL_CACHE_PATH_C FS_MOUNT_POINT "/.agenda_cal_cache_c.ics"
+#define AGENDA_CAL_CACHE_PATH_D FS_MOUNT_POINT "/.agenda_cal_cache_d.ics"
+#define AGENDA_CAL_CACHE_PATH_E FS_MOUNT_POINT "/.agenda_cal_cache_e.ics"
+
 // On-demand thumbnail scratch file for telegram_bot_notify_fallback_image() -
 // generated only when the image being reported has no pre-existing ".jpg"
 // sidecar (true for any plain Storage/Auto-Rotate album image, since that
@@ -610,6 +620,35 @@ typedef enum {
 #define AGENDA_CAL_A_C_DEFAULT "blue"
 #define NVS_AGENDA_CAL_B_C_KEY "agenda_cal_b_c"
 #define AGENDA_CAL_B_C_DEFAULT "green"
+// Three extra, independently-named ICS sources (e.g. holidays, school
+// holidays, other special-days feeds a user finds/exports as .ics) shown in
+// the same Calendar column as A/B, each in its own hue. Unlike A/B, these
+// have NO periodic refresh (see AGENDA_CAL_CACHE_PATH_C etc. above) - only
+// (re)fetched when the URL is set/changed, "refresh now" is clicked, or a
+// file is uploaded directly. Only red and yellow are left unused by the
+// other roles above at this column's own two existing hues (blue/green,
+// cal_a/cal_b) - the third source (E) necessarily reuses "red" (same as C),
+// same as several other roles already share a hue across different
+// contexts; still visually distinct from cal_a/cal_b within this column.
+#define NVS_AGENDA_CAL_C_ENABLED_KEY "agenda_cal_c_en"
+#define NVS_AGENDA_CAL_C_URL_KEY "agenda_cal_c_url"
+#define AGENDA_CAL_C_URL_MAX_LEN 256
+#define NVS_AGENDA_CAL_C_NAME_KEY "agenda_cal_c_nm"
+#define NVS_AGENDA_CAL_C_C_KEY "agenda_cal_c_c"
+#define AGENDA_CAL_C_C_DEFAULT "red"
+#define NVS_AGENDA_CAL_D_ENABLED_KEY "agenda_cal_d_en"
+#define NVS_AGENDA_CAL_D_URL_KEY "agenda_cal_d_url"
+#define AGENDA_CAL_D_URL_MAX_LEN 256
+#define NVS_AGENDA_CAL_D_NAME_KEY "agenda_cal_d_nm"
+#define NVS_AGENDA_CAL_D_C_KEY "agenda_cal_d_c"
+#define AGENDA_CAL_D_C_DEFAULT "yellow"
+#define NVS_AGENDA_CAL_E_ENABLED_KEY "agenda_cal_e_en"
+#define NVS_AGENDA_CAL_E_URL_KEY "agenda_cal_e_url"
+#define AGENDA_CAL_E_URL_MAX_LEN 256
+#define NVS_AGENDA_CAL_E_NAME_KEY "agenda_cal_e_nm"
+#define NVS_AGENDA_CAL_E_C_KEY "agenda_cal_e_c"
+#define AGENDA_CAL_E_C_DEFAULT "red"
+#define AGENDA_CAL_CDE_NAME_MAX_LEN 24
 
 // WiFi association draws a brief high-current TX burst; whenever a battery
 // is in the loop (battery-only, or USB+battery together - see

@@ -387,6 +387,32 @@ const char *config_manager_get_agenda_cal_url(void);
 void config_manager_set_agenda_cal_url2(const char *url);
 const char *config_manager_get_agenda_cal_url2(void);
 
+// Three extra, independently-enabled ICS sources (e.g. holidays/school
+// holidays/other special-days feeds) shown in the same Calendar column as
+// A/B - see AGENDA_CAL_CACHE_PATH_C etc. and NVS_AGENDA_CAL_C_URL_KEY etc.
+// in config.h for the key behavioral difference from A/B: these are never
+// refreshed automatically, only on an explicit URL change, a "refresh now"
+// request, or a direct file upload (agenda_manager_refresh_extra_ics()).
+// Same write-only URL treatment as agenda_cal_url/_url2 above.
+void config_manager_set_agenda_cal_c_enabled(bool enabled);
+bool config_manager_get_agenda_cal_c_enabled(void);
+void config_manager_set_agenda_cal_c_url(const char *url);
+const char *config_manager_get_agenda_cal_c_url(void);
+void config_manager_set_agenda_cal_c_name(const char *name);
+const char *config_manager_get_agenda_cal_c_name(void);
+void config_manager_set_agenda_cal_d_enabled(bool enabled);
+bool config_manager_get_agenda_cal_d_enabled(void);
+void config_manager_set_agenda_cal_d_url(const char *url);
+const char *config_manager_get_agenda_cal_d_url(void);
+void config_manager_set_agenda_cal_d_name(const char *name);
+const char *config_manager_get_agenda_cal_d_name(void);
+void config_manager_set_agenda_cal_e_enabled(bool enabled);
+bool config_manager_get_agenda_cal_e_enabled(void);
+void config_manager_set_agenda_cal_e_url(const char *url);
+const char *config_manager_get_agenda_cal_e_url(void);
+void config_manager_set_agenda_cal_e_name(const char *name);
+const char *config_manager_get_agenda_cal_e_name(void);
+
 // Cached ETag validators for each source's conditional GET (see
 // AGENDA_TODO_CACHE_PATH etc. in config.h) - internal fetch-cache state,
 // not user data: not exposed via the HTTP API, same as the getters above are
@@ -472,6 +498,12 @@ void config_manager_set_agenda_cal_a_color(const char *color);
 const char *config_manager_get_agenda_cal_a_color(void);
 void config_manager_set_agenda_cal_b_color(const char *color);
 const char *config_manager_get_agenda_cal_b_color(void);
+void config_manager_set_agenda_cal_c_color(const char *color);
+const char *config_manager_get_agenda_cal_c_color(void);
+void config_manager_set_agenda_cal_d_color(const char *color);
+const char *config_manager_get_agenda_cal_d_color(void);
+void config_manager_set_agenda_cal_e_color(const char *color);
+const char *config_manager_get_agenda_cal_e_color(void);
 
 // ============================================================================
 // OTA

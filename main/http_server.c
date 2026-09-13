@@ -1671,6 +1671,18 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddStringToObject(root, "agenda_cal_multiday_mode", agenda_multiday_str);
         cJSON_AddStringToObject(root, "agenda_cal_name", config_manager_get_agenda_cal_name());
         cJSON_AddStringToObject(root, "agenda_cal_name2", config_manager_get_agenda_cal_name2());
+        // Three extra ICS sources (e.g. holidays/school-holidays) - same
+        // write-only URL treatment as agenda_cal_url/_url2 above, but their
+        // enabled flag/name/color are plain, non-secret settings.
+        cJSON_AddBoolToObject(root, "agenda_cal_c_enabled",
+                              config_manager_get_agenda_cal_c_enabled());
+        cJSON_AddStringToObject(root, "agenda_cal_c_name", config_manager_get_agenda_cal_c_name());
+        cJSON_AddBoolToObject(root, "agenda_cal_d_enabled",
+                              config_manager_get_agenda_cal_d_enabled());
+        cJSON_AddStringToObject(root, "agenda_cal_d_name", config_manager_get_agenda_cal_d_name());
+        cJSON_AddBoolToObject(root, "agenda_cal_e_enabled",
+                              config_manager_get_agenda_cal_e_enabled());
+        cJSON_AddStringToObject(root, "agenda_cal_e_name", config_manager_get_agenda_cal_e_name());
         cJSON *agenda_cron_arr = cJSON_CreateArray();
         int agenda_cron_count = config_manager_get_agenda_cron_rule_count();
         for (int i = 0; i < agenda_cron_count; i++) {
@@ -1705,6 +1717,12 @@ static esp_err_t config_handler(httpd_req_t *req)
                                 config_manager_get_agenda_cal_a_color());
         cJSON_AddStringToObject(root, "agenda_cal_b_color",
                                 config_manager_get_agenda_cal_b_color());
+        cJSON_AddStringToObject(root, "agenda_cal_c_color",
+                                config_manager_get_agenda_cal_c_color());
+        cJSON_AddStringToObject(root, "agenda_cal_d_color",
+                                config_manager_get_agenda_cal_d_color());
+        cJSON_AddStringToObject(root, "agenda_cal_e_color",
+                                config_manager_get_agenda_cal_e_color());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -2327,8 +2345,9 @@ static esp_err_t factory_reset_handler(httpd_req_t *req)
     // never enabled) is expected, not an error - logged at INFO either way
     // so a factory reset's actual cleanup effect is visible in the log
     // rather than silently assumed.
-    const char *agenda_cache_paths[] = {AGENDA_TODO_CACHE_PATH, AGENDA_CAL_CACHE_PATH,
-                                        AGENDA_CAL_CACHE_PATH2};
+    const char *agenda_cache_paths[] = {AGENDA_TODO_CACHE_PATH,  AGENDA_CAL_CACHE_PATH,
+                                        AGENDA_CAL_CACHE_PATH2,  AGENDA_CAL_CACHE_PATH_C,
+                                        AGENDA_CAL_CACHE_PATH_D, AGENDA_CAL_CACHE_PATH_E};
     for (size_t i = 0; i < sizeof(agenda_cache_paths) / sizeof(agenda_cache_paths[0]); i++) {
         if (unlink(agenda_cache_paths[i]) == 0) {
             ESP_LOGI(TAG, "Removed orphaned Agenda cache file: %s", agenda_cache_paths[i]);
@@ -2386,6 +2405,98 @@ static esp_err_t error_overlay_test_handler(httpd_req_t *req)
             req, "{\"status\":\"error\",\"message\":\"Failed to display error overlay\"}");
         return ESP_FAIL;
     }
+}
+
+// Maximum accepted size for a directly-uploaded extra ICS file - generous
+// vs. a realistic holidays/school-holidays/special-days feed (calendar_ics.c
+// itself caps a normal fetch at 2MB for a full personal calendar's years of
+// history; a hand-curated or single-purpose feed like these is expected to
+// be far smaller), but still bounded rather than accepting an arbitrarily
+// large body into a heap allocation.
+#define AGENDA_EXTRA_ICS_UPLOAD_MAX_BYTES (512 * 1024)
+
+// POST /api/agenda/extra-ics?slot=c|d|e - lets the user upload a .ics file
+// directly instead of providing a URL, for one of the three extra Calendar
+// sources that never auto-refresh (see NVS_AGENDA_CAL_C_URL_KEY etc. in
+// config.h). The raw request body is the .ics content itself (not
+// multipart - these are plain text files, unlike the photo uploads
+// elsewhere in this file); it's written straight to that slot's cache file,
+// with no network fetch involved at all. A minimal sanity check
+// ("BEGIN:VCALENDAR" prefix) guards against silently caching something that
+// clearly isn't an ICS file, matching this project's fail-soft-but-not-
+// blind style elsewhere.
+static esp_err_t agenda_extra_ics_upload_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    char query[32];
+    char slot[4] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "slot", slot, sizeof(slot)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing ?slot=c|d|e");
+        return ESP_FAIL;
+    }
+    const char *cache_path;
+    if (strcmp(slot, "c") == 0) {
+        cache_path = AGENDA_CAL_CACHE_PATH_C;
+    } else if (strcmp(slot, "d") == 0) {
+        cache_path = AGENDA_CAL_CACHE_PATH_D;
+    } else if (strcmp(slot, "e") == 0) {
+        cache_path = AGENDA_CAL_CACHE_PATH_E;
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "slot must be c, d, or e");
+        return ESP_FAIL;
+    }
+
+    if (req->content_len <= 0 || req->content_len > AGENDA_EXTRA_ICS_UPLOAD_MAX_BYTES) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "File missing or too large");
+        return ESP_FAIL;
+    }
+
+    power_manager_reset_sleep_timer();
+
+    char *buf = heap_caps_malloc((size_t) req->content_len + 1, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+    int received = 0;
+    while (received < req->content_len) {
+        int ret = httpd_req_recv(req, buf + received, req->content_len - received);
+        if (ret <= 0) {
+            heap_caps_free(buf);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to receive data");
+            return ESP_FAIL;
+        }
+        received += ret;
+    }
+    buf[received] = '\0';
+
+    if (strncmp(buf, "BEGIN:VCALENDAR", 15) != 0) {
+        heap_caps_free(buf);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                            "Not an ICS file (missing BEGIN:VCALENDAR)");
+        return ESP_FAIL;
+    }
+
+    FILE *fp = fopen(cache_path, "wb");
+    if (!fp) {
+        heap_caps_free(buf);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save file");
+        return ESP_FAIL;
+    }
+    fwrite(buf, 1, (size_t) received, fp);
+    fclose(fp);
+    heap_caps_free(buf);
+
+    ESP_LOGI(TAG, "Extra ICS source '%s' updated via upload (%d bytes)", slot, received);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+    return ESP_OK;
 }
 
 static esp_err_t processing_settings_handler(httpd_req_t *req)
@@ -2951,6 +3062,12 @@ esp_err_t http_server_init(void)
                                               .handler = error_overlay_test_handler,
                                               .user_ctx = NULL};
         httpd_register_uri_handler(server, &error_overlay_test_uri);
+
+        httpd_uri_t agenda_extra_ics_uri = {.uri = "/api/agenda/extra-ics",
+                                            .method = HTTP_POST,
+                                            .handler = agenda_extra_ics_upload_handler,
+                                            .user_ctx = NULL};
+        httpd_register_uri_handler(server, &agenda_extra_ics_uri);
 
         ESP_LOGI(TAG, "HTTP server started");
         return ESP_OK;

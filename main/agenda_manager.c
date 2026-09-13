@@ -1,5 +1,6 @@
 #include "agenda_manager.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -17,6 +18,66 @@
 #include "weather.h"
 
 static const char *TAG = "agenda_manager";
+
+// If `list` has no event overlapping or after `now`, injects a single
+// synthetic all-day event naming `display_name` so a source that will never
+// refresh itself automatically (see NVS_AGENDA_CAL_C_URL_KEY etc. in
+// config.h) stays visibly identifiable in the Calendar column every day
+// until the user replaces it (new URL, "refresh now," or a fresh upload),
+// instead of just silently going empty forever. Only used for the three
+// extra sources below - Calendar A/B's emptiness is presumed transient (a
+// fetch failure this wake only), not a permanent "this needs attention"
+// signal.
+static void inject_stale_reminder_if_needed(ics_event_list_t *list, const char *display_name,
+                                            time_t now)
+{
+    if (calendar_ics_has_upcoming_event(list, now)) {
+        return;  // still has upcoming content - nothing to flag
+    }
+    if (list->count >= ICS_MAX_EVENTS) {
+        return;  // pathological - no room, leave as-is rather than drop a real event
+    }
+
+    struct tm tm_now;
+    localtime_r(&now, &tm_now);
+    tm_now.tm_hour = 0;
+    tm_now.tm_min = 0;
+    tm_now.tm_sec = 0;
+    time_t today = mktime(&tm_now);
+
+    ics_event_t *ev = &list->events[list->count++];
+    memset(ev, 0, sizeof(*ev));
+    ev->start = today;
+    ev->end = today;
+    ev->all_day = true;
+    bool german = (strcmp(config_manager_get_overlay_language(), "de") == 0);
+    if (german) {
+        snprintf(ev->summary, sizeof(ev->summary),
+                 "\xE2\x9A\xA0 %s: keine aktuellen Termine - bitte aktualisieren", display_name);
+    } else {
+        snprintf(ev->summary, sizeof(ev->summary),
+                 "\xE2\x9A\xA0 %s: no upcoming events - please update", display_name);
+    }
+}
+
+// Reads and parses whatever is already cached for one of the three extra,
+// non-auto-refreshing ICS sources (calendar_ics_read_cache() - no network),
+// and injects the stale reminder above if it's out of upcoming content.
+// Returns false (and leaves `out` zeroed) if the source isn't enabled, has
+// no cache yet (never configured / never successfully fetched), or fails to
+// parse - same fail-soft contract as the Calendar A/B fetch blocks.
+static bool load_extra_ics_source(bool enabled, const char *cache_path, const char *display_name,
+                                  time_t now, time_t window_end, ics_event_list_t *out)
+{
+    if (!enabled) {
+        return false;
+    }
+    if (calendar_ics_read_cache(cache_path, now, window_end, out) != ESP_OK) {
+        return false;
+    }
+    inject_stale_reminder_if_needed(out, display_name, now);
+    return true;
+}
 
 bool agenda_manager_is_enabled(void)
 {
@@ -80,11 +141,17 @@ esp_err_t agenda_manager_run(void)
     todo_list_t *todo = heap_caps_calloc(1, sizeof(todo_list_t), MALLOC_CAP_SPIRAM);
     ics_event_list_t *events_a = heap_caps_calloc(1, sizeof(ics_event_list_t), MALLOC_CAP_SPIRAM);
     ics_event_list_t *events_b = heap_caps_calloc(1, sizeof(ics_event_list_t), MALLOC_CAP_SPIRAM);
-    if (!todo || !events_a || !events_b) {
+    ics_event_list_t *events_c = heap_caps_calloc(1, sizeof(ics_event_list_t), MALLOC_CAP_SPIRAM);
+    ics_event_list_t *events_d = heap_caps_calloc(1, sizeof(ics_event_list_t), MALLOC_CAP_SPIRAM);
+    ics_event_list_t *events_e = heap_caps_calloc(1, sizeof(ics_event_list_t), MALLOC_CAP_SPIRAM);
+    if (!todo || !events_a || !events_b || !events_c || !events_d || !events_e) {
         ESP_LOGE(TAG, "Failed to allocate agenda fetch buffers");
         heap_caps_free(todo);
         heap_caps_free(events_a);
         heap_caps_free(events_b);
+        heap_caps_free(events_c);
+        heap_caps_free(events_d);
+        heap_caps_free(events_e);
         return ESP_ERR_NO_MEM;
     }
 
@@ -142,6 +209,32 @@ esp_err_t agenda_manager_run(void)
         }
     }
 
+    // Three extra, user-supplied ICS sources (e.g. holidays/school-holidays/
+    // other special-days feeds) - unlike A/B above, these are never fetched
+    // here: they were already downloaded/uploaded once, ahead of time (see
+    // utils.c's apply_config_from_json() and the /api/agenda/extra-ics
+    // upload endpoint in http_server.c), so this is a pure local read+parse,
+    // no network, no ETag. Gated on want_cal per the same "only matters if
+    // the Calendar column is actually showing" logic as A/B - cal_days/
+    // window_end are already computed above.
+    bool have_events_c = false, have_events_d = false, have_events_e = false;
+    if (want_cal) {
+        time_t now = time(NULL);
+        time_t window_end = now + (time_t) cal_days * 86400;
+        const char *name_c = config_manager_get_agenda_cal_c_name();
+        const char *name_d = config_manager_get_agenda_cal_d_name();
+        const char *name_e = config_manager_get_agenda_cal_e_name();
+        have_events_c = load_extra_ics_source(
+            config_manager_get_agenda_cal_c_enabled(), AGENDA_CAL_CACHE_PATH_C,
+            name_c[0] ? name_c : "Calendar C", now, window_end, events_c);
+        have_events_d = load_extra_ics_source(
+            config_manager_get_agenda_cal_d_enabled(), AGENDA_CAL_CACHE_PATH_D,
+            name_d[0] ? name_d : "Calendar D", now, window_end, events_d);
+        have_events_e = load_extra_ics_source(
+            config_manager_get_agenda_cal_e_enabled(), AGENDA_CAL_CACHE_PATH_E,
+            name_e[0] ? name_e : "Calendar E", now, window_end, events_e);
+    }
+
     // Opt-in per-day forecast annotation on the Calendar column's day
     // dividers - reuses the exact same weather_fetch_forecast() the photo
     // weather overlay already calls (same location/provider settings, own
@@ -154,7 +247,8 @@ esp_err_t agenda_manager_run(void)
     weather_forecast_t cal_weather;
     memset(&cal_weather, 0, sizeof(cal_weather));
     bool have_cal_weather = false;
-    if ((have_events_a || have_events_b) && config_manager_get_agenda_cal_weather_enabled()) {
+    if ((have_events_a || have_events_b || have_events_c || have_events_d || have_events_e) &&
+        config_manager_get_agenda_cal_weather_enabled()) {
         bool ok = (weather_fetch_forecast(&cal_weather) == ESP_OK);
         utils_record_internet_attempt(ok);
         have_cal_weather = ok && cal_weather.valid;
@@ -183,14 +277,16 @@ esp_err_t agenda_manager_run(void)
     }
 
     esp_err_t result;
-    if (!have_todo && !have_events_a && !have_events_b) {
+    if (!have_todo && !have_events_a && !have_events_b && !have_events_c && !have_events_d &&
+        !have_events_e) {
         ESP_LOGW(TAG, "Nothing to render this agenda cycle (no source fetched successfully)");
         result = ESP_FAIL;
     } else {
-        result = agenda_renderer_render(have_todo ? todo : NULL, have_events_a ? events_a : NULL,
-                                        have_events_b ? events_b : NULL,
-                                        have_cal_weather ? &cal_weather : NULL, cal_days,
-                                        AGENDA_OUTPUT_PATH, IMAGE_FORMAT_PNG);
+        result = agenda_renderer_render(
+            have_todo ? todo : NULL, have_events_a ? events_a : NULL,
+            have_events_b ? events_b : NULL, have_events_c ? events_c : NULL,
+            have_events_d ? events_d : NULL, have_events_e ? events_e : NULL,
+            have_cal_weather ? &cal_weather : NULL, cal_days, AGENDA_OUTPUT_PATH, IMAGE_FORMAT_PNG);
         if (result != ESP_OK) {
             ESP_LOGE(TAG, "Failed to render agenda screen: %s", esp_err_to_name(result));
         } else {
@@ -201,5 +297,8 @@ esp_err_t agenda_manager_run(void)
     heap_caps_free(todo);
     heap_caps_free(events_a);
     heap_caps_free(events_b);
+    heap_caps_free(events_c);
+    heap_caps_free(events_d);
+    heap_caps_free(events_e);
     return result;
 }

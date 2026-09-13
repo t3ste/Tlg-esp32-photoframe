@@ -463,3 +463,57 @@ TEST_F(CalendarIcs, NullOutIsInvalidArg)
     esp_err_t err = calendar_ics_parse(body, 1, 0, 0, nullptr);
     EXPECT_EQ(err, ESP_ERR_INVALID_ARG);
 }
+
+// calendar_ics_has_upcoming_event() - used by agenda_manager.c's extra ICS
+// sources (holidays/school-holidays/etc.) to decide whether to inject a
+// "this source is stale, please update it" reminder, since those three
+// sources never refresh themselves.
+TEST_F(CalendarIcs, HasUpcomingEventEmptyListIsFalse)
+{
+    ics_event_list_t list;
+    memset(&list, 0, sizeof(list));
+    EXPECT_FALSE(calendar_ics_has_upcoming_event(&list, make_utc(2024, 1, 15, 0, 0, 0)));
+}
+
+TEST_F(CalendarIcs, HasUpcomingEventAllInPastIsFalse)
+{
+    ics_event_list_t list;
+    memset(&list, 0, sizeof(list));
+    list.count = 2;
+    list.events[0].start = make_utc(2020, 1, 1, 0, 0, 0);
+    list.events[0].end = make_utc(2020, 1, 2, 0, 0, 0);
+    list.events[1].start = make_utc(2021, 6, 1, 0, 0, 0);
+    list.events[1].end = make_utc(2021, 6, 2, 0, 0, 0);
+    EXPECT_FALSE(calendar_ics_has_upcoming_event(&list, make_utc(2024, 1, 15, 0, 0, 0)));
+}
+
+TEST_F(CalendarIcs, HasUpcomingEventOneFutureIsTrue)
+{
+    ics_event_list_t list;
+    memset(&list, 0, sizeof(list));
+    list.count = 2;
+    list.events[0].start = make_utc(2020, 1, 1, 0, 0, 0);
+    list.events[0].end = make_utc(2020, 1, 2, 0, 0, 0);
+    list.events[1].start = make_utc(2030, 1, 1, 0, 0, 0);
+    list.events[1].end = make_utc(2030, 1, 2, 0, 0, 0);
+    EXPECT_TRUE(calendar_ics_has_upcoming_event(&list, make_utc(2024, 1, 15, 0, 0, 0)));
+}
+
+TEST_F(CalendarIcs, HasUpcomingEventEndExactlyAtNowIsFalse)
+{
+    // end > now is the exact rule (event.end == now is treated as fully
+    // passed, matching event_touches_day()'s own end-is-exclusive
+    // convention in agenda_renderer.c).
+    ics_event_list_t list;
+    memset(&list, 0, sizeof(list));
+    list.count = 1;
+    time_t now = make_utc(2024, 1, 15, 12, 0, 0);
+    list.events[0].start = make_utc(2024, 1, 15, 11, 0, 0);
+    list.events[0].end = now;
+    EXPECT_FALSE(calendar_ics_has_upcoming_event(&list, now));
+}
+
+TEST_F(CalendarIcs, HasUpcomingEventNullListIsFalse)
+{
+    EXPECT_FALSE(calendar_ics_has_upcoming_event(nullptr, make_utc(2024, 1, 15, 0, 0, 0)));
+}
