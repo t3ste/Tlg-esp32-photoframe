@@ -335,6 +335,9 @@ async function exportConfig() {
       delete config.agenda_todo_url;
       delete config.agenda_cal_url;
       delete config.agenda_cal_url2;
+      delete config.agenda_cal_c_url;
+      delete config.agenda_cal_d_url;
+      delete config.agenda_cal_e_url;
       // These 5 ARE returned by GET /api/config in plaintext - only strip
       // them when the user hasn't opted in to a full-credentials export.
       if (!exportIncludeSecrets.value) {
