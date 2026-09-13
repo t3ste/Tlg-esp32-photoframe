@@ -730,8 +730,8 @@ static bool event_touches_day(const ics_event_t *ev, time_t day)
 }
 
 // Total whole days `ev` spans (inclusive of both its first and last day) -
-// used only by the opt-in "compact multi-day" display below. A 1-day event
-// (the overwhelming majority) returns 1.
+// used by the COMPACT/REPEAT_NUMBERED multi-day display modes below. A
+// 1-day event (the overwhelming majority) returns 1.
 static int event_total_days(const ics_event_t *ev)
 {
     time_t ev_day_start = day_start(ev->start);
@@ -792,9 +792,10 @@ static int compare_tagged_by_start(const void *a, const void *b)
 // timestamp - no day-count parenthetical, see the Web UI/README for that),
 // then one draw_day_divider() per distinct calendar day touched by any
 // event from either source, each followed by every event that touches
-// that day - including a multi-day event, which is deliberately repeated
-// under each day it spans rather than shown once under its start day
-// only. The day list is derived from the merged events but clipped to the
+// that day - including a multi-day event, which by default (REPEAT mode)
+// is repeated under each day it spans rather than shown once under its
+// start day only; see agenda_multiday_mode_t for the other two modes. The
+// day list is derived from the merged events but clipped to the
 // lookahead window explicitly too, since a multi-day event's own span can
 // extend past the window on either side even though it overlaps it. Stops
 // once the column runs out of vertical room, reserving a row for "+N more"
@@ -908,13 +909,17 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         }
     }
 
-    // Opt-in: a multi-day event is shown only once, on the first day of the
-    // *visible* window it touches, with an "N/M: " prefix (N = its position
-    // within its own full span, M = that span's total length) instead of
-    // being repeated under every day it spans. Precomputed once per tagged
-    // event rather than re-derived per day, since both the budgeting pass
-    // and the render pass below need the same answer.
-    bool compact_multiday = config_manager_get_agenda_cal_compact_multiday();
+    // Multi-day event display mode - see agenda_multiday_mode_t (config.h).
+    // COMPACT shows the event only once, on the first day of the *visible*
+    // window it touches; REPEAT_NUMBERED keeps repeating it under every day
+    // like plain REPEAT but adds the same "N/M: " prefix COMPACT uses (N =
+    // position within the event's own full span, M = that span's total
+    // length). Precomputed once per tagged event rather than re-derived per
+    // day, since both the budgeting pass and the render pass below need the
+    // same answer.
+    agenda_multiday_mode_t multiday_mode = config_manager_get_agenda_cal_multiday_mode();
+    bool skip_repeats = (multiday_mode == AGENDA_MULTIDAY_COMPACT);
+    bool show_prefix = (multiday_mode != AGENDA_MULTIDAY_REPEAT);
     bool is_multiday[AGENDA_MAX_TAGGED_EVENTS];
     int first_visible_idx[AGENDA_MAX_TAGGED_EVENTS];
     for (int k = 0; k < tagged_count; k++) {
@@ -939,7 +944,7 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
             if (!event_touches_day(tagged[k].ev, days[di])) {
                 continue;
             }
-            if (compact_multiday && is_multiday[k] && di != first_visible_idx[k]) {
+            if (skip_repeats && is_multiday[k] && di != first_visible_idx[k]) {
                 continue;
             }
             total_event_instances++;
@@ -991,14 +996,14 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
             if (!event_touches_day(tagged[i].ev, days[di])) {
                 continue;
             }
-            if (compact_multiday && is_multiday[i] && di != first_visible_idx[i]) {
+            if (skip_repeats && is_multiday[i] && di != first_visible_idx[i]) {
                 continue;
             }
             const agenda_event_line_t *line = tagged[i].line;
 
             char prefix[16] = "";
             int prefix_len = 0;
-            if (compact_multiday && is_multiday[i]) {
+            if (show_prefix && is_multiday[i]) {
                 prefix_len = snprintf(prefix, sizeof(prefix),
                                       "%d/%d: ", event_day_index(tagged[i].ev, days[di]),
                                       event_total_days(tagged[i].ev));

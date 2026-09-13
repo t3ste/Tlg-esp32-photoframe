@@ -1657,8 +1657,18 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_agenda_cal_weather_enabled());
         cJSON_AddBoolToObject(root, "agenda_cal_weather_right_aligned",
                               config_manager_get_agenda_cal_weather_right_aligned());
-        cJSON_AddBoolToObject(root, "agenda_cal_compact_multiday",
-                              config_manager_get_agenda_cal_compact_multiday());
+        const char *agenda_multiday_str = "repeat";
+        switch (config_manager_get_agenda_cal_multiday_mode()) {
+        case AGENDA_MULTIDAY_COMPACT:
+            agenda_multiday_str = "compact";
+            break;
+        case AGENDA_MULTIDAY_REPEAT_NUMBERED:
+            agenda_multiday_str = "repeat_numbered";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "agenda_cal_multiday_mode", agenda_multiday_str);
         cJSON_AddStringToObject(root, "agenda_cal_name", config_manager_get_agenda_cal_name());
         cJSON_AddStringToObject(root, "agenda_cal_name2", config_manager_get_agenda_cal_name2());
         cJSON *agenda_cron_arr = cJSON_CreateArray();

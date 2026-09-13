@@ -23,6 +23,17 @@ typedef enum {
 // override is independent — it applies in both modes (empty = automatic).
 typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 
+// How the Calendar column of Agenda mode displays a multi-day event - see
+// NVS_AGENDA_CAL_COMPACT_KEY below and agenda_renderer.c's
+// event_total_days()/event_day_index(). Values are stored as-is in NVS, so
+// the numbering must stay stable across firmware versions.
+typedef enum {
+    AGENDA_MULTIDAY_REPEAT = 0,   // repeated under every day it spans, no prefix
+    AGENDA_MULTIDAY_COMPACT = 1,  // shown once, on its first visible day, "N/M: " prefix
+    AGENDA_MULTIDAY_REPEAT_NUMBERED =
+        2,  // repeated under every day, each with its own "N/M: " prefix
+} agenda_multiday_mode_t;
+
 #define IP_ADDR_STR_MAX_LEN 16  // dotted IPv4 + NUL
 
 #define DEVICE_NAME_MAX_LEN 64
@@ -532,10 +543,10 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // any information a centered layout would have kept, in either the
 // stacked or side-by-side column layout.
 #define NVS_AGENDA_CAL_WTHR_ALIGN_KEY "agenda_cal_wal"
-// Opt-in: a multi-day event is shown once (on the first day of the visible
-// window it touches) with an "N/M: " position-within-span prefix, instead
-// of being repeated under every day it spans - see agenda_renderer.c's
-// event_total_days()/event_day_index().
+// Multi-day event display mode - see agenda_multiday_mode_t above. NVS key
+// name/values predate the third mode (0/1 used to be a plain bool, "compact
+// multi-day" on/off) - kept as-is so existing devices' saved choice still
+// means the same thing after an upgrade.
 #define NVS_AGENDA_CAL_COMPACT_KEY "agenda_cal_cpt"
 // Optional display name shown in the Calendar column header instead of the
 // generic "Calendar A"/"Calendar B" fallback (agenda_renderer.c) - e.g.

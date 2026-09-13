@@ -81,7 +81,8 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 
 **Agenda Mode** ([colors doc](AGENDA_COLORS.html)):
 - feat: ToDo (todo.txt-format URL) and/or Calendar (up to two ICS/iCal URLs, merged and sorted together) content, shown full-screen alone or together (stacked or side-by-side), on its own independent cron schedule that runs alongside normal photo rotation rather than disabling it — a matching wake renders directly to the panel and skips the photo pipeline for that cycle only; normal rotation continues on its own next scheduled wake
-- feat: per-element ToDo coloring (priority, `+project`/`@context` tags, due-date urgency, each colored independently) and per-calendar-source coloring (Calendar A/B get their own color); day-grouped Calendar view with a divider per day, correctly showing multi-day events under every day they span
+- feat: per-element ToDo coloring (priority, `+project`/`@context` tags, due-date urgency, each colored independently) and per-calendar-source coloring (Calendar A/B get their own color); day-grouped Calendar view with a divider per day
+- feat: multi-day Calendar event display, selectable in the Web UI (Agenda settings): "Repeat" (default, shown under every day it spans), "Compact" (shown once, on its first visible day, with an "N/M:" span-position prefix), or "Repeat + number" (repeated under every day like "Repeat", but each occurrence also carries the same "N/M:" prefix)
 - feat: configurable shared background (white/black/any hardware-supported color) with automatic fallback if a text color would otherwise match it; landscape layout choice between stacked and side-by-side ToDo/Calendar columns
 - feat: adjustable Calendar lookahead window (1-3 days, Web UI: Agenda settings)
 - feat: full per-role Web UI color picker for every ToDo/Calendar color (Spectra6/color boards)

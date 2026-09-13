@@ -712,9 +712,16 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_cal_weather_right_aligned(cJSON_IsTrue(item));
     }
-    item = cJSON_GetObjectItem(root, "agenda_cal_compact_multiday");
-    if (item && cJSON_IsBool(item)) {
-        config_manager_set_agenda_cal_compact_multiday(cJSON_IsTrue(item));
+    item = cJSON_GetObjectItem(root, "agenda_cal_multiday_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *mode_str = cJSON_GetStringValue(item);
+        agenda_multiday_mode_t mode = AGENDA_MULTIDAY_REPEAT;
+        if (strcmp(mode_str, "compact") == 0) {
+            mode = AGENDA_MULTIDAY_COMPACT;
+        } else if (strcmp(mode_str, "repeat_numbered") == 0) {
+            mode = AGENDA_MULTIDAY_REPEAT_NUMBERED;
+        }
+        config_manager_set_agenda_cal_multiday_mode(mode);
     }
     // Plain display names, not credentials - unlike agenda_cal_url above,
     // applied even when empty (an empty save genuinely means "cleared back

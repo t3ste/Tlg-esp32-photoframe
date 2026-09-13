@@ -413,10 +413,10 @@ bool config_manager_get_agenda_cal_weather_enabled(void);
 void config_manager_set_agenda_cal_weather_right_aligned(bool enabled);
 bool config_manager_get_agenda_cal_weather_right_aligned(void);
 
-// Opt-in compact multi-day event display - see NVS_AGENDA_CAL_COMPACT_KEY
-// in config.h.
-void config_manager_set_agenda_cal_compact_multiday(bool enabled);
-bool config_manager_get_agenda_cal_compact_multiday(void);
+// Multi-day event display mode - see agenda_multiday_mode_t/
+// NVS_AGENDA_CAL_COMPACT_KEY in config.h.
+void config_manager_set_agenda_cal_multiday_mode(agenda_multiday_mode_t mode);
+agenda_multiday_mode_t config_manager_get_agenda_cal_multiday_mode(void);
 
 // Optional display names for the Calendar header - see
 // NVS_AGENDA_CAL_NAME_KEY/_NAME2_KEY in config.h. May return "" (never

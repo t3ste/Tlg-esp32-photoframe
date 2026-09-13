@@ -228,6 +228,12 @@ const rotationOptions = [
   { title: "180°", value: 180 },
 ];
 
+const agendaMultidayModeOptions = [
+  { title: "Repeat (default)", value: "repeat" },
+  { title: "Compact (once, numbered)", value: "compact" },
+  { title: "Repeat + number", value: "repeat_numbered" },
+];
+
 const rotationModeOptions = computed(() => {
   const options = [
     { title: "URL - Fetch image from URL", value: "url" },
@@ -1391,19 +1397,23 @@ async function performFactoryReset() {
               right edge instead - just a placement preference, doesn't change how much of it fits
               (works the same in both the stacked and side-by-side layout).
             </div>
-            <v-switch
-              v-model="settingsStore.deviceSettings.agendaCalCompactMultiday"
-              label="Compact multi-day events"
-              color="primary"
-              class="mb-1"
+            <v-select
+              v-model="settingsStore.deviceSettings.agendaCalMultidayMode"
+              :items="agendaMultidayModeOptions"
+              item-title="title"
+              item-value="value"
+              label="Multi-day events"
+              variant="outlined"
+              class="mt-2 mb-1"
               hide-details
               :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Shows a multi-day event only once, on the first visible day, with an "N/M:" prefix
-              (which day of the event's full span, out of how many) instead of repeating it under
-              every day it spans - e.g. an 8-day trip whose 4th day is the first one visible shows
-              "4/8: Trip" that one time only.
+              Repeat (default): a multi-day event appears under every day it spans, plain. Compact:
+              shown only once, on the first visible day, with an "N/M:" prefix (which day of the
+              event's full span, out of how many) - e.g. an 8-day trip whose 4th day is the first
+              one visible shows "4/8: Trip" that one time only. Repeat + number: combines both -
+              still repeated under every day, but each occurrence also gets its own "N/M:" prefix.
             </div>
 
             <v-divider class="mb-4 mt-2" />

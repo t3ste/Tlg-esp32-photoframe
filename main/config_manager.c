@@ -122,7 +122,7 @@ static bool agenda_todo_enabled = false;
 static bool agenda_cal_enabled = false;
 static bool agenda_cal_weather_enabled = false;
 static bool agenda_cal_weather_right_aligned = false;
-static bool agenda_cal_compact_multiday = false;
+static agenda_multiday_mode_t agenda_cal_multiday_mode = AGENDA_MULTIDAY_REPEAT;
 static char agenda_cal_name[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_cal_name2[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_todo_url[AGENDA_TODO_URL_MAX_LEN] = {0};
@@ -1040,7 +1040,9 @@ esp_err_t config_manager_init(void)
         }
         uint8_t stored_agenda_cal_cpt = 0;
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_COMPACT_KEY, &stored_agenda_cal_cpt) == ESP_OK) {
-            agenda_cal_compact_multiday = (stored_agenda_cal_cpt != 0);
+            agenda_cal_multiday_mode = (stored_agenda_cal_cpt <= AGENDA_MULTIDAY_REPEAT_NUMBERED)
+                                           ? (agenda_multiday_mode_t) stored_agenda_cal_cpt
+                                           : AGENDA_MULTIDAY_REPEAT;
         }
         size_t agenda_cal_name_len = sizeof(agenda_cal_name);
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_NAME_KEY, agenda_cal_name, &agenda_cal_name_len);
@@ -2860,15 +2862,18 @@ bool config_manager_get_agenda_cal_weather_right_aligned(void)
     return agenda_cal_weather_right_aligned;
 }
 
-void config_manager_set_agenda_cal_compact_multiday(bool enabled)
+void config_manager_set_agenda_cal_multiday_mode(agenda_multiday_mode_t mode)
 {
-    agenda_cal_compact_multiday = enabled;
-    agenda_nvs_set_u8(NVS_AGENDA_CAL_COMPACT_KEY, enabled ? 1 : 0);
+    if (mode < AGENDA_MULTIDAY_REPEAT || mode > AGENDA_MULTIDAY_REPEAT_NUMBERED) {
+        mode = AGENDA_MULTIDAY_REPEAT;
+    }
+    agenda_cal_multiday_mode = mode;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_COMPACT_KEY, (uint8_t) mode);
 }
 
-bool config_manager_get_agenda_cal_compact_multiday(void)
+agenda_multiday_mode_t config_manager_get_agenda_cal_multiday_mode(void)
 {
-    return agenda_cal_compact_multiday;
+    return agenda_cal_multiday_mode;
 }
 
 void config_manager_set_agenda_cal_name(const char *name)
