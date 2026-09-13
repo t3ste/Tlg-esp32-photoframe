@@ -60,21 +60,45 @@ static void inject_stale_reminder_if_needed(ics_event_list_t *list, const char *
     }
 }
 
-// Reads and parses whatever is already cached for one of the three extra,
-// non-auto-refreshing ICS sources (calendar_ics_read_cache() - no network),
-// and injects the stale reminder above if it's out of upcoming content.
-// Returns false (and leaves `out` zeroed) if the source isn't enabled, has
-// no cache yet (never configured / never successfully fetched), or fails to
-// parse - same fail-soft contract as the Calendar A/B fetch blocks.
-static bool load_extra_ics_source(bool enabled, const char *cache_path, const char *display_name,
-                                  time_t now, time_t window_end, ics_event_list_t *out)
+// Loads one of the three extra, non-auto-refreshing ICS sources - no
+// network involved either way, just local files (the raw source itself is
+// only ever fetched/uploaded on an explicit user action, see
+// apply_extra_ics_url() in utils.c and the /api/agenda/extra-ics upload
+// endpoint in http_server.c). Two-tier cache to avoid re-parsing a
+// potentially large raw .ics file on every agenda wake:
+//   1. Fast path: read the flat, already-expanded cache
+//      (calendar_ics_read_expanded_cache() - a cheap line-split, no ICS
+//      parsing at all) and use it as-is if it still has upcoming content.
+//   2. Slow path: only when that cache is missing or exhausted, re-parse
+//      the raw source (calendar_ics_read_cache()) for the next
+//      AGENDA_EXTRA_ICS_EXPAND_DAYS days and write the flat result back -
+//      for a real feed this only happens roughly once a month, not on
+//      every wake, which is the whole point for a large hand-curated or
+//      exported file (e.g. a year of holidays/school-holidays).
+// Either way, injects the stale reminder above if the (possibly freshly
+// re-expanded) result still has no upcoming content. Returns false (and
+// leaves `out` zeroed) if the source isn't enabled or both cache tiers
+// come up empty - same fail-soft contract as the Calendar A/B fetch blocks.
+static bool load_extra_ics_source(bool enabled, const char *raw_cache_path,
+                                  const char *flat_cache_path, const char *display_name, time_t now,
+                                  ics_event_list_t *out)
 {
     if (!enabled) {
         return false;
     }
-    if (calendar_ics_read_cache(cache_path, now, window_end, out) != ESP_OK) {
-        return false;
+
+    if (calendar_ics_read_expanded_cache(flat_cache_path, out) == ESP_OK &&
+        calendar_ics_has_upcoming_event(out, now)) {
+        return true;  // fast path - still fresh, no re-parse needed
     }
+
+    time_t expand_end = now + (time_t) AGENDA_EXTRA_ICS_EXPAND_DAYS * 86400;
+    if (calendar_ics_read_cache(raw_cache_path, now, expand_end, out) != ESP_OK) {
+        return false;  // source never configured, or the raw cache is missing/corrupt
+    }
+    calendar_ics_write_expanded_cache(flat_cache_path, out);
+    ESP_LOGI(TAG, "Re-expanded extra ICS source '%s' for the next %d days", display_name,
+             AGENDA_EXTRA_ICS_EXPAND_DAYS);
     inject_stale_reminder_if_needed(out, display_name, now);
     return true;
 }
@@ -213,26 +237,26 @@ esp_err_t agenda_manager_run(void)
     // other special-days feeds) - unlike A/B above, these are never fetched
     // here: they were already downloaded/uploaded once, ahead of time (see
     // utils.c's apply_config_from_json() and the /api/agenda/extra-ics
-    // upload endpoint in http_server.c), so this is a pure local read+parse,
-    // no network, no ETag. Gated on want_cal per the same "only matters if
-    // the Calendar column is actually showing" logic as A/B - cal_days/
-    // window_end are already computed above.
+    // upload endpoint in http_server.c), so this is a pure local read, no
+    // network, no ETag - see load_extra_ics_source()'s own comment for the
+    // two-tier flat-cache/raw-reparse split. Gated on want_cal per the same
+    // "only matters if the Calendar column is actually showing" logic as
+    // A/B.
     bool have_events_c = false, have_events_d = false, have_events_e = false;
     if (want_cal) {
         time_t now = time(NULL);
-        time_t window_end = now + (time_t) cal_days * 86400;
         const char *name_c = config_manager_get_agenda_cal_c_name();
         const char *name_d = config_manager_get_agenda_cal_d_name();
         const char *name_e = config_manager_get_agenda_cal_e_name();
-        have_events_c = load_extra_ics_source(
-            config_manager_get_agenda_cal_c_enabled(), AGENDA_CAL_CACHE_PATH_C,
-            name_c[0] ? name_c : "Calendar C", now, window_end, events_c);
-        have_events_d = load_extra_ics_source(
-            config_manager_get_agenda_cal_d_enabled(), AGENDA_CAL_CACHE_PATH_D,
-            name_d[0] ? name_d : "Calendar D", now, window_end, events_d);
-        have_events_e = load_extra_ics_source(
-            config_manager_get_agenda_cal_e_enabled(), AGENDA_CAL_CACHE_PATH_E,
-            name_e[0] ? name_e : "Calendar E", now, window_end, events_e);
+        have_events_c = load_extra_ics_source(config_manager_get_agenda_cal_c_enabled(),
+                                              AGENDA_CAL_CACHE_PATH_C, AGENDA_CAL_CACHE_PATH_C_FLAT,
+                                              name_c[0] ? name_c : "Calendar C", now, events_c);
+        have_events_d = load_extra_ics_source(config_manager_get_agenda_cal_d_enabled(),
+                                              AGENDA_CAL_CACHE_PATH_D, AGENDA_CAL_CACHE_PATH_D_FLAT,
+                                              name_d[0] ? name_d : "Calendar D", now, events_d);
+        have_events_e = load_extra_ics_source(config_manager_get_agenda_cal_e_enabled(),
+                                              AGENDA_CAL_CACHE_PATH_E, AGENDA_CAL_CACHE_PATH_E_FLAT,
+                                              name_e[0] ? name_e : "Calendar E", now, events_e);
     }
 
     // Opt-in per-day forecast annotation on the Calendar column's day

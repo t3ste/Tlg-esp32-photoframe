@@ -343,11 +343,27 @@ static void expand_rrule(const ics_rrule_t *rule, time_t base_start, time_t dura
         k0--;
     }
 
-    // Hard safety cap regardless of inputs: a window of at most a few days
-    // can never legitimately need more than window_days+1 occurrences at
-    // this period granularity, so 8 is a correctness backstop, not a real
-    // constraint.
-    for (long k = k0; k < k0 + 8; k++) {
+    // Hard safety cap, sized to the actual window rather than a fixed
+    // magic number - this used to be a flat "8", correct only as long as
+    // every caller's window stayed at the original 1-3 day rotation/agenda
+    // lookahead. That stopped being true once calendar_ics_read_cache()
+    // started getting called with much wider windows too (e.g. a 30-day
+    // expansion window for the extra ICS sources' flat cache, see
+    // agenda_manager.c) - a fixed 8 would have silently truncated a DAILY
+    // recurrence to its first ~8 days in that window and dropped the rest.
+    // +3 periods of slack covers the "back up one" pre-window candidate
+    // above plus normal rounding; the 400 ceiling is just a defensive
+    // backstop (over a year of daily occurrences) against a runaway window.
+    long window_span = (long) (window_end - window_start);
+    if (window_span < 0) {
+        window_span = 0;
+    }
+    long max_iterations = window_span / period_secs + 3;
+    if (max_iterations > 400) {
+        max_iterations = 400;
+    }
+
+    for (long k = k0; k < k0 + max_iterations; k++) {
         if (rule->has_count && k >= rule->count) {
             break;
         }
@@ -677,6 +693,76 @@ esp_err_t calendar_ics_read_cache(const char *cache_path, time_t window_start, t
     esp_err_t err = calendar_ics_parse(body, body_len, window_start, window_end, out);
     free(body);
     return err;
+}
+
+esp_err_t calendar_ics_write_expanded_cache(const char *path, const ics_event_list_t *list)
+{
+    if (!path || !list) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    FILE *fp = fopen(path, "wb");
+    if (!fp) {
+        ESP_LOGW(TAG, "Could not write expanded ICS cache file %s", path);
+        return ESP_FAIL;
+    }
+    for (int i = 0; i < list->count; i++) {
+        const ics_event_t *ev = &list->events[i];
+        char summary[ICS_SUMMARY_MAX_LEN];
+        strncpy(summary, ev->summary, sizeof(summary) - 1);
+        summary[sizeof(summary) - 1] = '\0';
+        for (char *p = summary; *p != '\0'; p++) {
+            if (*p == '\t' || *p == '\n' || *p == '\r') {
+                *p = ' ';
+            }
+        }
+        fprintf(fp, "%lld\t%lld\t%d\t%s\n", (long long) ev->start, (long long) ev->end,
+                ev->all_day ? 1 : 0, summary);
+    }
+    fclose(fp);
+    return ESP_OK;
+}
+
+esp_err_t calendar_ics_read_expanded_cache(const char *path, ics_event_list_t *out)
+{
+    if (!out) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out, 0, sizeof(*out));
+    if (!path) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    char line[64 + ICS_SUMMARY_MAX_LEN];
+    while (out->count < ICS_MAX_EVENTS && fgets(line, sizeof(line), fp)) {
+        char *tab1 = strchr(line, '\t');
+        char *tab2 = tab1 ? strchr(tab1 + 1, '\t') : NULL;
+        char *tab3 = tab2 ? strchr(tab2 + 1, '\t') : NULL;
+        if (!tab3) {
+            continue;  // malformed/corrupted line - skip it, fail-soft
+        }
+        *tab1 = '\0';
+        *tab2 = '\0';
+        *tab3 = '\0';
+        char *summary_start = tab3 + 1;
+        size_t slen = strlen(summary_start);
+        while (slen > 0 && (summary_start[slen - 1] == '\n' || summary_start[slen - 1] == '\r')) {
+            summary_start[--slen] = '\0';
+        }
+
+        ics_event_t *ev = &out->events[out->count++];
+        memset(ev, 0, sizeof(*ev));
+        ev->start = (time_t) strtoll(line, NULL, 10);
+        ev->end = (time_t) strtoll(tab1 + 1, NULL, 10);
+        ev->all_day = (strtol(tab2 + 1, NULL, 10) != 0);
+        strncpy(ev->summary, summary_start, sizeof(ev->summary) - 1);
+        ev->summary[sizeof(ev->summary) - 1] = '\0';
+    }
+    fclose(fp);
+    return ESP_OK;
 }
 
 bool calendar_ics_has_upcoming_event(const ics_event_list_t *list, time_t now)

@@ -160,9 +160,16 @@ const char *utils_consume_config_error(void)
 // unreachable source may become reachable later, and there's no ETag/prior
 // state to roll back to). `set_url` is one of the config_manager setters
 // for this slot (config_manager_set_agenda_cal_c_url() etc.).
+//
+// A successful fetch also deletes `flat_cache_path` (the already-expanded
+// cache agenda_manager.c's load_extra_ics_source() otherwise keeps reusing
+// for up to AGENDA_EXTRA_ICS_EXPAND_DAYS) - without this, a fresh raw file
+// from "refresh now" or a changed URL could sit unused for weeks behind a
+// still-fresh-looking old expansion, defeating the whole point of the
+// button.
 static void apply_extra_ics_url(cJSON *root, const char *url_field, const char *refetch_field,
                                 const char *old_url, const char *cache_path,
-                                void (*set_url)(const char *))
+                                const char *flat_cache_path, void (*set_url)(const char *))
 {
     cJSON *url_item = cJSON_GetObjectItem(root, url_field);
     const char *new_url =
@@ -180,6 +187,7 @@ static void apply_extra_ics_url(cJSON *root, const char *url_field, const char *
     if ((url_changed || refetch_requested) && effective_url && effective_url[0] != '\0') {
         esp_err_t err = calendar_ics_fetch_once(effective_url, 0, cache_path);
         if (err == ESP_OK) {
+            unlink(flat_cache_path);
             ESP_LOGI(TAG, "Fetched extra ICS source (%s)", url_field);
         } else {
             ESP_LOGW(TAG, "Failed to fetch extra ICS source (%s): %s", url_field,
@@ -808,13 +816,13 @@ esp_err_t apply_config_from_json(cJSON *root)
     }
     apply_extra_ics_url(root, "agenda_cal_c_url", "agenda_cal_c_refetch",
                         config_manager_get_agenda_cal_c_url(), AGENDA_CAL_CACHE_PATH_C,
-                        config_manager_set_agenda_cal_c_url);
+                        AGENDA_CAL_CACHE_PATH_C_FLAT, config_manager_set_agenda_cal_c_url);
     apply_extra_ics_url(root, "agenda_cal_d_url", "agenda_cal_d_refetch",
                         config_manager_get_agenda_cal_d_url(), AGENDA_CAL_CACHE_PATH_D,
-                        config_manager_set_agenda_cal_d_url);
+                        AGENDA_CAL_CACHE_PATH_D_FLAT, config_manager_set_agenda_cal_d_url);
     apply_extra_ics_url(root, "agenda_cal_e_url", "agenda_cal_e_refetch",
                         config_manager_get_agenda_cal_e_url(), AGENDA_CAL_CACHE_PATH_E,
-                        config_manager_set_agenda_cal_e_url);
+                        AGENDA_CAL_CACHE_PATH_E_FLAT, config_manager_set_agenda_cal_e_url);
     // Agenda schedule: same shape/validation as rotate_cron above, but an
     // empty array is allowed here (agenda_manager_is_enabled() already
     // requires a non-empty schedule before agenda mode can ever fire, so

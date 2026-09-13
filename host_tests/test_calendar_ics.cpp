@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -260,6 +261,34 @@ TEST_F(CalendarIcs, DailyRruleExpandsWithinWindow)
     }
 }
 
+// Regression test for a real bug: expand_rrule()'s occurrence-count safety
+// cap used to be a fixed "8", correct only as long as every caller stuck to
+// the original 1-3 day rotation/agenda lookahead window. A wider window
+// (e.g. the 30-day expansion agenda_manager.c's extra ICS sources use to
+// build their flat cache, so large files don't need re-parsing on every
+// wake) would have silently truncated a DAILY recurrence to its first ~8
+// occurrences and dropped the rest.
+TEST_F(CalendarIcs, DailyRruleExpandsAcrossWideThirtyDayWindow)
+{
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240101T090000Z\n"
+        "DTEND:20240101T093000Z\n"
+        "SUMMARY:Daily reminder\n"
+        "RRULE:FREQ=DAILY\n"
+        "END:VEVENT\n";
+
+    time_t window_start = make_utc(2024, 1, 15, 0, 0, 0);
+    time_t window_end = window_start + 30 * 86400;  // 30-day expansion window
+    ics_event_list_t out = parse(ics, window_start, window_end);
+    // ICS_MAX_EVENTS caps the list at 24, so a genuinely daily event across
+    // 30 days hits that cap rather than reaching all 30 - the point of this
+    // test is that it reaches the cap (not silently stopping at ~8).
+    EXPECT_EQ(out.count, 24);
+    EXPECT_EQ(out.events[0].start, make_utc(2024, 1, 15, 9, 0, 0));
+    EXPECT_EQ(out.events[23].start, make_utc(2024, 2, 7, 9, 0, 0));
+}
+
 TEST_F(CalendarIcs, DailyRruleClosedFormJumpFromFarPastDtstart)
 {
     // DTSTART is years before the window - this specifically exercises the
@@ -516,4 +545,91 @@ TEST_F(CalendarIcs, HasUpcomingEventEndExactlyAtNowIsFalse)
 TEST_F(CalendarIcs, HasUpcomingEventNullListIsFalse)
 {
     EXPECT_FALSE(calendar_ics_has_upcoming_event(nullptr, make_utc(2024, 1, 15, 0, 0, 0)));
+}
+
+// calendar_ics_write_expanded_cache()/calendar_ics_read_expanded_cache() -
+// the flat, already-expanded cache agenda_manager.c's extra ICS sources use
+// to avoid re-parsing a large raw .ics file on every agenda wake.
+class CalendarIcsExpandedCache : public CalendarIcs
+{
+   protected:
+    const char *path = "test_expanded_cache_tmp.txt";
+
+    void TearDown() override
+    {
+        remove(path);
+    }
+};
+
+TEST_F(CalendarIcsExpandedCache, RoundTripPreservesFields)
+{
+    ics_event_list_t list;
+    memset(&list, 0, sizeof(list));
+    list.count = 2;
+    list.events[0].start = make_utc(2024, 3, 1, 9, 0, 0);
+    list.events[0].end = make_utc(2024, 3, 1, 10, 0, 0);
+    list.events[0].all_day = false;
+    strncpy(list.events[0].summary, "Team Meeting", sizeof(list.events[0].summary) - 1);
+    list.events[1].start = make_utc(2024, 3, 2, 0, 0, 0);
+    list.events[1].end = make_utc(2024, 3, 3, 0, 0, 0);
+    list.events[1].all_day = true;
+    strncpy(list.events[1].summary, "Public Holiday", sizeof(list.events[1].summary) - 1);
+
+    ASSERT_EQ(calendar_ics_write_expanded_cache(path, &list), ESP_OK);
+
+    ics_event_list_t out;
+    ASSERT_EQ(calendar_ics_read_expanded_cache(path, &out), ESP_OK);
+    ASSERT_EQ(out.count, 2);
+    EXPECT_EQ(out.events[0].start, list.events[0].start);
+    EXPECT_EQ(out.events[0].end, list.events[0].end);
+    EXPECT_FALSE(out.events[0].all_day);
+    EXPECT_STREQ(out.events[0].summary, "Team Meeting");
+    EXPECT_EQ(out.events[1].start, list.events[1].start);
+    EXPECT_EQ(out.events[1].end, list.events[1].end);
+    EXPECT_TRUE(out.events[1].all_day);
+    EXPECT_STREQ(out.events[1].summary, "Public Holiday");
+}
+
+TEST_F(CalendarIcsExpandedCache, EmbeddedTabAndNewlineSanitizedNotCorrupting)
+{
+    ics_event_list_t list;
+    memset(&list, 0, sizeof(list));
+    list.count = 1;
+    list.events[0].start = make_utc(2024, 3, 1, 0, 0, 0);
+    list.events[0].end = make_utc(2024, 3, 2, 0, 0, 0);
+    list.events[0].all_day = true;
+    strncpy(list.events[0].summary, "Weird\tTitle\nWith Newline",
+            sizeof(list.events[0].summary) - 1);
+
+    ASSERT_EQ(calendar_ics_write_expanded_cache(path, &list), ESP_OK);
+
+    ics_event_list_t out;
+    ASSERT_EQ(calendar_ics_read_expanded_cache(path, &out), ESP_OK);
+    // A raw embedded tab/newline would otherwise be mistaken for a field
+    // separator or a second line - write-side sanitization replaces them
+    // with spaces, so this must round-trip as exactly one event.
+    ASSERT_EQ(out.count, 1);
+    EXPECT_STREQ(out.events[0].summary, "Weird Title With Newline");
+}
+
+TEST_F(CalendarIcsExpandedCache, MissingFileIsNotFound)
+{
+    ics_event_list_t out;
+    EXPECT_EQ(calendar_ics_read_expanded_cache("does_not_exist.txt", &out), ESP_ERR_NOT_FOUND);
+    EXPECT_EQ(out.count, 0);
+}
+
+TEST_F(CalendarIcsExpandedCache, MalformedLineSkippedFailSoft)
+{
+    FILE *fp = fopen(path, "wb");
+    ASSERT_NE(fp, nullptr);
+    fprintf(fp, "not a valid line\n");
+    fprintf(fp, "%lld\t%lld\t%d\t%s\n", (long long) make_utc(2024, 3, 1, 0, 0, 0),
+            (long long) make_utc(2024, 3, 2, 0, 0, 0), 1, "Valid Entry");
+    fclose(fp);
+
+    ics_event_list_t out;
+    ASSERT_EQ(calendar_ics_read_expanded_cache(path, &out), ESP_OK);
+    ASSERT_EQ(out.count, 1);
+    EXPECT_STREQ(out.events[0].summary, "Valid Entry");
 }

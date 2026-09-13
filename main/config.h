@@ -127,6 +127,20 @@ typedef enum {
 #define AGENDA_CAL_CACHE_PATH_D FS_MOUNT_POINT "/.agenda_cal_cache_d.ics"
 #define AGENDA_CAL_CACHE_PATH_E FS_MOUNT_POINT "/.agenda_cal_cache_e.ics"
 
+// Flat, already-expanded caches for the same three sources (see
+// calendar_ics_write_expanded_cache()/_read_expanded_cache()) - lets
+// agenda_manager.c avoid re-parsing a potentially large raw .ics file on
+// every agenda wake. The raw file above is only re-parsed/re-expanded when
+// this cache runs out of upcoming entries (see AGENDA_EXTRA_ICS_EXPAND_DAYS
+// below), which for a real feed only happens roughly once a month.
+#define AGENDA_CAL_CACHE_PATH_C_FLAT FS_MOUNT_POINT "/.agenda_cal_cache_c_flat.txt"
+#define AGENDA_CAL_CACHE_PATH_D_FLAT FS_MOUNT_POINT "/.agenda_cal_cache_d_flat.txt"
+#define AGENDA_CAL_CACHE_PATH_E_FLAT FS_MOUNT_POINT "/.agenda_cal_cache_e_flat.txt"
+// How far ahead each (re-)expansion looks, in days - wide enough that a
+// large source (e.g. a year of holidays/school-holidays) only needs
+// re-parsing roughly this often, not on every wake.
+#define AGENDA_EXTRA_ICS_EXPAND_DAYS 30
+
 // On-demand thumbnail scratch file for telegram_bot_notify_fallback_image() -
 // generated only when the image being reported has no pre-existing ".jpg"
 // sidecar (true for any plain Storage/Auto-Rotate album image, since that

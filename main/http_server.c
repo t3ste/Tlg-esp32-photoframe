@@ -2345,9 +2345,10 @@ static esp_err_t factory_reset_handler(httpd_req_t *req)
     // never enabled) is expected, not an error - logged at INFO either way
     // so a factory reset's actual cleanup effect is visible in the log
     // rather than silently assumed.
-    const char *agenda_cache_paths[] = {AGENDA_TODO_CACHE_PATH,  AGENDA_CAL_CACHE_PATH,
-                                        AGENDA_CAL_CACHE_PATH2,  AGENDA_CAL_CACHE_PATH_C,
-                                        AGENDA_CAL_CACHE_PATH_D, AGENDA_CAL_CACHE_PATH_E};
+    const char *agenda_cache_paths[] = {
+        AGENDA_TODO_CACHE_PATH,       AGENDA_CAL_CACHE_PATH,        AGENDA_CAL_CACHE_PATH2,
+        AGENDA_CAL_CACHE_PATH_C,      AGENDA_CAL_CACHE_PATH_D,      AGENDA_CAL_CACHE_PATH_E,
+        AGENDA_CAL_CACHE_PATH_C_FLAT, AGENDA_CAL_CACHE_PATH_D_FLAT, AGENDA_CAL_CACHE_PATH_E_FLAT};
     for (size_t i = 0; i < sizeof(agenda_cache_paths) / sizeof(agenda_cache_paths[0]); i++) {
         if (unlink(agenda_cache_paths[i]) == 0) {
             ESP_LOGI(TAG, "Removed orphaned Agenda cache file: %s", agenda_cache_paths[i]);
@@ -2441,12 +2442,16 @@ static esp_err_t agenda_extra_ics_upload_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
     const char *cache_path;
+    const char *flat_cache_path;
     if (strcmp(slot, "c") == 0) {
         cache_path = AGENDA_CAL_CACHE_PATH_C;
+        flat_cache_path = AGENDA_CAL_CACHE_PATH_C_FLAT;
     } else if (strcmp(slot, "d") == 0) {
         cache_path = AGENDA_CAL_CACHE_PATH_D;
+        flat_cache_path = AGENDA_CAL_CACHE_PATH_D_FLAT;
     } else if (strcmp(slot, "e") == 0) {
         cache_path = AGENDA_CAL_CACHE_PATH_E;
+        flat_cache_path = AGENDA_CAL_CACHE_PATH_E_FLAT;
     } else {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "slot must be c, d, or e");
         return ESP_FAIL;
@@ -2491,6 +2496,11 @@ static esp_err_t agenda_extra_ics_upload_handler(httpd_req_t *req)
     }
     fwrite(buf, 1, (size_t) received, fp);
     fclose(fp);
+    // Invalidate the expanded-cache tier too - otherwise a stale-but-not-
+    // yet-exhausted expansion from before this upload would keep being
+    // served for up to AGENDA_EXTRA_ICS_EXPAND_DAYS, silently ignoring the
+    // file just uploaded (see load_extra_ics_source() in agenda_manager.c).
+    unlink(flat_cache_path);
     heap_caps_free(buf);
 
     ESP_LOGI(TAG, "Extra ICS source '%s' updated via upload (%d bytes)", slot, received);
