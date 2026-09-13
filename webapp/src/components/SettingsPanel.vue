@@ -1500,7 +1500,9 @@ async function performFactoryReset() {
               tab). Unlike Calendar A/B, these are <strong>never refreshed automatically</strong> -
               only when you save a new/changed URL, click "Refresh now", or upload a replacement
               file directly. If a source runs out of upcoming events, a permanent reminder appears
-              in the calendar identifying which one needs updating.
+              in the calendar identifying which one needs updating. Each source shows up to 24
+              events within its 30-day window - plenty for holidays/school-holidays, but a very
+              densely-booked file could hit that cap.
             </div>
 
             <v-card variant="tonal" class="mb-3">
