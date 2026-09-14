@@ -37,6 +37,15 @@ static const char *TAG = "board_audio";
 
 #define CHIME_SAMPLE_RATE 16000
 #define CHIME_AMPLITUDE 7000
+
+// ES8311 register map - live-verified byte-for-byte against a known-good
+// register dump pulled from Waveshare's own shipped Arduino example
+// (05_ArduinoExample/01_Audio_Test, esp_codec_dev's es8311.c) running on
+// identical hardware. Two earlier attempts based on a generic/simplified
+// ES8311 bring-up sequence (missing several registers below, plus an
+// invented reset pulse not present in the real code) produced a fully
+// "successful" I2C/I2S bring-up with zero audible output - so every value
+// here is taken from the real trace, not derived from the datasheet alone.
 #define ES8311_REG_RESET 0x00
 #define ES8311_REG_CLK_MANAGER1 0x01
 #define ES8311_REG_CLK_MANAGER2 0x02
@@ -45,47 +54,30 @@ static const char *TAG = "board_audio";
 #define ES8311_REG_CLK_MANAGER5 0x05
 #define ES8311_REG_CLK_MANAGER6 0x06  // bclk divider
 #define ES8311_REG_CLK_MANAGER7 0x07  // lrck divider, high bits
-#define ES8311_REG_CLK_MANAGER8 \
-    0x08  // lrck divider, low bits - these 3
-          // registers were entirely missing
-          // from the first two attempts; without
-          // them the codec's internal ADC/DAC
-          // sample-rate dividers don't match the
-          // actual 16kHz/256x-MCLK I2S clocks
-          // the ESP32 side generates, even
-          // though every I2C write still
-          // reports success. Values below are
-          // computed from Waveshare's own
-          // coeff_div[] table (es8311.c) for
-          // {mclk: 4096000, rate: 16000}.
+#define ES8311_REG_CLK_MANAGER8 0x08  // lrck divider, low bits
 #define ES8311_REG_SDP_IN 0x09
 #define ES8311_REG_SDP_OUT 0x0A
+#define ES8311_REG_SYSTEM_0B 0x0B
+#define ES8311_REG_SYSTEM_0C 0x0C
 #define ES8311_REG_SYSTEM1 0x0D
 #define ES8311_REG_SYSTEM2 \
-    0x0E  // power up/down - analog output path stays
+    0x0E  // analog output power up/down - stays
           // powered down at reset until this is set;
-          // missing this write is silent (no I2C/I2S
-          // error either) - confirmed against
-          // Espressif's own reference es8311 driver
-          // after an initial port that omitted it
-          // produced zero audible output despite a
-          // fully successful bring-up otherwise
+          // the single register that mattered most
+          // across the earlier failed attempts
 #define ES8311_REG_SYSTEM3 0x12
 #define ES8311_REG_SYSTEM4 0x13
 #define ES8311_REG_SYSTEM5 0x14  // DMIC select / analog PGA gain
+#define ES8311_REG_SYSTEM_10 0x10
+#define ES8311_REG_SYSTEM_11 0x11
+#define ES8311_REG_ADC_15 0x15
+#define ES8311_REG_ADC_17 0x17
 #define ES8311_REG_SYSTEM7 0x1B
 #define ES8311_REG_SYSTEM8 0x1C
 #define ES8311_REG_DAC_MUTE \
     0x31  // separate from DAC_VOL below - the actual
-          // hardware mute flag (bits 0x60), reset
-          // default is muted; volume alone (0x32)
-          // is silent until this is explicitly
-          // cleared. This was the actual fix after
-          // the SYSTEM2 change above still produced
-          // no sound - confirmed against Waveshare's
-          // own shipped es8311.c (esp_codec_dev's
-          // es8311_set_mute(), always called once
-          // after opening a stream).
+          // hardware mute flag (bits 0x60); volume
+          // alone is silent until this is cleared
 #define ES8311_REG_DAC_VOL 0x32
 #define ES8311_REG_DAC_RAMPRATE 0x37
 #define ES8311_REG_GPIO 0x44  // internal reference signal routing (ADCL+DACR)
@@ -121,14 +113,18 @@ static esp_err_t es8311_read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t *
 
 static void pa_set(bool enable)
 {
-    // NS4150B CTRL is active-high.
+    // NS4150B CTRL is active-high - confirmed against the board schematic's
+    // "AudioCTR" net, which traces from this GPIO straight to the amp's
+    // CTRL pin.
     gpio_set_level(BOARD_HAL_AUDIO_PA_PIN, enable ? 1 : 0);
 }
 
-// ES8311 slave + MCLK, 16-bit Philips I2S, DAC only. Sequence follows the
-// common Espressif ES8311 DAC bring-up used by the Waveshare audio test
-// (esp_codec_dev ES8311, use_mclk=1) - MCLK tracks I2S Fs (256x), so the
-// same clock-manager values work for the 16kHz chime tones generated here.
+// ES8311 bring-up for 16-bit/16kHz DAC-only playback, MCLK-driven, ESP32 as
+// I2S master (codec as slave). Mirrors the real open()+set_fs()+enable()
+// call chain in order - unlike a generic simplified sequence, several of
+// these registers are only correct because of what ran immediately before
+// them (a few are deliberately re-read-and-modified rather than written
+// outright, matching the original code's own read-modify-write pattern).
 static esp_err_t es8311_dac_init(i2c_master_dev_handle_t dev)
 {
     uint8_t chip_id = 0;
@@ -142,47 +138,86 @@ static esp_err_t es8311_dac_init(i2c_master_dev_handle_t dev)
                  ES8311_CHIP_ID);
     }
 
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_RESET, 0x1F));
-    vTaskDelay(pdMS_TO_TICKS(20));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_RESET, 0x00));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_RESET, 0x80));  // CSM on
+    // ---- one-time bring-up ----
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_GPIO, 0x08));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        es8311_write(dev, ES8311_REG_GPIO, 0x08));  // written twice for I2C noise immunity
 
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER1, 0x3F));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER1, 0x30));
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER2, 0x00));
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER3, 0x10));
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_DIV, 0x24));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER4, 0x20));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER4, 0x10));
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER5, 0x00));
-    // bclk_div=4 -> (4-1)=3; lrck_h=0x00; lrck_l=0xFF (16kHz/256x-MCLK row)
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER6, 0x03));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER7, 0x00));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER8, 0xFF));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM_0B, 0x00));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM_0C, 0x00));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM_10, 0x1F));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM_11, 0x7F));
 
-    // SDP_IN/OUT word length 16-bit (WL=011), Philips I2S (FMT=00) => 0x0C
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SDP_IN, 0x0C));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SDP_OUT, 0x0C));
+    // The only write to the reset register: a single 0x80, at this exact
+    // point - not first, and not preceded by any other reset pulse.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_RESET, 0x80));
 
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM1, 0x01));
-    // Analog output power-up - stays powered down at reset otherwise (see
-    // the ES8311_REG_SYSTEM2 comment above for why this one matters).
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM2, 0x02));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM3, 0x00));
+    // Re-write CLK_MANAGER1 with the final (use_mclk=true) value - overwrites
+    // the 0x30 above.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER1, 0x3F));
+    // Slave mode (ESP32 is I2S master): clear bit 0x20 on REG06 relative to
+    // its true chip-reset value.
+    uint8_t reg06 = 0;
+    if (es8311_read(dev, ES8311_REG_CLK_MANAGER6, &reg06) == ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            es8311_write(dev, ES8311_REG_CLK_MANAGER6, reg06 & (uint8_t) ~0x20));
+    }
+
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM4, 0x10));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM5, 0x1A));
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM7, 0x0A));
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM8, 0x6A));
+    // Internal reference signal routing (ADCL+DACR).
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_GPIO, 0x58));
+
+    // ---- format/sample-rate ----
+    uint8_t sdp_in = 0, sdp_out = 0;
+    es8311_read(dev, ES8311_REG_SDP_IN, &sdp_in);
+    es8311_read(dev, ES8311_REG_SDP_OUT, &sdp_out);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SDP_IN, sdp_in | 0x0C));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SDP_OUT, sdp_out | 0x0C));
+    es8311_read(dev, ES8311_REG_SDP_IN, &sdp_in);
+    es8311_read(dev, ES8311_REG_SDP_OUT, &sdp_out);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SDP_IN, sdp_in & 0xFC));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SDP_OUT, sdp_out & 0xFC));
+    // Coefficients for {mclk: 4096000, rate: 16000} (256x MCLK multiple):
+    // pre_div=1, pre_multi=1, adc_div=1, dac_div=1, fs_mode=0, lrck_h=0,
+    // lrck_l=0xff, bclk_div=4, adc_osr=0x10, dac_osr=0x20.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER2, 0x00));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER5, 0x00));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER3, 0x10));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER4, 0x20));
+    uint8_t reg07 = 0;
+    es8311_read(dev, ES8311_REG_CLK_MANAGER7, &reg07);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER7, reg07 & 0xC0));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_CLK_MANAGER8, 0xFF));
+    es8311_read(dev, ES8311_REG_CLK_MANAGER6, &reg06);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        es8311_write(dev, ES8311_REG_CLK_MANAGER6, (reg06 & 0xE0) | 0x03));
+
+    // ---- enable ----
+    es8311_read(dev, ES8311_REG_SDP_IN, &sdp_in);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        es8311_write(dev, ES8311_REG_SDP_IN, (uint8_t) (sdp_in & 0xBF)));  // DAC mode: bit6 clear
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_ADC_17, 0xBF));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM2, 0x02));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM3, 0x00));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM5, 0x1A));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_SYSTEM1, 0x01));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_ADC_15, 0x40));
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_DAC_RAMPRATE, 0x08));
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_GP_CONTROL, 0x00));
-    // Internal reference signal routing (ADCL+DACR) - without this the DAC
-    // path can stay disconnected from the analog output even though every
-    // other register above reports success.
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_GPIO, 0x58));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_DAC_VOL, 0xBF));  // 0 dB
 
-    // Explicit unmute - read-modify-write clearing bits 0x60, matching
-    // es8311_set_mute(false) in Waveshare's own shipped driver. Without
-    // this the DAC stays hardware-muted at its reset default regardless of
-    // every register above.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_DAC_VOL, 0xBF));  // ~0 dB
+
+    // Explicit unmute - read-modify-write clearing bits 0x60. Volume alone
+    // is not enough; without this the DAC stays hardware-muted regardless
+    // of every register above.
     uint8_t mute_reg = 0;
     if (es8311_read(dev, ES8311_REG_DAC_MUTE, &mute_reg) == ESP_OK) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_DAC_MUTE, mute_reg & 0x9F));
@@ -191,10 +226,28 @@ static esp_err_t es8311_dac_init(i2c_master_dev_handle_t dev)
     return ESP_OK;
 }
 
+// Puts the codec into a known, fully-muted/reset state before the I2C
+// device handle is torn down. This board's ES8311 register state survives
+// across our open/close cycles (removing the I2C device handle does not
+// power-cycle the physical chip), so what this leaves behind is what the
+// NEXT es8311_dac_init() call actually starts from.
 static void es8311_standby(i2c_master_dev_handle_t dev)
 {
     es8311_write(dev, ES8311_REG_DAC_VOL, 0x00);
+    es8311_write(dev, ES8311_REG_ADC_17, 0x00);
+    es8311_write(dev, ES8311_REG_SYSTEM2, 0xFF);
+    es8311_write(dev, ES8311_REG_SYSTEM3, 0x02);
+    es8311_write(dev, ES8311_REG_SYSTEM5, 0x00);
+    es8311_write(dev, ES8311_REG_SYSTEM1, 0xFA);
+    es8311_write(dev, ES8311_REG_ADC_15, 0x00);
+    es8311_write(dev, ES8311_REG_CLK_MANAGER2, 0x10);
+    es8311_write(dev, ES8311_REG_RESET, 0x00);
     es8311_write(dev, ES8311_REG_RESET, 0x1F);
+    es8311_write(dev, ES8311_REG_CLK_MANAGER1, 0x30);
+    es8311_write(dev, ES8311_REG_CLK_MANAGER1, 0x00);
+    es8311_write(dev, ES8311_REG_GP_CONTROL, 0x00);
+    es8311_write(dev, ES8311_REG_SYSTEM1, 0xFC);
+    es8311_write(dev, ES8311_REG_CLK_MANAGER2, 0x00);
 }
 
 static void i2s_write_silence(i2s_chan_handle_t tx, int frames)
@@ -242,7 +295,12 @@ static void play_tone(i2s_chan_handle_t tx, float freq_hz, int duration_ms, int 
             }
         }
         size_t written = 0;
-        i2s_channel_write(tx, buf, (size_t) frames * 4, &written, pdMS_TO_TICKS(500));
+        esp_err_t werr =
+            i2s_channel_write(tx, buf, (size_t) frames * 4, &written, pdMS_TO_TICKS(500));
+        if (werr != ESP_OK || written != (size_t) frames * 4) {
+            ESP_LOGE(TAG, "i2s_channel_write failed: %s (wrote %u/%u bytes)", esp_err_to_name(werr),
+                     (unsigned) written, (unsigned) (frames * 4));
+        }
         produced += frames;
     }
 }
