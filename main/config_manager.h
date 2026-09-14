@@ -562,6 +562,11 @@ void config_manager_touch_config(void);
 void config_manager_set_chime_speaker_mode(chime_speaker_mode_t mode);
 chime_speaker_mode_t config_manager_get_chime_speaker_mode(void);
 
+// 0-100%, clamped. Applies to every chime alike - see CHIME_REPEAT_MAX in
+// config.h for why urgency is conveyed by repetition instead.
+void config_manager_set_chime_volume(int percent);
+int config_manager_get_chime_volume(void);
+
 void config_manager_set_chime_quiet_enabled(bool enabled);
 bool config_manager_get_chime_quiet_enabled(void);
 // "HH:MM" strings, not validated beyond length - a malformed value just
@@ -576,9 +581,11 @@ const char *config_manager_get_chime_quiet_end(void);
 void config_manager_set_chime_event_enabled(chime_event_t event, bool enabled);
 bool config_manager_get_chime_event_enabled(chime_event_t event);
 
-// Debounce state for the Agenda due/overdue chime (see agenda_manager.c) -
-// "" means "never chimed yet".
-void config_manager_set_chime_agenda_last_date(const char *date_str);
-const char *config_manager_get_chime_agenda_last_date(void);
+// Persisted repeat-until-resolved counter - see chime_repeat_gate() in
+// main/chime.c. Only meaningful for CHIME_EVENT_LOW_BATTERY/
+// CRITICAL_ERROR/AGENDA_DUE (see CHIME_REPEAT_MAX's comment in config.h);
+// any other event is a no-op get (0)/set (ignored).
+void config_manager_set_chime_repeat_count(chime_event_t event, int count);
+int config_manager_get_chime_repeat_count(chime_event_t event);
 
 #endif

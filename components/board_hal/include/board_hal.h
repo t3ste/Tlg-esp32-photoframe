@@ -198,10 +198,14 @@ typedef enum {
  * generated on-device (no WAV/melody data). Other boards return
  * ESP_ERR_NOT_SUPPORTED.
  *
+ * @param kind Which of the 3 built-in patterns to play
+ * @param volume_percent 0-100, linearly mapped to the codec's DAC volume
+ *        register - applies equally to every kind (urgency is conveyed by
+ *        which pattern/how often it repeats, not by loudness)
  * @return ESP_OK on success, ESP_ERR_NOT_SUPPORTED if no speaker, or another
  *         error if the codec / I2S path failed
  */
-esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind);
+esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volume_percent);
 
 #ifdef __cplusplus
 }

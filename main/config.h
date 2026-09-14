@@ -775,6 +775,12 @@ typedef enum {
 // Off by default: this is new, previously-silent hardware, so an update
 // shouldn't start making sound on its own.
 #define NVS_CHIME_SPEAKER_MODE_KEY "chime_mode"
+// DAC volume, 0-100% - linearly mapped to the ES8311's DAC_VOL register
+// range in audio_chime.c. Applies to every chime alike (success/warning/
+// error), by design - see chime_repeat_gate() below for how urgency is
+// instead conveyed by repetition, not loudness.
+#define NVS_CHIME_VOLUME_KEY "chime_vol"
+#define CHIME_DEFAULT_VOLUME_PERCENT 80
 // Quiet hours - a plain daily HH:MM-HH:MM window (wraps past midnight if
 // end < start) during which no chime plays regardless of the master mode
 // or any per-event flag. Off by default.
@@ -796,10 +802,20 @@ typedef enum {
 #define NVS_CHIME_EVENT_AGENDA_KEY "chime_ev_agenda"
 #define NVS_CHIME_EVENT_OTA_KEY "chime_ev_ota"
 #define NVS_CHIME_EVENT_CRIT_KEY "chime_ev_crit"
-// Debounce state for the Agenda due/overdue chime - a plain "YYYY-MM-DD"
-// string so it fires at most once per calendar day even if Agenda mode
-// renders more often than that (e.g. hourly).
-#define NVS_CHIME_AGENDA_LAST_DATE_KEY "chime_ag_date"
-#define CHIME_DATE_STR_MAX_LEN 11  // "YYYY-MM-DD" + NUL
+// Persisted repeat-until-resolved counters - see chime_repeat_gate() in
+// main/chime.c. An "actionable" event (needs the user to do something,
+// unlike a one-shot informational event like rotation/Telegram/OTA) fires
+// once per wake/render while its underlying condition stays true, up to
+// CHIME_REPEAT_MAX times, then goes quiet until the condition actually
+// resolves (which resets the counter back to 0, so it repeats again if the
+// same problem recurs later). Only the 3 events below currently have a
+// meaningful "still ongoing vs. resolved" state to repeat against -
+// WIFI_REPROVISION is inherently one-shot (the device reboots into a
+// different mode immediately after), and ROTATION/TELEGRAM_PHOTO/OTA_SUCCESS
+// are one-off good-news events with nothing to "still be wrong" about.
+#define CHIME_REPEAT_MAX 5
+#define NVS_CHIME_REPEAT_LOWBATT_KEY "chime_rc_lowbat"
+#define NVS_CHIME_REPEAT_CRIT_KEY "chime_rc_crit"
+#define NVS_CHIME_REPEAT_AGENDA_KEY "chime_rc_agenda"
 
 #endif

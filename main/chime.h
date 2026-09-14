@@ -20,6 +20,20 @@ extern "C" {
  */
 void chime_play_if_enabled(chime_event_t event);
 
+/**
+ * @brief Repeat-until-resolved gate for "actionable" events
+ *
+ * Call this with the event's current "is the underlying problem still
+ * happening" state every time that's checked (once per wake/render).
+ * Returns true (and the caller should then call chime_play_if_enabled())
+ * up to CHIME_REPEAT_MAX times while `condition_active` stays true, then
+ * false until the condition actually clears - at which point the counter
+ * resets, so a later recurrence of the same problem repeats again from 1.
+ * Only meaningful for CHIME_EVENT_LOW_BATTERY/CRITICAL_ERROR/AGENDA_DUE -
+ * see config_manager_get/set_chime_repeat_count()'s comment.
+ */
+bool chime_repeat_gate(chime_event_t event, bool condition_active);
+
 #ifdef __cplusplus
 }
 #endif

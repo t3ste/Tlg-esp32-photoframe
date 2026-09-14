@@ -2388,6 +2388,26 @@ async function performFactoryReset() {
               tone" always plays immediately, ignoring quiet hours and this setting - use it to
               confirm the speaker works right after choosing a mode.
             </div>
+            <v-slider
+              v-model="settingsStore.deviceSettings.chimeVolume"
+              label="Volume"
+              min="0"
+              max="100"
+              step="5"
+              thumb-label
+              hide-details
+              class="mt-2 mb-1"
+            >
+              <template #append>
+                <span class="text-body-2" style="min-width: 3em">
+                  {{ settingsStore.deviceSettings.chimeVolume }}%
+                </span>
+              </template>
+            </v-slider>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Applies equally to every chime - warning/error events aren't louder, they instead
+              repeat a few times while the underlying problem persists (see Events below).
+            </div>
 
             <v-divider class="mb-4 mt-2" />
 
@@ -2461,8 +2481,9 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Fires once when the battery first drops below the Low Battery Overlay threshold (Power
-              tab), not on every wake while still low.
+              Fires when the battery is below the Low Battery Overlay threshold (Power tab),
+              repeating once per wake while still low, up to 5 times, then resets once the level
+              recovers.
             </div>
             <v-switch
               v-model="settingsStore.deviceSettings.chimeEventWifiReprovisionEnabled"
@@ -2483,8 +2504,8 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Fires at most once per day, only if Agenda mode's ToDo list has an overdue or
-              due-today item.
+              Fires while Agenda mode's ToDo list has an overdue or due-today item, repeating once
+              per render, up to 5 times, then resets once nothing is due.
             </div>
             <v-switch
               v-model="settingsStore.deviceSettings.chimeEventOtaSuccessEnabled"
@@ -2504,8 +2525,9 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Fires once when WiFi/internet has failed several wakes in a row (same threshold as the
-              Error Overlay, General tab), not on every further failed attempt.
+              Fires once WiFi/internet has failed several wakes in a row (same threshold as the
+              Error Overlay, General tab), repeating each further failed wake, up to 5 times, then
+              resets once connectivity recovers.
             </div>
           </v-tabs-window-item>
 

@@ -201,7 +201,8 @@ static bool chime_event_enabled[CHIME_EVENT_COUNT] = {
     [CHIME_EVENT_AGENDA_DUE] = false,    [CHIME_EVENT_OTA_SUCCESS] = true,
     [CHIME_EVENT_CRITICAL_ERROR] = true,
 };
-static char chime_agenda_last_date[CHIME_DATE_STR_MAX_LEN] = {0};
+static int chime_volume = CHIME_DEFAULT_VOLUME_PERCENT;
+static int chime_repeat_count[CHIME_EVENT_COUNT] = {0};
 
 // ----------------------------------------------------------------------------
 // Cron schedule helpers
@@ -1283,6 +1284,10 @@ esp_err_t config_manager_init(void)
                                      ? (chime_speaker_mode_t) stored_chime_mode
                                      : CHIME_SPEAKER_OFF;
         }
+        uint8_t stored_chime_vol = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CHIME_VOLUME_KEY, &stored_chime_vol) == ESP_OK) {
+            chime_volume = (stored_chime_vol <= 100) ? stored_chime_vol : 100;
+        }
         uint8_t stored_chime_quiet_en = 0;
         if (nvs_get_u8(nvs_handle, NVS_CHIME_QUIET_ENABLED_KEY, &stored_chime_quiet_en) == ESP_OK) {
             chime_quiet_enabled = (stored_chime_quiet_en != 0);
@@ -1307,9 +1312,16 @@ esp_err_t config_manager_init(void)
                 chime_event_enabled[i] = (stored_ev != 0);
             }
         }
-        size_t chime_agenda_date_len = sizeof(chime_agenda_last_date);
-        nvs_get_str(nvs_handle, NVS_CHIME_AGENDA_LAST_DATE_KEY, chime_agenda_last_date,
-                    &chime_agenda_date_len);
+        int32_t stored_chime_rc = 0;
+        if (nvs_get_i32(nvs_handle, NVS_CHIME_REPEAT_LOWBATT_KEY, &stored_chime_rc) == ESP_OK) {
+            chime_repeat_count[CHIME_EVENT_LOW_BATTERY] = (int) stored_chime_rc;
+        }
+        if (nvs_get_i32(nvs_handle, NVS_CHIME_REPEAT_CRIT_KEY, &stored_chime_rc) == ESP_OK) {
+            chime_repeat_count[CHIME_EVENT_CRITICAL_ERROR] = (int) stored_chime_rc;
+        }
+        if (nvs_get_i32(nvs_handle, NVS_CHIME_REPEAT_AGENDA_KEY, &stored_chime_rc) == ESP_OK) {
+            chime_repeat_count[CHIME_EVENT_AGENDA_DUE] = (int) stored_chime_rc;
+        }
 
         nvs_close(nvs_handle);
     }
@@ -3712,6 +3724,22 @@ chime_speaker_mode_t config_manager_get_chime_speaker_mode(void)
     return chime_speaker_mode;
 }
 
+void config_manager_set_chime_volume(int percent)
+{
+    if (percent < 0) {
+        percent = 0;
+    } else if (percent > 100) {
+        percent = 100;
+    }
+    chime_volume = percent;
+    agenda_nvs_set_u8(NVS_CHIME_VOLUME_KEY, (uint8_t) percent);
+}
+
+int config_manager_get_chime_volume(void)
+{
+    return chime_volume;
+}
+
 void config_manager_set_chime_quiet_enabled(bool enabled)
 {
     chime_quiet_enabled = enabled;
@@ -3773,14 +3801,47 @@ bool config_manager_get_chime_event_enabled(chime_event_t event)
     return chime_event_enabled[event];
 }
 
-void config_manager_set_chime_agenda_last_date(const char *date_str)
+// Maps an event to its repeat-counter NVS key - only the 3 "actionable,
+// can resolve" events have one (see CHIME_REPEAT_MAX's comment in
+// config.h); any other event just isn't persisted (in-memory value stays
+// whatever it was, but nothing ever sets it since chime_repeat_gate() is
+// only ever called for these 3).
+static const char *chime_repeat_key_for_event(chime_event_t event)
 {
-    strncpy(chime_agenda_last_date, date_str ? date_str : "", sizeof(chime_agenda_last_date) - 1);
-    chime_agenda_last_date[sizeof(chime_agenda_last_date) - 1] = '\0';
-    agenda_nvs_set_str(NVS_CHIME_AGENDA_LAST_DATE_KEY, chime_agenda_last_date);
+    switch (event) {
+    case CHIME_EVENT_LOW_BATTERY:
+        return NVS_CHIME_REPEAT_LOWBATT_KEY;
+    case CHIME_EVENT_CRITICAL_ERROR:
+        return NVS_CHIME_REPEAT_CRIT_KEY;
+    case CHIME_EVENT_AGENDA_DUE:
+        return NVS_CHIME_REPEAT_AGENDA_KEY;
+    default:
+        return NULL;
+    }
 }
 
-const char *config_manager_get_chime_agenda_last_date(void)
+void config_manager_set_chime_repeat_count(chime_event_t event, int count)
 {
-    return chime_agenda_last_date;
+    if (event < 0 || event >= CHIME_EVENT_COUNT) {
+        return;
+    }
+    chime_repeat_count[event] = count;
+    const char *key = chime_repeat_key_for_event(event);
+    if (!key) {
+        return;
+    }
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_i32(nvs_handle, key, (int32_t) count);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int config_manager_get_chime_repeat_count(chime_event_t event)
+{
+    if (event < 0 || event >= CHIME_EVENT_COUNT) {
+        return 0;
+    }
+    return chime_repeat_count[event];
 }

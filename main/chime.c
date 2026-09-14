@@ -8,12 +8,11 @@
 
 // Per-event, per-boot fire cap - a generic backstop against any future bug
 // that calls chime_play_if_enabled() repeatedly for one event in a tight
-// loop, independent of whether today's call sites need it (each is already
-// edge-triggered on its own - see the individual hook comments). Reset on
-// every boot/deep-sleep wake (this array is a plain static, never
-// NVS-persisted), so a problem that resolves and later reappears isn't
-// permanently muted.
-#define CHIME_MAX_FIRES_PER_BOOT 3
+// loop within a single boot, independent of the (NVS-persisted, survives
+// across boots) repeat-until-resolved cap in chime_repeat_gate() below.
+// Reset on every boot/deep-sleep wake (this array is a plain static, never
+// persisted). Matches CHIME_REPEAT_MAX so the two caps agree.
+#define CHIME_MAX_FIRES_PER_BOOT CHIME_REPEAT_MAX
 static int chime_fire_count[CHIME_EVENT_COUNT] = {0};
 
 // "HH:MM" -> minutes since midnight. Returns false (caller treats quiet
@@ -98,5 +97,25 @@ void chime_play_if_enabled(chime_event_t event)
     }
 
     chime_fire_count[event]++;
-    board_hal_play_beep_pattern(chime_kind_for_event(event));
+    board_hal_play_beep_pattern(chime_kind_for_event(event),
+                                (uint8_t) config_manager_get_chime_volume());
+}
+
+bool chime_repeat_gate(chime_event_t event, bool condition_active)
+{
+    if (event < 0 || event >= CHIME_EVENT_COUNT) {
+        return false;
+    }
+    if (!condition_active) {
+        if (config_manager_get_chime_repeat_count(event) != 0) {
+            config_manager_set_chime_repeat_count(event, 0);
+        }
+        return false;
+    }
+    int count = config_manager_get_chime_repeat_count(event);
+    if (count >= CHIME_REPEAT_MAX) {
+        return false;
+    }
+    config_manager_set_chime_repeat_count(event, count + 1);
+    return true;
 }

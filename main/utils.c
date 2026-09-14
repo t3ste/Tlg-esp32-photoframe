@@ -805,6 +805,10 @@ esp_err_t apply_config_from_json(cJSON *root)
         }
         config_manager_set_chime_speaker_mode(mode);
     }
+    item = cJSON_GetObjectItem(root, "chime_volume");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_chime_volume(item->valueint);
+    }
     item = cJSON_GetObjectItem(root, "chime_quiet_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_chime_quiet_enabled(cJSON_IsTrue(item));
@@ -1772,6 +1776,7 @@ void utils_handle_wifi_connect_result(bool connected)
         if (config_manager_get_wifi_fail_count() != 0) {
             config_manager_set_wifi_fail_count(0);
         }
+        chime_repeat_gate(CHIME_EVENT_CRITICAL_ERROR, false);  // resolved - reset the repeat count
         return;
     }
 
@@ -1779,8 +1784,10 @@ void utils_handle_wifi_connect_result(bool connected)
     config_manager_set_wifi_fail_count(count);
     ESP_LOGW(TAG, "WiFi connect failed (%d consecutive)", count);
 
-    if (count == WIFI_FAIL_OVERLAY_THRESHOLD) {
-        chime_play_if_enabled(CHIME_EVENT_CRITICAL_ERROR);  // fire once, not every wake
+    // Repeats once per wake while still failing (not just on the first
+    // crossing), up to CHIME_REPEAT_MAX times - see chime_repeat_gate().
+    if (chime_repeat_gate(CHIME_EVENT_CRITICAL_ERROR, count >= WIFI_FAIL_OVERLAY_THRESHOLD)) {
+        chime_play_if_enabled(CHIME_EVENT_CRITICAL_ERROR);
     }
     if (!config_manager_get_error_overlay_enabled() || count < WIFI_FAIL_OVERLAY_THRESHOLD) {
         return;
@@ -1820,6 +1827,7 @@ void utils_finalize_internet_health(void)
         if (config_manager_get_wifi_fail_count() != 0) {
             config_manager_set_wifi_fail_count(0);
         }
+        chime_repeat_gate(CHIME_EVENT_CRITICAL_ERROR, false);  // resolved - reset the repeat count
         return;
     }
 
@@ -1829,8 +1837,8 @@ void utils_finalize_internet_health(void)
              "Internet-dependent request(s) failed despite WiFi being connected (%d consecutive)",
              count);
 
-    if (count == WIFI_FAIL_OVERLAY_THRESHOLD) {
-        chime_play_if_enabled(CHIME_EVENT_CRITICAL_ERROR);  // fire once, not every wake
+    if (chime_repeat_gate(CHIME_EVENT_CRITICAL_ERROR, count >= WIFI_FAIL_OVERLAY_THRESHOLD)) {
+        chime_play_if_enabled(CHIME_EVENT_CRITICAL_ERROR);
     }
     if (!config_manager_get_error_overlay_enabled() || count < WIFI_FAIL_OVERLAY_THRESHOLD) {
         return;

@@ -53,10 +53,16 @@ static bool low_battery_overlay_should_show(int *out_percent)
     if (!active && percent < low) {
         active = true;
         config_manager_set_low_battery_overlay_active(true);
-        chime_play_if_enabled(CHIME_EVENT_LOW_BATTERY);  // false->true edge only
     } else if (active && percent > clear) {
         active = false;
         config_manager_set_low_battery_overlay_active(false);
+    }
+
+    // Repeats once per render while still below threshold (not just on the
+    // first crossing), up to CHIME_REPEAT_MAX times, then goes quiet until
+    // the level actually recovers - see chime_repeat_gate().
+    if (chime_repeat_gate(CHIME_EVENT_LOW_BATTERY, active)) {
+        chime_play_if_enabled(CHIME_EVENT_LOW_BATTERY);
     }
 
     if (active && out_percent) {

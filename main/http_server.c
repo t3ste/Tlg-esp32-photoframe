@@ -1655,6 +1655,7 @@ static esp_err_t config_handler(httpd_req_t *req)
             break;
         }
         cJSON_AddStringToObject(root, "chime_speaker_mode", chime_mode_str);
+        cJSON_AddNumberToObject(root, "chime_volume", config_manager_get_chime_volume());
         cJSON_AddBoolToObject(root, "chime_quiet_enabled",
                               config_manager_get_chime_quiet_enabled());
         cJSON_AddStringToObject(root, "chime_quiet_start", config_manager_get_chime_quiet_start());
@@ -2510,7 +2511,9 @@ static esp_err_t chime_test_handler(httpd_req_t *req)
     }
 
     ESP_LOGI(TAG, "Testing speaker chime (kind=%d)", (int) kind);
-    esp_err_t ret = board_hal_play_beep_pattern(kind);
+    // Uses the configured volume, same as a real chime, so the test button
+    // shows exactly what the user will actually hear.
+    esp_err_t ret = board_hal_play_beep_pattern(kind, (uint8_t) config_manager_get_chime_volume());
 
     httpd_resp_set_type(req, "application/json");
     if (ret == ESP_OK) {

@@ -111,6 +111,7 @@ export const useSettingsStore = defineStore("settings", () => {
     // mirror the firmware's own conservative defaults (see config.h).
     chimeSpeakerAvailable: false,
     chimeSpeakerMode: "off",
+    chimeVolume: 80,
     chimeQuietEnabled: false,
     chimeQuietStart: "22:00",
     chimeQuietEnd: "07:00",
@@ -393,6 +394,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.lowBatteryOverlayThreshold = data.low_battery_overlay_threshold ?? 16;
       deviceSettings.value.chimeSpeakerAvailable = data.chime_speaker_available === true;
       deviceSettings.value.chimeSpeakerMode = data.chime_speaker_mode || "off";
+      deviceSettings.value.chimeVolume = data.chime_volume ?? 80;
       deviceSettings.value.chimeQuietEnabled = data.chime_quiet_enabled === true;
       deviceSettings.value.chimeQuietStart = data.chime_quiet_start || "22:00";
       deviceSettings.value.chimeQuietEnd = data.chime_quiet_end || "07:00";
@@ -564,6 +566,7 @@ export const useSettingsStore = defineStore("settings", () => {
       low_battery_overlay_enabled: deviceSettings.value.lowBatteryOverlayEnabled,
       low_battery_overlay_threshold: deviceSettings.value.lowBatteryOverlayThreshold,
       chime_speaker_mode: deviceSettings.value.chimeSpeakerMode,
+      chime_volume: deviceSettings.value.chimeVolume,
       chime_quiet_enabled: deviceSettings.value.chimeQuietEnabled,
       chime_quiet_start: deviceSettings.value.chimeQuietStart,
       chime_quiet_end: deviceSettings.value.chimeQuietEnd,

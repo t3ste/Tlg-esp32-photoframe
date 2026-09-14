@@ -24,28 +24,21 @@ static const char *TAG = "agenda_manager";
 // comparison agenda_renderer.c's (private) due_status() already does for
 // per-element coloring - duplicated here rather than exposed from the
 // renderer, since it's a 3-line comparison and this is the only other
-// place that needs it. Fires at most once per calendar day (persisted in
-// NVS, survives the deep-sleep reboot between agenda wakes) even if Agenda
-// mode renders more often than that.
+// place that needs it. Repeats once per Agenda render while at least one
+// item is still due/overdue, up to CHIME_REPEAT_MAX times, then goes quiet
+// until nothing is due anymore (which resets the count - see
+// chime_repeat_gate()) - so a later, different due item chimes again.
 static void agenda_chime_due_todo_if_needed(const todo_list_t *todo)
 {
     time_t now = time(NULL);
     struct tm now_tm;
     localtime_r(&now, &now_tm);
-    // Oversized vs. the exact "YYYY-MM-DD" (10 chars) it normally holds -
+    // Oversized vs. the exact "YYYY-MM-DD" (10 chars) ever compared below -
     // silences -Wformat-truncation, which (correctly) can't prove
-    // tm_year+1900 always fits in 4 digits from this call site alone. Only
-    // the first 10 chars are ever compared/stored below.
-    char today_str_buf[32];
-    snprintf(today_str_buf, sizeof(today_str_buf), "%04d-%02d-%02d", now_tm.tm_year + 1900,
+    // tm_year+1900 always fits in 4 digits from this call site alone.
+    char today_str[32];
+    snprintf(today_str, sizeof(today_str), "%04d-%02d-%02d", now_tm.tm_year + 1900,
              now_tm.tm_mon + 1, now_tm.tm_mday);
-    char today_str[CHIME_DATE_STR_MAX_LEN];
-    strncpy(today_str, today_str_buf, sizeof(today_str) - 1);
-    today_str[sizeof(today_str) - 1] = '\0';
-
-    if (strcmp(config_manager_get_chime_agenda_last_date(), today_str) == 0) {
-        return;  // already chimed today
-    }
 
     bool has_due = false;
     for (int i = 0; i < todo->count && !has_due; i++) {
@@ -54,12 +47,10 @@ static void agenda_chime_due_todo_if_needed(const todo_list_t *todo)
             has_due = true;
         }
     }
-    if (!has_due) {
-        return;
-    }
 
-    chime_play_if_enabled(CHIME_EVENT_AGENDA_DUE);
-    config_manager_set_chime_agenda_last_date(today_str);
+    if (chime_repeat_gate(CHIME_EVENT_AGENDA_DUE, has_due)) {
+        chime_play_if_enabled(CHIME_EVENT_AGENDA_DUE);
+    }
 }
 
 // If `list` has no event overlapping or after `now`, injects a single

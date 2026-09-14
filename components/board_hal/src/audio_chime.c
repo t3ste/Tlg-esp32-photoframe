@@ -10,9 +10,10 @@ bool board_hal_has_speaker(void)
     return false;
 }
 
-esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind)
+esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volume_percent)
 {
     (void) kind;
+    (void) volume_percent;
     return ESP_ERR_NOT_SUPPORTED;
 }
 
@@ -125,7 +126,7 @@ static void pa_set(bool enable)
 // these registers are only correct because of what ran immediately before
 // them (a few are deliberately re-read-and-modified rather than written
 // outright, matching the original code's own read-modify-write pattern).
-static esp_err_t es8311_dac_init(i2c_master_dev_handle_t dev)
+static esp_err_t es8311_dac_init(i2c_master_dev_handle_t dev, uint8_t volume_percent)
 {
     uint8_t chip_id = 0;
     esp_err_t err = es8311_read(dev, ES8311_REG_CHIP_ID1, &chip_id);
@@ -213,7 +214,15 @@ static esp_err_t es8311_dac_init(i2c_master_dev_handle_t dev)
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_DAC_RAMPRATE, 0x08));
     ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_GP_CONTROL, 0x00));
 
-    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_DAC_VOL, 0xBF));  // ~0 dB
+    // Linear 0-100% -> 0x00-0xFF. Not perceptually linear (the register is
+    // roughly logarithmic, ~0.5dB/step), but simple, monotonic, and good
+    // enough for "turn it up/down" - a live-confirmed 0xBF (~75%) played
+    // fine, so this range is known-good end to end.
+    if (volume_percent > 100) {
+        volume_percent = 100;
+    }
+    uint8_t vol_reg = (uint8_t) ((unsigned) volume_percent * 255 / 100);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(es8311_write(dev, ES8311_REG_DAC_VOL, vol_reg));
 
     // Explicit unmute - read-modify-write clearing bits 0x60. Volume alone
     // is not enough; without this the DAC stays hardware-muted regardless
@@ -356,7 +365,7 @@ static void audio_session_close(audio_session_t *s)
     }
 }
 
-static esp_err_t audio_session_open(audio_session_t *s)
+static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
 {
     memset(s, 0, sizeof(*s));
 
@@ -431,7 +440,7 @@ static esp_err_t audio_session_open(audio_session_t *s)
         return err;
     }
 
-    err = es8311_dac_init(s->es8311);
+    err = es8311_dac_init(s->es8311, volume_percent);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "ES8311 DAC init failed: %s", esp_err_to_name(err));
         audio_session_close(s);
@@ -455,7 +464,7 @@ bool board_hal_has_speaker(void)
     return true;
 }
 
-esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind)
+esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volume_percent)
 {
     chime_mutex_init();
     if (!s_chime_mutex || xSemaphoreTake(s_chime_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
@@ -463,7 +472,7 @@ esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind)
     }
 
     audio_session_t session;
-    esp_err_t err = audio_session_open(&session);
+    esp_err_t err = audio_session_open(&session, volume_percent);
     if (err == ESP_OK) {
         play_beep_pattern_tones(session.tx, kind);
         i2s_write_silence(session.tx, 128);
