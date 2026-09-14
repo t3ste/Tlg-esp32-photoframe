@@ -125,7 +125,7 @@ static bool agenda_cal_enabled = false;
 static bool agenda_cal_weather_enabled = false;
 static bool agenda_cal_weather_right_aligned = false;
 static agenda_multiday_mode_t agenda_cal_multiday_mode = AGENDA_MULTIDAY_REPEAT;
-static bool agenda_cal_show_duration = false;
+static agenda_time_display_mode_t agenda_cal_time_display_mode = AGENDA_TIME_DISPLAY_OFF;
 static char agenda_cal_name[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_cal_name2[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_todo_url[AGENDA_TODO_URL_MAX_LEN] = {0};
@@ -1076,7 +1076,9 @@ esp_err_t config_manager_init(void)
         uint8_t stored_agenda_cal_dur = 0;
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_SHOW_DURATION_KEY, &stored_agenda_cal_dur) ==
             ESP_OK) {
-            agenda_cal_show_duration = (stored_agenda_cal_dur != 0);
+            agenda_cal_time_display_mode = (stored_agenda_cal_dur <= AGENDA_TIME_DISPLAY_RANGE)
+                                               ? (agenda_time_display_mode_t) stored_agenda_cal_dur
+                                               : AGENDA_TIME_DISPLAY_OFF;
         }
         size_t agenda_cal_name_len = sizeof(agenda_cal_name);
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_NAME_KEY, agenda_cal_name, &agenda_cal_name_len);
@@ -2983,15 +2985,18 @@ agenda_multiday_mode_t config_manager_get_agenda_cal_multiday_mode(void)
     return agenda_cal_multiday_mode;
 }
 
-void config_manager_set_agenda_cal_show_duration(bool enabled)
+void config_manager_set_agenda_cal_time_display_mode(agenda_time_display_mode_t mode)
 {
-    agenda_cal_show_duration = enabled;
-    agenda_nvs_set_u8(NVS_AGENDA_CAL_SHOW_DURATION_KEY, enabled ? 1 : 0);
+    if (mode < AGENDA_TIME_DISPLAY_OFF || mode > AGENDA_TIME_DISPLAY_RANGE) {
+        mode = AGENDA_TIME_DISPLAY_OFF;
+    }
+    agenda_cal_time_display_mode = mode;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_SHOW_DURATION_KEY, (uint8_t) mode);
 }
 
-bool config_manager_get_agenda_cal_show_duration(void)
+agenda_time_display_mode_t config_manager_get_agenda_cal_time_display_mode(void)
 {
-    return agenda_cal_show_duration;
+    return agenda_cal_time_display_mode;
 }
 
 void config_manager_set_agenda_cal_name(const char *name)

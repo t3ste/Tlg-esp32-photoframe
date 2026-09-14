@@ -94,6 +94,10 @@ static bool load_extra_ics_source(bool enabled, const char *raw_cache_path,
 
     time_t expand_end = now + (time_t) AGENDA_EXTRA_ICS_EXPAND_DAYS * 86400;
     if (calendar_ics_read_cache(raw_cache_path, now, expand_end, out) != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "Extra ICS source '%s' is enabled but has no saved URL/file - that column will "
+                 "be omitted",
+                 display_name);
         return false;  // source never configured, or the raw cache is missing/corrupt
     }
     calendar_ics_write_expanded_cache(flat_cache_path, out);

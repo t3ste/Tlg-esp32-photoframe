@@ -117,10 +117,15 @@ export const useSettingsStore = defineStore("settings", () => {
     agendaCalEnabled: false,
     agendaTodoUrl: "",
     agendaCalUrl: "",
+    // Read-only, server-reported "is a URL actually saved?" flag - since the
+    // write-only field above always starts empty, this is the only way the
+    // UI can show a persistent "configured" confirmation across a reload.
+    agendaCalUrlConfigured: false,
     // Optional second calendar (e.g. work vs. personal) - merged with the
     // first at render time, colored per its own origin. Same write-only
     // treatment as agendaCalUrl above.
     agendaCalUrl2: "",
+    agendaCalUrl2Configured: false,
     // Three extra ICS sources (e.g. holidays/school-holidays/other
     // special-days feeds) shown in the same Calendar column as A/B, each
     // independently enabled/named/colored. Unlike A/B above, these are
@@ -134,6 +139,12 @@ export const useSettingsStore = defineStore("settings", () => {
     agendaCalCUrl: "",
     agendaCalDUrl: "",
     agendaCalEUrl: "",
+    // Read-only, server-reported "is a raw .ics file on disk right now?"
+    // flag - true whether it got there via URL fetch or direct upload; same
+    // "otherwise no persistent confirmation" reasoning as agendaCalUrlConfigured.
+    agendaCalCConfigured: false,
+    agendaCalDConfigured: false,
+    agendaCalEConfigured: false,
     agendaCalCName: "",
     agendaCalDName: "",
     agendaCalEName: "",
@@ -159,10 +170,10 @@ export const useSettingsStore = defineStore("settings", () => {
     // (repeated under every day like "repeat", but each occurrence also
     // gets its own "N/M: " prefix).
     agendaCalMultidayMode: "repeat",
-    // Off (default): timed events show just "HH:MM Summary". On: appends the
-    // duration, e.g. "08:15 [45m] Kaffee trinken" - never affects all-day
-    // events, which already show no time at all.
-    agendaCalShowDuration: false,
+    // "off" (default): timed events show just "HH:MM Summary". "duration":
+    // appends a compact "[Xm]"/"[Xh]" suffix. "range": shows the full
+    // "HH:MM-HH:MM" span instead. Never affects all-day events.
+    agendaCalTimeDisplayMode: "off",
     agendaCron: ["0 6-18 *"],
     // true = ToDo above Calendar (default), false = side by side. Portrait
     // boards always stack regardless of this setting - see agenda_renderer.c.
@@ -385,7 +396,12 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.agendaCalWeatherRightAligned =
         data.agenda_cal_weather_right_aligned === true;
       deviceSettings.value.agendaCalMultidayMode = data.agenda_cal_multiday_mode || "repeat";
-      deviceSettings.value.agendaCalShowDuration = data.agenda_cal_show_duration === true;
+      deviceSettings.value.agendaCalTimeDisplayMode = data.agenda_cal_time_display_mode || "off";
+      deviceSettings.value.agendaCalUrlConfigured = data.agenda_cal_url_configured === true;
+      deviceSettings.value.agendaCalUrl2Configured = data.agenda_cal_url2_configured === true;
+      deviceSettings.value.agendaCalCConfigured = data.agenda_cal_c_configured === true;
+      deviceSettings.value.agendaCalDConfigured = data.agenda_cal_d_configured === true;
+      deviceSettings.value.agendaCalEConfigured = data.agenda_cal_e_configured === true;
       deviceSettings.value.agendaCron =
         Array.isArray(data.agenda_cron) && data.agenda_cron.length
           ? data.agenda_cron
@@ -530,7 +546,7 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_cal_weather_enabled: deviceSettings.value.agendaCalWeatherEnabled,
       agenda_cal_weather_right_aligned: deviceSettings.value.agendaCalWeatherRightAligned,
       agenda_cal_multiday_mode: deviceSettings.value.agendaCalMultidayMode,
-      agenda_cal_show_duration: deviceSettings.value.agendaCalShowDuration,
+      agenda_cal_time_display_mode: deviceSettings.value.agendaCalTimeDisplayMode,
       agenda_cron: deviceSettings.value.agendaCron,
       agenda_stack_layout: deviceSettings.value.agendaStackLayout,
       agenda_bg_color: deviceSettings.value.agendaBgColor,

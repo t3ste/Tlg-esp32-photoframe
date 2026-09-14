@@ -779,9 +779,16 @@ esp_err_t apply_config_from_json(cJSON *root)
         }
         config_manager_set_agenda_cal_multiday_mode(mode);
     }
-    item = cJSON_GetObjectItem(root, "agenda_cal_show_duration");
-    if (item && cJSON_IsBool(item)) {
-        config_manager_set_agenda_cal_show_duration(cJSON_IsTrue(item));
+    item = cJSON_GetObjectItem(root, "agenda_cal_time_display_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *time_mode_str = cJSON_GetStringValue(item);
+        agenda_time_display_mode_t time_mode = AGENDA_TIME_DISPLAY_OFF;
+        if (strcmp(time_mode_str, "duration") == 0) {
+            time_mode = AGENDA_TIME_DISPLAY_DURATION;
+        } else if (strcmp(time_mode_str, "range") == 0) {
+            time_mode = AGENDA_TIME_DISPLAY_RANGE;
+        }
+        config_manager_set_agenda_cal_time_display_mode(time_mode);
     }
     // Plain display names, not credentials - unlike agenda_cal_url above,
     // applied even when empty (an empty save genuinely means "cleared back

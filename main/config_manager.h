@@ -457,10 +457,10 @@ bool config_manager_get_agenda_cal_weather_right_aligned(void);
 void config_manager_set_agenda_cal_multiday_mode(agenda_multiday_mode_t mode);
 agenda_multiday_mode_t config_manager_get_agenda_cal_multiday_mode(void);
 
-// Opt-in duration suffix on timed events, e.g. "08:15 [45m] Kaffee trinken" -
-// see NVS_AGENDA_CAL_SHOW_DURATION_KEY in config.h. Default false.
-void config_manager_set_agenda_cal_show_duration(bool enabled);
-bool config_manager_get_agenda_cal_show_duration(void);
+// How a timed event's time is shown - see agenda_time_display_mode_t/
+// NVS_AGENDA_CAL_SHOW_DURATION_KEY in config.h. Default off.
+void config_manager_set_agenda_cal_time_display_mode(agenda_time_display_mode_t mode);
+agenda_time_display_mode_t config_manager_get_agenda_cal_time_display_mode(void);
 
 // Optional display names for the Calendar header - see
 // NVS_AGENDA_CAL_NAME_KEY/_NAME2_KEY in config.h. May return "" (never

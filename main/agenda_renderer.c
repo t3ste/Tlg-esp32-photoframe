@@ -577,13 +577,16 @@ static void format_duration_compact(int total_minutes, char *out, size_t out_len
     }
 }
 
-// Builds one event's display text - "HH:MM " (omitted for an all-day
-// event), optionally followed by "[duration] " (see
-// config_manager_get_agenda_cal_show_duration()/NVS_AGENDA_CAL_SHOW_DURATION_KEY),
-// then the summary - and resolves the single color (plus optional chip)
-// the whole row draws in, per calendar_source_color() above. No
-// date/day-of-week here: draw_calendar_column() shows that once per day
-// group via draw_day_divider(), not repeated on every event.
+// Builds one event's display text - the start time (omitted for an all-day
+// event), in one of three forms depending on
+// config_manager_get_agenda_cal_time_display_mode() (NVS_AGENDA_CAL_SHOW_DURATION_KEY):
+// plain "HH:MM " (off, default), "HH:MM [duration] " (duration), or
+// "HH:MM-HH:MM " (range, only when a real end time is known - falls back to
+// plain "HH:MM " otherwise, same as duration mode already does) - then the
+// summary. Also resolves the single color (plus optional chip) the whole
+// row draws in, per calendar_source_color() above. No date/day-of-week
+// here: draw_calendar_column() shows that once per day group via
+// draw_day_divider(), not repeated on every event.
 static void build_event_line(const ics_event_t *ev, int calendar_index, bool grayscale,
                              uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, agenda_event_line_t *out)
 {
@@ -594,23 +597,31 @@ static void build_event_line(const ics_event_t *ev, int calendar_index, bool gra
     if (!ev->all_day) {
         struct tm start_tm;
         localtime_r(&ev->start, &start_tm);
-        int n = snprintf(out->text + pos, cap - pos + 1, "%02d:%02d ", start_tm.tm_hour,
+        agenda_time_display_mode_t time_mode = config_manager_get_agenda_cal_time_display_mode();
+        int duration_min = (ev->end > ev->start) ? (int) ((ev->end - ev->start) / 60) : 0;
+
+        int n;
+        if (time_mode == AGENDA_TIME_DISPLAY_RANGE && duration_min > 0) {
+            struct tm end_tm;
+            localtime_r(&ev->end, &end_tm);
+            n = snprintf(out->text + pos, cap - pos + 1, "%02d:%02d-%02d:%02d ", start_tm.tm_hour,
+                         start_tm.tm_min, end_tm.tm_hour, end_tm.tm_min);
+        } else {
+            n = snprintf(out->text + pos, cap - pos + 1, "%02d:%02d ", start_tm.tm_hour,
                          start_tm.tm_min);
+        }
         if (n > 0) {
             size_t written = ((size_t) n <= cap - pos) ? (size_t) n : cap - pos;
             pos += written;
         }
 
-        if (config_manager_get_agenda_cal_show_duration() && ev->end > ev->start) {
-            int duration_min = (int) ((ev->end - ev->start) / 60);
-            if (duration_min > 0) {
-                char dur[16];
-                format_duration_compact(duration_min, dur, sizeof(dur));
-                int dn = snprintf(out->text + pos, cap - pos + 1, "[%s] ", dur);
-                if (dn > 0) {
-                    size_t dwritten = ((size_t) dn <= cap - pos) ? (size_t) dn : cap - pos;
-                    pos += dwritten;
-                }
+        if (time_mode == AGENDA_TIME_DISPLAY_DURATION && duration_min > 0) {
+            char dur[16];
+            format_duration_compact(duration_min, dur, sizeof(dur));
+            int dn = snprintf(out->text + pos, cap - pos + 1, "[%s] ", dur);
+            if (dn > 0) {
+                size_t dwritten = ((size_t) dn <= cap - pos) ? (size_t) dn : cap - pos;
+                pos += dwritten;
             }
         }
     }

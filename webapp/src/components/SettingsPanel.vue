@@ -237,6 +237,63 @@ const agendaMultidayModeOptions = [
   { title: "Repeat + number", value: "repeat_numbered" },
 ];
 
+const agendaTimeDisplayModeOptions = [
+  { title: "Off (default) - start time only", value: "off" },
+  { title: "Duration - e.g. 08:15 [45m]", value: "duration" },
+  { title: "Range - e.g. 08:15-09:00", value: "range" },
+];
+
+// Guards against enabling a calendar with nothing behind it (no persisted
+// visual confirmation existed before, so this state was easy to fall into
+// silently - see agendaCalUrlConfigured etc. below). Each computed is true
+// once that slot has either a server-confirmed source (the "_configured"
+// flag GET /api/config now reports) or a URL just typed into its own field
+// this session, not yet saved. Turning a calendar OFF is always allowed -
+// only the ON transition is gated, via the setter below.
+const canEnableCalendarAB = computed(
+  () =>
+    settingsStore.deviceSettings.agendaCalUrlConfigured ||
+    settingsStore.deviceSettings.agendaCalUrl2Configured ||
+    !!settingsStore.deviceSettings.agendaCalUrl ||
+    !!settingsStore.deviceSettings.agendaCalUrl2
+);
+function canEnableExtraCal(slot) {
+  const configuredKey = `agendaCal${slot.toUpperCase()}Configured`;
+  const urlKey = `agendaCal${slot.toUpperCase()}Url`;
+  return !!settingsStore.deviceSettings[configuredKey] || !!settingsStore.deviceSettings[urlKey];
+}
+function flashBlockedEnable(message) {
+  saveError.value = true;
+  saveMessage.value = message;
+  setTimeout(() => (saveError.value = false), 4000);
+}
+const calendarAbEnabledModel = computed({
+  get: () => settingsStore.deviceSettings.agendaCalEnabled,
+  set: (val) => {
+    if (val && !canEnableCalendarAB.value) {
+      flashBlockedEnable("Add a Calendar A or B URL first");
+      return;
+    }
+    settingsStore.deviceSettings.agendaCalEnabled = val;
+  },
+});
+function extraCalEnabledModel(slot) {
+  const key = `agendaCal${slot.toUpperCase()}Enabled`;
+  return computed({
+    get: () => settingsStore.deviceSettings[key],
+    set: (val) => {
+      if (val && !canEnableExtraCal(slot)) {
+        flashBlockedEnable(`Add a Calendar ${slot.toUpperCase()} URL or upload a file first`);
+        return;
+      }
+      settingsStore.deviceSettings[key] = val;
+    },
+  });
+}
+const calendarCEnabledModel = extraCalEnabledModel("c");
+const calendarDEnabledModel = extraCalEnabledModel("d");
+const calendarEEnabledModel = extraCalEnabledModel("e");
+
 const rotationModeOptions = computed(() => {
   const options = [
     { title: "URL - Fetch image from URL", value: "url" },
@@ -460,6 +517,29 @@ async function organizeCropVariants() {
 // form is needed).
 const refreshingExtraIcs = ref({ c: false, d: false, e: false });
 const uploadingExtraIcs = ref({ c: false, d: false, e: false });
+
+// Re-reads all five calendars' "is a source actually saved?" flags from the
+// device (agenda_cal_url_configured etc. - a stat() of the raw cache file
+// for C/D/E, a non-empty check for A/B's URL - see GET /api/config in
+// http_server.c) after a save/refresh/upload action. Deliberately just
+// these five fields, not a full settingsStore reload, which would also
+// discard any unsaved edits the user has pending elsewhere in the panel.
+async function refreshConfiguredFlags() {
+  try {
+    const response = await fetch("/api/config");
+    if (response.ok) {
+      const data = await response.json();
+      settingsStore.deviceSettings.agendaCalUrlConfigured = data.agenda_cal_url_configured === true;
+      settingsStore.deviceSettings.agendaCalUrl2Configured =
+        data.agenda_cal_url2_configured === true;
+      settingsStore.deviceSettings.agendaCalCConfigured = data.agenda_cal_c_configured === true;
+      settingsStore.deviceSettings.agendaCalDConfigured = data.agenda_cal_d_configured === true;
+      settingsStore.deviceSettings.agendaCalEConfigured = data.agenda_cal_e_configured === true;
+    }
+  } catch (error) {
+    console.error("Failed to refresh calendar source status:", error);
+  }
+}
 const extraIcsFileC = ref(null);
 const extraIcsFileD = ref(null);
 const extraIcsFileE = ref(null);
@@ -475,6 +555,10 @@ async function refreshExtraIcs(slot) {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
+    // "refresh now" on a slot with no URL saved yet is a silent no-op
+    // backend-side (see apply_extra_ics_url() in utils.c), so re-check the
+    // actual on-device state rather than assuming this click succeeded.
+    await refreshConfiguredFlags();
     saveSuccess.value = true;
     saveMessage.value = `Calendar ${slot.toUpperCase()} refreshed`;
     setTimeout(() => (saveSuccess.value = false), 3000);
@@ -503,6 +587,7 @@ function onExtraIcsFileSelected(event, slot) {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
+      await refreshConfiguredFlags();
       saveSuccess.value = true;
       saveMessage.value = `Calendar ${slot.toUpperCase()} updated from file`;
       setTimeout(() => (saveSuccess.value = false), 3000);
@@ -634,6 +719,10 @@ async function saveSettings() {
 
     // Refresh device time in case timezone changed
     await fetchDeviceTime();
+    // A URL just saved (A/B/C/D/E) may or may not have actually fetched
+    // successfully server-side - re-check the persistent "configured"
+    // confirmation rather than assuming the save alone means success.
+    await refreshConfiguredFlags();
   } else {
     // Show error message
     saveError.value = true;
@@ -1381,7 +1470,7 @@ async function performFactoryReset() {
 
             <div class="text-subtitle-2 mb-2">Calendar</div>
             <v-switch
-              v-model="settingsStore.deviceSettings.agendaCalEnabled"
+              v-model="calendarAbEnabledModel"
               label="Show upcoming events"
               color="primary"
               class="mb-2"
@@ -1408,7 +1497,18 @@ async function performFactoryReset() {
                   persistent-hint
                   placeholder="••••••••"
                   :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
-                />
+                >
+                  <template #append-inner>
+                    <v-icon
+                      v-if="settingsStore.deviceSettings.agendaCalUrlConfigured"
+                      color="success"
+                      size="20"
+                      title="URL saved on device"
+                    >
+                      mdi-check-circle
+                    </v-icon>
+                  </template>
+                </v-text-field>
               </v-col>
               <v-col cols="8" sm="3">
                 <v-text-field
@@ -1445,7 +1545,18 @@ async function performFactoryReset() {
                   persistent-hint
                   placeholder="••••••••"
                   :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
-                />
+                >
+                  <template #append-inner>
+                    <v-icon
+                      v-if="settingsStore.deviceSettings.agendaCalUrl2Configured"
+                      color="success"
+                      size="20"
+                      title="URL saved on device"
+                    >
+                      mdi-check-circle
+                    </v-icon>
+                  </template>
+                </v-text-field>
               </v-col>
               <v-col cols="12" sm="4">
                 <v-text-field
@@ -1509,19 +1620,21 @@ async function performFactoryReset() {
               one visible shows "4/8: Trip" that one time only. Repeat + number: combines both -
               still repeated under every day, but each occurrence also gets its own "N/M:" prefix.
             </div>
-            <v-switch
-              v-model="settingsStore.deviceSettings.agendaCalShowDuration"
-              label="Show event duration"
-              color="primary"
+            <v-select
+              v-model="settingsStore.deviceSettings.agendaCalTimeDisplayMode"
+              :items="agendaTimeDisplayModeOptions"
+              item-title="title"
+              item-value="value"
+              label="Event time display"
+              variant="outlined"
               class="mt-2 mb-1"
               hide-details
               :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Off (default): a timed event shows just its start time, e.g. "08:15 Kaffee trinken" -
-              no indication of when it ends. On: appends how long it lasts, e.g. "08:15 [45m] Kaffee
-              trinken" or "14:00 [1h] Meeting" - chosen over "08:15-09:00" to stay compact on a
-              narrow column. Doesn't affect all-day events, which already show no time at all.
+              Duration is more compact for short events but longer once an event runs over an hour
+              (e.g. "08:00 [1h30m]" vs. "08:00-09:30" for Range) - pick whichever reads better for
+              your events. Neither affects all-day events.
             </div>
 
             <v-divider class="mb-4 mt-2" />
@@ -1541,7 +1654,7 @@ async function performFactoryReset() {
             <v-card variant="tonal" class="mb-3">
               <v-card-text>
                 <v-switch
-                  v-model="settingsStore.deviceSettings.agendaCalCEnabled"
+                  v-model="calendarCEnabledModel"
                   label="Calendar C enabled"
                   color="primary"
                   hide-details
@@ -1560,7 +1673,18 @@ async function performFactoryReset() {
                       persistent-hint
                       placeholder="••••••••"
                       :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
-                    />
+                    >
+                      <template #append-inner>
+                        <v-icon
+                          v-if="settingsStore.deviceSettings.agendaCalCConfigured"
+                          color="success"
+                          size="20"
+                          title="Source saved on device"
+                        >
+                          mdi-check-circle
+                        </v-icon>
+                      </template>
+                    </v-text-field>
                   </v-col>
                   <v-col cols="12" sm="5">
                     <v-text-field
@@ -1606,7 +1730,7 @@ async function performFactoryReset() {
             <v-card variant="tonal" class="mb-3">
               <v-card-text>
                 <v-switch
-                  v-model="settingsStore.deviceSettings.agendaCalDEnabled"
+                  v-model="calendarDEnabledModel"
                   label="Calendar D enabled"
                   color="primary"
                   hide-details
@@ -1625,7 +1749,18 @@ async function performFactoryReset() {
                       persistent-hint
                       placeholder="••••••••"
                       :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
-                    />
+                    >
+                      <template #append-inner>
+                        <v-icon
+                          v-if="settingsStore.deviceSettings.agendaCalDConfigured"
+                          color="success"
+                          size="20"
+                          title="Source saved on device"
+                        >
+                          mdi-check-circle
+                        </v-icon>
+                      </template>
+                    </v-text-field>
                   </v-col>
                   <v-col cols="12" sm="5">
                     <v-text-field
@@ -1671,7 +1806,7 @@ async function performFactoryReset() {
             <v-card variant="tonal" class="mb-3">
               <v-card-text>
                 <v-switch
-                  v-model="settingsStore.deviceSettings.agendaCalEEnabled"
+                  v-model="calendarEEnabledModel"
                   label="Calendar E enabled"
                   color="primary"
                   hide-details
@@ -1690,7 +1825,18 @@ async function performFactoryReset() {
                       persistent-hint
                       placeholder="••••••••"
                       :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
-                    />
+                    >
+                      <template #append-inner>
+                        <v-icon
+                          v-if="settingsStore.deviceSettings.agendaCalEConfigured"
+                          color="success"
+                          size="20"
+                          title="Source saved on device"
+                        >
+                          mdi-check-circle
+                        </v-icon>
+                      </template>
+                    </v-text-field>
                   </v-col>
                   <v-col cols="12" sm="5">
                     <v-text-field

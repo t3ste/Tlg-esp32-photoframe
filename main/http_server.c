@@ -1671,10 +1671,40 @@ static esp_err_t config_handler(httpd_req_t *req)
             break;
         }
         cJSON_AddStringToObject(root, "agenda_cal_multiday_mode", agenda_multiday_str);
-        cJSON_AddBoolToObject(root, "agenda_cal_show_duration",
-                              config_manager_get_agenda_cal_show_duration());
+        const char *agenda_time_str = "off";
+        switch (config_manager_get_agenda_cal_time_display_mode()) {
+        case AGENDA_TIME_DISPLAY_DURATION:
+            agenda_time_str = "duration";
+            break;
+        case AGENDA_TIME_DISPLAY_RANGE:
+            agenda_time_str = "range";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "agenda_cal_time_display_mode", agenda_time_str);
         cJSON_AddStringToObject(root, "agenda_cal_name", config_manager_get_agenda_cal_name());
         cJSON_AddStringToObject(root, "agenda_cal_name2", config_manager_get_agenda_cal_name2());
+        // Non-secret "is a source actually saved?" flags - the URL fields
+        // themselves are write-only (see the comment above), so without
+        // these the Web UI has no way to tell a freshly-saved, working
+        // calendar apart from one that was enabled but never actually given
+        // a URL/file, both before and after a page reload. A/B: was a URL
+        // ever saved. C/D/E: is there a raw .ics file on disk right now
+        // (from a URL fetch or a direct upload) - matches exactly what
+        // load_extra_ics_source() in agenda_manager.c needs to find
+        // anything at all.
+        cJSON_AddBoolToObject(root, "agenda_cal_url_configured",
+                              config_manager_get_agenda_cal_url()[0] != '\0');
+        cJSON_AddBoolToObject(root, "agenda_cal_url2_configured",
+                              config_manager_get_agenda_cal_url2()[0] != '\0');
+        struct stat cal_c_st, cal_d_st, cal_e_st;
+        cJSON_AddBoolToObject(root, "agenda_cal_c_configured",
+                              stat(AGENDA_CAL_CACHE_PATH_C, &cal_c_st) == 0);
+        cJSON_AddBoolToObject(root, "agenda_cal_d_configured",
+                              stat(AGENDA_CAL_CACHE_PATH_D, &cal_d_st) == 0);
+        cJSON_AddBoolToObject(root, "agenda_cal_e_configured",
+                              stat(AGENDA_CAL_CACHE_PATH_E, &cal_e_st) == 0);
         // Three extra ICS sources (e.g. holidays/school-holidays) - same
         // write-only URL treatment as agenda_cal_url/_url2 above, but their
         // enabled flag/name/color are plain, non-secret settings.

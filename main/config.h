@@ -34,6 +34,19 @@ typedef enum {
         2,  // repeated under every day, each with its own "N/M: " prefix
 } agenda_multiday_mode_t;
 
+// How a timed Calendar event's time is displayed - see
+// NVS_AGENDA_CAL_SHOW_DURATION_KEY below and build_event_line() in
+// agenda_renderer.c. Values are stored as-is in NVS, so the numbering must
+// stay stable across firmware versions. All-day events are never affected
+// by any of these modes - they already show no time at all.
+typedef enum {
+    AGENDA_TIME_DISPLAY_OFF = 0,       // just the start time, e.g. "08:15 Kaffee trinken"
+    AGENDA_TIME_DISPLAY_DURATION = 1,  // "08:15 [45m] Kaffee trinken" - compact, but longer
+                                       // than a range once the event runs over an hour
+                                       // ("08:00 [1h30m]" vs. "08:00-09:30")
+    AGENDA_TIME_DISPLAY_RANGE = 2,     // "08:15-09:00 Kaffee trinken"
+} agenda_time_display_mode_t;
+
 #define IP_ADDR_STR_MAX_LEN 16  // dotted IPv4 + NUL
 
 #define DEVICE_NAME_MAX_LEN 64
@@ -595,12 +608,8 @@ typedef enum {
 // multi-day" on/off) - kept as-is so existing devices' saved choice still
 // means the same thing after an upgrade.
 #define NVS_AGENDA_CAL_COMPACT_KEY "agenda_cal_cpt"
-// Opt-in: append each timed event's duration in brackets, e.g. "08:15 [45m]
-// Kaffee trinken" / "14:00 [1h] Meeting" / "09:00 [1h30m] Workshop" - instead
-// of just "08:15 Kaffee trinken" with no indication of when it ends. Off by
-// default (unchanged, existing behavior). All-day events are never affected
-// (they already show no time at all). See build_event_line() in
-// agenda_renderer.c for the compact "Xm"/"Xh"/"XhYYm" formatting.
+// How a timed event's time is shown - see agenda_time_display_mode_t above.
+// Off by default (unchanged, existing behavior: just the bare start time).
 #define NVS_AGENDA_CAL_SHOW_DURATION_KEY "agenda_cal_dur"
 // Optional display name shown in the Calendar column header instead of the
 // generic "Calendar A"/"Calendar B" fallback (agenda_renderer.c) - e.g.
