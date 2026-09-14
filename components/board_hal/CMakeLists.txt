@@ -1,12 +1,15 @@
 # Shared battery-voltage ADC helper used by the ADC-based boards.
 set(SRCS "src/battery_adc.c")
 
+# Speaker/chime support - a no-op stub on every board except
+# waveshare_photopainter_73 (see the #ifdef inside audio_chime.c itself).
+list(APPEND SRCS "src/audio_chime.c")
+
 set(PRIV_REQS
     charger_driver_sy6974b
     epaper_driver_ed2208_gca
     epaper_driver_ed2208_nca
     epaper_driver_it8951
-    esp_driver_i2c
     esp_driver_spi
     pmic_driver_axp2101
     rtc_driver_pcf85063
@@ -35,6 +38,7 @@ endif()
 idf_component_register(
     SRCS "${SRCS}"
     INCLUDE_DIRS "include"
-    REQUIRES esp_timer driver esp_adc esp_driver_gpio esp_driver_usb_serial_jtag epaper sensor
+    REQUIRES esp_timer driver esp_adc esp_driver_gpio esp_driver_i2c esp_driver_i2s
+              esp_driver_usb_serial_jtag epaper sensor
     PRIV_REQUIRES ${PRIV_REQS}
 )

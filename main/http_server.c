@@ -1640,6 +1640,9 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_low_battery_overlay_enabled());
         cJSON_AddNumberToObject(root, "low_battery_overlay_threshold",
                                 config_manager_get_low_battery_overlay_threshold());
+        // Hardware capability, not a user setting - lets the Web UI hide the
+        // whole Chimes tab on boards with no onboard speaker.
+        cJSON_AddBoolToObject(root, "chime_speaker_available", board_hal_has_speaker());
 
         // Agenda (ToDo + Calendar). agenda_cal_url/agenda_todo_url are
         // deliberately NEVER added here - either can carry a credential
@@ -2442,6 +2445,54 @@ static esp_err_t error_overlay_test_handler(httpd_req_t *req)
     }
 }
 
+// POST /api/chimes/test - plays a beep pattern directly on the onboard
+// speaker (board_hal_has_speaker()), bypassing every Chimes policy gate
+// (master mode, quiet hours, mains-only) on purpose: the whole point of a
+// test button is to hear it regardless of current settings. Optional JSON
+// body {"pattern": "success"|"warning"|"error"}, defaults to "success".
+static esp_err_t chime_test_handler(httpd_req_t *req)
+{
+    if (!board_hal_has_speaker()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"This board has no speaker\"}");
+        return ESP_FAIL;
+    }
+
+    board_hal_chime_kind_t kind = BOARD_HAL_CHIME_SUCCESS;
+    char buf[128];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len > 0) {
+        buf[len] = '\0';
+        cJSON *root = cJSON_Parse(buf);
+        if (root) {
+            cJSON *pattern = cJSON_GetObjectItem(root, "pattern");
+            if (pattern && cJSON_IsString(pattern)) {
+                const char *p = cJSON_GetStringValue(pattern);
+                if (strcmp(p, "warning") == 0) {
+                    kind = BOARD_HAL_CHIME_WARNING;
+                } else if (strcmp(p, "error") == 0) {
+                    kind = BOARD_HAL_CHIME_ERROR;
+                }
+            }
+            cJSON_Delete(root);
+        }
+    }
+
+    ESP_LOGI(TAG, "Testing speaker chime (kind=%d)", (int) kind);
+    esp_err_t ret = board_hal_play_beep_pattern(kind);
+
+    httpd_resp_set_type(req, "application/json");
+    if (ret == ESP_OK) {
+        httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Chime played\"}");
+        return ESP_OK;
+    } else {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Failed to play chime\"}");
+        return ESP_FAIL;
+    }
+}
+
 // Maximum accepted size for a directly-uploaded extra ICS file - generous
 // vs. a realistic holidays/school-holidays/special-days feed (calendar_ics.c
 // itself caps a normal fetch at 2MB for a full personal calendar's years of
@@ -3106,6 +3157,12 @@ esp_err_t http_server_init(void)
                                               .handler = error_overlay_test_handler,
                                               .user_ctx = NULL};
         httpd_register_uri_handler(server, &error_overlay_test_uri);
+
+        httpd_uri_t chime_test_uri = {.uri = "/api/chimes/test",
+                                      .method = HTTP_POST,
+                                      .handler = chime_test_handler,
+                                      .user_ctx = NULL};
+        httpd_register_uri_handler(server, &chime_test_uri);
 
         httpd_uri_t agenda_extra_ics_uri = {.uri = "/api/agenda/extra-ics",
                                             .method = HTTP_POST,

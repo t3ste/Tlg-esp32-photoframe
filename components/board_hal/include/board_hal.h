@@ -52,6 +52,12 @@ typedef enum {
 #define BOARD_HAL_DISPLAY_TYPE "spectra6"
 #endif
 
+// Boards with an ES8311/PA speaker path define BOARD_HAL_HAS_SPEAKER 1 in their own
+// header (see board_waveshare_photopainter_73.h) before including this file.
+#ifndef BOARD_HAL_HAS_SPEAKER
+#define BOARD_HAL_HAS_SPEAKER 0
+#endif
+
 /**
  * @brief Initialize the Board HAL
  *
@@ -169,6 +175,33 @@ typedef enum {
  * @param on true to turn LED on, false to turn off
  */
 void board_hal_led_set(board_hal_led_t led, bool on);
+
+/**
+ * @brief Whether this board has an on-device speaker / DAC path
+ *
+ * PhotoPainter 7.3" exposes ES8311 + NS4150B PA. Other boards return false.
+ */
+bool board_hal_has_speaker(void);
+
+// Short, synthesized (no WAV/melody file) beep patterns for the Chimes feature -
+// one built-in tone per severity, not a per-event sound library.
+typedef enum {
+    BOARD_HAL_CHIME_SUCCESS,  // 1 short beep
+    BOARD_HAL_CHIME_WARNING,  // 2 short beeps
+    BOARD_HAL_CHIME_ERROR,    // 3 short beeps
+} board_hal_chime_kind_t;
+
+/**
+ * @brief Play a short synthesized beep pattern on the onboard speaker
+ *
+ * Waveshare PhotoPainter: ES8311 DAC over I2S with PA GPIO enable, tones
+ * generated on-device (no WAV/melody data). Other boards return
+ * ESP_ERR_NOT_SUPPORTED.
+ *
+ * @return ESP_OK on success, ESP_ERR_NOT_SUPPORTED if no speaker, or another
+ *         error if the codec / I2S path failed
+ */
+esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind);
 
 #ifdef __cplusplus
 }
