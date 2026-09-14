@@ -737,7 +737,10 @@ async function performFactoryReset() {
               For anything else (a brief router outage, a weak/flaky signal), the frame keeps
               retrying across several reboots - up to 10 attempts total - before finally clearing
               the saved credentials and asking to be reconfigured. Turn off to go back to giving up
-              after just 3 attempts in a single boot, same as before.
+              after just 3 attempts in a single boot, same as before. Worst case (WiFi stays hard to
+              reach the whole time): up to ~6x the energy use of the old behavior, since the frame
+              stays fully awake through every retry and reboot instead of reprovisioning quickly -
+              recommended only for mains/USB-powered frames, not battery-only ones.
             </div>
 
             <v-row>
