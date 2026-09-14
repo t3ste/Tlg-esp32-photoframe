@@ -76,6 +76,7 @@ export const useSettingsStore = defineStore("settings", () => {
     otaCheckEnabled: true,
     wifiPerformanceModeEnabled: true,
     wifiTxPowerCapEnabled: true,
+    wifiExtendedRetryEnabled: true,
     rotationPairingEnabled: false,
     variantSelectionEnabled: false,
     telegramRotationNotifyEnabled: false,
@@ -326,6 +327,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.wifiPerformanceModeEnabled =
         data.wifi_performance_mode_enabled !== false;
       deviceSettings.value.wifiTxPowerCapEnabled = data.wifi_tx_power_cap_enabled !== false;
+      deviceSettings.value.wifiExtendedRetryEnabled = data.wifi_extended_retry_enabled !== false;
       deviceSettings.value.rotationPairingEnabled = data.rotation_pairing_enabled === true;
       deviceSettings.value.variantSelectionEnabled = data.variant_selection_enabled === true;
       deviceSettings.value.telegramRotationNotifyEnabled =
@@ -478,6 +480,7 @@ export const useSettingsStore = defineStore("settings", () => {
       ota_check_enabled: deviceSettings.value.otaCheckEnabled,
       wifi_performance_mode_enabled: deviceSettings.value.wifiPerformanceModeEnabled,
       wifi_tx_power_cap_enabled: deviceSettings.value.wifiTxPowerCapEnabled,
+      wifi_extended_retry_enabled: deviceSettings.value.wifiExtendedRetryEnabled,
       rotation_pairing_enabled: deviceSettings.value.rotationPairingEnabled,
       variant_selection_enabled: deviceSettings.value.variantSelectionEnabled,
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,

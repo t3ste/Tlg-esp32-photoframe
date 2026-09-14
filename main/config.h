@@ -301,6 +301,25 @@ typedef enum {
 // on regardless of that policy, trading web UI responsiveness for lower draw.
 #define NVS_WIFI_PERF_MODE_ENABLED_KEY "wifi_perf_mode"
 
+// Extended cold-boot WiFi retry: when enabled (default), a cold-boot connect
+// failure that is NOT a confirmed credential rejection (see
+// wifi_manager_last_failure_is_credential_reject()) no longer wipes the
+// saved SSID/password after just WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS (3,
+// main.c) - it instead persists a running attempt count here and reboots to
+// try again after a backoff, up to WIFI_COLD_BOOT_EXTENDED_MAX_TOTAL_ATTEMPTS
+// (main.c) total attempts across those reboots, so a brief AP-side outage or
+// a momentary weak-signal blip doesn't force a full reprovisioning. A
+// genuine credential rejection is never affected by this toggle - that still
+// wipes after a single attempt either way. Real incident (2026-09-13) that
+// prompted this: a cold boot got stuck retrying WIFI_REASON_AUTH_EXPIRE/
+// WIFI_REASON_CONNECTION_FAIL (never a real reject reason) right after the
+// AP's signal had degraded to -70dBm, and the then-unconditional wipe forced
+// an unnecessary reprovisioning even though the password was fine.
+#define NVS_WIFI_EXT_RETRY_ENABLED_KEY "wifi_ext_retry"
+// Internal only - the running cross-reboot attempt count above. Never
+// surfaced via the HTTP API (nothing for a user to usefully do with it).
+#define NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY "wifi_cb_fail"
+
 // Orientation-pairing during normal (non-Telegram) auto-rotation: when the
 // randomly-picked next image doesn't match the panel's orientation, look for
 // another mismatched image in the active album(s) and combine them instead

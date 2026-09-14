@@ -598,6 +598,11 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_wifi_tx_power_cap_enabled(cJSON_IsTrue(item));
     }
 
+    item = cJSON_GetObjectItem(root, "wifi_extended_retry_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_wifi_extended_retry_enabled(cJSON_IsTrue(item));
+    }
+
     // Auto-rotate orientation pairing (random mode only)
     item = cJSON_GetObjectItem(root, "rotation_pairing_enabled");
     if (item && cJSON_IsBool(item)) {

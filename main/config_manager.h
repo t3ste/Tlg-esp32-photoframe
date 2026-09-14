@@ -214,6 +214,18 @@ bool config_manager_get_wifi_performance_mode_enabled(void);
 void config_manager_set_wifi_tx_power_cap_enabled(bool enabled);
 bool config_manager_get_wifi_tx_power_cap_enabled(void);
 
+// Extended cold-boot retry for non-credential-reject WiFi failures - see
+// NVS_WIFI_EXT_RETRY_ENABLED_KEY in config.h. Defaults to true.
+void config_manager_set_wifi_extended_retry_enabled(bool enabled);
+bool config_manager_get_wifi_extended_retry_enabled(void);
+
+// Internal cross-reboot attempt counter backing the above - see
+// NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY in config.h. Never exposed via the HTTP
+// API. Reset to 0 on any successful cold-boot connect or once the device
+// gives up and reprovisions.
+void config_manager_set_wifi_coldboot_fail_count(int count);
+int config_manager_get_wifi_coldboot_fail_count(void);
+
 // Orientation pairing during normal (non-Telegram) auto-rotation - random
 // mode only. Defaults to false. See NVS_ROTATION_PAIRING_ENABLED_KEY in
 // config.h.

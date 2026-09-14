@@ -724,6 +724,22 @@ async function performFactoryReset() {
               </v-col>
             </v-row>
 
+            <v-switch
+              v-model="settingsStore.deviceSettings.wifiExtendedRetryEnabled"
+              label="Extended WiFi retry before reprovisioning"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              On (default). If the saved WiFi password is confirmed wrong by the router (a real
+              rejection), the frame still reprovisions immediately either way - that never changes.
+              For anything else (a brief router outage, a weak/flaky signal), the frame keeps
+              retrying across several reboots - up to 10 attempts total - before finally clearing
+              the saved credentials and asking to be reconfigured. Turn off to go back to giving up
+              after just 3 attempts in a single boot, same as before.
+            </div>
+
             <v-row>
               <v-col cols="12" md="6">
                 <v-select

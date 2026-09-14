@@ -85,6 +85,8 @@ static int wifi_fail_count = 0;
 // WiFi
 static bool wifi_performance_mode_enabled = true;
 static bool wifi_tx_power_cap_enabled = true;
+static bool wifi_extended_retry_enabled = true;
+static int wifi_coldboot_fail_count = 0;
 static bool rotation_pairing_enabled = false;
 static bool variant_selection_enabled = false;
 static bool telegram_rotation_notify_enabled = false;
@@ -874,6 +876,18 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_WIFI_TX_POWER_CAP_ENABLED_KEY, &stored_tx_power_cap) ==
             ESP_OK) {
             wifi_tx_power_cap_enabled = (stored_tx_power_cap != 0);
+        }
+
+        uint8_t stored_wifi_ext_retry = 1;  // Default to enabled
+        if (nvs_get_u8(nvs_handle, NVS_WIFI_EXT_RETRY_ENABLED_KEY, &stored_wifi_ext_retry) ==
+            ESP_OK) {
+            wifi_extended_retry_enabled = (stored_wifi_ext_retry != 0);
+        }
+
+        int32_t stored_wifi_cb_fail = 0;
+        if (nvs_get_i32(nvs_handle, NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY, &stored_wifi_cb_fail) ==
+            ESP_OK) {
+            wifi_coldboot_fail_count = (int) stored_wifi_cb_fail;
         }
 
         uint8_t stored_rotation_pairing = 0;
@@ -2208,6 +2222,43 @@ void config_manager_set_wifi_tx_power_cap_enabled(bool enabled)
 bool config_manager_get_wifi_tx_power_cap_enabled(void)
 {
     return wifi_tx_power_cap_enabled;
+}
+
+void config_manager_set_wifi_extended_retry_enabled(bool enabled)
+{
+    wifi_extended_retry_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_WIFI_EXT_RETRY_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "WiFi extended cold-boot retry %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_wifi_extended_retry_enabled(void)
+{
+    return wifi_extended_retry_enabled;
+}
+
+void config_manager_set_wifi_coldboot_fail_count(int count)
+{
+    wifi_coldboot_fail_count = count;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_i32(nvs_handle, NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY,
+                    (int32_t) wifi_coldboot_fail_count);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int config_manager_get_wifi_coldboot_fail_count(void)
+{
+    return wifi_coldboot_fail_count;
 }
 
 void config_manager_set_rotation_pairing_enabled(bool enabled)
