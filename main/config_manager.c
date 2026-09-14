@@ -85,7 +85,7 @@ static int wifi_fail_count = 0;
 // WiFi
 static bool wifi_performance_mode_enabled = true;
 static bool wifi_tx_power_cap_enabled = true;
-static bool wifi_extended_retry_enabled = true;
+static bool wifi_extended_retry_enabled = false;
 static int wifi_coldboot_fail_count = 0;
 static bool rotation_pairing_enabled = false;
 static bool variant_selection_enabled = false;
@@ -878,7 +878,7 @@ esp_err_t config_manager_init(void)
             wifi_tx_power_cap_enabled = (stored_tx_power_cap != 0);
         }
 
-        uint8_t stored_wifi_ext_retry = 1;  // Default to enabled
+        uint8_t stored_wifi_ext_retry = 0;  // Default to disabled - see config.h
         if (nvs_get_u8(nvs_handle, NVS_WIFI_EXT_RETRY_ENABLED_KEY, &stored_wifi_ext_retry) ==
             ESP_OK) {
             wifi_extended_retry_enabled = (stored_wifi_ext_retry != 0);

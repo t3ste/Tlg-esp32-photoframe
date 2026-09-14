@@ -301,8 +301,8 @@ typedef enum {
 // on regardless of that policy, trading web UI responsiveness for lower draw.
 #define NVS_WIFI_PERF_MODE_ENABLED_KEY "wifi_perf_mode"
 
-// Extended cold-boot WiFi retry: when enabled (default), a cold-boot connect
-// failure that is NOT a confirmed credential rejection (see
+// Extended cold-boot WiFi retry: when enabled, a cold-boot connect failure
+// that is NOT a confirmed credential rejection (see
 // wifi_manager_last_failure_is_credential_reject()) no longer wipes the
 // saved SSID/password after just WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS (3,
 // main.c) - it instead persists a running attempt count here and reboots to
@@ -310,8 +310,12 @@ typedef enum {
 // (main.c) total attempts across those reboots, so a brief AP-side outage or
 // a momentary weak-signal blip doesn't force a full reprovisioning. A
 // genuine credential rejection is never affected by this toggle - that still
-// wipes after a single attempt either way. Real incident (2026-09-13) that
-// prompted this: a cold boot got stuck retrying WIFI_REASON_AUTH_EXPIRE/
+// wipes after a single attempt either way. Off by default: live-verified
+// worst case is up to ~6x the energy use of the default behavior (the frame
+// stays fully awake through every retry/reboot instead of reprovisioning
+// quickly), so this is opt-in for mains/USB-powered frames rather than a
+// new default for every device. Real incident (2026-09-13) that prompted
+// this: a cold boot got stuck retrying WIFI_REASON_AUTH_EXPIRE/
 // WIFI_REASON_CONNECTION_FAIL (never a real reject reason) right after the
 // AP's signal had degraded to -70dBm, and the then-unconditional wipe forced
 // an unnecessary reprovisioning even though the password was fine.

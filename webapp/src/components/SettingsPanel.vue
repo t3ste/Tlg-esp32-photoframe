@@ -732,15 +732,15 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-4">
-              On (default). If the saved WiFi password is confirmed wrong by the router (a real
-              rejection), the frame still reprovisions immediately either way - that never changes.
-              For anything else (a brief router outage, a weak/flaky signal), the frame keeps
-              retrying across several reboots - up to 10 attempts total - before finally clearing
-              the saved credentials and asking to be reconfigured. Turn off to go back to giving up
-              after just 3 attempts in a single boot, same as before. Worst case (WiFi stays hard to
-              reach the whole time): up to ~6x the energy use of the old behavior, since the frame
-              stays fully awake through every retry and reboot instead of reprovisioning quickly -
-              recommended only for mains/USB-powered frames, not battery-only ones.
+              Off (default) - gives up and reprovisions after 3 attempts in a single boot, same as
+              always. Turn on if brief router outages or a weak/flaky signal keep forcing your frame
+              to reprovision even though the password is fine: the frame will then keep retrying
+              across several reboots - up to 10 attempts total - before finally clearing the saved
+              credentials. A confirmed-wrong password is never affected either way and always
+              reprovisions immediately. Worst case with this on (WiFi stays hard to reach the whole
+              time): up to ~6x the energy use of the default behavior, since the frame stays fully
+              awake through every retry and reboot instead of reprovisioning quickly - recommended
+              only for mains/USB-powered frames, not battery-only ones.
             </div>
 
             <v-row>

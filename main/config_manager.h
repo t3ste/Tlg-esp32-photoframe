@@ -215,7 +215,8 @@ void config_manager_set_wifi_tx_power_cap_enabled(bool enabled);
 bool config_manager_get_wifi_tx_power_cap_enabled(void);
 
 // Extended cold-boot retry for non-credential-reject WiFi failures - see
-// NVS_WIFI_EXT_RETRY_ENABLED_KEY in config.h. Defaults to true.
+// NVS_WIFI_EXT_RETRY_ENABLED_KEY in config.h. Defaults to false (opt-in -
+// worst case is up to ~6x the energy use of the default behavior).
 void config_manager_set_wifi_extended_retry_enabled(bool enabled);
 bool config_manager_get_wifi_extended_retry_enabled(void);
 
