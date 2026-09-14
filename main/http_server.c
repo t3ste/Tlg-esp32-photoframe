@@ -1643,6 +1643,36 @@ static esp_err_t config_handler(httpd_req_t *req)
         // Hardware capability, not a user setting - lets the Web UI hide the
         // whole Chimes tab on boards with no onboard speaker.
         cJSON_AddBoolToObject(root, "chime_speaker_available", board_hal_has_speaker());
+        const char *chime_mode_str = "off";
+        switch (config_manager_get_chime_speaker_mode()) {
+        case CHIME_SPEAKER_BATTERY_AND_MAINS:
+            chime_mode_str = "battery_and_mains";
+            break;
+        case CHIME_SPEAKER_MAINS_ONLY:
+            chime_mode_str = "mains_only";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "chime_speaker_mode", chime_mode_str);
+        cJSON_AddBoolToObject(root, "chime_quiet_enabled",
+                              config_manager_get_chime_quiet_enabled());
+        cJSON_AddStringToObject(root, "chime_quiet_start", config_manager_get_chime_quiet_start());
+        cJSON_AddStringToObject(root, "chime_quiet_end", config_manager_get_chime_quiet_end());
+        cJSON_AddBoolToObject(root, "chime_event_rotation_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_ROTATION));
+        cJSON_AddBoolToObject(root, "chime_event_telegram_photo_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_TELEGRAM_PHOTO));
+        cJSON_AddBoolToObject(root, "chime_event_low_battery_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_LOW_BATTERY));
+        cJSON_AddBoolToObject(root, "chime_event_wifi_reprovision_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_WIFI_REPROVISION));
+        cJSON_AddBoolToObject(root, "chime_event_agenda_due_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_AGENDA_DUE));
+        cJSON_AddBoolToObject(root, "chime_event_ota_success_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_OTA_SUCCESS));
+        cJSON_AddBoolToObject(root, "chime_event_critical_error_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_CRITICAL_ERROR));
 
         // Agenda (ToDo + Calendar). agenda_cal_url/agenda_todo_url are
         // deliberately NEVER added here - either can carry a credential

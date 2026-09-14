@@ -9,6 +9,7 @@
 #include "agenda_manager.h"
 #include "album_manager.h"
 #include "board_hal.h"
+#include "chime.h"
 #include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
@@ -921,6 +922,10 @@ void app_main(void)
             nvs_close(nvs_handle);
         }
         ESP_LOGI(TAG, "Restarting to enter provisioning mode...");
+        // Fires before the credentials are gone for good and the device
+        // reboots into provisioning - the 2s delay below gives a short beep
+        // enough headroom to actually play.
+        chime_play_if_enabled(CHIME_EVENT_WIFI_REPROVISION);
         vTaskDelay(pdMS_TO_TICKS(2000));
         esp_restart();
     }

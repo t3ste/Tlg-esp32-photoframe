@@ -38,6 +38,32 @@ async function testErrorOverlay() {
   }
 }
 
+// Plays a beep directly on the speaker, bypassing every Chimes policy gate
+// (master mode, quiet hours, mains-only) - the whole point of a test button
+// is to hear it regardless of current settings. Doubles as the "does the
+// hardware/wiring even work" calibration check right after enabling.
+const testingChime = ref(false);
+async function testChime() {
+  testingChime.value = true;
+  try {
+    const response = await fetch("/api/chimes/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pattern: "success" }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) {
+      showSnackbar(data.message || "Chime played", "success");
+    } else {
+      showSnackbar(data.message || "Failed to play chime", "error");
+    }
+  } catch (_error) {
+    showSnackbar("Failed to play chime", "error");
+  } finally {
+    testingChime.value = false;
+  }
+}
+
 // The device rejects the entire config request when any schedule rule is
 // invalid, empty or over the 7-rule budget — gate saving on the same checks.
 const scheduleValid = computed(() => {
@@ -241,6 +267,12 @@ const agendaTimeDisplayModeOptions = [
   { title: "Off (default) - start time only", value: "off" },
   { title: "Duration - e.g. 08:15 [45m]", value: "duration" },
   { title: "Range - e.g. 08:15-09:00", value: "range" },
+];
+
+const chimeSpeakerModeOptions = [
+  { title: "Off (default)", value: "off" },
+  { title: "Battery + mains", value: "battery_and_mains" },
+  { title: "Mains/USB only", value: "mains_only" },
 ];
 
 // Guards against enabling a calendar with nothing behind it (no persisted
@@ -765,6 +797,9 @@ async function performFactoryReset() {
         <v-tab value="autoRotate"> Auto Rotate </v-tab>
         <v-tab value="agenda"> Agenda </v-tab>
         <v-tab value="power"> Power </v-tab>
+        <v-tab v-if="settingsStore.deviceSettings.chimeSpeakerAvailable" value="chimes">
+          Chimes
+        </v-tab>
         <v-tab value="homeAssistant"> Home Assistant </v-tab>
         <v-tab value="processing"> Processing </v-tab>
         <v-tab value="ai"> AI Generation </v-tab>
@@ -2317,6 +2352,161 @@ async function performFactoryReset() {
                 />
               </v-col>
             </v-row>
+          </v-tabs-window-item>
+
+          <!-- Chimes Tab -->
+          <v-tabs-window-item
+            v-if="settingsStore.deviceSettings.chimeSpeakerAvailable"
+            class="mt-2"
+            value="chimes"
+          >
+            <div class="text-subtitle-2 mb-2">Speaker</div>
+            <v-row dense align="center">
+              <v-col cols="12" sm="7">
+                <v-select
+                  v-model="settingsStore.deviceSettings.chimeSpeakerMode"
+                  :items="chimeSpeakerModeOptions"
+                  item-title="title"
+                  item-value="value"
+                  label="Chimes"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="12" sm="5">
+                <v-btn variant="outlined" size="small" :loading="testingChime" @click="testChime">
+                  <v-icon icon="mdi-volume-high" start />
+                  Play test tone
+                </v-btn>
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Off (default): the board's speaker stays silent. Battery + mains: chimes play
+              regardless of power source. Mains/USB only (recommended for battery frames): the
+              amplifier draws noticeable current, so chimes only play while plugged in. "Play test
+              tone" always plays immediately, ignoring quiet hours and this setting - use it to
+              confirm the speaker works right after choosing a mode.
+            </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Quiet hours</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeQuietEnabled"
+              label="Enable quiet hours"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <v-row dense>
+              <v-col cols="6" sm="3">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.chimeQuietStart"
+                  type="time"
+                  label="From"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  :disabled="!settingsStore.deviceSettings.chimeQuietEnabled"
+                />
+              </v-col>
+              <v-col cols="6" sm="3">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.chimeQuietEnd"
+                  type="time"
+                  label="To"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  :disabled="!settingsStore.deviceSettings.chimeQuietEnabled"
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              No chimes play during this daily window, regardless of the speaker mode or which
+              events below are enabled. Wraps past midnight if "To" is earlier than "From" (e.g.
+              22:00-07:00).
+            </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Events</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventRotationEnabled"
+              label="Photo rotated / display refreshed"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires on every successful display update - the most frequent event here, off by
+              default for that reason.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventTelegramPhotoEnabled"
+              label="New photo received via Telegram"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Confirms a photo arrived, even if you're not standing in front of the frame.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventLowBatteryEnabled"
+              label="Low battery warning"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires once when the battery first drops below the Low Battery Overlay threshold (Power
+              tab), not on every wake while still low.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventWifiReprovisionEnabled"
+              label="WiFi reprovisioning needed"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires right before the frame clears its saved WiFi credentials and reboots into setup
+              mode.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventAgendaDueEnabled"
+              label="Agenda: due/overdue reminder"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires at most once per day, only if Agenda mode's ToDo list has an overdue or
+              due-today item.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventOtaSuccessEnabled"
+              label="Firmware update installed"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires once, on first boot after a successful OTA update.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventCriticalErrorEnabled"
+              label="Critical error (WiFi/internet lost)"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires once when WiFi/internet has failed several wakes in a row (same threshold as the
+              Error Overlay, General tab), not on every further failed attempt.
+            </div>
           </v-tabs-window-item>
 
           <!-- Home Assistant Tab -->

@@ -47,6 +47,30 @@ typedef enum {
     AGENDA_TIME_DISPLAY_RANGE = 2,     // "08:15-09:00 Kaffee trinken"
 } agenda_time_display_mode_t;
 
+// Master mode for the Chimes speaker feature (see board_hal_has_speaker() /
+// board_hal_play_beep_pattern() and main/chime.c). Values are stored as-is
+// in NVS, so the numbering must stay stable across firmware versions.
+typedef enum {
+    CHIME_SPEAKER_OFF = 0,                // never play, regardless of per-event flags
+    CHIME_SPEAKER_BATTERY_AND_MAINS = 1,  // play regardless of power source
+    CHIME_SPEAKER_MAINS_ONLY = 2,         // play only while USB/mains powered
+} chime_speaker_mode_t;
+
+// One entry per Chimes event hook - see chime_play_if_enabled() in
+// main/chime.c for the full list of call sites. Order is NVS-key-agnostic
+// (each has its own bool key, see NVS_CHIME_EVENT_*_KEY below), so this
+// enum's numbering can change freely.
+typedef enum {
+    CHIME_EVENT_ROTATION = 0,
+    CHIME_EVENT_TELEGRAM_PHOTO,
+    CHIME_EVENT_LOW_BATTERY,
+    CHIME_EVENT_WIFI_REPROVISION,
+    CHIME_EVENT_AGENDA_DUE,
+    CHIME_EVENT_OTA_SUCCESS,
+    CHIME_EVENT_CRITICAL_ERROR,
+    CHIME_EVENT_COUNT,  // not a real event - array size for chime.c's fire-count cap
+} chime_event_t;
+
 #define IP_ADDR_STR_MAX_LEN 16  // dotted IPv4 + NUL
 
 #define DEVICE_NAME_MAX_LEN 64
@@ -745,5 +769,37 @@ typedef enum {
 #define TELEGRAM_COMMAND_MAX_LEN 128
 #define TELEGRAM_CAPTION_MAX_LEN 128
 #define TELEGRAM_FILE_ID_MAX_LEN 128
+
+// Chimes (speaker feedback, waveshare_photopainter_73 only - see
+// board_hal_has_speaker()). Master mode - see chime_speaker_mode_t above.
+// Off by default: this is new, previously-silent hardware, so an update
+// shouldn't start making sound on its own.
+#define NVS_CHIME_SPEAKER_MODE_KEY "chime_mode"
+// Quiet hours - a plain daily HH:MM-HH:MM window (wraps past midnight if
+// end < start) during which no chime plays regardless of the master mode
+// or any per-event flag. Off by default.
+#define NVS_CHIME_QUIET_ENABLED_KEY "chime_quiet_on"
+#define NVS_CHIME_QUIET_START_KEY "chime_quiet_st"
+#define NVS_CHIME_QUIET_END_KEY "chime_quiet_ed"
+#define CHIME_TIME_STR_MAX_LEN 6  // "HH:MM" + NUL
+#define CHIME_DEFAULT_QUIET_START "22:00"
+#define CHIME_DEFAULT_QUIET_END "07:00"
+// One bool per chime_event_t - see main/chime.c's chime_play_if_enabled().
+// low-battery/wifi-reprovision/ota-success/critical-error default on (the
+// user asked for these specifically); the rest default off since they fire
+// far more often (every rotation) or are more a "nice to have" (Telegram
+// photo received, an overdue agenda item).
+#define NVS_CHIME_EVENT_ROTATION_KEY "chime_ev_rotate"
+#define NVS_CHIME_EVENT_TELEGRAM_KEY "chime_ev_tg"
+#define NVS_CHIME_EVENT_LOWBATT_KEY "chime_ev_lowbat"
+#define NVS_CHIME_EVENT_WIFIPROV_KEY "chime_ev_wifi"
+#define NVS_CHIME_EVENT_AGENDA_KEY "chime_ev_agenda"
+#define NVS_CHIME_EVENT_OTA_KEY "chime_ev_ota"
+#define NVS_CHIME_EVENT_CRIT_KEY "chime_ev_crit"
+// Debounce state for the Agenda due/overdue chime - a plain "YYYY-MM-DD"
+// string so it fires at most once per calendar day even if Agenda mode
+// renders more often than that (e.g. hourly).
+#define NVS_CHIME_AGENDA_LAST_DATE_KEY "chime_ag_date"
+#define CHIME_DATE_STR_MAX_LEN 11  // "YYYY-MM-DD" + NUL
 
 #endif

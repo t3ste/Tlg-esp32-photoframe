@@ -554,4 +554,31 @@ void config_manager_set_config_last_updated(int64_t timestamp);
 int64_t config_manager_get_config_last_updated(void);
 void config_manager_touch_config(void);
 
+// ============================================================================
+// Chimes (speaker feedback) - see chime_speaker_mode_t/chime_event_t in
+// config.h and main/chime.c for the policy layer that consumes these.
+// ============================================================================
+
+void config_manager_set_chime_speaker_mode(chime_speaker_mode_t mode);
+chime_speaker_mode_t config_manager_get_chime_speaker_mode(void);
+
+void config_manager_set_chime_quiet_enabled(bool enabled);
+bool config_manager_get_chime_quiet_enabled(void);
+// "HH:MM" strings, not validated beyond length - a malformed value just
+// fails to match in chime.c's time-window check (quiet hours off).
+void config_manager_set_chime_quiet_start(const char *time_str);
+const char *config_manager_get_chime_quiet_start(void);
+void config_manager_set_chime_quiet_end(const char *time_str);
+const char *config_manager_get_chime_quiet_end(void);
+
+// One enable flag per chime_event_t - index with the enum, out-of-range
+// indices are clamped to false/no-op.
+void config_manager_set_chime_event_enabled(chime_event_t event, bool enabled);
+bool config_manager_get_chime_event_enabled(chime_event_t event);
+
+// Debounce state for the Agenda due/overdue chime (see agenda_manager.c) -
+// "" means "never chimed yet".
+void config_manager_set_chime_agenda_last_date(const char *date_str);
+const char *config_manager_get_chime_agenda_last_date(void);
+
 #endif

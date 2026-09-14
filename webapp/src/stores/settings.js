@@ -105,6 +105,22 @@ export const useSettingsStore = defineStore("settings", () => {
     showExifDatetimeEnabled: false,
     lowBatteryOverlayEnabled: false,
     lowBatteryOverlayThreshold: 16,
+    // Chimes (speaker feedback, waveshare_photopainter_73 only) -
+    // chimeSpeakerAvailable is a read-only hardware capability flag, never
+    // sent in a PATCH. Off by default across the board, per-event flags
+    // mirror the firmware's own conservative defaults (see config.h).
+    chimeSpeakerAvailable: false,
+    chimeSpeakerMode: "off",
+    chimeQuietEnabled: false,
+    chimeQuietStart: "22:00",
+    chimeQuietEnd: "07:00",
+    chimeEventRotationEnabled: false,
+    chimeEventTelegramPhotoEnabled: false,
+    chimeEventLowBatteryEnabled: true,
+    chimeEventWifiReprovisionEnabled: true,
+    chimeEventAgendaDueEnabled: false,
+    chimeEventOtaSuccessEnabled: true,
+    chimeEventCriticalErrorEnabled: true,
     // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
     // overlay. agendaTodoUrl/agendaCalUrl are write-only (never returned by
     // GET /api/config, same treatment as wifiPassword above) - both start
@@ -375,6 +391,24 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.showExifDatetimeEnabled = data.show_exif_datetime_enabled === true;
       deviceSettings.value.lowBatteryOverlayEnabled = data.low_battery_overlay_enabled === true;
       deviceSettings.value.lowBatteryOverlayThreshold = data.low_battery_overlay_threshold ?? 16;
+      deviceSettings.value.chimeSpeakerAvailable = data.chime_speaker_available === true;
+      deviceSettings.value.chimeSpeakerMode = data.chime_speaker_mode || "off";
+      deviceSettings.value.chimeQuietEnabled = data.chime_quiet_enabled === true;
+      deviceSettings.value.chimeQuietStart = data.chime_quiet_start || "22:00";
+      deviceSettings.value.chimeQuietEnd = data.chime_quiet_end || "07:00";
+      deviceSettings.value.chimeEventRotationEnabled = data.chime_event_rotation_enabled === true;
+      deviceSettings.value.chimeEventTelegramPhotoEnabled =
+        data.chime_event_telegram_photo_enabled === true;
+      deviceSettings.value.chimeEventLowBatteryEnabled =
+        data.chime_event_low_battery_enabled === true;
+      deviceSettings.value.chimeEventWifiReprovisionEnabled =
+        data.chime_event_wifi_reprovision_enabled === true;
+      deviceSettings.value.chimeEventAgendaDueEnabled =
+        data.chime_event_agenda_due_enabled === true;
+      deviceSettings.value.chimeEventOtaSuccessEnabled =
+        data.chime_event_ota_success_enabled === true;
+      deviceSettings.value.chimeEventCriticalErrorEnabled =
+        data.chime_event_critical_error_enabled === true;
       deviceSettings.value.agendaTodoEnabled = data.agenda_todo_enabled === true;
       deviceSettings.value.agendaCalEnabled = data.agenda_cal_enabled === true;
       // agenda_todo_url/agenda_cal_url are intentionally never present in
@@ -529,6 +563,17 @@ export const useSettingsStore = defineStore("settings", () => {
       show_exif_datetime_enabled: deviceSettings.value.showExifDatetimeEnabled,
       low_battery_overlay_enabled: deviceSettings.value.lowBatteryOverlayEnabled,
       low_battery_overlay_threshold: deviceSettings.value.lowBatteryOverlayThreshold,
+      chime_speaker_mode: deviceSettings.value.chimeSpeakerMode,
+      chime_quiet_enabled: deviceSettings.value.chimeQuietEnabled,
+      chime_quiet_start: deviceSettings.value.chimeQuietStart,
+      chime_quiet_end: deviceSettings.value.chimeQuietEnd,
+      chime_event_rotation_enabled: deviceSettings.value.chimeEventRotationEnabled,
+      chime_event_telegram_photo_enabled: deviceSettings.value.chimeEventTelegramPhotoEnabled,
+      chime_event_low_battery_enabled: deviceSettings.value.chimeEventLowBatteryEnabled,
+      chime_event_wifi_reprovision_enabled: deviceSettings.value.chimeEventWifiReprovisionEnabled,
+      chime_event_agenda_due_enabled: deviceSettings.value.chimeEventAgendaDueEnabled,
+      chime_event_ota_success_enabled: deviceSettings.value.chimeEventOtaSuccessEnabled,
+      chime_event_critical_error_enabled: deviceSettings.value.chimeEventCriticalErrorEnabled,
       agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
       agenda_cal_c_enabled: deviceSettings.value.agendaCalCEnabled,

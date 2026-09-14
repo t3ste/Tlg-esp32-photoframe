@@ -5,6 +5,7 @@ set(SOURCES
     "battery_history.c"
     "calendar_ics.c"
     "cert_pin.c"
+    "chime.c"
     "color_palette.c"
     "config_manager.c"
     "debug_log.c"

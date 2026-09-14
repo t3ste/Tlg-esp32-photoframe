@@ -440,7 +440,13 @@ static esp_err_t audio_session_open(audio_session_t *s)
 
     i2s_write_silence(s->tx, 128);
     pa_set(true);
-    vTaskDelay(pdMS_TO_TICKS(30));
+    // NS4150B (or its own soft-start/anti-pop ramp) needs real time to fully
+    // turn on after CTRL goes high - confirmed live: a 20s continuous test
+    // tone was clearly audible, but a single ~150ms beep with only a 30ms
+    // settle delay here was not, on two different physical units. The I2S
+    // channel keeps outputting silence during this wait (auto_clear=true
+    // above), so nothing is lost by waiting longer.
+    vTaskDelay(pdMS_TO_TICKS(250));
     return ESP_OK;
 }
 

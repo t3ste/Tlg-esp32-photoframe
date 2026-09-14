@@ -13,6 +13,7 @@
 #include "battery_history.h"
 #include "board_hal.h"
 #include "cJSON.h"
+#include "chime.h"
 #include "config.h"
 #include "config_manager.h"
 #include "cron.h"
@@ -1958,6 +1959,7 @@ esp_err_t telegram_bot_poll(telegram_poll_result_t *out_result)
                 // album rotation, same as any other album image - see
                 // finalize_telegram_image() for why a raw download isn't.
                 finalize_telegram_image(downloaded_path, sizeof(downloaded_path), largest_file_id);
+                chime_play_if_enabled(CHIME_EVENT_TELEGRAM_PHOTO);
 
                 if (saved_image_count < TELEGRAM_MAX_TRACKED_IMAGES) {
                     telegram_saved_image_t *entry = &saved_images[saved_image_count++];

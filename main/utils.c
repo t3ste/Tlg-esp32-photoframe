@@ -10,6 +10,7 @@
 #include "cJSON.h"
 #include "calendar_ics.h"
 #include "cert_pin.h"
+#include "chime.h"
 #include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
@@ -790,6 +791,51 @@ esp_err_t apply_config_from_json(cJSON *root)
         }
         config_manager_set_agenda_cal_time_display_mode(time_mode);
     }
+
+    // Chimes (speaker feedback) - see chime_speaker_mode_t/chime_event_t in
+    // config.h and main/chime.c.
+    item = cJSON_GetObjectItem(root, "chime_speaker_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *mode_str = cJSON_GetStringValue(item);
+        chime_speaker_mode_t mode = CHIME_SPEAKER_OFF;
+        if (strcmp(mode_str, "battery_and_mains") == 0) {
+            mode = CHIME_SPEAKER_BATTERY_AND_MAINS;
+        } else if (strcmp(mode_str, "mains_only") == 0) {
+            mode = CHIME_SPEAKER_MAINS_ONLY;
+        }
+        config_manager_set_chime_speaker_mode(mode);
+    }
+    item = cJSON_GetObjectItem(root, "chime_quiet_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_chime_quiet_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "chime_quiet_start");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_chime_quiet_start(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "chime_quiet_end");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_chime_quiet_end(cJSON_GetStringValue(item));
+    }
+    static const struct {
+        const char *field;
+        chime_event_t event;
+    } chime_event_fields[] = {
+        {"chime_event_rotation_enabled", CHIME_EVENT_ROTATION},
+        {"chime_event_telegram_photo_enabled", CHIME_EVENT_TELEGRAM_PHOTO},
+        {"chime_event_low_battery_enabled", CHIME_EVENT_LOW_BATTERY},
+        {"chime_event_wifi_reprovision_enabled", CHIME_EVENT_WIFI_REPROVISION},
+        {"chime_event_agenda_due_enabled", CHIME_EVENT_AGENDA_DUE},
+        {"chime_event_ota_success_enabled", CHIME_EVENT_OTA_SUCCESS},
+        {"chime_event_critical_error_enabled", CHIME_EVENT_CRITICAL_ERROR},
+    };
+    for (size_t i = 0; i < sizeof(chime_event_fields) / sizeof(chime_event_fields[0]); i++) {
+        item = cJSON_GetObjectItem(root, chime_event_fields[i].field);
+        if (item && cJSON_IsBool(item)) {
+            config_manager_set_chime_event_enabled(chime_event_fields[i].event, cJSON_IsTrue(item));
+        }
+    }
+
     // Plain display names, not credentials - unlike agenda_cal_url above,
     // applied even when empty (an empty save genuinely means "cleared back
     // to the generic default", not "field left untouched").
@@ -1733,6 +1779,9 @@ void utils_handle_wifi_connect_result(bool connected)
     config_manager_set_wifi_fail_count(count);
     ESP_LOGW(TAG, "WiFi connect failed (%d consecutive)", count);
 
+    if (count == WIFI_FAIL_OVERLAY_THRESHOLD) {
+        chime_play_if_enabled(CHIME_EVENT_CRITICAL_ERROR);  // fire once, not every wake
+    }
     if (!config_manager_get_error_overlay_enabled() || count < WIFI_FAIL_OVERLAY_THRESHOLD) {
         return;
     }
@@ -1780,6 +1829,9 @@ void utils_finalize_internet_health(void)
              "Internet-dependent request(s) failed despite WiFi being connected (%d consecutive)",
              count);
 
+    if (count == WIFI_FAIL_OVERLAY_THRESHOLD) {
+        chime_play_if_enabled(CHIME_EVENT_CRITICAL_ERROR);  // fire once, not every wake
+    }
     if (!config_manager_get_error_overlay_enabled() || count < WIFI_FAIL_OVERLAY_THRESHOLD) {
         return;
     }

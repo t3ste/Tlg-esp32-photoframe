@@ -190,6 +190,19 @@ static bool debug_log_enabled = false;
 // Config sync
 static int64_t config_last_updated = 0;
 
+// Chimes (speaker feedback) - off by default across the board, see config.h.
+static chime_speaker_mode_t chime_speaker_mode = CHIME_SPEAKER_OFF;
+static bool chime_quiet_enabled = false;
+static char chime_quiet_start[CHIME_TIME_STR_MAX_LEN] = CHIME_DEFAULT_QUIET_START;
+static char chime_quiet_end[CHIME_TIME_STR_MAX_LEN] = CHIME_DEFAULT_QUIET_END;
+static bool chime_event_enabled[CHIME_EVENT_COUNT] = {
+    [CHIME_EVENT_ROTATION] = false,      [CHIME_EVENT_TELEGRAM_PHOTO] = false,
+    [CHIME_EVENT_LOW_BATTERY] = true,    [CHIME_EVENT_WIFI_REPROVISION] = true,
+    [CHIME_EVENT_AGENDA_DUE] = false,    [CHIME_EVENT_OTA_SUCCESS] = true,
+    [CHIME_EVENT_CRITICAL_ERROR] = true,
+};
+static char chime_agenda_last_date[CHIME_DATE_STR_MAX_LEN] = {0};
+
 // ----------------------------------------------------------------------------
 // Cron schedule helpers
 // ----------------------------------------------------------------------------
@@ -1262,6 +1275,41 @@ esp_err_t config_manager_init(void)
         if (nvs_get_i64(nvs_handle, "cfg_updated", &config_last_updated) == ESP_OK) {
             ESP_LOGI(TAG, "Loaded config_last_updated: %lld", (long long) config_last_updated);
         }
+
+        // Chimes
+        uint8_t stored_chime_mode = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CHIME_SPEAKER_MODE_KEY, &stored_chime_mode) == ESP_OK) {
+            chime_speaker_mode = (stored_chime_mode <= CHIME_SPEAKER_MAINS_ONLY)
+                                     ? (chime_speaker_mode_t) stored_chime_mode
+                                     : CHIME_SPEAKER_OFF;
+        }
+        uint8_t stored_chime_quiet_en = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CHIME_QUIET_ENABLED_KEY, &stored_chime_quiet_en) == ESP_OK) {
+            chime_quiet_enabled = (stored_chime_quiet_en != 0);
+        }
+        size_t chime_quiet_start_len = sizeof(chime_quiet_start);
+        nvs_get_str(nvs_handle, NVS_CHIME_QUIET_START_KEY, chime_quiet_start,
+                    &chime_quiet_start_len);
+        size_t chime_quiet_end_len = sizeof(chime_quiet_end);
+        nvs_get_str(nvs_handle, NVS_CHIME_QUIET_END_KEY, chime_quiet_end, &chime_quiet_end_len);
+        static const char *const chime_event_keys[CHIME_EVENT_COUNT] = {
+            [CHIME_EVENT_ROTATION] = NVS_CHIME_EVENT_ROTATION_KEY,
+            [CHIME_EVENT_TELEGRAM_PHOTO] = NVS_CHIME_EVENT_TELEGRAM_KEY,
+            [CHIME_EVENT_LOW_BATTERY] = NVS_CHIME_EVENT_LOWBATT_KEY,
+            [CHIME_EVENT_WIFI_REPROVISION] = NVS_CHIME_EVENT_WIFIPROV_KEY,
+            [CHIME_EVENT_AGENDA_DUE] = NVS_CHIME_EVENT_AGENDA_KEY,
+            [CHIME_EVENT_OTA_SUCCESS] = NVS_CHIME_EVENT_OTA_KEY,
+            [CHIME_EVENT_CRITICAL_ERROR] = NVS_CHIME_EVENT_CRIT_KEY,
+        };
+        for (int i = 0; i < CHIME_EVENT_COUNT; i++) {
+            uint8_t stored_ev = 0;
+            if (nvs_get_u8(nvs_handle, chime_event_keys[i], &stored_ev) == ESP_OK) {
+                chime_event_enabled[i] = (stored_ev != 0);
+            }
+        }
+        size_t chime_agenda_date_len = sizeof(chime_agenda_last_date);
+        nvs_get_str(nvs_handle, NVS_CHIME_AGENDA_LAST_DATE_KEY, chime_agenda_last_date,
+                    &chime_agenda_date_len);
 
         nvs_close(nvs_handle);
     }
@@ -3644,4 +3692,95 @@ void config_manager_touch_config(void)
     time_t now;
     time(&now);
     config_manager_set_config_last_updated((int64_t) now);
+}
+
+// ============================================================================
+// Chimes (speaker feedback)
+// ============================================================================
+
+void config_manager_set_chime_speaker_mode(chime_speaker_mode_t mode)
+{
+    if (mode < CHIME_SPEAKER_OFF || mode > CHIME_SPEAKER_MAINS_ONLY) {
+        mode = CHIME_SPEAKER_OFF;
+    }
+    chime_speaker_mode = mode;
+    agenda_nvs_set_u8(NVS_CHIME_SPEAKER_MODE_KEY, (uint8_t) mode);
+}
+
+chime_speaker_mode_t config_manager_get_chime_speaker_mode(void)
+{
+    return chime_speaker_mode;
+}
+
+void config_manager_set_chime_quiet_enabled(bool enabled)
+{
+    chime_quiet_enabled = enabled;
+    agenda_nvs_set_u8(NVS_CHIME_QUIET_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_chime_quiet_enabled(void)
+{
+    return chime_quiet_enabled;
+}
+
+void config_manager_set_chime_quiet_start(const char *time_str)
+{
+    strncpy(chime_quiet_start, time_str ? time_str : "", sizeof(chime_quiet_start) - 1);
+    chime_quiet_start[sizeof(chime_quiet_start) - 1] = '\0';
+    agenda_nvs_set_str(NVS_CHIME_QUIET_START_KEY, chime_quiet_start);
+}
+
+const char *config_manager_get_chime_quiet_start(void)
+{
+    return chime_quiet_start;
+}
+
+void config_manager_set_chime_quiet_end(const char *time_str)
+{
+    strncpy(chime_quiet_end, time_str ? time_str : "", sizeof(chime_quiet_end) - 1);
+    chime_quiet_end[sizeof(chime_quiet_end) - 1] = '\0';
+    agenda_nvs_set_str(NVS_CHIME_QUIET_END_KEY, chime_quiet_end);
+}
+
+const char *config_manager_get_chime_quiet_end(void)
+{
+    return chime_quiet_end;
+}
+
+void config_manager_set_chime_event_enabled(chime_event_t event, bool enabled)
+{
+    if (event < 0 || event >= CHIME_EVENT_COUNT) {
+        return;
+    }
+    static const char *const chime_event_keys[CHIME_EVENT_COUNT] = {
+        [CHIME_EVENT_ROTATION] = NVS_CHIME_EVENT_ROTATION_KEY,
+        [CHIME_EVENT_TELEGRAM_PHOTO] = NVS_CHIME_EVENT_TELEGRAM_KEY,
+        [CHIME_EVENT_LOW_BATTERY] = NVS_CHIME_EVENT_LOWBATT_KEY,
+        [CHIME_EVENT_WIFI_REPROVISION] = NVS_CHIME_EVENT_WIFIPROV_KEY,
+        [CHIME_EVENT_AGENDA_DUE] = NVS_CHIME_EVENT_AGENDA_KEY,
+        [CHIME_EVENT_OTA_SUCCESS] = NVS_CHIME_EVENT_OTA_KEY,
+        [CHIME_EVENT_CRITICAL_ERROR] = NVS_CHIME_EVENT_CRIT_KEY,
+    };
+    chime_event_enabled[event] = enabled;
+    agenda_nvs_set_u8(chime_event_keys[event], enabled ? 1 : 0);
+}
+
+bool config_manager_get_chime_event_enabled(chime_event_t event)
+{
+    if (event < 0 || event >= CHIME_EVENT_COUNT) {
+        return false;
+    }
+    return chime_event_enabled[event];
+}
+
+void config_manager_set_chime_agenda_last_date(const char *date_str)
+{
+    strncpy(chime_agenda_last_date, date_str ? date_str : "", sizeof(chime_agenda_last_date) - 1);
+    chime_agenda_last_date[sizeof(chime_agenda_last_date) - 1] = '\0';
+    agenda_nvs_set_str(NVS_CHIME_AGENDA_LAST_DATE_KEY, chime_agenda_last_date);
+}
+
+const char *config_manager_get_chime_agenda_last_date(void)
+{
+    return chime_agenda_last_date;
 }

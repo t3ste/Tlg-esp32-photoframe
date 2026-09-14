@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "board_hal.h"
+#include "chime.h"
 #include "config.h"
 #include "config_manager.h"
 #include "esp_log.h"
@@ -52,6 +53,7 @@ static bool low_battery_overlay_should_show(int *out_percent)
     if (!active && percent < low) {
         active = true;
         config_manager_set_low_battery_overlay_active(true);
+        chime_play_if_enabled(CHIME_EVENT_LOW_BATTERY);  // false->true edge only
     } else if (active && percent > clear) {
         active = false;
         config_manager_set_low_battery_overlay_active(false);

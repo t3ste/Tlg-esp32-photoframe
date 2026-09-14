@@ -7,6 +7,7 @@
 
 #include "agenda_renderer.h"
 #include "calendar_ics.h"
+#include "chime.h"
 #include "config.h"
 #include "config_manager.h"
 #include "cron.h"
@@ -18,6 +19,48 @@
 #include "weather.h"
 
 static const char *TAG = "agenda_manager";
+
+// Chimes: a short, local re-derivation of the same "YYYY-MM-DD" string
+// comparison agenda_renderer.c's (private) due_status() already does for
+// per-element coloring - duplicated here rather than exposed from the
+// renderer, since it's a 3-line comparison and this is the only other
+// place that needs it. Fires at most once per calendar day (persisted in
+// NVS, survives the deep-sleep reboot between agenda wakes) even if Agenda
+// mode renders more often than that.
+static void agenda_chime_due_todo_if_needed(const todo_list_t *todo)
+{
+    time_t now = time(NULL);
+    struct tm now_tm;
+    localtime_r(&now, &now_tm);
+    // Oversized vs. the exact "YYYY-MM-DD" (10 chars) it normally holds -
+    // silences -Wformat-truncation, which (correctly) can't prove
+    // tm_year+1900 always fits in 4 digits from this call site alone. Only
+    // the first 10 chars are ever compared/stored below.
+    char today_str_buf[32];
+    snprintf(today_str_buf, sizeof(today_str_buf), "%04d-%02d-%02d", now_tm.tm_year + 1900,
+             now_tm.tm_mon + 1, now_tm.tm_mday);
+    char today_str[CHIME_DATE_STR_MAX_LEN];
+    strncpy(today_str, today_str_buf, sizeof(today_str) - 1);
+    today_str[sizeof(today_str) - 1] = '\0';
+
+    if (strcmp(config_manager_get_chime_agenda_last_date(), today_str) == 0) {
+        return;  // already chimed today
+    }
+
+    bool has_due = false;
+    for (int i = 0; i < todo->count && !has_due; i++) {
+        const char *due = todo->items[i].due_date;
+        if (due[0] != '\0' && strncmp(due, today_str, 10) <= 0) {
+            has_due = true;
+        }
+    }
+    if (!has_due) {
+        return;
+    }
+
+    chime_play_if_enabled(CHIME_EVENT_AGENDA_DUE);
+    config_manager_set_chime_agenda_last_date(today_str);
+}
 
 // If `list` has no event overlapping or after `now`, injects a single
 // synthetic all-day event naming `display_name` so a source that will never
@@ -302,6 +345,10 @@ esp_err_t agenda_manager_run(void)
                 ESP_LOGW(TAG, "ToDo fetch failed, that column will be omitted this cycle");
             }
         }
+    }
+
+    if (have_todo) {
+        agenda_chime_due_todo_if_needed(todo);
     }
 
     esp_err_t result;
