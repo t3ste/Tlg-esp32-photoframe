@@ -595,6 +595,13 @@ typedef enum {
 // multi-day" on/off) - kept as-is so existing devices' saved choice still
 // means the same thing after an upgrade.
 #define NVS_AGENDA_CAL_COMPACT_KEY "agenda_cal_cpt"
+// Opt-in: append each timed event's duration in brackets, e.g. "08:15 [45m]
+// Kaffee trinken" / "14:00 [1h] Meeting" / "09:00 [1h30m] Workshop" - instead
+// of just "08:15 Kaffee trinken" with no indication of when it ends. Off by
+// default (unchanged, existing behavior). All-day events are never affected
+// (they already show no time at all). See build_event_line() in
+// agenda_renderer.c for the compact "Xm"/"Xh"/"XhYYm" formatting.
+#define NVS_AGENDA_CAL_SHOW_DURATION_KEY "agenda_cal_dur"
 // Optional display name shown in the Calendar column header instead of the
 // generic "Calendar A"/"Calendar B" fallback (agenda_renderer.c) - e.g.
 // "Private"/"Work". Not a credential, unlike the URL fields above - shown

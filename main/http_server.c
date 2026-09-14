@@ -1671,6 +1671,8 @@ static esp_err_t config_handler(httpd_req_t *req)
             break;
         }
         cJSON_AddStringToObject(root, "agenda_cal_multiday_mode", agenda_multiday_str);
+        cJSON_AddBoolToObject(root, "agenda_cal_show_duration",
+                              config_manager_get_agenda_cal_show_duration());
         cJSON_AddStringToObject(root, "agenda_cal_name", config_manager_get_agenda_cal_name());
         cJSON_AddStringToObject(root, "agenda_cal_name2", config_manager_get_agenda_cal_name2());
         // Three extra ICS sources (e.g. holidays/school-holidays) - same

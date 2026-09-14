@@ -561,11 +561,29 @@ static void calendar_source_color(int calendar_index, bool grayscale, uint8_t bg
     }
 }
 
+// Formats a duration in whole minutes as a compact bracket-free token:
+// under an hour "45m", an exact number of hours "1h"/"2h", otherwise
+// "1h30m" - matches the granularity ICS events actually have (minutes),
+// without ever needing more than a handful of characters next to the
+// "HH:MM " prefix it follows.
+static void format_duration_compact(int total_minutes, char *out, size_t out_len)
+{
+    if (total_minutes < 60) {
+        snprintf(out, out_len, "%dm", total_minutes);
+    } else if (total_minutes % 60 == 0) {
+        snprintf(out, out_len, "%dh", total_minutes / 60);
+    } else {
+        snprintf(out, out_len, "%dh%02dm", total_minutes / 60, total_minutes % 60);
+    }
+}
+
 // Builds one event's display text - "HH:MM " (omitted for an all-day
-// event) followed by the summary - and resolves the single color (plus
-// optional chip) the whole row draws in, per calendar_source_color()
-// above. No date/day-of-week here: draw_calendar_column() shows that once
-// per day group via draw_day_divider(), not repeated on every event.
+// event), optionally followed by "[duration] " (see
+// config_manager_get_agenda_cal_show_duration()/NVS_AGENDA_CAL_SHOW_DURATION_KEY),
+// then the summary - and resolves the single color (plus optional chip)
+// the whole row draws in, per calendar_source_color() above. No
+// date/day-of-week here: draw_calendar_column() shows that once per day
+// group via draw_day_divider(), not repeated on every event.
 static void build_event_line(const ics_event_t *ev, int calendar_index, bool grayscale,
                              uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, agenda_event_line_t *out)
 {
@@ -581,6 +599,19 @@ static void build_event_line(const ics_event_t *ev, int calendar_index, bool gra
         if (n > 0) {
             size_t written = ((size_t) n <= cap - pos) ? (size_t) n : cap - pos;
             pos += written;
+        }
+
+        if (config_manager_get_agenda_cal_show_duration() && ev->end > ev->start) {
+            int duration_min = (int) ((ev->end - ev->start) / 60);
+            if (duration_min > 0) {
+                char dur[16];
+                format_duration_compact(duration_min, dur, sizeof(dur));
+                int dn = snprintf(out->text + pos, cap - pos + 1, "[%s] ", dur);
+                if (dn > 0) {
+                    size_t dwritten = ((size_t) dn <= cap - pos) ? (size_t) dn : cap - pos;
+                    pos += dwritten;
+                }
+            }
         }
     }
 

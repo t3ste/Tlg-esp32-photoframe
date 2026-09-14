@@ -779,6 +779,10 @@ esp_err_t apply_config_from_json(cJSON *root)
         }
         config_manager_set_agenda_cal_multiday_mode(mode);
     }
+    item = cJSON_GetObjectItem(root, "agenda_cal_show_duration");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_show_duration(cJSON_IsTrue(item));
+    }
     // Plain display names, not credentials - unlike agenda_cal_url above,
     // applied even when empty (an empty save genuinely means "cleared back
     // to the generic default", not "field left untouched").

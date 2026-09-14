@@ -1509,6 +1509,20 @@ async function performFactoryReset() {
               one visible shows "4/8: Trip" that one time only. Repeat + number: combines both -
               still repeated under every day, but each occurrence also gets its own "N/M:" prefix.
             </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.agendaCalShowDuration"
+              label="Show event duration"
+              color="primary"
+              class="mt-2 mb-1"
+              hide-details
+              :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Off (default): a timed event shows just its start time, e.g. "08:15 Kaffee trinken" -
+              no indication of when it ends. On: appends how long it lasts, e.g. "08:15 [45m] Kaffee
+              trinken" or "14:00 [1h] Meeting" - chosen over "08:15-09:00" to stay compact on a
+              narrow column. Doesn't affect all-day events, which already show no time at all.
+            </div>
 
             <v-divider class="mb-4 mt-2" />
 

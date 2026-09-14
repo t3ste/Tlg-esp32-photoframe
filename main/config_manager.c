@@ -125,6 +125,7 @@ static bool agenda_cal_enabled = false;
 static bool agenda_cal_weather_enabled = false;
 static bool agenda_cal_weather_right_aligned = false;
 static agenda_multiday_mode_t agenda_cal_multiday_mode = AGENDA_MULTIDAY_REPEAT;
+static bool agenda_cal_show_duration = false;
 static char agenda_cal_name[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_cal_name2[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_todo_url[AGENDA_TODO_URL_MAX_LEN] = {0};
@@ -1071,6 +1072,11 @@ esp_err_t config_manager_init(void)
             agenda_cal_multiday_mode = (stored_agenda_cal_cpt <= AGENDA_MULTIDAY_REPEAT_NUMBERED)
                                            ? (agenda_multiday_mode_t) stored_agenda_cal_cpt
                                            : AGENDA_MULTIDAY_REPEAT;
+        }
+        uint8_t stored_agenda_cal_dur = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_SHOW_DURATION_KEY, &stored_agenda_cal_dur) ==
+            ESP_OK) {
+            agenda_cal_show_duration = (stored_agenda_cal_dur != 0);
         }
         size_t agenda_cal_name_len = sizeof(agenda_cal_name);
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_NAME_KEY, agenda_cal_name, &agenda_cal_name_len);
@@ -2975,6 +2981,17 @@ void config_manager_set_agenda_cal_multiday_mode(agenda_multiday_mode_t mode)
 agenda_multiday_mode_t config_manager_get_agenda_cal_multiday_mode(void)
 {
     return agenda_cal_multiday_mode;
+}
+
+void config_manager_set_agenda_cal_show_duration(bool enabled)
+{
+    agenda_cal_show_duration = enabled;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_SHOW_DURATION_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_agenda_cal_show_duration(void)
+{
+    return agenda_cal_show_duration;
 }
 
 void config_manager_set_agenda_cal_name(const char *name)

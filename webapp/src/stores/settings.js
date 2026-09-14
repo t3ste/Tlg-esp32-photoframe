@@ -159,6 +159,10 @@ export const useSettingsStore = defineStore("settings", () => {
     // (repeated under every day like "repeat", but each occurrence also
     // gets its own "N/M: " prefix).
     agendaCalMultidayMode: "repeat",
+    // Off (default): timed events show just "HH:MM Summary". On: appends the
+    // duration, e.g. "08:15 [45m] Kaffee trinken" - never affects all-day
+    // events, which already show no time at all.
+    agendaCalShowDuration: false,
     agendaCron: ["0 6-18 *"],
     // true = ToDo above Calendar (default), false = side by side. Portrait
     // boards always stack regardless of this setting - see agenda_renderer.c.
@@ -381,6 +385,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.agendaCalWeatherRightAligned =
         data.agenda_cal_weather_right_aligned === true;
       deviceSettings.value.agendaCalMultidayMode = data.agenda_cal_multiday_mode || "repeat";
+      deviceSettings.value.agendaCalShowDuration = data.agenda_cal_show_duration === true;
       deviceSettings.value.agendaCron =
         Array.isArray(data.agenda_cron) && data.agenda_cron.length
           ? data.agenda_cron
@@ -525,6 +530,7 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_cal_weather_enabled: deviceSettings.value.agendaCalWeatherEnabled,
       agenda_cal_weather_right_aligned: deviceSettings.value.agendaCalWeatherRightAligned,
       agenda_cal_multiday_mode: deviceSettings.value.agendaCalMultidayMode,
+      agenda_cal_show_duration: deviceSettings.value.agendaCalShowDuration,
       agenda_cron: deviceSettings.value.agendaCron,
       agenda_stack_layout: deviceSettings.value.agendaStackLayout,
       agenda_bg_color: deviceSettings.value.agendaBgColor,
