@@ -2,6 +2,7 @@
 #define CLIMATE_H
 
 #include "config.h"
+#include "esp_err.h"
 
 // Comfort category a single temperature or humidity reading falls into for
 // a given room type - see climate_classify_temperature()/
@@ -26,5 +27,16 @@ climate_category_t climate_classify_humidity(float humidity_percent, climate_roo
 // Rounds a Celsius value to the nearest whole Fahrenheit degree, for
 // display only - never used for classification.
 int climate_celsius_to_fahrenheit(float celsius);
+
+// Reads the SHTC3 sensor with the user's calibration offset
+// (config_manager_get_climate_temp_offset()/_hum_offset()) already applied -
+// use these everywhere a climate value is displayed or logged (overlay
+// badge, Agenda header, history log). GET /api/sensor deliberately calls
+// board_hal_get_temperature()/get_humidity() directly instead, so it keeps
+// showing the raw, un-offset reading - useful as a reference for picking an
+// offset in the first place. Same ESP_OK/error contract as the board_hal
+// functions they wrap.
+esp_err_t climate_read_temperature(float *out_celsius);
+esp_err_t climate_read_humidity(float *out_percent);
 
 #endif

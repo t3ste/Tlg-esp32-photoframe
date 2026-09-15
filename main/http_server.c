@@ -1747,6 +1747,14 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_climate_overlay_enabled());
         cJSON_AddBoolToObject(root, "climate_agenda_header_enabled",
                               config_manager_get_climate_agenda_header_enabled());
+        // Always Celsius/percentage-point deltas, regardless of
+        // climate_temp_unit - the Web UI converts for display in whichever
+        // unit is selected (see climate_temp_offset_c's doc comment,
+        // config.h).
+        cJSON_AddNumberToObject(root, "climate_temp_offset",
+                                atof(config_manager_get_climate_temp_offset()));
+        cJSON_AddNumberToObject(root, "climate_hum_offset",
+                                atof(config_manager_get_climate_hum_offset()));
 
         // Agenda (ToDo + Calendar). agenda_cal_url/agenda_todo_url are
         // deliberately NEVER added here - either can carry a credential
@@ -3002,12 +3010,16 @@ static esp_err_t color_palette_handler(httpd_req_t *req)
 esp_err_t http_server_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    // 55: 51 handlers are registered below as of this comment - keep a small
-    // margin above the exact count so the next handler added here doesn't
-    // silently fail to register (httpd_register_uri_handler() only logs a
-    // warning on overflow, never a hard error - a real esp32-photoframe bug
-    // caused by /api/albums/organize-crop pushing the old limit of 50 over).
-    config.max_uri_handlers = 55;
+    // 64: 56 handlers are registered below as of this comment (the Climate
+    // feature's endpoints pushed the previous 55-handler margin - meant to
+    // cover exactly this - over by one, the same way /api/albums/organize-crop
+    // once pushed an even older limit of 50 over). Keep real margin above the
+    // exact count so the next handler added here doesn't silently fail to
+    // register (httpd_register_uri_handler() only logs a warning on overflow,
+    // never a hard error, and every following handler in the same init
+    // function still gets registered fine - only the ones actually over the
+    // limit silently vanish, which is what made this so easy to miss twice).
+    config.max_uri_handlers = 64;
     // 16384: rotate_handler() (/api/rotate) calls trigger_image_rotation()
     // synchronously on this worker task - the same heavy pipeline that's
     // needed the same bump on button_task/deep_sleep_wake_task (12288 wasn't

@@ -270,9 +270,15 @@ esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *
  * @param invert_colors false (default) = black bar, white text; true = white
  * bar, black text - Web UI toggle, independent of the caption bar's colors
  * (though callers may choose to pass the same value through).
+ * @param right_margin_px Pixels to reserve on the right edge, kept out of
+ * both the truncation-width and centering math (though the bar's background
+ * still fills edge to edge) - lets a caller avoid the top-right climate
+ * badges overwriting this bar's text instead of the text simply running
+ * under them. 0 when nothing needs the reservation.
  */
 void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height,
-                                      const char *const *lines, int line_count, bool invert_colors);
+                                      const char *const *lines, int line_count, bool invert_colors,
+                                      int right_margin_px);
 
 /**
  * @brief Same as image_processor_draw_overlay_bar(), but reads an already
@@ -335,7 +341,9 @@ void image_processor_draw_battery_badge(uint8_t *rgb_buffer, int width, int heig
  * background color is its own category - Red (Bad), Yellow (Good - stands
  * in for orange, this board's palette has no true orange), Green (Super);
  * grayscale-only boards get a single black badge with no color
- * distinction, same convention as the battery badge. `temp_text`/
+ * distinction, same convention as the battery badge. Text is white except
+ * on a Yellow (Good) background, where white reads poorly on the actual
+ * e-paper panel - black instead, only for that one case. `temp_text`/
  * `hum_text` are pre-formatted short strings (e.g. "21C"/"48%") - this
  * function does no unit conversion or number formatting.
  *

@@ -889,10 +889,12 @@ static bool find_weather_for_day(const weather_forecast_t *weather, time_t day,
 // Colors mirror image_processor_draw_climate_badges()'s convention exactly
 // (Bad=Red, Good=Yellow standing in for orange - this board's real palette
 // has no true orange, Super=Green; a single black chip on grayscale
-// boards, no color distinction possible there). Solid box + white text, so
-// no background-collision avoidance is needed (always high-contrast by
+// boards, no color distinction possible there). No background-collision
+// avoidance is needed for the box itself (always high-contrast by
 // construction - same reasoning as the day-count "N/N:" prefix and the
-// per-source name swatches elsewhere in this file).
+// per-source name swatches elsewhere in this file) - but the TEXT color
+// still needs to pick white vs. black per background, see
+// climate_chip_text_color() below.
 static void climate_chip_colors(climate_category_t category, bool grayscale, uint8_t *bg_r,
                                 uint8_t *bg_g, uint8_t *bg_b)
 {
@@ -920,9 +922,23 @@ static void climate_chip_colors(climate_category_t category, bool grayscale, uin
     }
 }
 
-// Draws one right-aligned chip (colored box + white text) in a column
-// header, anchored so its right edge sits at `right_edge_x` - returns the
-// x the next (further left) chip should use as its own right edge, same
+// White text reads fine on Red/Green/the grayscale chip's Black, but not on
+// Good's Yellow background - too little contrast to read on the actual
+// e-paper panel (confirmed live, same issue as the photo-overlay badges'
+// climate_badge_text_color()). Black text instead, only for that one case.
+static void climate_chip_text_color(climate_category_t category, bool grayscale, uint8_t *fg_r,
+                                    uint8_t *fg_g, uint8_t *fg_b)
+{
+    if (!grayscale && category == CLIMATE_CATEGORY_GOOD) {
+        *fg_r = *fg_g = *fg_b = 0;
+        return;
+    }
+    *fg_r = *fg_g = *fg_b = 255;
+}
+
+// Draws one right-aligned chip (colored box + text) in a column header,
+// anchored so its right edge sits at `right_edge_x` - returns the x the
+// next (further left) chip should use as its own right edge, same
 // chaining shape as image_processor_draw_climate_badges()'s photo-overlay
 // counterpart.
 static int draw_header_climate_chip(uint8_t *rgb, int width, int height, int right_edge_x, int y,
@@ -938,8 +954,10 @@ static int draw_header_climate_chip(uint8_t *rgb, int width, int height, int rig
     climate_chip_colors(category, grayscale, &bg_r, &bg_g, &bg_b);
     image_processor_fill_rect(rgb, width, height, x, y, chip_w, IMAGE_PROCESSOR_FONT_HEIGHT, bg_r,
                               bg_g, bg_b);
-    image_processor_draw_text(rgb, width, height, x + IMAGE_PROCESSOR_FONT_WIDTH / 4, y, text, 255,
-                              255, 255);
+    uint8_t fg_r, fg_g, fg_b;
+    climate_chip_text_color(category, grayscale, &fg_r, &fg_g, &fg_b);
+    image_processor_draw_text(rgb, width, height, x + IMAGE_PROCESSOR_FONT_WIDTH / 4, y, text, fg_r,
+                              fg_g, fg_b);
     return x - IMAGE_PROCESSOR_FONT_WIDTH / 2;
 }
 

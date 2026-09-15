@@ -875,6 +875,18 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_climate_agenda_header_enabled(cJSON_IsTrue(item));
     }
+    item = cJSON_GetObjectItem(root, "climate_temp_offset");
+    if (item && cJSON_IsNumber(item)) {
+        char offset_str[CLIMATE_OFFSET_MAX_LEN];
+        snprintf(offset_str, sizeof(offset_str), "%.2f", item->valuedouble);
+        config_manager_set_climate_temp_offset(offset_str);
+    }
+    item = cJSON_GetObjectItem(root, "climate_hum_offset");
+    if (item && cJSON_IsNumber(item)) {
+        char offset_str[CLIMATE_OFFSET_MAX_LEN];
+        snprintf(offset_str, sizeof(offset_str), "%.2f", item->valuedouble);
+        config_manager_set_climate_hum_offset(offset_str);
+    }
 
     // Plain display names, not credentials - unlike agenda_cal_url above,
     // applied even when empty (an empty save genuinely means "cleared back

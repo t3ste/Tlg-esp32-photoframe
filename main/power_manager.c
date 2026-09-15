@@ -20,6 +20,7 @@
 
 #include "agenda_manager.h"
 #include "board_hal.h"
+#include "climate_history.h"
 #include "config.h"
 #include "config_manager.h"
 #include "debug_log.h"
@@ -47,6 +48,7 @@ static uint32_t auto_sleep_timeout_sec = AUTO_SLEEP_TIMEOUT_SEC;
 static wakeup_source_t wakeup_source = WAKEUP_SOURCE_NONE;
 static int64_t next_rotation_time = 0;  // Use absolute time for rotation
 static int64_t next_agenda_time = 0;    // Same convention, for the Agenda schedule below
+static int64_t next_climate_time = 0;   // Same convention, for the climate log below
 static uint64_t ext1_wakeup_pin_mask = 0;
 
 static void rotation_timer_task(void *arg)
@@ -66,6 +68,23 @@ static void rotation_timer_task(void *arg)
         }
 
         int64_t now = esp_timer_get_time();  // Get absolute time in microseconds
+
+        // Climate: same "device stays awake continuously" gating as
+        // rotation/agenda above, but this one genuinely doesn't need
+        // 1-second precision - only actually evaluated once every ~30 ticks
+        // of this task's own 1-second loop, well within
+        // CLIMATE_ACTIVE_LOG_INTERVAL_SEC's 6-minute granularity.
+        // climate_history_record() has its own persisted debounce
+        // (CLIMATE_LOG_MIN_INTERVAL_SEC) against overlapping with a
+        // wake-triggered reading (main.c), so no coordination is needed here.
+        static int climate_check_counter = 0;
+        if (++climate_check_counter >= 30) {
+            climate_check_counter = 0;
+            if (next_climate_time == 0 || now >= next_climate_time) {
+                climate_history_record();
+                next_climate_time = now + ((int64_t) CLIMATE_ACTIVE_LOG_INTERVAL_SEC * 1000000LL);
+            }
+        }
 
         // Agenda: an independent schedule, same "device stays awake" gating
         // as rotation above - mirrors deep_sleep_wake_main()'s agenda_wake

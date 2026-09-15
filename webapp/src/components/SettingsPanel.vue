@@ -327,6 +327,25 @@ const climateRoomLegend = computed(() => {
   };
 });
 
+// Calibration offset for temperature - always stored/sent as a Celsius
+// DELTA (climateTempOffset), but shown/edited in whichever unit is
+// currently selected. A delta conversion has no "+32" term, unlike
+// converting an absolute temperature (formatTempC() above) - +2°C of
+// offset is +3.6°F of offset, not +35.6°F.
+const climateTempOffsetDisplay = computed({
+  get() {
+    const c = settingsStore.deviceSettings.climateTempOffset;
+    return settingsStore.deviceSettings.climateTempUnit === "fahrenheit"
+      ? Math.round(((c * 9) / 5) * 10) / 10
+      : c;
+  },
+  set(value) {
+    const v = Number(value) || 0;
+    settingsStore.deviceSettings.climateTempOffset =
+      settingsStore.deviceSettings.climateTempUnit === "fahrenheit" ? (v * 5) / 9 : v;
+  },
+});
+
 // Guards against enabling a calendar with nothing behind it (no persisted
 // visual confirmation existed before, so this state was easy to fall into
 // silently - see agendaCalUrlConfigured etc. below). Each computed is true
@@ -815,7 +834,7 @@ async function saveSettings() {
     saveSuccess.value = true;
     saveError.value = false;
     saveMessage.value = deviceResult.message || "Settings saved!";
-    setTimeout(() => (saveSuccess.value = false), 3000);
+    setTimeout(() => (saveSuccess.value = false), 6000);
 
     // Refresh device time in case timezone changed
     await fetchDeviceTime();
@@ -2645,6 +2664,39 @@ async function performFactoryReset() {
               }}: temperature is Bad {{ climateRoomLegend.tempBad }}, Super
               {{ climateRoomLegend.tempSuper }}; humidity is Bad {{ climateRoomLegend.humBad }},
               Super {{ climateRoomLegend.humSuper }} - anything else counts as Good.
+            </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Calibration</div>
+            <v-row dense>
+              <v-col cols="6">
+                <v-text-field
+                  v-model.number="climateTempOffsetDisplay"
+                  :label="`Temperature offset (${settingsStore.deviceSettings.climateTempUnit === 'fahrenheit' ? '°F' : '°C'})`"
+                  type="number"
+                  step="0.1"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="6">
+                <v-text-field
+                  v-model.number="settingsStore.deviceSettings.climateHumOffset"
+                  label="Humidity offset (percentage points)"
+                  type="number"
+                  step="0.1"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Added to every raw sensor reading before it's displayed or logged - use this if the
+              sensor consistently reads too high/low. Default 0. Does not affect the raw reading
+              shown by the device's own diagnostic endpoint.
             </div>
 
             <v-divider class="mb-4 mt-2" />

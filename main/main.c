@@ -10,6 +10,7 @@
 #include "album_manager.h"
 #include "board_hal.h"
 #include "chime.h"
+#include "climate_history.h"
 #include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
@@ -264,6 +265,15 @@ static void log_wall_clock(const char *label)
 
 void deep_sleep_wake_main(wakeup_source_t wakeup_src)
 {
+    // Every real wake gets a climate reading, regardless of whether this
+    // cycle ends up rotating/rendering anything - board_hal_init() already
+    // ran in app_main() before this task was created, so the I2C sensor is
+    // ready, and this needs neither WiFi nor a corrected clock. Deliberately
+    // ahead of every early-sleep-return branch below (the "woke too early"
+    // checks, the agenda/HA-veto sleeps) - see climate_history_record()'s
+    // own debounce for why calling it this often is still cheap.
+    climate_history_record();
+
     bool is_button_wake = (wakeup_src == WAKEUP_SOURCE_ROTATE_BUTTON);
     // Check rotation mode and HA configuration
     rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
@@ -721,6 +731,7 @@ void app_main(void)
     case WAKEUP_SOURCE_CLEAR_BUTTON:
         ESP_LOGI(TAG, "CLEAR button wakeup detected - clearing display and sleeping");
         board_hal_init();             // Ensure HAL is active
+        climate_history_record();     // Every physical wake gets a reading too
         display_manager_init();       // Initialize display
         display_manager_clear();      // Clear screen
         power_manager_enter_sleep();  // Go back to sleep

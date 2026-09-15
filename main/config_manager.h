@@ -610,4 +610,20 @@ bool config_manager_get_climate_overlay_enabled(void);
 void config_manager_set_climate_agenda_header_enabled(bool enabled);
 bool config_manager_get_climate_agenda_header_enabled(void);
 
+// Calibration offsets applied to every displayed/logged reading (never to
+// GET /api/sensor's raw value) - see climate_read_temperature()/
+// climate_read_humidity() in main/climate.c. Always Celsius/percentage-point
+// deltas, string-stored (same convention as weather_lat/weather_lon), parsed
+// with strtof() at the point of use. Default "0".
+void config_manager_set_climate_temp_offset(const char *offset_c_str);
+const char *config_manager_get_climate_temp_offset(void);
+void config_manager_set_climate_hum_offset(const char *offset_str);
+const char *config_manager_get_climate_hum_offset(void);
+
+// Persisted anchor for the shared debounce in climate_history_record() - see
+// CLIMATE_LOG_MIN_INTERVAL_SEC in config.h. Same int64 NVS pattern as
+// config_manager_get/set_config_last_updated().
+void config_manager_set_climate_last_log_time(int64_t timestamp);
+int64_t config_manager_get_climate_last_log_time(void);
+
 #endif
