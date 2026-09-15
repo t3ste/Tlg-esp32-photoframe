@@ -3823,6 +3823,17 @@ static rgb_t climate_badge_color(climate_category_t category)
     }
 }
 
+// White text reads fine on Red/Green/the grayscale badge's Black, but not on
+// Good's Yellow background - too little contrast to read on the actual
+// e-paper panel (confirmed live). Black text instead, only for that one case.
+static rgb_t climate_badge_text_color(climate_category_t category)
+{
+    if (!board_is_grayscale() && category == CLIMATE_CATEGORY_GOOD) {
+        return palette[0];
+    }
+    return palette[1];
+}
+
 // Pixel width one climate badge will occupy for the given text, box padding
 // included - shared by draw_one_climate_badge() (the actual draw) and
 // image_processor_add_overlay_to_file() (which needs this ahead of time, to
@@ -3839,7 +3850,7 @@ static int climate_badge_width(const char *text)
 // without overlap. Otherwise identical box+glyph-loop shape to
 // image_processor_draw_battery_badge() above.
 static int draw_one_climate_badge(uint8_t *rgb_buffer, int width, int height, int right_edge_x,
-                                  const char *text, rgb_t bg)
+                                  const char *text, rgb_t bg, rgb_t fg)
 {
     int badge_width = climate_badge_width(text);
     int badge_height = Font24.Height + 2 * CAPTION_LINE_PADDING;
@@ -3855,7 +3866,6 @@ static int draw_one_climate_badge(uint8_t *rgb_buffer, int width, int height, in
         box_x = 0;
     }
 
-    rgb_t fg = palette[1];
     for (int y = 0; y < badge_height; y++) {
         for (int x = 0; x < badge_width; x++) {
             int idx = (y * width + (box_x + x)) * 3;
@@ -3885,11 +3895,13 @@ void image_processor_draw_climate_badges(uint8_t *rgb_buffer, int width, int hei
     int right_edge_x = width;
     if (has_hum && hum_text && hum_text[0] != '\0') {
         right_edge_x = draw_one_climate_badge(rgb_buffer, width, height, right_edge_x, hum_text,
-                                              climate_badge_color(hum_category));
+                                              climate_badge_color(hum_category),
+                                              climate_badge_text_color(hum_category));
     }
     if (has_temp && temp_text && temp_text[0] != '\0') {
         draw_one_climate_badge(rgb_buffer, width, height, right_edge_x, temp_text,
-                               climate_badge_color(temp_category));
+                               climate_badge_color(temp_category),
+                               climate_badge_text_color(temp_category));
     }
 }
 

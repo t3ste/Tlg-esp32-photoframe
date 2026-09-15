@@ -341,7 +341,9 @@ void image_processor_draw_battery_badge(uint8_t *rgb_buffer, int width, int heig
  * background color is its own category - Red (Bad), Yellow (Good - stands
  * in for orange, this board's palette has no true orange), Green (Super);
  * grayscale-only boards get a single black badge with no color
- * distinction, same convention as the battery badge. `temp_text`/
+ * distinction, same convention as the battery badge. Text is white except
+ * on a Yellow (Good) background, where white reads poorly on the actual
+ * e-paper panel - black instead, only for that one case. `temp_text`/
  * `hum_text` are pre-formatted short strings (e.g. "21C"/"48%") - this
  * function does no unit conversion or number formatting.
  *
