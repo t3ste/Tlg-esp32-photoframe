@@ -133,6 +133,23 @@ async function syncTime() {
   }
 }
 
+// v-combobox with object items (TIMEZONE_PRESETS) is inconsistent about what
+// it emits on selection across Vuetify versions - typing free text correctly
+// emits a plain string, but picking a preset from the dropdown can emit the
+// whole {title, value} object instead of just its item-value. Normalizing
+// through this computed keeps the store's `timezone` field a plain string
+// either way - binding item-title/item-value alone was not enough (a
+// selected preset silently failed to apply, since the device only accepts a
+// string in PATCH /api/config, per apply_config_from_json()'s
+// cJSON_IsString() check).
+const timezoneModel = computed({
+  get: () => settingsStore.deviceSettings.timezone,
+  set: (val) => {
+    settingsStore.deviceSettings.timezone =
+      val && typeof val === "object" ? (val.value ?? val.title ?? "") : (val ?? "");
+  },
+});
+
 onMounted(() => {
   fetchDeviceTime();
   // Tick every second to update display
@@ -989,7 +1006,7 @@ async function performFactoryReset() {
               </v-col>
               <v-col cols="12" md="6">
                 <v-combobox
-                  v-model="settingsStore.deviceSettings.timezone"
+                  v-model="timezoneModel"
                   :items="TIMEZONE_PRESETS"
                   item-title="title"
                   item-value="value"
