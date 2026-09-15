@@ -1,11 +1,13 @@
 #include "agenda_manager.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include "agenda_renderer.h"
+#include "board_hal.h"
 #include "calendar_ics.h"
 #include "chime.h"
 #include "config.h"
@@ -19,6 +21,44 @@
 #include "weather.h"
 
 static const char *TAG = "agenda_manager";
+
+// Optional climate readout for both column headers - see
+// config_manager_get_climate_agenda_header_enabled() and agenda_climate_t's
+// doc comment. Same unit-conversion/formatting-owned-by-the-caller shape as
+// overlay_manager.c's climate_badge_should_show() for the photo overlay;
+// duplicated rather than shared since the two live in unrelated render
+// paths with no common caller. Returns false (nothing to draw) if the
+// setting is off or both sensor reads fail.
+static bool build_agenda_climate(agenda_climate_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (!config_manager_get_climate_agenda_header_enabled()) {
+        return false;
+    }
+
+    float temp_c, humidity;
+    out->has_temp = (board_hal_get_temperature(&temp_c) == ESP_OK);
+    out->has_hum = (board_hal_get_humidity(&humidity) == ESP_OK);
+    if (!out->has_temp && !out->has_hum) {
+        return false;
+    }
+
+    climate_room_type_t room = config_manager_get_climate_room_type();
+    if (out->has_temp) {
+        out->temp_category = climate_classify_temperature(temp_c, room);
+        if (config_manager_get_climate_temp_unit() == CLIMATE_UNIT_FAHRENHEIT) {
+            snprintf(out->temp_text, sizeof(out->temp_text), "%dF",
+                     climate_celsius_to_fahrenheit(temp_c));
+        } else {
+            snprintf(out->temp_text, sizeof(out->temp_text), "%dC", (int) lroundf(temp_c));
+        }
+    }
+    if (out->has_hum) {
+        out->hum_category = climate_classify_humidity(humidity, room);
+        snprintf(out->hum_text, sizeof(out->hum_text), "%d%%", (int) lroundf(humidity));
+    }
+    return true;
+}
 
 // Chimes: a short, local re-derivation of the same "YYYY-MM-DD" string
 // comparison agenda_renderer.c's (private) due_status() already does for
@@ -342,6 +382,9 @@ esp_err_t agenda_manager_run(void)
         agenda_chime_due_todo_if_needed(todo);
     }
 
+    agenda_climate_t climate;
+    bool have_climate = build_agenda_climate(&climate);
+
     esp_err_t result;
     if (!have_todo && !have_events_a && !have_events_b && !have_events_c && !have_events_d &&
         !have_events_e) {
@@ -352,7 +395,8 @@ esp_err_t agenda_manager_run(void)
             have_todo ? todo : NULL, have_events_a ? events_a : NULL,
             have_events_b ? events_b : NULL, have_events_c ? events_c : NULL,
             have_events_d ? events_d : NULL, have_events_e ? events_e : NULL,
-            have_cal_weather ? &cal_weather : NULL, cal_days, AGENDA_OUTPUT_PATH, IMAGE_FORMAT_PNG);
+            have_cal_weather ? &cal_weather : NULL, cal_days, AGENDA_OUTPUT_PATH, IMAGE_FORMAT_PNG,
+            have_climate ? &climate : NULL);
         if (result != ESP_OK) {
             ESP_LOGE(TAG, "Failed to render agenda screen: %s", esp_err_to_name(result));
         } else {

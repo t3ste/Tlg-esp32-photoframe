@@ -840,6 +840,42 @@ esp_err_t apply_config_from_json(cJSON *root)
         }
     }
 
+    // Climate (SHTC3 temperature/humidity) - see climate_room_type_t/
+    // climate_temp_unit_t in config.h and main/climate.[ch].
+    item = cJSON_GetObjectItem(root, "climate_room_type");
+    if (item && cJSON_IsString(item)) {
+        const char *room_str = cJSON_GetStringValue(item);
+        climate_room_type_t room = CLIMATE_ROOM_LIVING_ROOM;
+        if (strcmp(room_str, "bedroom") == 0) {
+            room = CLIMATE_ROOM_BEDROOM;
+        } else if (strcmp(room_str, "bathroom") == 0) {
+            room = CLIMATE_ROOM_BATHROOM;
+        } else if (strcmp(room_str, "kitchen") == 0) {
+            room = CLIMATE_ROOM_KITCHEN;
+        } else if (strcmp(room_str, "basement") == 0) {
+            room = CLIMATE_ROOM_BASEMENT;
+        }
+        config_manager_set_climate_room_type(room);
+    }
+    item = cJSON_GetObjectItem(root, "climate_temp_unit");
+    if (item && cJSON_IsString(item)) {
+        const char *unit_str = cJSON_GetStringValue(item);
+        config_manager_set_climate_temp_unit(
+            strcmp(unit_str, "fahrenheit") == 0 ? CLIMATE_UNIT_FAHRENHEIT : CLIMATE_UNIT_CELSIUS);
+    }
+    item = cJSON_GetObjectItem(root, "climate_logging_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_climate_logging_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "climate_overlay_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_climate_overlay_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "climate_agenda_header_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_climate_agenda_header_enabled(cJSON_IsTrue(item));
+    }
+
     // Plain display names, not credentials - unlike agenda_cal_url above,
     // applied even when empty (an empty save genuinely means "cleared back
     // to the generic default", not "field left untouched").

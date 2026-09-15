@@ -3793,6 +3793,87 @@ void image_processor_draw_battery_badge(uint8_t *rgb_buffer, int width, int heig
     }
 }
 
+// Bad=Red, Super=Green; Good stands in for the report's "orange" since this
+// board's real palette (see `palette[]` above) has no true orange.
+// Grayscale-only boards can't represent any of these distinctly, so they
+// all collapse to the same black badge as the battery badge above.
+static rgb_t climate_badge_color(climate_category_t category)
+{
+    if (board_is_grayscale()) {
+        return palette[0];
+    }
+    switch (category) {
+    case CLIMATE_CATEGORY_BAD:
+        return palette[3];
+    case CLIMATE_CATEGORY_SUPER:
+        return palette[6];
+    case CLIMATE_CATEGORY_GOOD:
+    default:
+        return palette[2];
+    }
+}
+
+// Draws one badge anchored so its RIGHT edge sits at `right_edge_x` -
+// returns the x coordinate the next (further left) badge should use as its
+// own right edge, so image_processor_draw_climate_badges() can chain two
+// without overlap. Otherwise identical box+glyph-loop shape to
+// image_processor_draw_battery_badge() above.
+static int draw_one_climate_badge(uint8_t *rgb_buffer, int width, int height, int right_edge_x,
+                                  const char *text, rgb_t bg)
+{
+    int text_len = (int) strlen(text);
+    int badge_width = text_len * Font24.Width + 2 * CAPTION_LINE_PADDING;
+    int badge_height = Font24.Height + 2 * CAPTION_LINE_PADDING;
+    if (badge_width > width) {
+        badge_width = width;
+    }
+    if (badge_height > height) {
+        badge_height = height;
+    }
+
+    int box_x = right_edge_x - badge_width;
+    if (box_x < 0) {
+        box_x = 0;
+    }
+
+    rgb_t fg = palette[1];
+    for (int y = 0; y < badge_height; y++) {
+        for (int x = 0; x < badge_width; x++) {
+            int idx = (y * width + (box_x + x)) * 3;
+            rgb_buffer[idx] = bg.r;
+            rgb_buffer[idx + 1] = bg.g;
+            rgb_buffer[idx + 2] = bg.b;
+        }
+    }
+
+    int tx = box_x + CAPTION_LINE_PADDING;
+    int ty = CAPTION_LINE_PADDING;
+    for (const char *p = text; *p != '\0'; p++) {
+        draw_glyph(rgb_buffer, width, height, tx, ty, *p, fg);
+        tx += Font24.Width;
+    }
+    return box_x - CAPTION_LINE_PADDING;  // small gap before the next badge
+}
+
+void image_processor_draw_climate_badges(uint8_t *rgb_buffer, int width, int height, bool has_temp,
+                                         const char *temp_text, climate_category_t temp_category,
+                                         bool has_hum, const char *hum_text,
+                                         climate_category_t hum_category)
+{
+    if (!rgb_buffer || width <= 0 || height <= 0) {
+        return;
+    }
+    int right_edge_x = width;
+    if (has_hum && hum_text && hum_text[0] != '\0') {
+        right_edge_x = draw_one_climate_badge(rgb_buffer, width, height, right_edge_x, hum_text,
+                                              climate_badge_color(hum_category));
+    }
+    if (has_temp && temp_text && temp_text[0] != '\0') {
+        draw_one_climate_badge(rgb_buffer, width, height, right_edge_x, temp_text,
+                               climate_badge_color(temp_category));
+    }
+}
+
 void image_processor_sanitize_ascii(const char *utf8, char *out, size_t out_len)
 {
     sanitize_caption_ascii(utf8, out, out_len);
@@ -3880,11 +3961,16 @@ static void overlay_draw_trampoline(uint8_t *rgb_buffer, int width, int height, 
 
 esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lines, int line_count,
                                               bool invert_colors, bool draw_battery_badge,
-                                              int battery_percent, const char *exif_caption)
+                                              int battery_percent, const char *exif_caption,
+                                              bool draw_climate_temp, const char *climate_temp_text,
+                                              climate_category_t climate_temp_category,
+                                              bool draw_climate_hum, const char *climate_hum_text,
+                                              climate_category_t climate_hum_category)
 {
     bool has_lines = lines && line_count > 0;
     bool has_exif_caption = exif_caption && exif_caption[0] != '\0';
-    if (!has_lines && !draw_battery_badge && !has_exif_caption) {
+    if (!has_lines && !draw_battery_badge && !has_exif_caption && !draw_climate_temp &&
+        !draw_climate_hum) {
         return ESP_OK;
     }
     if (!path) {
@@ -3935,6 +4021,13 @@ esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lin
         // Drawn after the overlay bar above (if any) so it visually sits in
         // front of it, inset into the left edge - see the doc comment.
         image_processor_draw_battery_badge(rgb_buffer, width, height, battery_percent);
+    }
+    if (draw_climate_temp || draw_climate_hum) {
+        // Top-right corner - independent of the top-left battery badge
+        // above, can never collide with it.
+        image_processor_draw_climate_badges(
+            rgb_buffer, width, height, draw_climate_temp, climate_temp_text, climate_temp_category,
+            draw_climate_hum, climate_hum_text, climate_hum_category);
     }
     if (has_exif_caption) {
         // Bottom-anchored (image_processor_draw_caption()), so it can never

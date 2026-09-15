@@ -275,6 +275,58 @@ const chimeSpeakerModeOptions = [
   { title: "Mains/USB only", value: "mains_only" },
 ];
 
+const climateRoomTypeOptions = [
+  { title: "Living Room / Office (default)", value: "living_room" },
+  { title: "Bedroom", value: "bedroom" },
+  { title: "Bathroom", value: "bathroom" },
+  { title: "Kitchen", value: "kitchen" },
+  { title: "Basement", value: "basement" },
+];
+
+const climateTempUnitOptions = [
+  { title: "Celsius (default)", value: "celsius" },
+  { title: "Fahrenheit", value: "fahrenheit" },
+];
+
+// Reference legend only (never sent to the device - classification always
+// happens firmware-side, in Celsius, from the identical table). Bad is
+// everything outside these bounds; Super is the innermost range; any gap
+// between the two (e.g. 18.0-18.9°C in the Living Room row) counts as Good,
+// same "not Bad, not Super" fallback rule the firmware uses.
+const climateRoomProfilesC = {
+  living_room: { badT: [18, 24], superT: [20, 21], badH: [35, 65], superH: [45, 55] },
+  bedroom: { badT: [15, 21], superT: [16, 18], badH: [35, 65], superH: [45, 55] },
+  bathroom: { badT: [19, 25], superT: [22, 23], badH: [40, 75], superH: [50, 60] },
+  kitchen: { badT: [16, 22], superT: [18, 19], badH: [35, 70], superH: [45, 55] },
+  basement: { badT: [10, 18], superT: [15, 17], badH: [0, 70], superH: [50, 55] },
+};
+
+function celsiusToFahrenheit(c) {
+  return Math.round((c * 9) / 5 + 32);
+}
+
+function formatTempC(c, unit) {
+  return unit === "fahrenheit" ? `${celsiusToFahrenheit(c)}°F` : `${c}°C`;
+}
+
+// Builds the current room type's legend as plain text lines, in whichever
+// unit the user has selected - shown under the room-type selector so "Bad"
+// vs. "Good" vs. "Super" has a concrete meaning without needing to look
+// anything up elsewhere.
+const climateRoomLegend = computed(() => {
+  const p =
+    climateRoomProfilesC[settingsStore.deviceSettings.climateRoomType] ||
+    climateRoomProfilesC.living_room;
+  const unit = settingsStore.deviceSettings.climateTempUnit;
+  const t = (c) => formatTempC(c, unit);
+  return {
+    tempBad: `<${t(p.badT[0])} or >${t(p.badT[1])}`,
+    tempSuper: `${t(p.superT[0])}-${t(p.superT[1])}`,
+    humBad: p.badH[0] > 0 ? `<${p.badH[0]}% or >${p.badH[1]}%` : `>${p.badH[1]}%`,
+    humSuper: `${p.superH[0]}-${p.superH[1]}%`,
+  };
+});
+
 // Guards against enabling a calendar with nothing behind it (no persisted
 // visual confirmation existed before, so this state was easy to fall into
 // silently - see agendaCalUrlConfigured etc. below). Each computed is true
@@ -418,8 +470,9 @@ async function exportConfig() {
     if (configRes.ok) {
       const config = await configRes.json();
       // Always write-only at the device level - never returned by GET, so
-      // these deletes are belt-and-suspenders and unaffected by the
-      // checkbox below.
+      // these deletes are belt-and-suspenders (the real source of these
+      // fields, when opted in below, is the dedicated /api/config/urls
+      // fetch further down - GET /api/config itself never carries them).
       delete config.wifi_password;
       delete config.agenda_todo_url;
       delete config.agenda_cal_url;
@@ -437,6 +490,21 @@ async function exportConfig() {
         delete config.google_api_key;
       }
       exported.config = config;
+    }
+    // ToDo/Calendar URLs are write-only at the device level (GET /api/config
+    // never returns them - either can carry a credential embedded as a
+    // query param), so a full backup needs this dedicated opt-in fetch
+    // instead. Only requested when the checkbox is checked, same opt-in
+    // gate as the credential fields above.
+    if (exportIncludeSecrets.value && exported.config) {
+      try {
+        const urlsRes = await fetch("/api/config/urls");
+        if (urlsRes.ok) {
+          Object.assign(exported.config, await urlsRes.json());
+        }
+      } catch (_error) {
+        console.log("Failed to fetch URLs for export");
+      }
     }
     if (processingRes.ok) exported.processing = await processingRes.json();
     if (paletteRes.ok) exported.palette = await paletteRes.json();
@@ -799,6 +867,9 @@ async function performFactoryReset() {
         <v-tab value="power"> Power </v-tab>
         <v-tab v-if="settingsStore.deviceSettings.chimeSpeakerAvailable" value="chimes">
           Chimes
+        </v-tab>
+        <v-tab v-if="settingsStore.deviceSettings.climateSensorAvailable" value="climate">
+          Climate
         </v-tab>
         <v-tab value="homeAssistant"> Home Assistant </v-tab>
         <v-tab value="processing"> Processing </v-tab>
@@ -2531,6 +2602,91 @@ async function performFactoryReset() {
             </div>
           </v-tabs-window-item>
 
+          <!-- Climate Tab -->
+          <v-tabs-window-item
+            v-if="settingsStore.deviceSettings.climateSensorAvailable"
+            class="mt-2"
+            value="climate"
+          >
+            <div class="text-subtitle-2 mb-2">Room</div>
+            <v-row dense>
+              <v-col cols="12" sm="7">
+                <v-select
+                  v-model="settingsStore.deviceSettings.climateRoomType"
+                  :items="climateRoomTypeOptions"
+                  item-title="title"
+                  item-value="value"
+                  label="Room type"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="12" sm="5">
+                <v-select
+                  v-model="settingsStore.deviceSettings.climateTempUnit"
+                  :items="climateTempUnitOptions"
+                  item-title="title"
+                  item-value="value"
+                  label="Unit"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Temperature and humidity are classified separately, each into Bad (mold/dryness risk),
+              Good, or Super (optimal), based on the selected room type. For
+              {{
+                climateRoomTypeOptions.find(
+                  (o) => o.value === settingsStore.deviceSettings.climateRoomType
+                )?.title
+              }}: temperature is Bad {{ climateRoomLegend.tempBad }}, Super
+              {{ climateRoomLegend.tempSuper }}; humidity is Bad {{ climateRoomLegend.humBad }},
+              Super {{ climateRoomLegend.humSuper }} - anything else counts as Good.
+            </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Display</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.climateLoggingEnabled"
+              label="Log readings for the history chart"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Records one reading per successfully displayed image (photo or Agenda render) to the
+              Climate History chart below the settings. On by default - has no effect on the display
+              itself.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.climateOverlayEnabled"
+              label="Show on photos (top-right badge)"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Draws the latest temperature and humidity as two small colored badges in the top-right
+              corner of every photo - color shows the category (red/orange/green for Bad/Good/Super;
+              a single black badge on grayscale-only displays).
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.climateAgendaHeaderEnabled"
+              label="Show in Agenda header"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Adds the same readout, right-aligned, to the ToDo and Calendar column headers in
+              Agenda mode.
+            </div>
+          </v-tabs-window-item>
+
           <!-- Home Assistant Tab -->
           <v-tabs-window-item class="mt-2" value="homeAssistant">
             <v-switch
@@ -2647,13 +2803,14 @@ async function performFactoryReset() {
                   density="compact"
                   hide-details
                   class="mb-2"
-                  label="Include credentials in export (Telegram bot token, AI API keys, access token, custom auth header)"
+                  label="Include credentials and URLs in export (Telegram bot token, AI API keys, access token, custom auth header, ToDo/Calendar URLs)"
                 />
                 <div class="text-caption text-grey mb-3">
                   Off by default: an export is a plaintext JSON file. Enable this for a fully
-                  self-contained backup, e.g. before restoring to a fresh device. WiFi password and
-                  Calendar/ToDo URLs can never be included (the device never returns them at all) -
-                  re-enter those manually after importing.
+                  self-contained backup, e.g. before restoring to a fresh device - ToDo/Calendar
+                  URLs can carry an embedded credential (e.g. a Google Calendar "secret address"),
+                  same reasoning as the other fields here. WiFi password can never be included (the
+                  device never returns it at all) - re-enter that manually after importing.
                 </div>
                 <v-btn variant="outlined" class="mr-2" @click="exportConfig">
                   <v-icon start>mdi-download</v-icon>

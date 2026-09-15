@@ -14,6 +14,7 @@
 #include "battery_history.h"
 #include "board_hal.h"
 #include "cJSON.h"
+#include "climate_history.h"
 #include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
@@ -1161,6 +1162,38 @@ static esp_err_t battery_history_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t climate_history_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    if (req->method == HTTP_DELETE) {
+        climate_history_reset();
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+        return ESP_OK;
+    }
+
+    cJSON *response = climate_history_build_json();
+    if (response == NULL) {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "Failed to build climate history JSON");
+        return ESP_FAIL;
+    }
+
+    char *json_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(response);
+
+    return ESP_OK;
+}
+
 // GET returns how many images have been marked shown in the current
 // no-repeat cycle (history_manager.h); DELETE clears it and restarts the
 // cycle - same effect as the "/clear_history" Telegram command, including
@@ -1675,6 +1708,46 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddBoolToObject(root, "chime_event_critical_error_enabled",
                               config_manager_get_chime_event_enabled(CHIME_EVENT_CRITICAL_ERROR));
 
+        // Climate (SHTC3 temperature/humidity). Generic feature - available
+        // on any board whose sensor actually answers, not tied to one
+        // specific board like the Chimes speaker check above. A live probe
+        // (not a compile-time capability flag) since the same board_hal
+        // function can fail at runtime even where the driver is wired up
+        // (unpowered rail, no sensor populated on a given unit, etc.).
+        float climate_probe_temp, climate_probe_hum;
+        bool climate_sensor_available =
+            (board_hal_get_temperature(&climate_probe_temp) == ESP_OK) &&
+            (board_hal_get_humidity(&climate_probe_hum) == ESP_OK);
+        cJSON_AddBoolToObject(root, "climate_sensor_available", climate_sensor_available);
+        const char *climate_room_str = "living_room";
+        switch (config_manager_get_climate_room_type()) {
+        case CLIMATE_ROOM_BEDROOM:
+            climate_room_str = "bedroom";
+            break;
+        case CLIMATE_ROOM_BATHROOM:
+            climate_room_str = "bathroom";
+            break;
+        case CLIMATE_ROOM_KITCHEN:
+            climate_room_str = "kitchen";
+            break;
+        case CLIMATE_ROOM_BASEMENT:
+            climate_room_str = "basement";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "climate_room_type", climate_room_str);
+        cJSON_AddStringToObject(root, "climate_temp_unit",
+                                config_manager_get_climate_temp_unit() == CLIMATE_UNIT_FAHRENHEIT
+                                    ? "fahrenheit"
+                                    : "celsius");
+        cJSON_AddBoolToObject(root, "climate_logging_enabled",
+                              config_manager_get_climate_logging_enabled());
+        cJSON_AddBoolToObject(root, "climate_overlay_enabled",
+                              config_manager_get_climate_overlay_enabled());
+        cJSON_AddBoolToObject(root, "climate_agenda_header_enabled",
+                              config_manager_get_climate_agenda_header_enabled());
+
         // Agenda (ToDo + Calendar). agenda_cal_url/agenda_todo_url are
         // deliberately NEVER added here - either can carry a credential
         // (Google's Calendar "secret address" is the obvious case, but a
@@ -1889,6 +1962,45 @@ static esp_err_t config_handler(httpd_req_t *req)
     httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
     return ESP_FAIL;
 }
+
+// Deliberately NOT part of GET /api/config's response (see the write-only
+// comment on agenda_todo_url/agenda_cal_url etc. there - either can carry a
+// credential embedded as a query param) - this exists only so the Web UI's
+// "Export Config" opt-in checkbox can include a fully self-contained
+// backup on request, without these URLs being readable on every normal
+// Settings-page load. Same fields, same plain-text-JSON exposure as the
+// existing credential fields GET /api/config already returns unconditionally
+// - reachable by anyone who can reach this device's HTTP server either way.
+static esp_err_t config_urls_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "Failed to create JSON response");
+        return ESP_FAIL;
+    }
+    cJSON_AddStringToObject(root, "agenda_todo_url", config_manager_get_agenda_todo_url());
+    cJSON_AddStringToObject(root, "agenda_cal_url", config_manager_get_agenda_cal_url());
+    cJSON_AddStringToObject(root, "agenda_cal_url2", config_manager_get_agenda_cal_url2());
+    cJSON_AddStringToObject(root, "agenda_cal_c_url", config_manager_get_agenda_cal_c_url());
+    cJSON_AddStringToObject(root, "agenda_cal_d_url", config_manager_get_agenda_cal_d_url());
+    cJSON_AddStringToObject(root, "agenda_cal_e_url", config_manager_get_agenda_cal_e_url());
+
+    char *json_str = cJSON_Print(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
 static esp_err_t albums_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -2979,6 +3091,12 @@ esp_err_t http_server_init(void)
                                         .user_ctx = NULL};
         httpd_register_uri_handler(server, &config_patch_uri);
 
+        httpd_uri_t config_urls_uri = {.uri = "/api/config/urls",
+                                       .method = HTTP_GET,
+                                       .handler = config_urls_handler,
+                                       .user_ctx = NULL};
+        httpd_register_uri_handler(server, &config_urls_uri);
+
         httpd_uri_t debug_log_uri = {.uri = "/api/debug/log",
                                      .method = HTTP_GET,
                                      .handler = debug_log_download_handler,
@@ -3030,6 +3148,18 @@ esp_err_t http_server_init(void)
         httpd_uri_t sensor_uri = {
             .uri = "/api/sensor", .method = HTTP_GET, .handler = sensor_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &sensor_uri);
+
+        httpd_uri_t climate_history_uri = {.uri = "/api/climate-history",
+                                           .method = HTTP_GET,
+                                           .handler = climate_history_handler,
+                                           .user_ctx = NULL};
+        httpd_register_uri_handler(server, &climate_history_uri);
+
+        httpd_uri_t climate_history_reset_uri = {.uri = "/api/climate-history",
+                                                 .method = HTTP_DELETE,
+                                                 .handler = climate_history_handler,
+                                                 .user_ctx = NULL};
+        httpd_register_uri_handler(server, &climate_history_reset_uri);
 
         httpd_uri_t sleep_uri = {
             .uri = "/api/sleep", .method = HTTP_POST, .handler = sleep_handler, .user_ctx = NULL};

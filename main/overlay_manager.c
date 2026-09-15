@@ -1,11 +1,13 @@
 #include "overlay_manager.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "board_hal.h"
 #include "chime.h"
+#include "climate.h"
 #include "config.h"
 #include "config_manager.h"
 #include "esp_log.h"
@@ -71,6 +73,49 @@ static bool low_battery_overlay_should_show(int *out_percent)
     return active;
 }
 
+// Decorative (unlike the battery badge above, which is a safety
+// notification) - respects the normal EPDGZ-overlay-disabled gate in
+// overlay_manager_apply() rather than forcing through. Owns unit
+// conversion/text formatting itself (image_processor.c stays unit-
+// agnostic, just draws whatever short string it's given) and classifies
+// each channel independently - temperature and humidity are never merged
+// into one combined verdict (by design). Returns false (nothing to draw)
+// if the feature is off or both sensor reads fail; a caller should still
+// check each `out_*_text` for an empty string, since one channel can
+// succeed while the other fails.
+static bool climate_badge_should_show(char *out_temp_text, size_t temp_text_len,
+                                      climate_category_t *out_temp_category, char *out_hum_text,
+                                      size_t hum_text_len, climate_category_t *out_hum_category)
+{
+    out_temp_text[0] = '\0';
+    out_hum_text[0] = '\0';
+    if (!config_manager_get_climate_overlay_enabled()) {
+        return false;
+    }
+
+    float temp_c, humidity;
+    bool have_temp = (board_hal_get_temperature(&temp_c) == ESP_OK);
+    bool have_hum = (board_hal_get_humidity(&humidity) == ESP_OK);
+    if (!have_temp && !have_hum) {
+        return false;
+    }
+
+    climate_room_type_t room = config_manager_get_climate_room_type();
+    if (have_temp) {
+        *out_temp_category = climate_classify_temperature(temp_c, room);
+        if (config_manager_get_climate_temp_unit() == CLIMATE_UNIT_FAHRENHEIT) {
+            snprintf(out_temp_text, temp_text_len, "%dF", climate_celsius_to_fahrenheit(temp_c));
+        } else {
+            snprintf(out_temp_text, temp_text_len, "%dC", (int) lroundf(temp_c));
+        }
+    }
+    if (have_hum) {
+        *out_hum_category = climate_classify_humidity(humidity, room);
+        snprintf(out_hum_text, hum_text_len, "%d%%", (int) lroundf(humidity));
+    }
+    return true;
+}
+
 static bool copy_file(const char *src_path, const char *dst_path)
 {
     FILE *src = fopen(src_path, "rb");
@@ -112,7 +157,18 @@ const char *overlay_manager_apply(const char *source_path)
     bool exif_caption_due =
         config_manager_get_show_exif_datetime_enabled() &&
         capture_date_sidecar_read(source_path, exif_caption, sizeof(exif_caption));
-    if (!weather_on && !headlines_on && !exif_caption_due && !battery_badge_due) {
+    // Decorative like weather/headlines/the capture-date caption above, not
+    // a safety notification like the battery badge - see
+    // climate_badge_should_show()'s doc comment.
+    char climate_temp_text[8] = {0};
+    char climate_hum_text[8] = {0};
+    climate_category_t climate_temp_category = CLIMATE_CATEGORY_GOOD;
+    climate_category_t climate_hum_category = CLIMATE_CATEGORY_GOOD;
+    bool climate_badge_due = climate_badge_should_show(
+        climate_temp_text, sizeof(climate_temp_text), &climate_temp_category, climate_hum_text,
+        sizeof(climate_hum_text), &climate_hum_category);
+    if (!weather_on && !headlines_on && !exif_caption_due && !battery_badge_due &&
+        !climate_badge_due) {
         return source_path;
     }
 
@@ -132,6 +188,7 @@ const char *overlay_manager_apply(const char *source_path)
         weather_on = false;
         headlines_on = false;
         exif_caption_due = false;
+        climate_badge_due = false;
     }
     if (!is_epdgz && (format != IMAGE_FORMAT_PNG || !image_processor_is_processed(source_path))) {
         ESP_LOGI(TAG, "Skipping overlay for %s: not a processed PNG or EPDGZ", source_path);
@@ -208,7 +265,7 @@ const char *overlay_manager_apply(const char *source_path)
         }
     }
 
-    if (line_count == 0 && !exif_caption_due && !battery_badge_due) {
+    if (line_count == 0 && !exif_caption_due && !battery_badge_due && !climate_badge_due) {
         ESP_LOGI(TAG, "No overlay content available this cycle, showing %s unmodified",
                  source_path);
         return source_path;
@@ -230,7 +287,9 @@ const char *overlay_manager_apply(const char *source_path)
     bool invert_colors = config_manager_get_overlay_invert_colors();
     esp_err_t err = image_processor_add_overlay_to_file(
         scratch_path, lines, line_count, invert_colors, battery_badge_due, battery_percent,
-        exif_caption_due ? exif_caption : NULL);
+        exif_caption_due ? exif_caption : NULL, climate_badge_due && climate_temp_text[0] != '\0',
+        climate_temp_text, climate_temp_category, climate_badge_due && climate_hum_text[0] != '\0',
+        climate_hum_text, climate_hum_category);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to draw overlay onto scratch copy: %s", esp_err_to_name(err));
         return source_path;

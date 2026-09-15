@@ -18,6 +18,7 @@
 #include "battery_history.h"
 #include "board_hal.h"
 #include "chime.h"
+#include "climate_history.h"
 #include "config.h"
 #include "config_manager.h"
 #include "epaper.h"
@@ -216,6 +217,10 @@ esp_err_t display_manager_show_image(const char *filename)
     // One battery reading per successfully displayed image - see
     // battery_history.c for the persisted log and reset policy.
     battery_history_record();
+    // Same cadence as battery history above - see climate_history.c. Also
+    // called from agenda_manager.c's own render path, since Agenda mode
+    // skips this whole photo pipeline entirely.
+    climate_history_record();
 
     // Same choke point as history_manager_mark_shown() above - fires for
     // every successful display regardless of source (rotation, manual pick,

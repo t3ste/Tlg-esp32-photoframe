@@ -588,4 +588,26 @@ bool config_manager_get_chime_event_enabled(chime_event_t event);
 void config_manager_set_chime_repeat_count(chime_event_t event, int count);
 int config_manager_get_chime_repeat_count(chime_event_t event);
 
+// ============================================================================
+// Climate (SHTC3 temperature/humidity) - see climate_room_type_t/
+// climate_temp_unit_t in config.h and main/climate.[ch] for the
+// classification logic that consumes these. Generic feature: available on
+// any board whose board_hal_get_temperature()/get_humidity() succeed.
+// ============================================================================
+
+void config_manager_set_climate_room_type(climate_room_type_t room);
+climate_room_type_t config_manager_get_climate_room_type(void);
+
+void config_manager_set_climate_temp_unit(climate_temp_unit_t unit);
+climate_temp_unit_t config_manager_get_climate_temp_unit(void);
+
+void config_manager_set_climate_logging_enabled(bool enabled);
+bool config_manager_get_climate_logging_enabled(void);
+
+void config_manager_set_climate_overlay_enabled(bool enabled);
+bool config_manager_get_climate_overlay_enabled(void);
+
+void config_manager_set_climate_agenda_header_enabled(bool enabled);
+bool config_manager_get_climate_agenda_header_enabled(void);
+
 #endif

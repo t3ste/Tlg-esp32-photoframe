@@ -886,11 +886,94 @@ static bool find_weather_for_day(const weather_forecast_t *weather, time_t day,
     return false;
 }
 
+// Colors mirror image_processor_draw_climate_badges()'s convention exactly
+// (Bad=Red, Good=Yellow standing in for orange - this board's real palette
+// has no true orange, Super=Green; a single black chip on grayscale
+// boards, no color distinction possible there). Solid box + white text, so
+// no background-collision avoidance is needed (always high-contrast by
+// construction - same reasoning as the day-count "N/N:" prefix and the
+// per-source name swatches elsewhere in this file).
+static void climate_chip_colors(climate_category_t category, bool grayscale, uint8_t *bg_r,
+                                uint8_t *bg_g, uint8_t *bg_b)
+{
+    if (grayscale) {
+        *bg_r = *bg_g = *bg_b = 0;
+        return;
+    }
+    switch (category) {
+    case CLIMATE_CATEGORY_BAD:
+        *bg_r = 255;
+        *bg_g = 0;
+        *bg_b = 0;
+        break;
+    case CLIMATE_CATEGORY_SUPER:
+        *bg_r = 0;
+        *bg_g = 255;
+        *bg_b = 0;
+        break;
+    case CLIMATE_CATEGORY_GOOD:
+    default:
+        *bg_r = 255;
+        *bg_g = 255;
+        *bg_b = 0;
+        break;
+    }
+}
+
+// Draws one right-aligned chip (colored box + white text) in a column
+// header, anchored so its right edge sits at `right_edge_x` - returns the
+// x the next (further left) chip should use as its own right edge, same
+// chaining shape as image_processor_draw_climate_badges()'s photo-overlay
+// counterpart.
+static int draw_header_climate_chip(uint8_t *rgb, int width, int height, int right_edge_x, int y,
+                                    const char *text, climate_category_t category, bool grayscale)
+{
+    int text_len = (int) strlen(text);
+    int chip_w = text_len * IMAGE_PROCESSOR_FONT_WIDTH + IMAGE_PROCESSOR_FONT_WIDTH / 2;
+    int x = right_edge_x - chip_w;
+    if (x < 0) {
+        x = 0;
+    }
+    uint8_t bg_r, bg_g, bg_b;
+    climate_chip_colors(category, grayscale, &bg_r, &bg_g, &bg_b);
+    image_processor_fill_rect(rgb, width, height, x, y, chip_w, IMAGE_PROCESSOR_FONT_HEIGHT, bg_r,
+                              bg_g, bg_b);
+    image_processor_draw_text(rgb, width, height, x + IMAGE_PROCESSOR_FONT_WIDTH / 4, y, text, 255,
+                              255, 255);
+    return x - IMAGE_PROCESSOR_FONT_WIDTH / 2;
+}
+
+// Draws the optional climate readout (see agenda_climate_t) right-aligned
+// in a column header bar - shared by both draw_todo_column() and
+// draw_calendar_column(), which otherwise leave this space empty after
+// their own header text (confirmed free in both). No-op if `climate` is
+// NULL (feature off, or both sensor reads failed).
+static void draw_header_climate(uint8_t *rgb, int width, int height, agenda_rect_t rect,
+                                const agenda_climate_t *climate)
+{
+    if (!climate) {
+        return;
+    }
+    bool grayscale = agenda_board_is_grayscale();
+    int y = rect.y + AGENDA_PADDING;
+    int right_edge_x = rect.x + rect.w - AGENDA_PADDING;
+    if (climate->has_hum) {
+        right_edge_x =
+            draw_header_climate_chip(rgb, width, height, right_edge_x, y, climate->hum_text,
+                                     climate->hum_category, grayscale);
+    }
+    if (climate->has_temp) {
+        draw_header_climate_chip(rgb, width, height, right_edge_x, y, climate->temp_text,
+                                 climate->temp_category, grayscale);
+    }
+}
+
 static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rect_t rect,
                                  time_t now, int lookahead_days, uint8_t body_r, uint8_t body_g,
                                  uint8_t body_b, const agenda_tagged_event_t *tagged,
                                  int tagged_count, const weather_forecast_t *cal_weather,
-                                 agenda_cal_name_tag_t name_a, agenda_cal_name_tag_t name_b)
+                                 agenda_cal_name_tag_t name_a, agenda_cal_name_tag_t name_b,
+                                 const agenda_climate_t *climate)
 {
     uint8_t header_text_r, header_text_g, header_text_b;
     agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g, &header_text_b);
@@ -947,6 +1030,7 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
              now_tm.tm_mon + 1, now_tm.tm_year + 1900, now_tm.tm_hour, now_tm.tm_min);
     image_processor_draw_text(rgb, width, height, hx, hy, datetime, header_text_r, header_text_g,
                               header_text_b);
+    draw_header_climate(rgb, width, height, rect, climate);
 
     int row_h = IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
     int content_top = rect.y + header_h + AGENDA_PADDING;
@@ -1115,7 +1199,8 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
 // straddling the cutoff is shortened to match).
 static void draw_todo_column(uint8_t *rgb, int width, int height, agenda_rect_t rect, time_t now,
                              uint8_t body_r, uint8_t body_g, uint8_t body_b,
-                             const agenda_line_t *todo_lines, int line_count)
+                             const agenda_line_t *todo_lines, int line_count,
+                             const agenda_climate_t *climate)
 {
     uint8_t header_text_r, header_text_g, header_text_b;
     agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g, &header_text_b);
@@ -1131,6 +1216,7 @@ static void draw_todo_column(uint8_t *rgb, int width, int height, agenda_rect_t 
                               body_b);
     image_processor_draw_text(rgb, width, height, rect.x + AGENDA_PADDING, rect.y + AGENDA_PADDING,
                               header, header_text_r, header_text_g, header_text_b);
+    draw_header_climate(rgb, width, height, rect, climate);
 
     int row_h = IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
     int content_top = rect.y + header_h + AGENDA_PADDING;
@@ -1187,7 +1273,8 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                                  const ics_event_list_t *events_b, const ics_event_list_t *events_c,
                                  const ics_event_list_t *events_d, const ics_event_list_t *events_e,
                                  const weather_forecast_t *cal_weather, int lookahead_days,
-                                 const char *output_path, image_format_t out_format)
+                                 const char *output_path, image_format_t out_format,
+                                 const agenda_climate_t *climate)
 {
     if (!output_path) {
         return ESP_ERR_INVALID_ARG;
@@ -1261,7 +1348,7 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                 build_todo_line(&todo->items[i], now, grayscale, bg_r, bg_g, bg_b, &todo_lines[i]);
             }
             draw_todo_column(rgb, width, height, todo_rect, now, body_r, body_g, body_b, todo_lines,
-                             todo->count);
+                             todo->count, climate);
         } else {
             ESP_LOGW(TAG, "Failed to allocate ToDo render scratch buffers - skipping ToDo column");
         }
@@ -1365,7 +1452,7 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                 tag_b.b = lines_b[0].fb;
             }
             draw_calendar_column(rgb, width, height, cal_rect, now, lookahead_days, body_r, body_g,
-                                 body_b, tagged, tagged_count, cal_weather, tag_a, tag_b);
+                                 body_b, tagged, tagged_count, cal_weather, tag_a, tag_b, climate);
         } else {
             ESP_LOGW(TAG, "Failed to allocate Calendar render scratch buffers - skipping column");
         }
