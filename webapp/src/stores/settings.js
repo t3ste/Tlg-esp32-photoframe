@@ -36,7 +36,13 @@ export const useSettingsStore = defineStore("settings", () => {
   const deviceSettings = ref({
     // General
     deviceName: "PhotoFrame",
-    timezoneOffset: 0,
+    // Raw POSIX TZ string (e.g. "UTC-2" or a full DST rule like
+    // "CET-1CEST,M3.5.0/2,M10.5.0/3") - the device's own canonical value
+    // (main/config_manager.c passes it to setenv("TZ", ...) as-is). Never
+    // round-tripped through a numeric UTC-offset field - that lossy
+    // conversion silently discarded DST-aware strings and could overwrite
+    // them with "UTC0" on save (see webapp/src/utils/timezone.js).
+    timezone: "UTC0",
     ntpServer: "pool.ntp.org",
     // Network: static IP / DNS override (#43)
     ipMode: "dhcp",
@@ -505,39 +511,15 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.aiCredentials.openaiApiKey = data.openai_api_key || "";
       deviceSettings.value.aiCredentials.googleApiKey = data.google_api_key || "";
 
-      // Parse timezone from POSIX format (e.g., "UTC-8" -> 8)
-      const timezone = data.timezone || "UTC0";
-      let offset = 0;
-      const match = timezone.match(/UTC([+-]?)(\d+)(?::(\d+))?/);
-      if (match) {
-        const sign = match[1] === "-" ? 1 : -1; // POSIX format is inverted
-        const hours = parseInt(match[2]) || 0;
-        const minutes = parseInt(match[3]) || 0;
-        offset = sign * (hours + minutes / 60);
-      }
-      deviceSettings.value.timezoneOffset = offset;
+      // Kept as the raw POSIX string - see the `timezone` field's own
+      // comment above for why this is never parsed into a numeric offset.
+      deviceSettings.value.timezone = data.timezone || "UTC0";
     } catch (_error) {
       console.log("Device settings API not available (standalone mode)");
     }
   }
 
   async function saveDeviceSettings() {
-    // Convert UTC offset to POSIX timezone format
-    const offsetValue = deviceSettings.value.timezoneOffset || 0;
-    let timezone = "UTC0";
-    if (offsetValue !== 0) {
-      const absOffset = Math.abs(offsetValue);
-      const hours = Math.floor(absOffset);
-      const minutes = Math.round((absOffset - hours) * 60);
-      const sign = offsetValue > 0 ? "-" : "+"; // Inverted for POSIX
-
-      if (minutes === 0) {
-        timezone = `UTC${sign}${hours}`;
-      } else {
-        timezone = `UTC${sign}${hours}:${String(minutes).padStart(2, "0")}`;
-      }
-    }
-
     const currentConfig = {
       auto_rotate: deviceSettings.value.autoRotate,
       rotate_cron: deviceSettings.value.rotateCron,
@@ -643,7 +625,7 @@ export const useSettingsStore = defineStore("settings", () => {
       static_netmask: deviceSettings.value.staticNetmask,
       static_gateway: deviceSettings.value.staticGateway,
       dns_server: deviceSettings.value.dnsServer,
-      timezone: timezone,
+      timezone: deviceSettings.value.timezone,
       access_token: deviceSettings.value.accessToken,
       http_header_key: deviceSettings.value.httpHeaderKey,
       http_header_value: deviceSettings.value.httpHeaderValue,
