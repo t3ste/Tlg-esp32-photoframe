@@ -21,6 +21,7 @@ All notable changes to this fork are documented here. See [README.md → Changes
 ### Fixed
 
 - Settings timezone field silently destroyed a DST-aware POSIX timezone (e.g. `CET-1CEST,M3.5.0/2,M10.5.0/3` for Amsterdam/Berlin) back to a fixed `UTC0` on *any* Settings save, not just an edit to timezone itself — the raw POSIX string is now the only source of truth, edited via a combobox (presets + free text) instead of a lossy numeric-offset field; the device's own time-keeping was never at fault
+- Selecting a preset from that same new timezone combobox could silently fail to apply (typing a plain string worked fine) — Vuetify's combobox inconsistently emitted an object instead of a string on selection, which the backend silently rejected
 - Gallery per-thumbnail delete button was undiscoverable (an unmarked 48px hover hotspot) and unusable on touch screens at all — now reveals on hovering/focusing the whole thumbnail and stays visible on touch devices
 - Settings-save confirmation next to the Save button disappeared after 3 seconds, often too quickly to read — doubled to 6 seconds
 - `build.py`/`CMakeLists.txt` could silently fail on a stock Windows + official ESP-IDF installer setup with no separate `python3` shim on PATH (resolving to the Microsoft Store stub) — version detection and partition-table generation now use the interpreter `idf.py` already provides; `build.py` also now prefers a real `idf.py.exe` wrapper when present
