@@ -7,6 +7,7 @@ import ProcessingControls from "./ProcessingControls.vue";
 import RotationSchedule from "./RotationSchedule.vue";
 import { isValidCron } from "../utils/cron";
 import { wideEdit } from "../utils/uiPrefs";
+import { TIMEZONE_PRESETS, parseDeviceWallClock, formatDeviceWallClock } from "../utils/timezone";
 
 const settingsStore = useSettingsStore();
 const appStore = useAppStore();
@@ -71,47 +72,29 @@ const scheduleValid = computed(() => {
   return rules.length >= 1 && rules.length <= 7 && rules.every((r) => isValidCron(r));
 });
 
-// Device time state
+// Device time state. `/api/time`'s "time" field is the device's own
+// already-localized wall-clock string (localtime_r() against whatever TZ
+// is actually set, DST included) - trusted directly rather than
+// reconstructed from a Unix timestamp + a guessed numeric offset, which
+// broke for any DST-aware POSIX string (see webapp/src/utils/timezone.js).
 const deviceTime = ref("");
 const syncingTime = ref(false);
-let deviceTimestamp = null; // Unix timestamp from device
-let localTimeOffset = 0; // Offset between device time and local time
+let deviceWallClock = null; // Date holding the device's wall-clock time at the last fetch
+let localTimeOffset = 0; // Date.now() at that same moment, to tick the display forward locally
 let tickInterval = null;
 
 function updateDisplayTime() {
-  if (deviceTimestamp === null) return;
-  // Calculate current device time based on elapsed local time
-  const elapsed = Math.floor((Date.now() - localTimeOffset) / 1000);
-  const currentTimestamp = deviceTimestamp + elapsed;
-
-  // Apply timezone offset for display
-  // We shift the timestamp by the offset so that toISOString() (which is UTC)
-  // displays the correct local time numbers.
-  const offsetHours = settingsStore.deviceSettings.timezoneOffset || 0;
-  const adjustedTimestamp = currentTimestamp + offsetHours * 3600;
-
-  const date = new Date(adjustedTimestamp * 1000);
-  // Format as YYYY-MM-DD HH:MM:SS
-  deviceTime.value = date.toISOString().slice(0, 19).replace("T", " ");
+  if (!deviceWallClock) return;
+  const elapsedMs = Date.now() - localTimeOffset;
+  deviceTime.value = formatDeviceWallClock(new Date(deviceWallClock.getTime() + elapsedMs));
 }
 
-async function parseTimezone(timezoneStr) {
-  if (!timezoneStr) return;
-
-  // Posix format: UTC[+/-]H[:MM] (e.g., UTC-8 or UTC+5:30)
-  // Note: POSIX sign is inverted relative to ISO8601
-  let offset = 0;
-  const match = timezoneStr.match(/UTC([+-]?)(\d+)(?::(\d+))?/);
-  if (match) {
-    const sign = match[1] === "-" ? 1 : -1; // POSIX Inverted
-    const hours = parseInt(match[2]) || 0;
-    const minutes = parseInt(match[3]) || 0;
-    offset = sign * (hours + minutes / 60);
-
-    // Update store if different, to keep UI in sync
-    if (settingsStore.deviceSettings.timezoneOffset !== offset) {
-      settingsStore.deviceSettings.timezoneOffset = offset;
-    }
+// Keeps the Settings form honest about the device's actual configured
+// timezone (e.g. after an external change), without ever parsing it into a
+// lossy numeric offset.
+function syncTimezoneFromDevice(timezoneStr) {
+  if (timezoneStr && settingsStore.deviceSettings.timezone !== timezoneStr) {
+    settingsStore.deviceSettings.timezone = timezoneStr;
   }
 }
 
@@ -120,9 +103,9 @@ async function fetchDeviceTime() {
     const response = await fetch("/api/time");
     if (response.ok) {
       const data = await response.json();
-      deviceTimestamp = data.timestamp;
+      deviceWallClock = parseDeviceWallClock(data.time);
       localTimeOffset = Date.now();
-      await parseTimezone(data.timezone);
+      syncTimezoneFromDevice(data.timezone);
       updateDisplayTime();
     }
   } catch (error) {
@@ -137,9 +120,9 @@ async function syncTime() {
     if (response.ok) {
       const data = await response.json();
       if (data.status === "success") {
-        deviceTimestamp = data.timestamp;
+        deviceWallClock = parseDeviceWallClock(data.time);
         localTimeOffset = Date.now();
-        await parseTimezone(data.timezone);
+        syncTimezoneFromDevice(data.timezone);
         updateDisplayTime();
       }
     }
@@ -1005,15 +988,14 @@ async function performFactoryReset() {
                 </v-text-field>
               </v-col>
               <v-col cols="12" md="6">
-                <v-text-field
-                  v-model.number="settingsStore.deviceSettings.timezoneOffset"
-                  label="Timezone (UTC offset)"
-                  type="number"
-                  :min="-12"
-                  :max="14"
-                  :step="0.5"
+                <v-combobox
+                  v-model="settingsStore.deviceSettings.timezone"
+                  :items="TIMEZONE_PRESETS"
+                  item-title="title"
+                  item-value="value"
+                  label="Timezone"
                   variant="outlined"
-                  hint="e.g., -8 for PST, +1 for CET, +8 for CST"
+                  hint="Pick a preset, or type any POSIX TZ string (e.g. a DST rule)"
                   persistent-hint
                 />
               </v-col>
