@@ -68,4 +68,58 @@ esp_err_t calendar_ics_fetch(const char *url, int timeout_ms, time_t window_star
 esp_err_t calendar_ics_parse(char *body, size_t body_len, time_t window_start, time_t window_end,
                              ics_event_list_t *out);
 
+/**
+ * @brief One-shot, unconditional fetch: downloads `url` and overwrites
+ * `cache_path` with the raw response body - no ETag/conditional-GET, no
+ * parsing/event extraction. For ICS sources that are only ever meant to be
+ * fetched on an explicit user action (a URL being set/changed, a manual
+ * "refresh now", see agenda_manager.c's extra ICS sources) rather than on
+ * every agenda wake like calendar_ics_fetch() above.
+ */
+esp_err_t calendar_ics_fetch_once(const char *url, int timeout_ms, const char *cache_path);
+
+/**
+ * @brief Reads whatever is currently cached at `cache_path` and parses it
+ * (calendar_ics_parse()) - no network access at all. The per-wake read
+ * path for a source that doesn't auto-refresh (calendar_ics_fetch_once()
+ * above is the only thing that ever updates `cache_path`). Returns
+ * ESP_ERR_NOT_FOUND if the file doesn't exist/is empty - a source that was
+ * never configured, same as a fresh device.
+ */
+esp_err_t calendar_ics_read_cache(const char *cache_path, time_t window_start, time_t window_end,
+                                  ics_event_list_t *out);
+
+/**
+ * @brief Writes `list` to `path` as a small flat cache - one line per
+ * event, "<start>\t<end>\t<all_day 0|1>\t<summary>\n" (any stray tab/
+ * newline/carriage-return already in `summary` is replaced with a space so
+ * it can't be mistaken for a field separator or a second line). This is
+ * NOT valid ICS - it's a fast internal format so re-reading it
+ * (calendar_ics_read_expanded_cache() below) never needs to re-run the
+ * line-unfolding/VEVENT-scanning/RRULE-expansion parser again. Used by
+ * agenda_manager.c's extra ICS sources to avoid re-parsing a large raw
+ * .ics file on every agenda wake: the raw file is parsed/expanded once
+ * for a wide (e.g. 30-day) window, the flat result is cached here, and
+ * every wake after that just reads this cheap file until it runs out of
+ * upcoming entries.
+ */
+esp_err_t calendar_ics_write_expanded_cache(const char *path, const ics_event_list_t *list);
+
+/**
+ * @brief Reads back a cache written by calendar_ics_write_expanded_cache()
+ * - a cheap line-split, no ICS parsing at all. A malformed line is skipped
+ * (fail-soft), not treated as a fatal error. Returns ESP_ERR_NOT_FOUND if
+ * the file doesn't exist, same convention as calendar_ics_read_cache().
+ */
+esp_err_t calendar_ics_read_expanded_cache(const char *path, ics_event_list_t *out);
+
+/**
+ * @brief True if `list` has at least one event that hasn't fully passed yet
+ * (end > now) - i.e. the source isn't exhausted/stale. Used by callers that
+ * treat "no more upcoming content at all" as actionable, e.g.
+ * agenda_manager.c's extra ICS sources, which never refresh themselves and
+ * so need to flag when they've run dry.
+ */
+bool calendar_ics_has_upcoming_event(const ics_event_list_t *list, time_t now);
+
 #endif

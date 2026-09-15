@@ -14,6 +14,7 @@
 #include "battery_history.h"
 #include "board_hal.h"
 #include "cJSON.h"
+#include "climate_history.h"
 #include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
@@ -1161,6 +1162,38 @@ static esp_err_t battery_history_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t climate_history_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    if (req->method == HTTP_DELETE) {
+        climate_history_reset();
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+        return ESP_OK;
+    }
+
+    cJSON *response = climate_history_build_json();
+    if (response == NULL) {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "Failed to build climate history JSON");
+        return ESP_FAIL;
+    }
+
+    char *json_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(response);
+
+    return ESP_OK;
+}
+
 // GET returns how many images have been marked shown in the current
 // no-repeat cycle (history_manager.h); DELETE clears it and restarts the
 // cycle - same effect as the "/clear_history" Telegram command, including
@@ -1590,6 +1623,8 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_wifi_performance_mode_enabled());
         cJSON_AddBoolToObject(root, "wifi_tx_power_cap_enabled",
                               config_manager_get_wifi_tx_power_cap_enabled());
+        cJSON_AddBoolToObject(root, "wifi_extended_retry_enabled",
+                              config_manager_get_wifi_extended_retry_enabled());
         cJSON_AddBoolToObject(root, "rotation_pairing_enabled",
                               config_manager_get_rotation_pairing_enabled());
         cJSON_AddBoolToObject(root, "variant_selection_enabled",
@@ -1638,6 +1673,88 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_low_battery_overlay_enabled());
         cJSON_AddNumberToObject(root, "low_battery_overlay_threshold",
                                 config_manager_get_low_battery_overlay_threshold());
+        // Hardware capability, not a user setting - lets the Web UI hide the
+        // whole Chimes tab on boards with no onboard speaker.
+        cJSON_AddBoolToObject(root, "chime_speaker_available", board_hal_has_speaker());
+        const char *chime_mode_str = "off";
+        switch (config_manager_get_chime_speaker_mode()) {
+        case CHIME_SPEAKER_BATTERY_AND_MAINS:
+            chime_mode_str = "battery_and_mains";
+            break;
+        case CHIME_SPEAKER_MAINS_ONLY:
+            chime_mode_str = "mains_only";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "chime_speaker_mode", chime_mode_str);
+        cJSON_AddNumberToObject(root, "chime_volume", config_manager_get_chime_volume());
+        cJSON_AddBoolToObject(root, "chime_quiet_enabled",
+                              config_manager_get_chime_quiet_enabled());
+        cJSON_AddStringToObject(root, "chime_quiet_start", config_manager_get_chime_quiet_start());
+        cJSON_AddStringToObject(root, "chime_quiet_end", config_manager_get_chime_quiet_end());
+        cJSON_AddBoolToObject(root, "chime_event_rotation_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_ROTATION));
+        cJSON_AddBoolToObject(root, "chime_event_telegram_photo_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_TELEGRAM_PHOTO));
+        cJSON_AddBoolToObject(root, "chime_event_low_battery_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_LOW_BATTERY));
+        cJSON_AddBoolToObject(root, "chime_event_wifi_reprovision_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_WIFI_REPROVISION));
+        cJSON_AddBoolToObject(root, "chime_event_agenda_due_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_AGENDA_DUE));
+        cJSON_AddBoolToObject(root, "chime_event_ota_success_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_OTA_SUCCESS));
+        cJSON_AddBoolToObject(root, "chime_event_critical_error_enabled",
+                              config_manager_get_chime_event_enabled(CHIME_EVENT_CRITICAL_ERROR));
+
+        // Climate (SHTC3 temperature/humidity). Generic feature - available
+        // on any board whose sensor actually answers, not tied to one
+        // specific board like the Chimes speaker check above. A live probe
+        // (not a compile-time capability flag) since the same board_hal
+        // function can fail at runtime even where the driver is wired up
+        // (unpowered rail, no sensor populated on a given unit, etc.).
+        float climate_probe_temp, climate_probe_hum;
+        bool climate_sensor_available =
+            (board_hal_get_temperature(&climate_probe_temp) == ESP_OK) &&
+            (board_hal_get_humidity(&climate_probe_hum) == ESP_OK);
+        cJSON_AddBoolToObject(root, "climate_sensor_available", climate_sensor_available);
+        const char *climate_room_str = "living_room";
+        switch (config_manager_get_climate_room_type()) {
+        case CLIMATE_ROOM_BEDROOM:
+            climate_room_str = "bedroom";
+            break;
+        case CLIMATE_ROOM_BATHROOM:
+            climate_room_str = "bathroom";
+            break;
+        case CLIMATE_ROOM_KITCHEN:
+            climate_room_str = "kitchen";
+            break;
+        case CLIMATE_ROOM_BASEMENT:
+            climate_room_str = "basement";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "climate_room_type", climate_room_str);
+        cJSON_AddStringToObject(root, "climate_temp_unit",
+                                config_manager_get_climate_temp_unit() == CLIMATE_UNIT_FAHRENHEIT
+                                    ? "fahrenheit"
+                                    : "celsius");
+        cJSON_AddBoolToObject(root, "climate_logging_enabled",
+                              config_manager_get_climate_logging_enabled());
+        cJSON_AddBoolToObject(root, "climate_overlay_enabled",
+                              config_manager_get_climate_overlay_enabled());
+        cJSON_AddBoolToObject(root, "climate_agenda_header_enabled",
+                              config_manager_get_climate_agenda_header_enabled());
+        // Always Celsius/percentage-point deltas, regardless of
+        // climate_temp_unit - the Web UI converts for display in whichever
+        // unit is selected (see climate_temp_offset_c's doc comment,
+        // config.h).
+        cJSON_AddNumberToObject(root, "climate_temp_offset",
+                                atof(config_manager_get_climate_temp_offset()));
+        cJSON_AddNumberToObject(root, "climate_hum_offset",
+                                atof(config_manager_get_climate_hum_offset()));
 
         // Agenda (ToDo + Calendar). agenda_cal_url/agenda_todo_url are
         // deliberately NEVER added here - either can carry a credential
@@ -1657,10 +1774,64 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_agenda_cal_weather_enabled());
         cJSON_AddBoolToObject(root, "agenda_cal_weather_right_aligned",
                               config_manager_get_agenda_cal_weather_right_aligned());
-        cJSON_AddBoolToObject(root, "agenda_cal_compact_multiday",
-                              config_manager_get_agenda_cal_compact_multiday());
+        const char *agenda_multiday_str = "repeat";
+        switch (config_manager_get_agenda_cal_multiday_mode()) {
+        case AGENDA_MULTIDAY_COMPACT:
+            agenda_multiday_str = "compact";
+            break;
+        case AGENDA_MULTIDAY_REPEAT_NUMBERED:
+            agenda_multiday_str = "repeat_numbered";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "agenda_cal_multiday_mode", agenda_multiday_str);
+        const char *agenda_time_str = "off";
+        switch (config_manager_get_agenda_cal_time_display_mode()) {
+        case AGENDA_TIME_DISPLAY_DURATION:
+            agenda_time_str = "duration";
+            break;
+        case AGENDA_TIME_DISPLAY_RANGE:
+            agenda_time_str = "range";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "agenda_cal_time_display_mode", agenda_time_str);
         cJSON_AddStringToObject(root, "agenda_cal_name", config_manager_get_agenda_cal_name());
         cJSON_AddStringToObject(root, "agenda_cal_name2", config_manager_get_agenda_cal_name2());
+        // Non-secret "is a source actually saved?" flags - the URL fields
+        // themselves are write-only (see the comment above), so without
+        // these the Web UI has no way to tell a freshly-saved, working
+        // calendar apart from one that was enabled but never actually given
+        // a URL/file, both before and after a page reload. A/B: was a URL
+        // ever saved. C/D/E: is there a raw .ics file on disk right now
+        // (from a URL fetch or a direct upload) - matches exactly what
+        // load_extra_ics_source() in agenda_manager.c needs to find
+        // anything at all.
+        cJSON_AddBoolToObject(root, "agenda_cal_url_configured",
+                              config_manager_get_agenda_cal_url()[0] != '\0');
+        cJSON_AddBoolToObject(root, "agenda_cal_url2_configured",
+                              config_manager_get_agenda_cal_url2()[0] != '\0');
+        struct stat cal_c_st, cal_d_st, cal_e_st;
+        cJSON_AddBoolToObject(root, "agenda_cal_c_configured",
+                              stat(AGENDA_CAL_CACHE_PATH_C, &cal_c_st) == 0);
+        cJSON_AddBoolToObject(root, "agenda_cal_d_configured",
+                              stat(AGENDA_CAL_CACHE_PATH_D, &cal_d_st) == 0);
+        cJSON_AddBoolToObject(root, "agenda_cal_e_configured",
+                              stat(AGENDA_CAL_CACHE_PATH_E, &cal_e_st) == 0);
+        // Three extra ICS sources (e.g. holidays/school-holidays) - same
+        // write-only URL treatment as agenda_cal_url/_url2 above, but their
+        // enabled flag/name/color are plain, non-secret settings.
+        cJSON_AddBoolToObject(root, "agenda_cal_c_enabled",
+                              config_manager_get_agenda_cal_c_enabled());
+        cJSON_AddStringToObject(root, "agenda_cal_c_name", config_manager_get_agenda_cal_c_name());
+        cJSON_AddBoolToObject(root, "agenda_cal_d_enabled",
+                              config_manager_get_agenda_cal_d_enabled());
+        cJSON_AddStringToObject(root, "agenda_cal_d_name", config_manager_get_agenda_cal_d_name());
+        cJSON_AddBoolToObject(root, "agenda_cal_e_enabled",
+                              config_manager_get_agenda_cal_e_enabled());
+        cJSON_AddStringToObject(root, "agenda_cal_e_name", config_manager_get_agenda_cal_e_name());
         cJSON *agenda_cron_arr = cJSON_CreateArray();
         int agenda_cron_count = config_manager_get_agenda_cron_rule_count();
         for (int i = 0; i < agenda_cron_count; i++) {
@@ -1695,6 +1866,12 @@ static esp_err_t config_handler(httpd_req_t *req)
                                 config_manager_get_agenda_cal_a_color());
         cJSON_AddStringToObject(root, "agenda_cal_b_color",
                                 config_manager_get_agenda_cal_b_color());
+        cJSON_AddStringToObject(root, "agenda_cal_c_color",
+                                config_manager_get_agenda_cal_c_color());
+        cJSON_AddStringToObject(root, "agenda_cal_d_color",
+                                config_manager_get_agenda_cal_d_color());
+        cJSON_AddStringToObject(root, "agenda_cal_e_color",
+                                config_manager_get_agenda_cal_e_color());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -1793,6 +1970,45 @@ static esp_err_t config_handler(httpd_req_t *req)
     httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
     return ESP_FAIL;
 }
+
+// Deliberately NOT part of GET /api/config's response (see the write-only
+// comment on agenda_todo_url/agenda_cal_url etc. there - either can carry a
+// credential embedded as a query param) - this exists only so the Web UI's
+// "Export Config" opt-in checkbox can include a fully self-contained
+// backup on request, without these URLs being readable on every normal
+// Settings-page load. Same fields, same plain-text-JSON exposure as the
+// existing credential fields GET /api/config already returns unconditionally
+// - reachable by anyone who can reach this device's HTTP server either way.
+static esp_err_t config_urls_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "Failed to create JSON response");
+        return ESP_FAIL;
+    }
+    cJSON_AddStringToObject(root, "agenda_todo_url", config_manager_get_agenda_todo_url());
+    cJSON_AddStringToObject(root, "agenda_cal_url", config_manager_get_agenda_cal_url());
+    cJSON_AddStringToObject(root, "agenda_cal_url2", config_manager_get_agenda_cal_url2());
+    cJSON_AddStringToObject(root, "agenda_cal_c_url", config_manager_get_agenda_cal_c_url());
+    cJSON_AddStringToObject(root, "agenda_cal_d_url", config_manager_get_agenda_cal_d_url());
+    cJSON_AddStringToObject(root, "agenda_cal_e_url", config_manager_get_agenda_cal_e_url());
+
+    char *json_str = cJSON_Print(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
 static esp_err_t albums_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -2317,8 +2533,10 @@ static esp_err_t factory_reset_handler(httpd_req_t *req)
     // never enabled) is expected, not an error - logged at INFO either way
     // so a factory reset's actual cleanup effect is visible in the log
     // rather than silently assumed.
-    const char *agenda_cache_paths[] = {AGENDA_TODO_CACHE_PATH, AGENDA_CAL_CACHE_PATH,
-                                        AGENDA_CAL_CACHE_PATH2};
+    const char *agenda_cache_paths[] = {
+        AGENDA_TODO_CACHE_PATH,       AGENDA_CAL_CACHE_PATH,        AGENDA_CAL_CACHE_PATH2,
+        AGENDA_CAL_CACHE_PATH_C,      AGENDA_CAL_CACHE_PATH_D,      AGENDA_CAL_CACHE_PATH_E,
+        AGENDA_CAL_CACHE_PATH_C_FLAT, AGENDA_CAL_CACHE_PATH_D_FLAT, AGENDA_CAL_CACHE_PATH_E_FLAT};
     for (size_t i = 0; i < sizeof(agenda_cache_paths) / sizeof(agenda_cache_paths[0]); i++) {
         if (unlink(agenda_cache_paths[i]) == 0) {
             ESP_LOGI(TAG, "Removed orphaned Agenda cache file: %s", agenda_cache_paths[i]);
@@ -2376,6 +2594,157 @@ static esp_err_t error_overlay_test_handler(httpd_req_t *req)
             req, "{\"status\":\"error\",\"message\":\"Failed to display error overlay\"}");
         return ESP_FAIL;
     }
+}
+
+// POST /api/chimes/test - plays a beep pattern directly on the onboard
+// speaker (board_hal_has_speaker()), bypassing every Chimes policy gate
+// (master mode, quiet hours, mains-only) on purpose: the whole point of a
+// test button is to hear it regardless of current settings. Optional JSON
+// body {"pattern": "success"|"warning"|"error"}, defaults to "success".
+static esp_err_t chime_test_handler(httpd_req_t *req)
+{
+    if (!board_hal_has_speaker()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"This board has no speaker\"}");
+        return ESP_FAIL;
+    }
+
+    board_hal_chime_kind_t kind = BOARD_HAL_CHIME_SUCCESS;
+    char buf[128];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len > 0) {
+        buf[len] = '\0';
+        cJSON *root = cJSON_Parse(buf);
+        if (root) {
+            cJSON *pattern = cJSON_GetObjectItem(root, "pattern");
+            if (pattern && cJSON_IsString(pattern)) {
+                const char *p = cJSON_GetStringValue(pattern);
+                if (strcmp(p, "warning") == 0) {
+                    kind = BOARD_HAL_CHIME_WARNING;
+                } else if (strcmp(p, "error") == 0) {
+                    kind = BOARD_HAL_CHIME_ERROR;
+                }
+            }
+            cJSON_Delete(root);
+        }
+    }
+
+    ESP_LOGI(TAG, "Testing speaker chime (kind=%d)", (int) kind);
+    // Uses the configured volume, same as a real chime, so the test button
+    // shows exactly what the user will actually hear.
+    esp_err_t ret = board_hal_play_beep_pattern(kind, (uint8_t) config_manager_get_chime_volume());
+
+    httpd_resp_set_type(req, "application/json");
+    if (ret == ESP_OK) {
+        httpd_resp_sendstr(req, "{\"status\":\"success\",\"message\":\"Chime played\"}");
+        return ESP_OK;
+    } else {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"Failed to play chime\"}");
+        return ESP_FAIL;
+    }
+}
+
+// Maximum accepted size for a directly-uploaded extra ICS file - generous
+// vs. a realistic holidays/school-holidays/special-days feed (calendar_ics.c
+// itself caps a normal fetch at 2MB for a full personal calendar's years of
+// history; a hand-curated or single-purpose feed like these is expected to
+// be far smaller), but still bounded rather than accepting an arbitrarily
+// large body into a heap allocation.
+#define AGENDA_EXTRA_ICS_UPLOAD_MAX_BYTES (512 * 1024)
+
+// POST /api/agenda/extra-ics?slot=c|d|e - lets the user upload a .ics file
+// directly instead of providing a URL, for one of the three extra Calendar
+// sources that never auto-refresh (see NVS_AGENDA_CAL_C_URL_KEY etc. in
+// config.h). The raw request body is the .ics content itself (not
+// multipart - these are plain text files, unlike the photo uploads
+// elsewhere in this file); it's written straight to that slot's cache file,
+// with no network fetch involved at all. A minimal sanity check
+// ("BEGIN:VCALENDAR" prefix) guards against silently caching something that
+// clearly isn't an ICS file, matching this project's fail-soft-but-not-
+// blind style elsewhere.
+static esp_err_t agenda_extra_ics_upload_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    char query[32];
+    char slot[4] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "slot", slot, sizeof(slot)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing ?slot=c|d|e");
+        return ESP_FAIL;
+    }
+    const char *cache_path;
+    const char *flat_cache_path;
+    if (strcmp(slot, "c") == 0) {
+        cache_path = AGENDA_CAL_CACHE_PATH_C;
+        flat_cache_path = AGENDA_CAL_CACHE_PATH_C_FLAT;
+    } else if (strcmp(slot, "d") == 0) {
+        cache_path = AGENDA_CAL_CACHE_PATH_D;
+        flat_cache_path = AGENDA_CAL_CACHE_PATH_D_FLAT;
+    } else if (strcmp(slot, "e") == 0) {
+        cache_path = AGENDA_CAL_CACHE_PATH_E;
+        flat_cache_path = AGENDA_CAL_CACHE_PATH_E_FLAT;
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "slot must be c, d, or e");
+        return ESP_FAIL;
+    }
+
+    if (req->content_len <= 0 || req->content_len > AGENDA_EXTRA_ICS_UPLOAD_MAX_BYTES) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "File missing or too large");
+        return ESP_FAIL;
+    }
+
+    power_manager_reset_sleep_timer();
+
+    char *buf = heap_caps_malloc((size_t) req->content_len + 1, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+    int received = 0;
+    while (received < req->content_len) {
+        int ret = httpd_req_recv(req, buf + received, req->content_len - received);
+        if (ret <= 0) {
+            heap_caps_free(buf);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to receive data");
+            return ESP_FAIL;
+        }
+        received += ret;
+    }
+    buf[received] = '\0';
+
+    if (strncmp(buf, "BEGIN:VCALENDAR", 15) != 0) {
+        heap_caps_free(buf);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                            "Not an ICS file (missing BEGIN:VCALENDAR)");
+        return ESP_FAIL;
+    }
+
+    FILE *fp = fopen(cache_path, "wb");
+    if (!fp) {
+        heap_caps_free(buf);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save file");
+        return ESP_FAIL;
+    }
+    fwrite(buf, 1, (size_t) received, fp);
+    fclose(fp);
+    // Invalidate the expanded-cache tier too - otherwise a stale-but-not-
+    // yet-exhausted expansion from before this upload would keep being
+    // served for up to AGENDA_EXTRA_ICS_EXPAND_DAYS, silently ignoring the
+    // file just uploaded (see load_extra_ics_source() in agenda_manager.c).
+    unlink(flat_cache_path);
+    heap_caps_free(buf);
+
+    ESP_LOGI(TAG, "Extra ICS source '%s' updated via upload (%d bytes)", slot, received);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+    return ESP_OK;
 }
 
 static esp_err_t processing_settings_handler(httpd_req_t *req)
@@ -2641,12 +3010,16 @@ static esp_err_t color_palette_handler(httpd_req_t *req)
 esp_err_t http_server_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    // 55: 51 handlers are registered below as of this comment - keep a small
-    // margin above the exact count so the next handler added here doesn't
-    // silently fail to register (httpd_register_uri_handler() only logs a
-    // warning on overflow, never a hard error - a real esp32-photoframe bug
-    // caused by /api/albums/organize-crop pushing the old limit of 50 over).
-    config.max_uri_handlers = 55;
+    // 64: 56 handlers are registered below as of this comment (the Climate
+    // feature's endpoints pushed the previous 55-handler margin - meant to
+    // cover exactly this - over by one, the same way /api/albums/organize-crop
+    // once pushed an even older limit of 50 over). Keep real margin above the
+    // exact count so the next handler added here doesn't silently fail to
+    // register (httpd_register_uri_handler() only logs a warning on overflow,
+    // never a hard error, and every following handler in the same init
+    // function still gets registered fine - only the ones actually over the
+    // limit silently vanish, which is what made this so easy to miss twice).
+    config.max_uri_handlers = 64;
     // 16384: rotate_handler() (/api/rotate) calls trigger_image_rotation()
     // synchronously on this worker task - the same heavy pipeline that's
     // needed the same bump on button_task/deep_sleep_wake_task (12288 wasn't
@@ -2730,6 +3103,12 @@ esp_err_t http_server_init(void)
                                         .user_ctx = NULL};
         httpd_register_uri_handler(server, &config_patch_uri);
 
+        httpd_uri_t config_urls_uri = {.uri = "/api/config/urls",
+                                       .method = HTTP_GET,
+                                       .handler = config_urls_handler,
+                                       .user_ctx = NULL};
+        httpd_register_uri_handler(server, &config_urls_uri);
+
         httpd_uri_t debug_log_uri = {.uri = "/api/debug/log",
                                      .method = HTTP_GET,
                                      .handler = debug_log_download_handler,
@@ -2781,6 +3160,18 @@ esp_err_t http_server_init(void)
         httpd_uri_t sensor_uri = {
             .uri = "/api/sensor", .method = HTTP_GET, .handler = sensor_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &sensor_uri);
+
+        httpd_uri_t climate_history_uri = {.uri = "/api/climate-history",
+                                           .method = HTTP_GET,
+                                           .handler = climate_history_handler,
+                                           .user_ctx = NULL};
+        httpd_register_uri_handler(server, &climate_history_uri);
+
+        httpd_uri_t climate_history_reset_uri = {.uri = "/api/climate-history",
+                                                 .method = HTTP_DELETE,
+                                                 .handler = climate_history_handler,
+                                                 .user_ctx = NULL};
+        httpd_register_uri_handler(server, &climate_history_reset_uri);
 
         httpd_uri_t sleep_uri = {
             .uri = "/api/sleep", .method = HTTP_POST, .handler = sleep_handler, .user_ctx = NULL};
@@ -2941,6 +3332,18 @@ esp_err_t http_server_init(void)
                                               .handler = error_overlay_test_handler,
                                               .user_ctx = NULL};
         httpd_register_uri_handler(server, &error_overlay_test_uri);
+
+        httpd_uri_t chime_test_uri = {.uri = "/api/chimes/test",
+                                      .method = HTTP_POST,
+                                      .handler = chime_test_handler,
+                                      .user_ctx = NULL};
+        httpd_register_uri_handler(server, &chime_test_uri);
+
+        httpd_uri_t agenda_extra_ics_uri = {.uri = "/api/agenda/extra-ics",
+                                            .method = HTTP_POST,
+                                            .handler = agenda_extra_ics_upload_handler,
+                                            .user_ctx = NULL};
+        httpd_register_uri_handler(server, &agenda_extra_ics_uri);
 
         ESP_LOGI(TAG, "HTTP server started");
         return ESP_OK;

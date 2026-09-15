@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "climate.h"
 #include "display_manager.h"
 #include "esp_err.h"
 
@@ -269,9 +270,15 @@ esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *
  * @param invert_colors false (default) = black bar, white text; true = white
  * bar, black text - Web UI toggle, independent of the caption bar's colors
  * (though callers may choose to pass the same value through).
+ * @param right_margin_px Pixels to reserve on the right edge, kept out of
+ * both the truncation-width and centering math (though the bar's background
+ * still fills edge to edge) - lets a caller avoid the top-right climate
+ * badges overwriting this bar's text instead of the text simply running
+ * under them. 0 when nothing needs the reservation.
  */
 void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height,
-                                      const char *const *lines, int line_count, bool invert_colors);
+                                      const char *const *lines, int line_count, bool invert_colors,
+                                      int right_margin_px);
 
 /**
  * @brief Same as image_processor_draw_overlay_bar(), but reads an already
@@ -292,13 +299,24 @@ void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height
  * image_processor_draw_caption() (bottom-anchored, so it can never collide
  * with the top-anchored overlay bar or the top-left battery badge) on the
  * same decoded buffer, after both of the above.
+ * @param draw_climate_temp / @param draw_climate_hum Also draws up to 2
+ * small climate badges (see image_processor_draw_climate_badges()) in the
+ * TOP-RIGHT corner - independent of each other and of every other
+ * parameter above, so they can never collide with the top-left battery
+ * badge or the bottom-anchored caption. `climate_temp_text`/
+ * `climate_hum_text` are pre-formatted short strings (e.g. "21C"/"48%");
+ * this function does no unit conversion or number formatting itself.
  *
- * No-op (returns ESP_OK) if lines is NULL/empty, draw_battery_badge is false,
- * and exif_caption is NULL/empty.
+ * No-op (returns ESP_OK) if lines is NULL/empty, draw_battery_badge is
+ * false, exif_caption is NULL/empty, and both climate badges are false.
  */
 esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lines, int line_count,
                                               bool invert_colors, bool draw_battery_badge,
-                                              int battery_percent, const char *exif_caption);
+                                              int battery_percent, const char *exif_caption,
+                                              bool draw_climate_temp, const char *climate_temp_text,
+                                              climate_category_t climate_temp_category,
+                                              bool draw_climate_hum, const char *climate_hum_text,
+                                              climate_category_t climate_hum_category);
 
 /**
  * @brief Draws a small, fixed-size corner badge (NOT a full-width bar, unlike
@@ -313,6 +331,29 @@ esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lin
  */
 void image_processor_draw_battery_badge(uint8_t *rgb_buffer, int width, int height,
                                         int battery_percent);
+
+/**
+ * @brief Draws up to 2 small fixed-size corner badges (same box+text shape
+ * as image_processor_draw_battery_badge()) in the TOP-RIGHT corner of an
+ * already-processed RGB888 buffer - a humidity badge and a temperature
+ * badge, drawn right-to-left so they sit adjacent without colliding with
+ * each other, and never with the top-left battery badge. Each badge's
+ * background color is its own category - Red (Bad), Yellow (Good - stands
+ * in for orange, this board's palette has no true orange), Green (Super);
+ * grayscale-only boards get a single black badge with no color
+ * distinction, same convention as the battery badge. Text is white except
+ * on a Yellow (Good) background, where white reads poorly on the actual
+ * e-paper panel - black instead, only for that one case. `temp_text`/
+ * `hum_text` are pre-formatted short strings (e.g. "21C"/"48%") - this
+ * function does no unit conversion or number formatting.
+ *
+ * @param has_temp / @param has_hum Independently gate each badge - either
+ * may be skipped (e.g. a transient read error on just one channel).
+ */
+void image_processor_draw_climate_badges(uint8_t *rgb_buffer, int width, int height, bool has_temp,
+                                         const char *temp_text, climate_category_t temp_category,
+                                         bool has_hum, const char *hum_text,
+                                         climate_category_t hum_category);
 
 /**
  * @brief Fills an axis-aligned rectangle with a solid color, clipped to

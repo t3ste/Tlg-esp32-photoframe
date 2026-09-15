@@ -214,6 +214,19 @@ bool config_manager_get_wifi_performance_mode_enabled(void);
 void config_manager_set_wifi_tx_power_cap_enabled(bool enabled);
 bool config_manager_get_wifi_tx_power_cap_enabled(void);
 
+// Extended cold-boot retry for non-credential-reject WiFi failures - see
+// NVS_WIFI_EXT_RETRY_ENABLED_KEY in config.h. Defaults to false (opt-in -
+// worst case is up to ~6x the energy use of the default behavior).
+void config_manager_set_wifi_extended_retry_enabled(bool enabled);
+bool config_manager_get_wifi_extended_retry_enabled(void);
+
+// Internal cross-reboot attempt counter backing the above - see
+// NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY in config.h. Never exposed via the HTTP
+// API. Reset to 0 on any successful cold-boot connect or once the device
+// gives up and reprovisions.
+void config_manager_set_wifi_coldboot_fail_count(int count);
+int config_manager_get_wifi_coldboot_fail_count(void);
+
 // Orientation pairing during normal (non-Telegram) auto-rotation - random
 // mode only. Defaults to false. See NVS_ROTATION_PAIRING_ENABLED_KEY in
 // config.h.
@@ -387,6 +400,32 @@ const char *config_manager_get_agenda_cal_url(void);
 void config_manager_set_agenda_cal_url2(const char *url);
 const char *config_manager_get_agenda_cal_url2(void);
 
+// Three extra, independently-enabled ICS sources (e.g. holidays/school
+// holidays/other special-days feeds) shown in the same Calendar column as
+// A/B - see AGENDA_CAL_CACHE_PATH_C etc. and NVS_AGENDA_CAL_C_URL_KEY etc.
+// in config.h for the key behavioral difference from A/B: these are never
+// refreshed automatically, only on an explicit URL change, a "refresh now"
+// request, or a direct file upload (agenda_manager_refresh_extra_ics()).
+// Same write-only URL treatment as agenda_cal_url/_url2 above.
+void config_manager_set_agenda_cal_c_enabled(bool enabled);
+bool config_manager_get_agenda_cal_c_enabled(void);
+void config_manager_set_agenda_cal_c_url(const char *url);
+const char *config_manager_get_agenda_cal_c_url(void);
+void config_manager_set_agenda_cal_c_name(const char *name);
+const char *config_manager_get_agenda_cal_c_name(void);
+void config_manager_set_agenda_cal_d_enabled(bool enabled);
+bool config_manager_get_agenda_cal_d_enabled(void);
+void config_manager_set_agenda_cal_d_url(const char *url);
+const char *config_manager_get_agenda_cal_d_url(void);
+void config_manager_set_agenda_cal_d_name(const char *name);
+const char *config_manager_get_agenda_cal_d_name(void);
+void config_manager_set_agenda_cal_e_enabled(bool enabled);
+bool config_manager_get_agenda_cal_e_enabled(void);
+void config_manager_set_agenda_cal_e_url(const char *url);
+const char *config_manager_get_agenda_cal_e_url(void);
+void config_manager_set_agenda_cal_e_name(const char *name);
+const char *config_manager_get_agenda_cal_e_name(void);
+
 // Cached ETag validators for each source's conditional GET (see
 // AGENDA_TODO_CACHE_PATH etc. in config.h) - internal fetch-cache state,
 // not user data: not exposed via the HTTP API, same as the getters above are
@@ -413,10 +452,15 @@ bool config_manager_get_agenda_cal_weather_enabled(void);
 void config_manager_set_agenda_cal_weather_right_aligned(bool enabled);
 bool config_manager_get_agenda_cal_weather_right_aligned(void);
 
-// Opt-in compact multi-day event display - see NVS_AGENDA_CAL_COMPACT_KEY
-// in config.h.
-void config_manager_set_agenda_cal_compact_multiday(bool enabled);
-bool config_manager_get_agenda_cal_compact_multiday(void);
+// Multi-day event display mode - see agenda_multiday_mode_t/
+// NVS_AGENDA_CAL_COMPACT_KEY in config.h.
+void config_manager_set_agenda_cal_multiday_mode(agenda_multiday_mode_t mode);
+agenda_multiday_mode_t config_manager_get_agenda_cal_multiday_mode(void);
+
+// How a timed event's time is shown - see agenda_time_display_mode_t/
+// NVS_AGENDA_CAL_SHOW_DURATION_KEY in config.h. Default off.
+void config_manager_set_agenda_cal_time_display_mode(agenda_time_display_mode_t mode);
+agenda_time_display_mode_t config_manager_get_agenda_cal_time_display_mode(void);
 
 // Optional display names for the Calendar header - see
 // NVS_AGENDA_CAL_NAME_KEY/_NAME2_KEY in config.h. May return "" (never
@@ -472,6 +516,12 @@ void config_manager_set_agenda_cal_a_color(const char *color);
 const char *config_manager_get_agenda_cal_a_color(void);
 void config_manager_set_agenda_cal_b_color(const char *color);
 const char *config_manager_get_agenda_cal_b_color(void);
+void config_manager_set_agenda_cal_c_color(const char *color);
+const char *config_manager_get_agenda_cal_c_color(void);
+void config_manager_set_agenda_cal_d_color(const char *color);
+const char *config_manager_get_agenda_cal_d_color(void);
+void config_manager_set_agenda_cal_e_color(const char *color);
+const char *config_manager_get_agenda_cal_e_color(void);
 
 // ============================================================================
 // OTA
@@ -503,5 +553,77 @@ bool config_manager_get_debug_log_enabled(void);
 void config_manager_set_config_last_updated(int64_t timestamp);
 int64_t config_manager_get_config_last_updated(void);
 void config_manager_touch_config(void);
+
+// ============================================================================
+// Chimes (speaker feedback) - see chime_speaker_mode_t/chime_event_t in
+// config.h and main/chime.c for the policy layer that consumes these.
+// ============================================================================
+
+void config_manager_set_chime_speaker_mode(chime_speaker_mode_t mode);
+chime_speaker_mode_t config_manager_get_chime_speaker_mode(void);
+
+// 0-100%, clamped. Applies to every chime alike - see CHIME_REPEAT_MAX in
+// config.h for why urgency is conveyed by repetition instead.
+void config_manager_set_chime_volume(int percent);
+int config_manager_get_chime_volume(void);
+
+void config_manager_set_chime_quiet_enabled(bool enabled);
+bool config_manager_get_chime_quiet_enabled(void);
+// "HH:MM" strings, not validated beyond length - a malformed value just
+// fails to match in chime.c's time-window check (quiet hours off).
+void config_manager_set_chime_quiet_start(const char *time_str);
+const char *config_manager_get_chime_quiet_start(void);
+void config_manager_set_chime_quiet_end(const char *time_str);
+const char *config_manager_get_chime_quiet_end(void);
+
+// One enable flag per chime_event_t - index with the enum, out-of-range
+// indices are clamped to false/no-op.
+void config_manager_set_chime_event_enabled(chime_event_t event, bool enabled);
+bool config_manager_get_chime_event_enabled(chime_event_t event);
+
+// Persisted repeat-until-resolved counter - see chime_repeat_gate() in
+// main/chime.c. Only meaningful for CHIME_EVENT_LOW_BATTERY/
+// CRITICAL_ERROR/AGENDA_DUE (see CHIME_REPEAT_MAX's comment in config.h);
+// any other event is a no-op get (0)/set (ignored).
+void config_manager_set_chime_repeat_count(chime_event_t event, int count);
+int config_manager_get_chime_repeat_count(chime_event_t event);
+
+// ============================================================================
+// Climate (SHTC3 temperature/humidity) - see climate_room_type_t/
+// climate_temp_unit_t in config.h and main/climate.[ch] for the
+// classification logic that consumes these. Generic feature: available on
+// any board whose board_hal_get_temperature()/get_humidity() succeed.
+// ============================================================================
+
+void config_manager_set_climate_room_type(climate_room_type_t room);
+climate_room_type_t config_manager_get_climate_room_type(void);
+
+void config_manager_set_climate_temp_unit(climate_temp_unit_t unit);
+climate_temp_unit_t config_manager_get_climate_temp_unit(void);
+
+void config_manager_set_climate_logging_enabled(bool enabled);
+bool config_manager_get_climate_logging_enabled(void);
+
+void config_manager_set_climate_overlay_enabled(bool enabled);
+bool config_manager_get_climate_overlay_enabled(void);
+
+void config_manager_set_climate_agenda_header_enabled(bool enabled);
+bool config_manager_get_climate_agenda_header_enabled(void);
+
+// Calibration offsets applied to every displayed/logged reading (never to
+// GET /api/sensor's raw value) - see climate_read_temperature()/
+// climate_read_humidity() in main/climate.c. Always Celsius/percentage-point
+// deltas, string-stored (same convention as weather_lat/weather_lon), parsed
+// with strtof() at the point of use. Default "0".
+void config_manager_set_climate_temp_offset(const char *offset_c_str);
+const char *config_manager_get_climate_temp_offset(void);
+void config_manager_set_climate_hum_offset(const char *offset_str);
+const char *config_manager_get_climate_hum_offset(void);
+
+// Persisted anchor for the shared debounce in climate_history_record() - see
+// CLIMATE_LOG_MIN_INTERVAL_SEC in config.h. Same int64 NVS pattern as
+// config_manager_get/set_config_last_updated().
+void config_manager_set_climate_last_log_time(int64_t timestamp);
+int64_t config_manager_get_climate_last_log_time(void);
 
 #endif

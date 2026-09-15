@@ -23,6 +23,74 @@ typedef enum {
 // override is independent — it applies in both modes (empty = automatic).
 typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 
+// How the Calendar column of Agenda mode displays a multi-day event - see
+// NVS_AGENDA_CAL_COMPACT_KEY below and agenda_renderer.c's
+// event_total_days()/event_day_index(). Values are stored as-is in NVS, so
+// the numbering must stay stable across firmware versions.
+typedef enum {
+    AGENDA_MULTIDAY_REPEAT = 0,   // repeated under every day it spans, no prefix
+    AGENDA_MULTIDAY_COMPACT = 1,  // shown once, on its first visible day, "N/M: " prefix
+    AGENDA_MULTIDAY_REPEAT_NUMBERED =
+        2,  // repeated under every day, each with its own "N/M: " prefix
+} agenda_multiday_mode_t;
+
+// How a timed Calendar event's time is displayed - see
+// NVS_AGENDA_CAL_SHOW_DURATION_KEY below and build_event_line() in
+// agenda_renderer.c. Values are stored as-is in NVS, so the numbering must
+// stay stable across firmware versions. All-day events are never affected
+// by any of these modes - they already show no time at all.
+typedef enum {
+    AGENDA_TIME_DISPLAY_OFF = 0,       // just the start time, e.g. "08:15 Kaffee trinken"
+    AGENDA_TIME_DISPLAY_DURATION = 1,  // "08:15 [45m] Kaffee trinken" - compact, but longer
+                                       // than a range once the event runs over an hour
+                                       // ("08:00 [1h30m]" vs. "08:00-09:30")
+    AGENDA_TIME_DISPLAY_RANGE = 2,     // "08:15-09:00 Kaffee trinken"
+} agenda_time_display_mode_t;
+
+// Master mode for the Chimes speaker feature (see board_hal_has_speaker() /
+// board_hal_play_beep_pattern() and main/chime.c). Values are stored as-is
+// in NVS, so the numbering must stay stable across firmware versions.
+typedef enum {
+    CHIME_SPEAKER_OFF = 0,                // never play, regardless of per-event flags
+    CHIME_SPEAKER_BATTERY_AND_MAINS = 1,  // play regardless of power source
+    CHIME_SPEAKER_MAINS_ONLY = 2,         // play only while USB/mains powered
+} chime_speaker_mode_t;
+
+// One entry per Chimes event hook - see chime_play_if_enabled() in
+// main/chime.c for the full list of call sites. Order is NVS-key-agnostic
+// (each has its own bool key, see NVS_CHIME_EVENT_*_KEY below), so this
+// enum's numbering can change freely.
+typedef enum {
+    CHIME_EVENT_ROTATION = 0,
+    CHIME_EVENT_TELEGRAM_PHOTO,
+    CHIME_EVENT_LOW_BATTERY,
+    CHIME_EVENT_WIFI_REPROVISION,
+    CHIME_EVENT_AGENDA_DUE,
+    CHIME_EVENT_OTA_SUCCESS,
+    CHIME_EVENT_CRITICAL_ERROR,
+    CHIME_EVENT_COUNT,  // not a real event - array size for chime.c's fire-count cap
+} chime_event_t;
+
+// Preset room profile the SHTC3 climate sensor is classified against - see
+// climate_classify_temperature()/climate_classify_humidity() in climate.c.
+// Values are stored as-is in NVS, so the numbering must stay stable.
+typedef enum {
+    CLIMATE_ROOM_LIVING_ROOM = 0,
+    CLIMATE_ROOM_BEDROOM = 1,
+    CLIMATE_ROOM_BATHROOM = 2,
+    CLIMATE_ROOM_KITCHEN = 3,
+    CLIMATE_ROOM_BASEMENT = 4,
+} climate_room_type_t;
+
+// Display-only unit for the climate feature - classification thresholds are
+// always defined in Celsius (climate.c); this only affects how a reading is
+// formatted for the overlay badge, Agenda header, and Web UI. Values are
+// stored as-is in NVS.
+typedef enum {
+    CLIMATE_UNIT_CELSIUS = 0,
+    CLIMATE_UNIT_FAHRENHEIT = 1,
+} climate_temp_unit_t;
+
 #define IP_ADDR_STR_MAX_LEN 16  // dotted IPv4 + NUL
 
 #define DEVICE_NAME_MAX_LEN 64
@@ -106,6 +174,30 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define AGENDA_CAL_CACHE_PATH FS_MOUNT_POINT "/.agenda_cal_cache.ics"
 #define AGENDA_CAL_CACHE_PATH2 FS_MOUNT_POINT "/.agenda_cal_cache2.ics"
 
+// Three extra, user-supplied ICS sources (e.g. holidays/school-holidays/
+// special-days feeds) - unlike the two caches above, these are NOT
+// refreshed on every agenda wake (see NVS_AGENDA_CAL_C_URL_KEY etc.): the
+// file here is only (re)written when the user sets/changes the source URL,
+// clicks "refresh now," or uploads a replacement directly. Every agenda
+// wake just re-parses whatever's already on disk, no network involved.
+#define AGENDA_CAL_CACHE_PATH_C FS_MOUNT_POINT "/.agenda_cal_cache_c.ics"
+#define AGENDA_CAL_CACHE_PATH_D FS_MOUNT_POINT "/.agenda_cal_cache_d.ics"
+#define AGENDA_CAL_CACHE_PATH_E FS_MOUNT_POINT "/.agenda_cal_cache_e.ics"
+
+// Flat, already-expanded caches for the same three sources (see
+// calendar_ics_write_expanded_cache()/_read_expanded_cache()) - lets
+// agenda_manager.c avoid re-parsing a potentially large raw .ics file on
+// every agenda wake. The raw file above is only re-parsed/re-expanded when
+// this cache runs out of upcoming entries (see AGENDA_EXTRA_ICS_EXPAND_DAYS
+// below), which for a real feed only happens roughly once a month.
+#define AGENDA_CAL_CACHE_PATH_C_FLAT FS_MOUNT_POINT "/.agenda_cal_cache_c_flat.txt"
+#define AGENDA_CAL_CACHE_PATH_D_FLAT FS_MOUNT_POINT "/.agenda_cal_cache_d_flat.txt"
+#define AGENDA_CAL_CACHE_PATH_E_FLAT FS_MOUNT_POINT "/.agenda_cal_cache_e_flat.txt"
+// How far ahead each (re-)expansion looks, in days - wide enough that a
+// large source (e.g. a year of holidays/school-holidays) only needs
+// re-parsing roughly this often, not on every wake.
+#define AGENDA_EXTRA_ICS_EXPAND_DAYS 30
+
 // On-demand thumbnail scratch file for telegram_bot_notify_fallback_image() -
 // generated only when the image being reported has no pre-existing ".jpg"
 // sidecar (true for any plain Storage/Auto-Rotate album image, since that
@@ -131,6 +223,22 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define BATTERY_HISTORY_RESET_PERCENT 95
 #define BATTERY_HISTORY_MAX_AGE_DAYS 180
 #define BATTERY_HISTORY_TARGET_PERCENT 20
+
+// Climate (SHTC3 temperature/humidity) history log (one
+// "<unix_ts>,<temp_c>,<humidity>" line per recorded reading). See
+// climate_history.[ch]. No natural "reset" event like a battery recharge, so
+// this only ever clears on CLIMATE_HISTORY_MAX_AGE_DAYS or a user-requested
+// reset.
+#define CLIMATE_HISTORY_PATH FS_MOUNT_POINT "/.climate_history"
+#define CLIMATE_HISTORY_MAX_AGE_DAYS 180
+// A reading is logged on every wake (main.c) and, while the device stays
+// awake continuously, every CLIMATE_ACTIVE_LOG_INTERVAL_SEC (power_manager.c)
+// - CLIMATE_LOG_MIN_INTERVAL_SEC is a shared debounce inside
+// climate_history_record() itself (persisted in NVS, since deep sleep wipes
+// RAM) so neither trigger can log more often than this, even if both fire
+// close together.
+#define CLIMATE_LOG_MIN_INTERVAL_SEC (5 * 60)
+#define CLIMATE_ACTIVE_LOG_INTERVAL_SEC (6 * 60)
 
 #ifdef DEBUG_DEEP_SLEEP_WAKE
 #define AUTO_SLEEP_TIMEOUT_SEC 60
@@ -265,6 +373,29 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // interactive wakes or USB power. When disabled, WiFi power-save always stays
 // on regardless of that policy, trading web UI responsiveness for lower draw.
 #define NVS_WIFI_PERF_MODE_ENABLED_KEY "wifi_perf_mode"
+
+// Extended cold-boot WiFi retry: when enabled, a cold-boot connect failure
+// that is NOT a confirmed credential rejection (see
+// wifi_manager_last_failure_is_credential_reject()) no longer wipes the
+// saved SSID/password after just WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS (3,
+// main.c) - it instead persists a running attempt count here and reboots to
+// try again after a backoff, up to WIFI_COLD_BOOT_EXTENDED_MAX_TOTAL_ATTEMPTS
+// (main.c) total attempts across those reboots, so a brief AP-side outage or
+// a momentary weak-signal blip doesn't force a full reprovisioning. A
+// genuine credential rejection is never affected by this toggle - that still
+// wipes after a single attempt either way. Off by default: live-verified
+// worst case is up to ~6x the energy use of the default behavior (the frame
+// stays fully awake through every retry/reboot instead of reprovisioning
+// quickly), so this is opt-in for mains/USB-powered frames rather than a
+// new default for every device. Real incident (2026-09-13) that prompted
+// this: a cold boot got stuck retrying WIFI_REASON_AUTH_EXPIRE/
+// WIFI_REASON_CONNECTION_FAIL (never a real reject reason) right after the
+// AP's signal had degraded to -70dBm, and the then-unconditional wipe forced
+// an unnecessary reprovisioning even though the password was fine.
+#define NVS_WIFI_EXT_RETRY_ENABLED_KEY "wifi_ext_retry"
+// Internal only - the running cross-reboot attempt count above. Never
+// surfaced via the HTTP API (nothing for a user to usefully do with it).
+#define NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY "wifi_cb_fail"
 
 // Orientation-pairing during normal (non-Telegram) auto-rotation: when the
 // randomly-picked next image doesn't match the panel's orientation, look for
@@ -532,11 +663,14 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 // any information a centered layout would have kept, in either the
 // stacked or side-by-side column layout.
 #define NVS_AGENDA_CAL_WTHR_ALIGN_KEY "agenda_cal_wal"
-// Opt-in: a multi-day event is shown once (on the first day of the visible
-// window it touches) with an "N/M: " position-within-span prefix, instead
-// of being repeated under every day it spans - see agenda_renderer.c's
-// event_total_days()/event_day_index().
+// Multi-day event display mode - see agenda_multiday_mode_t above. NVS key
+// name/values predate the third mode (0/1 used to be a plain bool, "compact
+// multi-day" on/off) - kept as-is so existing devices' saved choice still
+// means the same thing after an upgrade.
 #define NVS_AGENDA_CAL_COMPACT_KEY "agenda_cal_cpt"
+// How a timed event's time is shown - see agenda_time_display_mode_t above.
+// Off by default (unchanged, existing behavior: just the bare start time).
+#define NVS_AGENDA_CAL_SHOW_DURATION_KEY "agenda_cal_dur"
 // Optional display name shown in the Calendar column header instead of the
 // generic "Calendar A"/"Calendar B" fallback (agenda_renderer.c) - e.g.
 // "Private"/"Work". Not a credential, unlike the URL fields above - shown
@@ -599,6 +733,35 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define AGENDA_CAL_A_C_DEFAULT "blue"
 #define NVS_AGENDA_CAL_B_C_KEY "agenda_cal_b_c"
 #define AGENDA_CAL_B_C_DEFAULT "green"
+// Three extra, independently-named ICS sources (e.g. holidays, school
+// holidays, other special-days feeds a user finds/exports as .ics) shown in
+// the same Calendar column as A/B, each in its own hue. Unlike A/B, these
+// have NO periodic refresh (see AGENDA_CAL_CACHE_PATH_C etc. above) - only
+// (re)fetched when the URL is set/changed, "refresh now" is clicked, or a
+// file is uploaded directly. Only red and yellow are left unused by the
+// other roles above at this column's own two existing hues (blue/green,
+// cal_a/cal_b) - the third source (E) necessarily reuses "red" (same as C),
+// same as several other roles already share a hue across different
+// contexts; still visually distinct from cal_a/cal_b within this column.
+#define NVS_AGENDA_CAL_C_ENABLED_KEY "agenda_cal_c_en"
+#define NVS_AGENDA_CAL_C_URL_KEY "agenda_cal_c_url"
+#define AGENDA_CAL_C_URL_MAX_LEN 256
+#define NVS_AGENDA_CAL_C_NAME_KEY "agenda_cal_c_nm"
+#define NVS_AGENDA_CAL_C_C_KEY "agenda_cal_c_c"
+#define AGENDA_CAL_C_C_DEFAULT "red"
+#define NVS_AGENDA_CAL_D_ENABLED_KEY "agenda_cal_d_en"
+#define NVS_AGENDA_CAL_D_URL_KEY "agenda_cal_d_url"
+#define AGENDA_CAL_D_URL_MAX_LEN 256
+#define NVS_AGENDA_CAL_D_NAME_KEY "agenda_cal_d_nm"
+#define NVS_AGENDA_CAL_D_C_KEY "agenda_cal_d_c"
+#define AGENDA_CAL_D_C_DEFAULT "yellow"
+#define NVS_AGENDA_CAL_E_ENABLED_KEY "agenda_cal_e_en"
+#define NVS_AGENDA_CAL_E_URL_KEY "agenda_cal_e_url"
+#define AGENDA_CAL_E_URL_MAX_LEN 256
+#define NVS_AGENDA_CAL_E_NAME_KEY "agenda_cal_e_nm"
+#define NVS_AGENDA_CAL_E_C_KEY "agenda_cal_e_c"
+#define AGENDA_CAL_E_C_DEFAULT "red"
+#define AGENDA_CAL_CDE_NAME_MAX_LEN 24
 
 // WiFi association draws a brief high-current TX burst; whenever a battery
 // is in the loop (battery-only, or USB+battery together - see
@@ -642,5 +805,81 @@ typedef enum { IP_MODE_DHCP = 0, IP_MODE_STATIC = 1 } ip_mode_t;
 #define TELEGRAM_COMMAND_MAX_LEN 128
 #define TELEGRAM_CAPTION_MAX_LEN 128
 #define TELEGRAM_FILE_ID_MAX_LEN 128
+
+// Chimes (speaker feedback, waveshare_photopainter_73 only - see
+// board_hal_has_speaker()). Master mode - see chime_speaker_mode_t above.
+// Off by default: this is new, previously-silent hardware, so an update
+// shouldn't start making sound on its own.
+#define NVS_CHIME_SPEAKER_MODE_KEY "chime_mode"
+// DAC volume, 0-100% - linearly mapped to the ES8311's DAC_VOL register
+// range in audio_chime.c. Applies to every chime alike (success/warning/
+// error), by design - see chime_repeat_gate() below for how urgency is
+// instead conveyed by repetition, not loudness.
+#define NVS_CHIME_VOLUME_KEY "chime_vol"
+#define CHIME_DEFAULT_VOLUME_PERCENT 80
+// Quiet hours - a plain daily HH:MM-HH:MM window (wraps past midnight if
+// end < start) during which no chime plays regardless of the master mode
+// or any per-event flag. Off by default.
+#define NVS_CHIME_QUIET_ENABLED_KEY "chime_quiet_on"
+#define NVS_CHIME_QUIET_START_KEY "chime_quiet_st"
+#define NVS_CHIME_QUIET_END_KEY "chime_quiet_ed"
+#define CHIME_TIME_STR_MAX_LEN 6  // "HH:MM" + NUL
+#define CHIME_DEFAULT_QUIET_START "22:00"
+#define CHIME_DEFAULT_QUIET_END "07:00"
+// One bool per chime_event_t - see main/chime.c's chime_play_if_enabled().
+// low-battery/wifi-reprovision/ota-success/critical-error default on (the
+// user asked for these specifically); the rest default off since they fire
+// far more often (every rotation) or are more a "nice to have" (Telegram
+// photo received, an overdue agenda item).
+#define NVS_CHIME_EVENT_ROTATION_KEY "chime_ev_rotate"
+#define NVS_CHIME_EVENT_TELEGRAM_KEY "chime_ev_tg"
+#define NVS_CHIME_EVENT_LOWBATT_KEY "chime_ev_lowbat"
+#define NVS_CHIME_EVENT_WIFIPROV_KEY "chime_ev_wifi"
+#define NVS_CHIME_EVENT_AGENDA_KEY "chime_ev_agenda"
+#define NVS_CHIME_EVENT_OTA_KEY "chime_ev_ota"
+#define NVS_CHIME_EVENT_CRIT_KEY "chime_ev_crit"
+// Persisted repeat-until-resolved counters - see chime_repeat_gate() in
+// main/chime.c. An "actionable" event (needs the user to do something,
+// unlike a one-shot informational event like rotation/Telegram/OTA) fires
+// once per wake/render while its underlying condition stays true, up to
+// CHIME_REPEAT_MAX times, then goes quiet until the condition actually
+// resolves (which resets the counter back to 0, so it repeats again if the
+// same problem recurs later). Only the 3 events below currently have a
+// meaningful "still ongoing vs. resolved" state to repeat against -
+// WIFI_REPROVISION is inherently one-shot (the device reboots into a
+// different mode immediately after), and ROTATION/TELEGRAM_PHOTO/OTA_SUCCESS
+// are one-off good-news events with nothing to "still be wrong" about.
+#define CHIME_REPEAT_MAX 5
+#define NVS_CHIME_REPEAT_LOWBATT_KEY "chime_rc_lowbat"
+#define NVS_CHIME_REPEAT_CRIT_KEY "chime_rc_crit"
+#define NVS_CHIME_REPEAT_AGENDA_KEY "chime_rc_agenda"
+
+// Climate (SHTC3) settings - see climate_room_type_t/climate_temp_unit_t
+// above and main/climate.[ch]. Generic feature: available on any board
+// whose board_hal_get_temperature()/get_humidity() actually succeed, not
+// gated to one specific board.
+#define NVS_CLIMATE_ROOM_TYPE_KEY "climate_room"
+#define NVS_CLIMATE_TEMP_UNIT_KEY "climate_unit"
+// Logging defaults on (mirrors battery history's always-on-when-hardware-
+// present behavior, no visual clutter involved); the overlay badge and
+// Agenda-header readout default off since they add visible clutter to
+// every image/render until the user opts in.
+#define NVS_CLIMATE_LOGGING_ENABLED_KEY "climate_log_en"
+#define NVS_CLIMATE_OVERLAY_ENABLED_KEY "climate_ovl_en"
+#define NVS_CLIMATE_AGENDA_HEADER_ENABLED_KEY "climate_hdr_en"
+// Persisted debounce anchor for CLIMATE_LOG_MIN_INTERVAL_SEC above - unix
+// timestamp of the last actually-recorded reading (not every check), same
+// int64 NVS pattern as "cfg_updated" (config_manager_get_config_last_updated()).
+#define NVS_CLIMATE_LAST_LOG_KEY "climate_lastlog"
+// User-correctable calibration offset, applied to every displayed/logged
+// climate value (NOT to GET /api/sensor's raw reading, which stays
+// unadjusted on purpose - useful as a reference for picking these values).
+// Always stored/transmitted in Celsius/percentage-points regardless of the
+// user's display-unit preference; climate_temp_offset_c is a DELTA, so
+// converting it to/from Fahrenheit for display never adds the usual +32
+// (see climate_celsius_to_fahrenheit() vs. a plain *9/5 delta conversion).
+#define NVS_CLIMATE_TEMP_OFFSET_KEY "climate_toff"
+#define NVS_CLIMATE_HUM_OFFSET_KEY "climate_hoff"
+#define CLIMATE_OFFSET_MAX_LEN 16
 
 #endif

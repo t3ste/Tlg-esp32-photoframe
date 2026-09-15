@@ -56,6 +56,8 @@ _BATT_ANAL/
 docs/AGENDA_AUDIT.md
 docs/FIRMWARE_AUDIT.md
 docs/examples/
+docs/CMD_examples.txt
+docs/HOLIDAYS_API_PLAN.md
 
 # Local editor/tool configs - not project-wide settings
 .claude/

@@ -85,6 +85,8 @@ static int wifi_fail_count = 0;
 // WiFi
 static bool wifi_performance_mode_enabled = true;
 static bool wifi_tx_power_cap_enabled = true;
+static bool wifi_extended_retry_enabled = false;
+static int wifi_coldboot_fail_count = 0;
 static bool rotation_pairing_enabled = false;
 static bool variant_selection_enabled = false;
 static bool telegram_rotation_notify_enabled = false;
@@ -122,7 +124,8 @@ static bool agenda_todo_enabled = false;
 static bool agenda_cal_enabled = false;
 static bool agenda_cal_weather_enabled = false;
 static bool agenda_cal_weather_right_aligned = false;
-static bool agenda_cal_compact_multiday = false;
+static agenda_multiday_mode_t agenda_cal_multiday_mode = AGENDA_MULTIDAY_REPEAT;
+static agenda_time_display_mode_t agenda_cal_time_display_mode = AGENDA_TIME_DISPLAY_OFF;
 static char agenda_cal_name[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_cal_name2[AGENDA_CAL_NAME_MAX_LEN] = {0};
 static char agenda_todo_url[AGENDA_TODO_URL_MAX_LEN] = {0};
@@ -156,6 +159,20 @@ static char agenda_project_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PROJ_C_DEFA
 static char agenda_context_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CTX_C_DEFAULT;
 static char agenda_cal_a_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_A_C_DEFAULT;
 static char agenda_cal_b_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_B_C_DEFAULT;
+// Three extra ICS sources, no auto-refresh - see NVS_AGENDA_CAL_C_URL_KEY
+// etc. in config.h.
+static bool agenda_cal_c_enabled = false;
+static bool agenda_cal_d_enabled = false;
+static bool agenda_cal_e_enabled = false;
+static char agenda_cal_c_url[AGENDA_CAL_C_URL_MAX_LEN] = {0};
+static char agenda_cal_d_url[AGENDA_CAL_D_URL_MAX_LEN] = {0};
+static char agenda_cal_e_url[AGENDA_CAL_E_URL_MAX_LEN] = {0};
+static char agenda_cal_c_name[AGENDA_CAL_CDE_NAME_MAX_LEN] = {0};
+static char agenda_cal_d_name[AGENDA_CAL_CDE_NAME_MAX_LEN] = {0};
+static char agenda_cal_e_name[AGENDA_CAL_CDE_NAME_MAX_LEN] = {0};
+static char agenda_cal_c_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_C_C_DEFAULT;
+static char agenda_cal_d_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_D_C_DEFAULT;
+static char agenda_cal_e_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_E_C_DEFAULT;
 
 // OTA
 static bool ota_check_enabled = true;
@@ -172,6 +189,31 @@ static bool debug_log_enabled = false;
 
 // Config sync
 static int64_t config_last_updated = 0;
+
+// Chimes (speaker feedback) - off by default across the board, see config.h.
+static chime_speaker_mode_t chime_speaker_mode = CHIME_SPEAKER_OFF;
+static bool chime_quiet_enabled = false;
+static char chime_quiet_start[CHIME_TIME_STR_MAX_LEN] = CHIME_DEFAULT_QUIET_START;
+static char chime_quiet_end[CHIME_TIME_STR_MAX_LEN] = CHIME_DEFAULT_QUIET_END;
+static bool chime_event_enabled[CHIME_EVENT_COUNT] = {
+    [CHIME_EVENT_ROTATION] = false,      [CHIME_EVENT_TELEGRAM_PHOTO] = false,
+    [CHIME_EVENT_LOW_BATTERY] = true,    [CHIME_EVENT_WIFI_REPROVISION] = true,
+    [CHIME_EVENT_AGENDA_DUE] = false,    [CHIME_EVENT_OTA_SUCCESS] = true,
+    [CHIME_EVENT_CRITICAL_ERROR] = true,
+};
+static int chime_volume = CHIME_DEFAULT_VOLUME_PERCENT;
+static int chime_repeat_count[CHIME_EVENT_COUNT] = {0};
+
+// Climate (SHTC3) - logging on by default (no visual clutter), the overlay
+// badge and Agenda-header readout off by default, see config.h.
+static climate_room_type_t climate_room_type = CLIMATE_ROOM_LIVING_ROOM;
+static climate_temp_unit_t climate_temp_unit = CLIMATE_UNIT_CELSIUS;
+static bool climate_logging_enabled = true;
+static bool climate_overlay_enabled = false;
+static bool climate_agenda_header_enabled = false;
+static char climate_temp_offset[CLIMATE_OFFSET_MAX_LEN] = "0";
+static char climate_hum_offset[CLIMATE_OFFSET_MAX_LEN] = "0";
+static int64_t climate_last_log_time = 0;
 
 // ----------------------------------------------------------------------------
 // Cron schedule helpers
@@ -862,6 +904,18 @@ esp_err_t config_manager_init(void)
             wifi_tx_power_cap_enabled = (stored_tx_power_cap != 0);
         }
 
+        uint8_t stored_wifi_ext_retry = 0;  // Default to disabled - see config.h
+        if (nvs_get_u8(nvs_handle, NVS_WIFI_EXT_RETRY_ENABLED_KEY, &stored_wifi_ext_retry) ==
+            ESP_OK) {
+            wifi_extended_retry_enabled = (stored_wifi_ext_retry != 0);
+        }
+
+        int32_t stored_wifi_cb_fail = 0;
+        if (nvs_get_i32(nvs_handle, NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY, &stored_wifi_cb_fail) ==
+            ESP_OK) {
+            wifi_coldboot_fail_count = (int) stored_wifi_cb_fail;
+        }
+
         uint8_t stored_rotation_pairing = 0;
         if (nvs_get_u8(nvs_handle, NVS_ROTATION_PAIRING_ENABLED_KEY, &stored_rotation_pairing) ==
             ESP_OK) {
@@ -1040,7 +1094,16 @@ esp_err_t config_manager_init(void)
         }
         uint8_t stored_agenda_cal_cpt = 0;
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_COMPACT_KEY, &stored_agenda_cal_cpt) == ESP_OK) {
-            agenda_cal_compact_multiday = (stored_agenda_cal_cpt != 0);
+            agenda_cal_multiday_mode = (stored_agenda_cal_cpt <= AGENDA_MULTIDAY_REPEAT_NUMBERED)
+                                           ? (agenda_multiday_mode_t) stored_agenda_cal_cpt
+                                           : AGENDA_MULTIDAY_REPEAT;
+        }
+        uint8_t stored_agenda_cal_dur = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_SHOW_DURATION_KEY, &stored_agenda_cal_dur) ==
+            ESP_OK) {
+            agenda_cal_time_display_mode = (stored_agenda_cal_dur <= AGENDA_TIME_DISPLAY_RANGE)
+                                               ? (agenda_time_display_mode_t) stored_agenda_cal_dur
+                                               : AGENDA_TIME_DISPLAY_OFF;
         }
         size_t agenda_cal_name_len = sizeof(agenda_cal_name);
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_NAME_KEY, agenda_cal_name, &agenda_cal_name_len);
@@ -1052,6 +1115,36 @@ esp_err_t config_manager_init(void)
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_URL_KEY, agenda_cal_url, &agenda_cal_url_len);
         size_t agenda_cal_url2_len = sizeof(agenda_cal_url2);
         nvs_get_str(nvs_handle, NVS_AGENDA_CAL_URL2_KEY, agenda_cal_url2, &agenda_cal_url2_len);
+        uint8_t stored_agenda_cal_c_en = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_C_ENABLED_KEY, &stored_agenda_cal_c_en) ==
+            ESP_OK) {
+            agenda_cal_c_enabled = (stored_agenda_cal_c_en != 0);
+        }
+        uint8_t stored_agenda_cal_d_en = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_D_ENABLED_KEY, &stored_agenda_cal_d_en) ==
+            ESP_OK) {
+            agenda_cal_d_enabled = (stored_agenda_cal_d_en != 0);
+        }
+        uint8_t stored_agenda_cal_e_en = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_E_ENABLED_KEY, &stored_agenda_cal_e_en) ==
+            ESP_OK) {
+            agenda_cal_e_enabled = (stored_agenda_cal_e_en != 0);
+        }
+        size_t agenda_cal_c_url_len = sizeof(agenda_cal_c_url);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_C_URL_KEY, agenda_cal_c_url, &agenda_cal_c_url_len);
+        size_t agenda_cal_d_url_len = sizeof(agenda_cal_d_url);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_D_URL_KEY, agenda_cal_d_url, &agenda_cal_d_url_len);
+        size_t agenda_cal_e_url_len = sizeof(agenda_cal_e_url);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_E_URL_KEY, agenda_cal_e_url, &agenda_cal_e_url_len);
+        size_t agenda_cal_c_name_len = sizeof(agenda_cal_c_name);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_C_NAME_KEY, agenda_cal_c_name,
+                    &agenda_cal_c_name_len);
+        size_t agenda_cal_d_name_len = sizeof(agenda_cal_d_name);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_D_NAME_KEY, agenda_cal_d_name,
+                    &agenda_cal_d_name_len);
+        size_t agenda_cal_e_name_len = sizeof(agenda_cal_e_name);
+        nvs_get_str(nvs_handle, NVS_AGENDA_CAL_E_NAME_KEY, agenda_cal_e_name,
+                    &agenda_cal_e_name_len);
         size_t agenda_todo_etag_len = sizeof(agenda_todo_etag);
         nvs_get_str(nvs_handle, NVS_AGENDA_TODO_ETAG_KEY, agenda_todo_etag, &agenda_todo_etag_len);
         size_t agenda_cal_etag_len = sizeof(agenda_cal_etag);
@@ -1124,6 +1217,12 @@ esp_err_t config_manager_init(void)
                                sizeof(agenda_cal_a_color), AGENDA_CAL_A_C_DEFAULT);
         agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_B_C_KEY, agenda_cal_b_color,
                                sizeof(agenda_cal_b_color), AGENDA_CAL_B_C_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_C_C_KEY, agenda_cal_c_color,
+                               sizeof(agenda_cal_c_color), AGENDA_CAL_C_C_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_D_C_KEY, agenda_cal_d_color,
+                               sizeof(agenda_cal_d_color), AGENDA_CAL_D_C_DEFAULT);
+        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_E_C_KEY, agenda_cal_e_color,
+                               sizeof(agenda_cal_e_color), AGENDA_CAL_E_C_DEFAULT);
 
         {
             static char pending_buf[TELEGRAM_PENDING_JOINED_MAX];
@@ -1188,6 +1287,88 @@ esp_err_t config_manager_init(void)
         if (nvs_get_i64(nvs_handle, "cfg_updated", &config_last_updated) == ESP_OK) {
             ESP_LOGI(TAG, "Loaded config_last_updated: %lld", (long long) config_last_updated);
         }
+
+        // Chimes
+        uint8_t stored_chime_mode = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CHIME_SPEAKER_MODE_KEY, &stored_chime_mode) == ESP_OK) {
+            chime_speaker_mode = (stored_chime_mode <= CHIME_SPEAKER_MAINS_ONLY)
+                                     ? (chime_speaker_mode_t) stored_chime_mode
+                                     : CHIME_SPEAKER_OFF;
+        }
+        uint8_t stored_chime_vol = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CHIME_VOLUME_KEY, &stored_chime_vol) == ESP_OK) {
+            chime_volume = (stored_chime_vol <= 100) ? stored_chime_vol : 100;
+        }
+        uint8_t stored_chime_quiet_en = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CHIME_QUIET_ENABLED_KEY, &stored_chime_quiet_en) == ESP_OK) {
+            chime_quiet_enabled = (stored_chime_quiet_en != 0);
+        }
+        size_t chime_quiet_start_len = sizeof(chime_quiet_start);
+        nvs_get_str(nvs_handle, NVS_CHIME_QUIET_START_KEY, chime_quiet_start,
+                    &chime_quiet_start_len);
+        size_t chime_quiet_end_len = sizeof(chime_quiet_end);
+        nvs_get_str(nvs_handle, NVS_CHIME_QUIET_END_KEY, chime_quiet_end, &chime_quiet_end_len);
+        static const char *const chime_event_keys[CHIME_EVENT_COUNT] = {
+            [CHIME_EVENT_ROTATION] = NVS_CHIME_EVENT_ROTATION_KEY,
+            [CHIME_EVENT_TELEGRAM_PHOTO] = NVS_CHIME_EVENT_TELEGRAM_KEY,
+            [CHIME_EVENT_LOW_BATTERY] = NVS_CHIME_EVENT_LOWBATT_KEY,
+            [CHIME_EVENT_WIFI_REPROVISION] = NVS_CHIME_EVENT_WIFIPROV_KEY,
+            [CHIME_EVENT_AGENDA_DUE] = NVS_CHIME_EVENT_AGENDA_KEY,
+            [CHIME_EVENT_OTA_SUCCESS] = NVS_CHIME_EVENT_OTA_KEY,
+            [CHIME_EVENT_CRITICAL_ERROR] = NVS_CHIME_EVENT_CRIT_KEY,
+        };
+        for (int i = 0; i < CHIME_EVENT_COUNT; i++) {
+            uint8_t stored_ev = 0;
+            if (nvs_get_u8(nvs_handle, chime_event_keys[i], &stored_ev) == ESP_OK) {
+                chime_event_enabled[i] = (stored_ev != 0);
+            }
+        }
+        int32_t stored_chime_rc = 0;
+        if (nvs_get_i32(nvs_handle, NVS_CHIME_REPEAT_LOWBATT_KEY, &stored_chime_rc) == ESP_OK) {
+            chime_repeat_count[CHIME_EVENT_LOW_BATTERY] = (int) stored_chime_rc;
+        }
+        if (nvs_get_i32(nvs_handle, NVS_CHIME_REPEAT_CRIT_KEY, &stored_chime_rc) == ESP_OK) {
+            chime_repeat_count[CHIME_EVENT_CRITICAL_ERROR] = (int) stored_chime_rc;
+        }
+        if (nvs_get_i32(nvs_handle, NVS_CHIME_REPEAT_AGENDA_KEY, &stored_chime_rc) == ESP_OK) {
+            chime_repeat_count[CHIME_EVENT_AGENDA_DUE] = (int) stored_chime_rc;
+        }
+
+        // Climate
+        uint8_t stored_climate_room = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_ROOM_TYPE_KEY, &stored_climate_room) == ESP_OK) {
+            climate_room_type = (stored_climate_room <= CLIMATE_ROOM_BASEMENT)
+                                    ? (climate_room_type_t) stored_climate_room
+                                    : CLIMATE_ROOM_LIVING_ROOM;
+        }
+        uint8_t stored_climate_unit = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_TEMP_UNIT_KEY, &stored_climate_unit) == ESP_OK) {
+            climate_temp_unit = (stored_climate_unit <= CLIMATE_UNIT_FAHRENHEIT)
+                                    ? (climate_temp_unit_t) stored_climate_unit
+                                    : CLIMATE_UNIT_CELSIUS;
+        }
+        uint8_t stored_climate_log = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_LOGGING_ENABLED_KEY, &stored_climate_log) ==
+            ESP_OK) {
+            climate_logging_enabled = (stored_climate_log != 0);
+        }
+        uint8_t stored_climate_ovl = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_OVERLAY_ENABLED_KEY, &stored_climate_ovl) ==
+            ESP_OK) {
+            climate_overlay_enabled = (stored_climate_ovl != 0);
+        }
+        uint8_t stored_climate_hdr = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_AGENDA_HEADER_ENABLED_KEY, &stored_climate_hdr) ==
+            ESP_OK) {
+            climate_agenda_header_enabled = (stored_climate_hdr != 0);
+        }
+        size_t climate_temp_offset_len = sizeof(climate_temp_offset);
+        nvs_get_str(nvs_handle, NVS_CLIMATE_TEMP_OFFSET_KEY, climate_temp_offset,
+                    &climate_temp_offset_len);
+        size_t climate_hum_offset_len = sizeof(climate_hum_offset);
+        nvs_get_str(nvs_handle, NVS_CLIMATE_HUM_OFFSET_KEY, climate_hum_offset,
+                    &climate_hum_offset_len);
+        nvs_get_i64(nvs_handle, NVS_CLIMATE_LAST_LOG_KEY, &climate_last_log_time);
 
         nvs_close(nvs_handle);
     }
@@ -2158,6 +2339,43 @@ bool config_manager_get_wifi_tx_power_cap_enabled(void)
     return wifi_tx_power_cap_enabled;
 }
 
+void config_manager_set_wifi_extended_retry_enabled(bool enabled)
+{
+    wifi_extended_retry_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_WIFI_EXT_RETRY_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "WiFi extended cold-boot retry %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_wifi_extended_retry_enabled(void)
+{
+    return wifi_extended_retry_enabled;
+}
+
+void config_manager_set_wifi_coldboot_fail_count(int count)
+{
+    wifi_coldboot_fail_count = count;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_i32(nvs_handle, NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY,
+                    (int32_t) wifi_coldboot_fail_count);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int config_manager_get_wifi_coldboot_fail_count(void)
+{
+    return wifi_coldboot_fail_count;
+}
+
 void config_manager_set_rotation_pairing_enabled(bool enabled)
 {
     rotation_pairing_enabled = enabled;
@@ -2860,15 +3078,32 @@ bool config_manager_get_agenda_cal_weather_right_aligned(void)
     return agenda_cal_weather_right_aligned;
 }
 
-void config_manager_set_agenda_cal_compact_multiday(bool enabled)
+void config_manager_set_agenda_cal_multiday_mode(agenda_multiday_mode_t mode)
 {
-    agenda_cal_compact_multiday = enabled;
-    agenda_nvs_set_u8(NVS_AGENDA_CAL_COMPACT_KEY, enabled ? 1 : 0);
+    if (mode < AGENDA_MULTIDAY_REPEAT || mode > AGENDA_MULTIDAY_REPEAT_NUMBERED) {
+        mode = AGENDA_MULTIDAY_REPEAT;
+    }
+    agenda_cal_multiday_mode = mode;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_COMPACT_KEY, (uint8_t) mode);
 }
 
-bool config_manager_get_agenda_cal_compact_multiday(void)
+agenda_multiday_mode_t config_manager_get_agenda_cal_multiday_mode(void)
 {
-    return agenda_cal_compact_multiday;
+    return agenda_cal_multiday_mode;
+}
+
+void config_manager_set_agenda_cal_time_display_mode(agenda_time_display_mode_t mode)
+{
+    if (mode < AGENDA_TIME_DISPLAY_OFF || mode > AGENDA_TIME_DISPLAY_RANGE) {
+        mode = AGENDA_TIME_DISPLAY_OFF;
+    }
+    agenda_cal_time_display_mode = mode;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_SHOW_DURATION_KEY, (uint8_t) mode);
+}
+
+agenda_time_display_mode_t config_manager_get_agenda_cal_time_display_mode(void)
+{
+    return agenda_cal_time_display_mode;
 }
 
 void config_manager_set_agenda_cal_name(const char *name)
@@ -2982,6 +3217,123 @@ void config_manager_set_agenda_cal_url2(const char *url)
 const char *config_manager_get_agenda_cal_url2(void)
 {
     return agenda_cal_url2;
+}
+
+void config_manager_set_agenda_cal_c_enabled(bool enabled)
+{
+    agenda_cal_c_enabled = enabled;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_C_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_agenda_cal_c_enabled(void)
+{
+    return agenda_cal_c_enabled;
+}
+
+void config_manager_set_agenda_cal_d_enabled(bool enabled)
+{
+    agenda_cal_d_enabled = enabled;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_D_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_agenda_cal_d_enabled(void)
+{
+    return agenda_cal_d_enabled;
+}
+
+void config_manager_set_agenda_cal_e_enabled(bool enabled)
+{
+    agenda_cal_e_enabled = enabled;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_E_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_agenda_cal_e_enabled(void)
+{
+    return agenda_cal_e_enabled;
+}
+
+// No etag to clear on change, unlike agenda_cal_url/_url2 above - these
+// three sources have no conditional-GET/periodic refresh at all (see
+// AGENDA_CAL_CACHE_PATH_C etc. in config.h). Whether a URL actually changed
+// (and therefore needs an immediate fetch) is decided by the caller in
+// utils.c's apply_config_from_json(), which compares against the old value
+// before calling this setter.
+void config_manager_set_agenda_cal_c_url(const char *url)
+{
+    const char *new_url = url ? url : "";
+    strncpy(agenda_cal_c_url, new_url, AGENDA_CAL_C_URL_MAX_LEN - 1);
+    agenda_cal_c_url[AGENDA_CAL_C_URL_MAX_LEN - 1] = '\0';
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_C_URL_KEY, agenda_cal_c_url);
+    ESP_LOGI(TAG, "Agenda Calendar URL C set (length: %zu)", strlen(agenda_cal_c_url));
+}
+
+const char *config_manager_get_agenda_cal_c_url(void)
+{
+    return agenda_cal_c_url;
+}
+
+void config_manager_set_agenda_cal_d_url(const char *url)
+{
+    const char *new_url = url ? url : "";
+    strncpy(agenda_cal_d_url, new_url, AGENDA_CAL_D_URL_MAX_LEN - 1);
+    agenda_cal_d_url[AGENDA_CAL_D_URL_MAX_LEN - 1] = '\0';
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_D_URL_KEY, agenda_cal_d_url);
+    ESP_LOGI(TAG, "Agenda Calendar URL D set (length: %zu)", strlen(agenda_cal_d_url));
+}
+
+const char *config_manager_get_agenda_cal_d_url(void)
+{
+    return agenda_cal_d_url;
+}
+
+void config_manager_set_agenda_cal_e_url(const char *url)
+{
+    const char *new_url = url ? url : "";
+    strncpy(agenda_cal_e_url, new_url, AGENDA_CAL_E_URL_MAX_LEN - 1);
+    agenda_cal_e_url[AGENDA_CAL_E_URL_MAX_LEN - 1] = '\0';
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_CAL_E_URL_KEY, agenda_cal_e_url);
+    ESP_LOGI(TAG, "Agenda Calendar URL E set (length: %zu)", strlen(agenda_cal_e_url));
+}
+
+const char *config_manager_get_agenda_cal_e_url(void)
+{
+    return agenda_cal_e_url;
+}
+
+void config_manager_set_agenda_cal_c_name(const char *name)
+{
+    strncpy(agenda_cal_c_name, name ? name : "", sizeof(agenda_cal_c_name) - 1);
+    agenda_cal_c_name[sizeof(agenda_cal_c_name) - 1] = '\0';
+    agenda_nvs_set_str(NVS_AGENDA_CAL_C_NAME_KEY, agenda_cal_c_name);
+}
+
+const char *config_manager_get_agenda_cal_c_name(void)
+{
+    return agenda_cal_c_name;
+}
+
+void config_manager_set_agenda_cal_d_name(const char *name)
+{
+    strncpy(agenda_cal_d_name, name ? name : "", sizeof(agenda_cal_d_name) - 1);
+    agenda_cal_d_name[sizeof(agenda_cal_d_name) - 1] = '\0';
+    agenda_nvs_set_str(NVS_AGENDA_CAL_D_NAME_KEY, agenda_cal_d_name);
+}
+
+const char *config_manager_get_agenda_cal_d_name(void)
+{
+    return agenda_cal_d_name;
+}
+
+void config_manager_set_agenda_cal_e_name(const char *name)
+{
+    strncpy(agenda_cal_e_name, name ? name : "", sizeof(agenda_cal_e_name) - 1);
+    agenda_cal_e_name[sizeof(agenda_cal_e_name) - 1] = '\0';
+    agenda_nvs_set_str(NVS_AGENDA_CAL_E_NAME_KEY, agenda_cal_e_name);
+}
+
+const char *config_manager_get_agenda_cal_e_name(void)
+{
+    return agenda_cal_e_name;
 }
 
 void config_manager_set_agenda_cal_etag2(const char *etag)
@@ -3232,6 +3584,39 @@ const char *config_manager_get_agenda_cal_b_color(void)
     return agenda_cal_b_color;
 }
 
+void config_manager_set_agenda_cal_c_color(const char *color)
+{
+    agenda_role_color_set(agenda_cal_c_color, sizeof(agenda_cal_c_color), NVS_AGENDA_CAL_C_C_KEY,
+                          color);
+}
+
+const char *config_manager_get_agenda_cal_c_color(void)
+{
+    return agenda_cal_c_color;
+}
+
+void config_manager_set_agenda_cal_d_color(const char *color)
+{
+    agenda_role_color_set(agenda_cal_d_color, sizeof(agenda_cal_d_color), NVS_AGENDA_CAL_D_C_KEY,
+                          color);
+}
+
+const char *config_manager_get_agenda_cal_d_color(void)
+{
+    return agenda_cal_d_color;
+}
+
+void config_manager_set_agenda_cal_e_color(const char *color)
+{
+    agenda_role_color_set(agenda_cal_e_color, sizeof(agenda_cal_e_color), NVS_AGENDA_CAL_E_C_KEY,
+                          color);
+}
+
+const char *config_manager_get_agenda_cal_e_color(void)
+{
+    return agenda_cal_e_color;
+}
+
 // ============================================================================
 // OTA
 // ============================================================================
@@ -3366,4 +3751,250 @@ void config_manager_touch_config(void)
     time_t now;
     time(&now);
     config_manager_set_config_last_updated((int64_t) now);
+}
+
+// ============================================================================
+// Chimes (speaker feedback)
+// ============================================================================
+
+void config_manager_set_chime_speaker_mode(chime_speaker_mode_t mode)
+{
+    if (mode < CHIME_SPEAKER_OFF || mode > CHIME_SPEAKER_MAINS_ONLY) {
+        mode = CHIME_SPEAKER_OFF;
+    }
+    chime_speaker_mode = mode;
+    agenda_nvs_set_u8(NVS_CHIME_SPEAKER_MODE_KEY, (uint8_t) mode);
+}
+
+chime_speaker_mode_t config_manager_get_chime_speaker_mode(void)
+{
+    return chime_speaker_mode;
+}
+
+void config_manager_set_chime_volume(int percent)
+{
+    if (percent < 0) {
+        percent = 0;
+    } else if (percent > 100) {
+        percent = 100;
+    }
+    chime_volume = percent;
+    agenda_nvs_set_u8(NVS_CHIME_VOLUME_KEY, (uint8_t) percent);
+}
+
+int config_manager_get_chime_volume(void)
+{
+    return chime_volume;
+}
+
+void config_manager_set_chime_quiet_enabled(bool enabled)
+{
+    chime_quiet_enabled = enabled;
+    agenda_nvs_set_u8(NVS_CHIME_QUIET_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_chime_quiet_enabled(void)
+{
+    return chime_quiet_enabled;
+}
+
+void config_manager_set_chime_quiet_start(const char *time_str)
+{
+    strncpy(chime_quiet_start, time_str ? time_str : "", sizeof(chime_quiet_start) - 1);
+    chime_quiet_start[sizeof(chime_quiet_start) - 1] = '\0';
+    agenda_nvs_set_str(NVS_CHIME_QUIET_START_KEY, chime_quiet_start);
+}
+
+const char *config_manager_get_chime_quiet_start(void)
+{
+    return chime_quiet_start;
+}
+
+void config_manager_set_chime_quiet_end(const char *time_str)
+{
+    strncpy(chime_quiet_end, time_str ? time_str : "", sizeof(chime_quiet_end) - 1);
+    chime_quiet_end[sizeof(chime_quiet_end) - 1] = '\0';
+    agenda_nvs_set_str(NVS_CHIME_QUIET_END_KEY, chime_quiet_end);
+}
+
+const char *config_manager_get_chime_quiet_end(void)
+{
+    return chime_quiet_end;
+}
+
+void config_manager_set_chime_event_enabled(chime_event_t event, bool enabled)
+{
+    if (event < 0 || event >= CHIME_EVENT_COUNT) {
+        return;
+    }
+    static const char *const chime_event_keys[CHIME_EVENT_COUNT] = {
+        [CHIME_EVENT_ROTATION] = NVS_CHIME_EVENT_ROTATION_KEY,
+        [CHIME_EVENT_TELEGRAM_PHOTO] = NVS_CHIME_EVENT_TELEGRAM_KEY,
+        [CHIME_EVENT_LOW_BATTERY] = NVS_CHIME_EVENT_LOWBATT_KEY,
+        [CHIME_EVENT_WIFI_REPROVISION] = NVS_CHIME_EVENT_WIFIPROV_KEY,
+        [CHIME_EVENT_AGENDA_DUE] = NVS_CHIME_EVENT_AGENDA_KEY,
+        [CHIME_EVENT_OTA_SUCCESS] = NVS_CHIME_EVENT_OTA_KEY,
+        [CHIME_EVENT_CRITICAL_ERROR] = NVS_CHIME_EVENT_CRIT_KEY,
+    };
+    chime_event_enabled[event] = enabled;
+    agenda_nvs_set_u8(chime_event_keys[event], enabled ? 1 : 0);
+}
+
+bool config_manager_get_chime_event_enabled(chime_event_t event)
+{
+    if (event < 0 || event >= CHIME_EVENT_COUNT) {
+        return false;
+    }
+    return chime_event_enabled[event];
+}
+
+// Maps an event to its repeat-counter NVS key - only the 3 "actionable,
+// can resolve" events have one (see CHIME_REPEAT_MAX's comment in
+// config.h); any other event just isn't persisted (in-memory value stays
+// whatever it was, but nothing ever sets it since chime_repeat_gate() is
+// only ever called for these 3).
+static const char *chime_repeat_key_for_event(chime_event_t event)
+{
+    switch (event) {
+    case CHIME_EVENT_LOW_BATTERY:
+        return NVS_CHIME_REPEAT_LOWBATT_KEY;
+    case CHIME_EVENT_CRITICAL_ERROR:
+        return NVS_CHIME_REPEAT_CRIT_KEY;
+    case CHIME_EVENT_AGENDA_DUE:
+        return NVS_CHIME_REPEAT_AGENDA_KEY;
+    default:
+        return NULL;
+    }
+}
+
+void config_manager_set_chime_repeat_count(chime_event_t event, int count)
+{
+    if (event < 0 || event >= CHIME_EVENT_COUNT) {
+        return;
+    }
+    chime_repeat_count[event] = count;
+    const char *key = chime_repeat_key_for_event(event);
+    if (!key) {
+        return;
+    }
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_i32(nvs_handle, key, (int32_t) count);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int config_manager_get_chime_repeat_count(chime_event_t event)
+{
+    if (event < 0 || event >= CHIME_EVENT_COUNT) {
+        return 0;
+    }
+    return chime_repeat_count[event];
+}
+
+// ============================================================================
+// Climate (SHTC3 temperature/humidity)
+// ============================================================================
+
+void config_manager_set_climate_room_type(climate_room_type_t room)
+{
+    if (room < CLIMATE_ROOM_LIVING_ROOM || room > CLIMATE_ROOM_BASEMENT) {
+        room = CLIMATE_ROOM_LIVING_ROOM;
+    }
+    climate_room_type = room;
+    agenda_nvs_set_u8(NVS_CLIMATE_ROOM_TYPE_KEY, (uint8_t) room);
+}
+
+climate_room_type_t config_manager_get_climate_room_type(void)
+{
+    return climate_room_type;
+}
+
+void config_manager_set_climate_temp_unit(climate_temp_unit_t unit)
+{
+    if (unit < CLIMATE_UNIT_CELSIUS || unit > CLIMATE_UNIT_FAHRENHEIT) {
+        unit = CLIMATE_UNIT_CELSIUS;
+    }
+    climate_temp_unit = unit;
+    agenda_nvs_set_u8(NVS_CLIMATE_TEMP_UNIT_KEY, (uint8_t) unit);
+}
+
+climate_temp_unit_t config_manager_get_climate_temp_unit(void)
+{
+    return climate_temp_unit;
+}
+
+void config_manager_set_climate_logging_enabled(bool enabled)
+{
+    climate_logging_enabled = enabled;
+    agenda_nvs_set_u8(NVS_CLIMATE_LOGGING_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_climate_logging_enabled(void)
+{
+    return climate_logging_enabled;
+}
+
+void config_manager_set_climate_overlay_enabled(bool enabled)
+{
+    climate_overlay_enabled = enabled;
+    agenda_nvs_set_u8(NVS_CLIMATE_OVERLAY_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_climate_overlay_enabled(void)
+{
+    return climate_overlay_enabled;
+}
+
+void config_manager_set_climate_agenda_header_enabled(bool enabled)
+{
+    climate_agenda_header_enabled = enabled;
+    agenda_nvs_set_u8(NVS_CLIMATE_AGENDA_HEADER_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_climate_agenda_header_enabled(void)
+{
+    return climate_agenda_header_enabled;
+}
+
+void config_manager_set_climate_temp_offset(const char *offset_c_str)
+{
+    strncpy(climate_temp_offset, offset_c_str ? offset_c_str : "0",
+            sizeof(climate_temp_offset) - 1);
+    climate_temp_offset[sizeof(climate_temp_offset) - 1] = '\0';
+    agenda_nvs_set_str(NVS_CLIMATE_TEMP_OFFSET_KEY, climate_temp_offset);
+}
+
+const char *config_manager_get_climate_temp_offset(void)
+{
+    return climate_temp_offset;
+}
+
+void config_manager_set_climate_hum_offset(const char *offset_str)
+{
+    strncpy(climate_hum_offset, offset_str ? offset_str : "0", sizeof(climate_hum_offset) - 1);
+    climate_hum_offset[sizeof(climate_hum_offset) - 1] = '\0';
+    agenda_nvs_set_str(NVS_CLIMATE_HUM_OFFSET_KEY, climate_hum_offset);
+}
+
+const char *config_manager_get_climate_hum_offset(void)
+{
+    return climate_hum_offset;
+}
+
+void config_manager_set_climate_last_log_time(int64_t timestamp)
+{
+    climate_last_log_time = timestamp;
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_i64(nvs_handle, NVS_CLIMATE_LAST_LOG_KEY, climate_last_log_time);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int64_t config_manager_get_climate_last_log_time(void)
+{
+    return climate_last_log_time;
 }

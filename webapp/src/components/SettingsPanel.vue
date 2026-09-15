@@ -7,6 +7,7 @@ import ProcessingControls from "./ProcessingControls.vue";
 import RotationSchedule from "./RotationSchedule.vue";
 import { isValidCron } from "../utils/cron";
 import { wideEdit } from "../utils/uiPrefs";
+import { TIMEZONE_PRESETS, parseDeviceWallClock, formatDeviceWallClock } from "../utils/timezone";
 
 const settingsStore = useSettingsStore();
 const appStore = useAppStore();
@@ -38,6 +39,32 @@ async function testErrorOverlay() {
   }
 }
 
+// Plays a beep directly on the speaker, bypassing every Chimes policy gate
+// (master mode, quiet hours, mains-only) - the whole point of a test button
+// is to hear it regardless of current settings. Doubles as the "does the
+// hardware/wiring even work" calibration check right after enabling.
+const testingChime = ref(false);
+async function testChime() {
+  testingChime.value = true;
+  try {
+    const response = await fetch("/api/chimes/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pattern: "success" }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) {
+      showSnackbar(data.message || "Chime played", "success");
+    } else {
+      showSnackbar(data.message || "Failed to play chime", "error");
+    }
+  } catch (_error) {
+    showSnackbar("Failed to play chime", "error");
+  } finally {
+    testingChime.value = false;
+  }
+}
+
 // The device rejects the entire config request when any schedule rule is
 // invalid, empty or over the 7-rule budget — gate saving on the same checks.
 const scheduleValid = computed(() => {
@@ -45,47 +72,29 @@ const scheduleValid = computed(() => {
   return rules.length >= 1 && rules.length <= 7 && rules.every((r) => isValidCron(r));
 });
 
-// Device time state
+// Device time state. `/api/time`'s "time" field is the device's own
+// already-localized wall-clock string (localtime_r() against whatever TZ
+// is actually set, DST included) - trusted directly rather than
+// reconstructed from a Unix timestamp + a guessed numeric offset, which
+// broke for any DST-aware POSIX string (see webapp/src/utils/timezone.js).
 const deviceTime = ref("");
 const syncingTime = ref(false);
-let deviceTimestamp = null; // Unix timestamp from device
-let localTimeOffset = 0; // Offset between device time and local time
+let deviceWallClock = null; // Date holding the device's wall-clock time at the last fetch
+let localTimeOffset = 0; // Date.now() at that same moment, to tick the display forward locally
 let tickInterval = null;
 
 function updateDisplayTime() {
-  if (deviceTimestamp === null) return;
-  // Calculate current device time based on elapsed local time
-  const elapsed = Math.floor((Date.now() - localTimeOffset) / 1000);
-  const currentTimestamp = deviceTimestamp + elapsed;
-
-  // Apply timezone offset for display
-  // We shift the timestamp by the offset so that toISOString() (which is UTC)
-  // displays the correct local time numbers.
-  const offsetHours = settingsStore.deviceSettings.timezoneOffset || 0;
-  const adjustedTimestamp = currentTimestamp + offsetHours * 3600;
-
-  const date = new Date(adjustedTimestamp * 1000);
-  // Format as YYYY-MM-DD HH:MM:SS
-  deviceTime.value = date.toISOString().slice(0, 19).replace("T", " ");
+  if (!deviceWallClock) return;
+  const elapsedMs = Date.now() - localTimeOffset;
+  deviceTime.value = formatDeviceWallClock(new Date(deviceWallClock.getTime() + elapsedMs));
 }
 
-async function parseTimezone(timezoneStr) {
-  if (!timezoneStr) return;
-
-  // Posix format: UTC[+/-]H[:MM] (e.g., UTC-8 or UTC+5:30)
-  // Note: POSIX sign is inverted relative to ISO8601
-  let offset = 0;
-  const match = timezoneStr.match(/UTC([+-]?)(\d+)(?::(\d+))?/);
-  if (match) {
-    const sign = match[1] === "-" ? 1 : -1; // POSIX Inverted
-    const hours = parseInt(match[2]) || 0;
-    const minutes = parseInt(match[3]) || 0;
-    offset = sign * (hours + minutes / 60);
-
-    // Update store if different, to keep UI in sync
-    if (settingsStore.deviceSettings.timezoneOffset !== offset) {
-      settingsStore.deviceSettings.timezoneOffset = offset;
-    }
+// Keeps the Settings form honest about the device's actual configured
+// timezone (e.g. after an external change), without ever parsing it into a
+// lossy numeric offset.
+function syncTimezoneFromDevice(timezoneStr) {
+  if (timezoneStr && settingsStore.deviceSettings.timezone !== timezoneStr) {
+    settingsStore.deviceSettings.timezone = timezoneStr;
   }
 }
 
@@ -94,9 +103,9 @@ async function fetchDeviceTime() {
     const response = await fetch("/api/time");
     if (response.ok) {
       const data = await response.json();
-      deviceTimestamp = data.timestamp;
+      deviceWallClock = parseDeviceWallClock(data.time);
       localTimeOffset = Date.now();
-      await parseTimezone(data.timezone);
+      syncTimezoneFromDevice(data.timezone);
       updateDisplayTime();
     }
   } catch (error) {
@@ -111,9 +120,9 @@ async function syncTime() {
     if (response.ok) {
       const data = await response.json();
       if (data.status === "success") {
-        deviceTimestamp = data.timestamp;
+        deviceWallClock = parseDeviceWallClock(data.time);
         localTimeOffset = Date.now();
-        await parseTimezone(data.timezone);
+        syncTimezoneFromDevice(data.timezone);
         updateDisplayTime();
       }
     }
@@ -123,6 +132,23 @@ async function syncTime() {
     syncingTime.value = false;
   }
 }
+
+// v-combobox with object items (TIMEZONE_PRESETS) is inconsistent about what
+// it emits on selection across Vuetify versions - typing free text correctly
+// emits a plain string, but picking a preset from the dropdown can emit the
+// whole {title, value} object instead of just its item-value. Normalizing
+// through this computed keeps the store's `timezone` field a plain string
+// either way - binding item-title/item-value alone was not enough (a
+// selected preset silently failed to apply, since the device only accepts a
+// string in PATCH /api/config, per apply_config_from_json()'s
+// cJSON_IsString() check).
+const timezoneModel = computed({
+  get: () => settingsStore.deviceSettings.timezone,
+  set: (val) => {
+    settingsStore.deviceSettings.timezone =
+      val && typeof val === "object" ? (val.value ?? val.title ?? "") : (val ?? "");
+  },
+});
 
 onMounted(() => {
   fetchDeviceTime();
@@ -218,6 +244,9 @@ const agendaTodoColorFields = [
 const agendaCalendarColorFields = [
   { key: "agendaCalAColor", label: "Calendar A" },
   { key: "agendaCalBColor", label: "Calendar B" },
+  { key: "agendaCalCColor", label: "Calendar C" },
+  { key: "agendaCalDColor", label: "Calendar D" },
+  { key: "agendaCalEColor", label: "Calendar E" },
 ];
 
 // 90/270 would swap the panel's logical dimensions, which the streaming
@@ -227,6 +256,146 @@ const rotationOptions = [
   { title: "0°", value: 0 },
   { title: "180°", value: 180 },
 ];
+
+const agendaMultidayModeOptions = [
+  { title: "Repeat (default)", value: "repeat" },
+  { title: "Compact (once, numbered)", value: "compact" },
+  { title: "Repeat + number", value: "repeat_numbered" },
+];
+
+const agendaTimeDisplayModeOptions = [
+  { title: "Off (default) - start time only", value: "off" },
+  { title: "Duration - e.g. 08:15 [45m]", value: "duration" },
+  { title: "Range - e.g. 08:15-09:00", value: "range" },
+];
+
+const chimeSpeakerModeOptions = [
+  { title: "Off (default)", value: "off" },
+  { title: "Battery + mains", value: "battery_and_mains" },
+  { title: "Mains/USB only", value: "mains_only" },
+];
+
+const climateRoomTypeOptions = [
+  { title: "Living Room / Office (default)", value: "living_room" },
+  { title: "Bedroom", value: "bedroom" },
+  { title: "Bathroom", value: "bathroom" },
+  { title: "Kitchen", value: "kitchen" },
+  { title: "Basement", value: "basement" },
+];
+
+const climateTempUnitOptions = [
+  { title: "Celsius (default)", value: "celsius" },
+  { title: "Fahrenheit", value: "fahrenheit" },
+];
+
+// Reference legend only (never sent to the device - classification always
+// happens firmware-side, in Celsius, from the identical table). Bad is
+// everything outside these bounds; Super is the innermost range; any gap
+// between the two (e.g. 18.0-18.9°C in the Living Room row) counts as Good,
+// same "not Bad, not Super" fallback rule the firmware uses.
+const climateRoomProfilesC = {
+  living_room: { badT: [18, 24], superT: [20, 21], badH: [35, 65], superH: [45, 55] },
+  bedroom: { badT: [15, 21], superT: [16, 18], badH: [35, 65], superH: [45, 55] },
+  bathroom: { badT: [19, 25], superT: [22, 23], badH: [40, 75], superH: [50, 60] },
+  kitchen: { badT: [16, 22], superT: [18, 19], badH: [35, 70], superH: [45, 55] },
+  basement: { badT: [10, 18], superT: [15, 17], badH: [0, 70], superH: [50, 55] },
+};
+
+function celsiusToFahrenheit(c) {
+  return Math.round((c * 9) / 5 + 32);
+}
+
+function formatTempC(c, unit) {
+  return unit === "fahrenheit" ? `${celsiusToFahrenheit(c)}°F` : `${c}°C`;
+}
+
+// Builds the current room type's legend as plain text lines, in whichever
+// unit the user has selected - shown under the room-type selector so "Bad"
+// vs. "Good" vs. "Super" has a concrete meaning without needing to look
+// anything up elsewhere.
+const climateRoomLegend = computed(() => {
+  const p =
+    climateRoomProfilesC[settingsStore.deviceSettings.climateRoomType] ||
+    climateRoomProfilesC.living_room;
+  const unit = settingsStore.deviceSettings.climateTempUnit;
+  const t = (c) => formatTempC(c, unit);
+  return {
+    tempBad: `<${t(p.badT[0])} or >${t(p.badT[1])}`,
+    tempSuper: `${t(p.superT[0])}-${t(p.superT[1])}`,
+    humBad: p.badH[0] > 0 ? `<${p.badH[0]}% or >${p.badH[1]}%` : `>${p.badH[1]}%`,
+    humSuper: `${p.superH[0]}-${p.superH[1]}%`,
+  };
+});
+
+// Calibration offset for temperature - always stored/sent as a Celsius
+// DELTA (climateTempOffset), but shown/edited in whichever unit is
+// currently selected. A delta conversion has no "+32" term, unlike
+// converting an absolute temperature (formatTempC() above) - +2°C of
+// offset is +3.6°F of offset, not +35.6°F.
+const climateTempOffsetDisplay = computed({
+  get() {
+    const c = settingsStore.deviceSettings.climateTempOffset;
+    return settingsStore.deviceSettings.climateTempUnit === "fahrenheit"
+      ? Math.round(((c * 9) / 5) * 10) / 10
+      : c;
+  },
+  set(value) {
+    const v = Number(value) || 0;
+    settingsStore.deviceSettings.climateTempOffset =
+      settingsStore.deviceSettings.climateTempUnit === "fahrenheit" ? (v * 5) / 9 : v;
+  },
+});
+
+// Guards against enabling a calendar with nothing behind it (no persisted
+// visual confirmation existed before, so this state was easy to fall into
+// silently - see agendaCalUrlConfigured etc. below). Each computed is true
+// once that slot has either a server-confirmed source (the "_configured"
+// flag GET /api/config now reports) or a URL just typed into its own field
+// this session, not yet saved. Turning a calendar OFF is always allowed -
+// only the ON transition is gated, via the setter below.
+const canEnableCalendarAB = computed(
+  () =>
+    settingsStore.deviceSettings.agendaCalUrlConfigured ||
+    settingsStore.deviceSettings.agendaCalUrl2Configured ||
+    !!settingsStore.deviceSettings.agendaCalUrl ||
+    !!settingsStore.deviceSettings.agendaCalUrl2
+);
+function canEnableExtraCal(slot) {
+  const configuredKey = `agendaCal${slot.toUpperCase()}Configured`;
+  const urlKey = `agendaCal${slot.toUpperCase()}Url`;
+  return !!settingsStore.deviceSettings[configuredKey] || !!settingsStore.deviceSettings[urlKey];
+}
+function flashBlockedEnable(message) {
+  saveError.value = true;
+  saveMessage.value = message;
+  setTimeout(() => (saveError.value = false), 4000);
+}
+const calendarAbEnabledModel = computed({
+  get: () => settingsStore.deviceSettings.agendaCalEnabled,
+  set: (val) => {
+    if (val && !canEnableCalendarAB.value) {
+      flashBlockedEnable("Add a Calendar A or B URL first");
+      return;
+    }
+    settingsStore.deviceSettings.agendaCalEnabled = val;
+  },
+});
+function extraCalEnabledModel(slot) {
+  const key = `agendaCal${slot.toUpperCase()}Enabled`;
+  return computed({
+    get: () => settingsStore.deviceSettings[key],
+    set: (val) => {
+      if (val && !canEnableExtraCal(slot)) {
+        flashBlockedEnable(`Add a Calendar ${slot.toUpperCase()} URL or upload a file first`);
+        return;
+      }
+      settingsStore.deviceSettings[key] = val;
+    },
+  });
+}
+const calendarCEnabledModel = extraCalEnabledModel("c");
+const calendarDEnabledModel = extraCalEnabledModel("d");
+const calendarEEnabledModel = extraCalEnabledModel("e");
 
 const rotationModeOptions = computed(() => {
   const options = [
@@ -320,12 +489,16 @@ async function exportConfig() {
     if (configRes.ok) {
       const config = await configRes.json();
       // Always write-only at the device level - never returned by GET, so
-      // these deletes are belt-and-suspenders and unaffected by the
-      // checkbox below.
+      // these deletes are belt-and-suspenders (the real source of these
+      // fields, when opted in below, is the dedicated /api/config/urls
+      // fetch further down - GET /api/config itself never carries them).
       delete config.wifi_password;
       delete config.agenda_todo_url;
       delete config.agenda_cal_url;
       delete config.agenda_cal_url2;
+      delete config.agenda_cal_c_url;
+      delete config.agenda_cal_d_url;
+      delete config.agenda_cal_e_url;
       // These 5 ARE returned by GET /api/config in plaintext - only strip
       // them when the user hasn't opted in to a full-credentials export.
       if (!exportIncludeSecrets.value) {
@@ -336,6 +509,21 @@ async function exportConfig() {
         delete config.google_api_key;
       }
       exported.config = config;
+    }
+    // ToDo/Calendar URLs are write-only at the device level (GET /api/config
+    // never returns them - either can carry a credential embedded as a
+    // query param), so a full backup needs this dedicated opt-in fetch
+    // instead. Only requested when the checkbox is checked, same opt-in
+    // gate as the credential fields above.
+    if (exportIncludeSecrets.value && exported.config) {
+      try {
+        const urlsRes = await fetch("/api/config/urls");
+        if (urlsRes.ok) {
+          Object.assign(exported.config, await urlsRes.json());
+        }
+      } catch (_error) {
+        console.log("Failed to fetch URLs for export");
+      }
     }
     if (processingRes.ok) exported.processing = await processingRes.json();
     if (paletteRes.ok) exported.palette = await paletteRes.json();
@@ -436,6 +624,103 @@ async function organizeCropVariants() {
   } finally {
     organizingCropVariants.value = false;
   }
+}
+
+// Three extra ICS calendar sources (e.g. holidays/school-holidays) - unlike
+// Calendar A/B, these never refresh themselves, so the Web UI needs two
+// one-shot actions per slot: re-download the currently-saved URL ("refresh
+// now", a bare PATCH flag the backend consumes without persisting it - see
+// utils.c's apply_extra_ics_url()), or upload a replacement .ics file
+// directly (POST /api/agenda/extra-ics?slot=<c|d|e>, raw file content as
+// the body - these are plain text files, not an image, so no multipart
+// form is needed).
+const refreshingExtraIcs = ref({ c: false, d: false, e: false });
+const uploadingExtraIcs = ref({ c: false, d: false, e: false });
+
+// Re-reads all five calendars' "is a source actually saved?" flags from the
+// device (agenda_cal_url_configured etc. - a stat() of the raw cache file
+// for C/D/E, a non-empty check for A/B's URL - see GET /api/config in
+// http_server.c) after a save/refresh/upload action. Deliberately just
+// these five fields, not a full settingsStore reload, which would also
+// discard any unsaved edits the user has pending elsewhere in the panel.
+async function refreshConfiguredFlags() {
+  try {
+    const response = await fetch("/api/config");
+    if (response.ok) {
+      const data = await response.json();
+      settingsStore.deviceSettings.agendaCalUrlConfigured = data.agenda_cal_url_configured === true;
+      settingsStore.deviceSettings.agendaCalUrl2Configured =
+        data.agenda_cal_url2_configured === true;
+      settingsStore.deviceSettings.agendaCalCConfigured = data.agenda_cal_c_configured === true;
+      settingsStore.deviceSettings.agendaCalDConfigured = data.agenda_cal_d_configured === true;
+      settingsStore.deviceSettings.agendaCalEConfigured = data.agenda_cal_e_configured === true;
+    }
+  } catch (error) {
+    console.error("Failed to refresh calendar source status:", error);
+  }
+}
+const extraIcsFileC = ref(null);
+const extraIcsFileD = ref(null);
+const extraIcsFileE = ref(null);
+
+async function refreshExtraIcs(slot) {
+  refreshingExtraIcs.value[slot] = true;
+  try {
+    const response = await fetch("/api/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [`agenda_cal_${slot}_refetch`]: true }),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    // "refresh now" on a slot with no URL saved yet is a silent no-op
+    // backend-side (see apply_extra_ics_url() in utils.c), so re-check the
+    // actual on-device state rather than assuming this click succeeded.
+    await refreshConfiguredFlags();
+    saveSuccess.value = true;
+    saveMessage.value = `Calendar ${slot.toUpperCase()} refreshed`;
+    setTimeout(() => (saveSuccess.value = false), 3000);
+  } catch (error) {
+    console.error(`Failed to refresh Calendar ${slot}:`, error);
+    saveError.value = true;
+    saveMessage.value = `Failed to refresh Calendar ${slot.toUpperCase()} - check the URL is reachable`;
+    setTimeout(() => (saveError.value = false), 5000);
+  } finally {
+    refreshingExtraIcs.value[slot] = false;
+  }
+}
+
+function onExtraIcsFileSelected(event, slot) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  uploadingExtraIcs.value[slot] = true;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const response = await fetch(`/api/agenda/extra-ics?slot=${slot}`, {
+        method: "POST",
+        headers: { "Content-Type": "text/calendar" },
+        body: e.target.result,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      await refreshConfiguredFlags();
+      saveSuccess.value = true;
+      saveMessage.value = `Calendar ${slot.toUpperCase()} updated from file`;
+      setTimeout(() => (saveSuccess.value = false), 3000);
+    } catch (error) {
+      console.error(`Failed to upload ICS file for Calendar ${slot}:`, error);
+      saveError.value = true;
+      saveMessage.value = `Failed to upload file for Calendar ${slot.toUpperCase()} - is it a valid .ics file?`;
+      setTimeout(() => (saveError.value = false), 5000);
+    } finally {
+      uploadingExtraIcs.value[slot] = false;
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = "";
 }
 
 function onImportFileSelected(event) {
@@ -549,10 +834,14 @@ async function saveSettings() {
     saveSuccess.value = true;
     saveError.value = false;
     saveMessage.value = deviceResult.message || "Settings saved!";
-    setTimeout(() => (saveSuccess.value = false), 3000);
+    setTimeout(() => (saveSuccess.value = false), 6000);
 
     // Refresh device time in case timezone changed
     await fetchDeviceTime();
+    // A URL just saved (A/B/C/D/E) may or may not have actually fetched
+    // successfully server-side - re-check the persistent "configured"
+    // confirmation rather than assuming the save alone means success.
+    await refreshConfiguredFlags();
   } else {
     // Show error message
     saveError.value = true;
@@ -595,6 +884,12 @@ async function performFactoryReset() {
         <v-tab value="autoRotate"> Auto Rotate </v-tab>
         <v-tab value="agenda"> Agenda </v-tab>
         <v-tab value="power"> Power </v-tab>
+        <v-tab v-if="settingsStore.deviceSettings.chimeSpeakerAvailable" value="chimes">
+          Chimes
+        </v-tab>
+        <v-tab v-if="settingsStore.deviceSettings.climateSensorAvailable" value="climate">
+          Climate
+        </v-tab>
         <v-tab value="homeAssistant"> Home Assistant </v-tab>
         <v-tab value="processing"> Processing </v-tab>
         <v-tab value="ai"> AI Generation </v-tab>
@@ -642,6 +937,25 @@ async function performFactoryReset() {
                 />
               </v-col>
             </v-row>
+
+            <v-switch
+              v-model="settingsStore.deviceSettings.wifiExtendedRetryEnabled"
+              label="Extended WiFi retry before reprovisioning"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              Off (default) - gives up and reprovisions after 3 attempts in a single boot, same as
+              always. Turn on if brief router outages or a weak/flaky signal keep forcing your frame
+              to reprovision even though the password is fine: the frame will then keep retrying
+              across several reboots - up to 10 attempts total - before finally clearing the saved
+              credentials. A confirmed-wrong password is never affected either way and always
+              reprovisions immediately. Worst case with this on (WiFi stays hard to reach the whole
+              time): up to ~6x the energy use of the default behavior, since the frame stays fully
+              awake through every retry and reboot instead of reprovisioning quickly - recommended
+              only for mains/USB-powered frames, not battery-only ones.
+            </div>
 
             <v-row>
               <v-col cols="12" md="6">
@@ -691,15 +1005,14 @@ async function performFactoryReset() {
                 </v-text-field>
               </v-col>
               <v-col cols="12" md="6">
-                <v-text-field
-                  v-model.number="settingsStore.deviceSettings.timezoneOffset"
-                  label="Timezone (UTC offset)"
-                  type="number"
-                  :min="-12"
-                  :max="14"
-                  :step="0.5"
+                <v-combobox
+                  v-model="timezoneModel"
+                  :items="TIMEZONE_PRESETS"
+                  item-title="title"
+                  item-value="value"
+                  label="Timezone"
                   variant="outlined"
-                  hint="e.g., -8 for PST, +1 for CET, +8 for CST"
+                  hint="Pick a preset, or type any POSIX TZ string (e.g. a DST rule)"
                   persistent-hint
                 />
               </v-col>
@@ -1281,7 +1594,7 @@ async function performFactoryReset() {
 
             <div class="text-subtitle-2 mb-2">Calendar</div>
             <v-switch
-              v-model="settingsStore.deviceSettings.agendaCalEnabled"
+              v-model="calendarAbEnabledModel"
               label="Show upcoming events"
               color="primary"
               class="mb-2"
@@ -1308,7 +1621,18 @@ async function performFactoryReset() {
                   persistent-hint
                   placeholder="••••••••"
                   :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
-                />
+                >
+                  <template #append-inner>
+                    <v-icon
+                      v-if="settingsStore.deviceSettings.agendaCalUrlConfigured"
+                      color="success"
+                      size="20"
+                      title="URL saved on device"
+                    >
+                      mdi-check-circle
+                    </v-icon>
+                  </template>
+                </v-text-field>
               </v-col>
               <v-col cols="8" sm="3">
                 <v-text-field
@@ -1345,7 +1669,18 @@ async function performFactoryReset() {
                   persistent-hint
                   placeholder="••••••••"
                   :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
-                />
+                >
+                  <template #append-inner>
+                    <v-icon
+                      v-if="settingsStore.deviceSettings.agendaCalUrl2Configured"
+                      color="success"
+                      size="20"
+                      title="URL saved on device"
+                    >
+                      mdi-check-circle
+                    </v-icon>
+                  </template>
+                </v-text-field>
               </v-col>
               <v-col cols="12" sm="4">
                 <v-text-field
@@ -1391,20 +1726,282 @@ async function performFactoryReset() {
               right edge instead - just a placement preference, doesn't change how much of it fits
               (works the same in both the stacked and side-by-side layout).
             </div>
-            <v-switch
-              v-model="settingsStore.deviceSettings.agendaCalCompactMultiday"
-              label="Compact multi-day events"
-              color="primary"
-              class="mb-1"
+            <v-select
+              v-model="settingsStore.deviceSettings.agendaCalMultidayMode"
+              :items="agendaMultidayModeOptions"
+              item-title="title"
+              item-value="value"
+              label="Multi-day events"
+              variant="outlined"
+              class="mt-2 mb-1"
               hide-details
               :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Shows a multi-day event only once, on the first visible day, with an "N/M:" prefix
-              (which day of the event's full span, out of how many) instead of repeating it under
-              every day it spans - e.g. an 8-day trip whose 4th day is the first one visible shows
-              "4/8: Trip" that one time only.
+              Repeat (default): a multi-day event appears under every day it spans, plain. Compact:
+              shown only once, on the first visible day, with an "N/M:" prefix (which day of the
+              event's full span, out of how many) - e.g. an 8-day trip whose 4th day is the first
+              one visible shows "4/8: Trip" that one time only. Repeat + number: combines both -
+              still repeated under every day, but each occurrence also gets its own "N/M:" prefix.
             </div>
+            <v-select
+              v-model="settingsStore.deviceSettings.agendaCalTimeDisplayMode"
+              :items="agendaTimeDisplayModeOptions"
+              item-title="title"
+              item-value="value"
+              label="Event time display"
+              variant="outlined"
+              class="mt-2 mb-1"
+              hide-details
+              :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Duration is more compact for short events but longer once an event runs over an hour
+              (e.g. "08:00 [1h30m]" vs. "08:00-09:30" for Range) - pick whichever reads better for
+              your events. Neither affects all-day events.
+            </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Extra ICS Calendars</div>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Up to three additional calendars (e.g. holidays, school holidays, or any other .ics
+              feed) shown in the same Calendar column above, each in its own color (see Appearance
+              tab). Unlike Calendar A/B, these are <strong>never refreshed automatically</strong> -
+              only when you save a new/changed URL, click "Refresh now", or upload a replacement
+              file directly. If a source runs out of upcoming events, a permanent reminder appears
+              in the calendar identifying which one needs updating. Each source shows up to 24
+              events within its 30-day window - plenty for holidays/school-holidays, but a very
+              densely-booked file could hit that cap.
+            </div>
+
+            <v-card variant="tonal" class="mb-3">
+              <v-card-text>
+                <v-switch
+                  v-model="calendarCEnabledModel"
+                  label="Calendar C enabled"
+                  color="primary"
+                  hide-details
+                  class="mb-2"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+                <v-row dense>
+                  <v-col cols="12" sm="7">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalCUrl"
+                      label="Calendar C ICS URL"
+                      type="password"
+                      variant="outlined"
+                      density="compact"
+                      hint="Leave empty to keep the current URL - fetched once on save, never again automatically"
+                      persistent-hint
+                      placeholder="••••••••"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    >
+                      <template #append-inner>
+                        <v-icon
+                          v-if="settingsStore.deviceSettings.agendaCalCConfigured"
+                          color="success"
+                          size="20"
+                          title="Source saved on device"
+                        >
+                          mdi-check-circle
+                        </v-icon>
+                      </template>
+                    </v-text-field>
+                  </v-col>
+                  <v-col cols="12" sm="5">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalCName"
+                      label="Display name"
+                      variant="outlined"
+                      density="compact"
+                      placeholder="Calendar C"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    />
+                  </v-col>
+                </v-row>
+                <div class="d-flex flex-wrap ga-2 mt-1">
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="refreshingExtraIcs.c"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="refreshExtraIcs('c')"
+                  >
+                    Refresh now
+                  </v-btn>
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="uploadingExtraIcs.c"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="extraIcsFileC?.click()"
+                  >
+                    Upload .ics file
+                  </v-btn>
+                  <input
+                    ref="extraIcsFileC"
+                    type="file"
+                    accept=".ics"
+                    hidden
+                    @change="onExtraIcsFileSelected($event, 'c')"
+                  />
+                </div>
+              </v-card-text>
+            </v-card>
+
+            <v-card variant="tonal" class="mb-3">
+              <v-card-text>
+                <v-switch
+                  v-model="calendarDEnabledModel"
+                  label="Calendar D enabled"
+                  color="primary"
+                  hide-details
+                  class="mb-2"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+                <v-row dense>
+                  <v-col cols="12" sm="7">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalDUrl"
+                      label="Calendar D ICS URL"
+                      type="password"
+                      variant="outlined"
+                      density="compact"
+                      hint="Leave empty to keep the current URL - fetched once on save, never again automatically"
+                      persistent-hint
+                      placeholder="••••••••"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    >
+                      <template #append-inner>
+                        <v-icon
+                          v-if="settingsStore.deviceSettings.agendaCalDConfigured"
+                          color="success"
+                          size="20"
+                          title="Source saved on device"
+                        >
+                          mdi-check-circle
+                        </v-icon>
+                      </template>
+                    </v-text-field>
+                  </v-col>
+                  <v-col cols="12" sm="5">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalDName"
+                      label="Display name"
+                      variant="outlined"
+                      density="compact"
+                      placeholder="Calendar D"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    />
+                  </v-col>
+                </v-row>
+                <div class="d-flex flex-wrap ga-2 mt-1">
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="refreshingExtraIcs.d"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="refreshExtraIcs('d')"
+                  >
+                    Refresh now
+                  </v-btn>
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="uploadingExtraIcs.d"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="extraIcsFileD?.click()"
+                  >
+                    Upload .ics file
+                  </v-btn>
+                  <input
+                    ref="extraIcsFileD"
+                    type="file"
+                    accept=".ics"
+                    hidden
+                    @change="onExtraIcsFileSelected($event, 'd')"
+                  />
+                </div>
+              </v-card-text>
+            </v-card>
+
+            <v-card variant="tonal" class="mb-3">
+              <v-card-text>
+                <v-switch
+                  v-model="calendarEEnabledModel"
+                  label="Calendar E enabled"
+                  color="primary"
+                  hide-details
+                  class="mb-2"
+                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                />
+                <v-row dense>
+                  <v-col cols="12" sm="7">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalEUrl"
+                      label="Calendar E ICS URL"
+                      type="password"
+                      variant="outlined"
+                      density="compact"
+                      hint="Leave empty to keep the current URL - fetched once on save, never again automatically"
+                      persistent-hint
+                      placeholder="••••••••"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    >
+                      <template #append-inner>
+                        <v-icon
+                          v-if="settingsStore.deviceSettings.agendaCalEConfigured"
+                          color="success"
+                          size="20"
+                          title="Source saved on device"
+                        >
+                          mdi-check-circle
+                        </v-icon>
+                      </template>
+                    </v-text-field>
+                  </v-col>
+                  <v-col cols="12" sm="5">
+                    <v-text-field
+                      v-model="settingsStore.deviceSettings.agendaCalEName"
+                      label="Display name"
+                      variant="outlined"
+                      density="compact"
+                      placeholder="Calendar E"
+                      :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    />
+                  </v-col>
+                </v-row>
+                <div class="d-flex flex-wrap ga-2 mt-1">
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="refreshingExtraIcs.e"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="refreshExtraIcs('e')"
+                  >
+                    Refresh now
+                  </v-btn>
+                  <v-btn
+                    size="small"
+                    variant="tonal"
+                    :loading="uploadingExtraIcs.e"
+                    :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+                    @click="extraIcsFileE?.click()"
+                  >
+                    Upload .ics file
+                  </v-btn>
+                  <input
+                    ref="extraIcsFileE"
+                    type="file"
+                    accept=".ics"
+                    hidden
+                    @change="onExtraIcsFileSelected($event, 'e')"
+                  />
+                </div>
+              </v-card-text>
+            </v-card>
 
             <v-divider class="mb-4 mt-2" />
 
@@ -1846,6 +2443,301 @@ async function performFactoryReset() {
             </v-row>
           </v-tabs-window-item>
 
+          <!-- Chimes Tab -->
+          <v-tabs-window-item
+            v-if="settingsStore.deviceSettings.chimeSpeakerAvailable"
+            class="mt-2"
+            value="chimes"
+          >
+            <div class="text-subtitle-2 mb-2">Speaker</div>
+            <v-row dense align="center">
+              <v-col cols="12" sm="7">
+                <v-select
+                  v-model="settingsStore.deviceSettings.chimeSpeakerMode"
+                  :items="chimeSpeakerModeOptions"
+                  item-title="title"
+                  item-value="value"
+                  label="Chimes"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="12" sm="5">
+                <v-btn variant="outlined" size="small" :loading="testingChime" @click="testChime">
+                  <v-icon icon="mdi-volume-high" start />
+                  Play test tone
+                </v-btn>
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Off (default): the board's speaker stays silent. Battery + mains: chimes play
+              regardless of power source. Mains/USB only (recommended for battery frames): the
+              amplifier draws noticeable current, so chimes only play while plugged in. "Play test
+              tone" always plays immediately, ignoring quiet hours and this setting - use it to
+              confirm the speaker works right after choosing a mode.
+            </div>
+            <v-slider
+              v-model="settingsStore.deviceSettings.chimeVolume"
+              label="Volume"
+              min="0"
+              max="100"
+              step="5"
+              thumb-label
+              hide-details
+              class="mt-2 mb-1"
+            >
+              <template #append>
+                <span class="text-body-2" style="min-width: 3em">
+                  {{ settingsStore.deviceSettings.chimeVolume }}%
+                </span>
+              </template>
+            </v-slider>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Applies equally to every chime - warning/error events aren't louder, they instead
+              repeat a few times while the underlying problem persists (see Events below).
+            </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Quiet hours</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeQuietEnabled"
+              label="Enable quiet hours"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <v-row dense>
+              <v-col cols="6" sm="3">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.chimeQuietStart"
+                  type="time"
+                  label="From"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  :disabled="!settingsStore.deviceSettings.chimeQuietEnabled"
+                />
+              </v-col>
+              <v-col cols="6" sm="3">
+                <v-text-field
+                  v-model="settingsStore.deviceSettings.chimeQuietEnd"
+                  type="time"
+                  label="To"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  :disabled="!settingsStore.deviceSettings.chimeQuietEnabled"
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              No chimes play during this daily window, regardless of the speaker mode or which
+              events below are enabled. Wraps past midnight if "To" is earlier than "From" (e.g.
+              22:00-07:00).
+            </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Events</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventRotationEnabled"
+              label="Photo rotated / display refreshed"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires on every successful display update - the most frequent event here, off by
+              default for that reason.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventTelegramPhotoEnabled"
+              label="New photo received via Telegram"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Confirms a photo arrived, even if you're not standing in front of the frame.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventLowBatteryEnabled"
+              label="Low battery warning"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires when the battery is below the Low Battery Overlay threshold (Power tab),
+              repeating once per wake while still low, up to 5 times, then resets once the level
+              recovers.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventWifiReprovisionEnabled"
+              label="WiFi reprovisioning needed"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires right before the frame clears its saved WiFi credentials and reboots into setup
+              mode.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventAgendaDueEnabled"
+              label="Agenda: due/overdue reminder"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires while Agenda mode's ToDo list has an overdue or due-today item, repeating once
+              per render, up to 5 times, then resets once nothing is due.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventOtaSuccessEnabled"
+              label="Firmware update installed"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires once, on first boot after a successful OTA update.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.chimeEventCriticalErrorEnabled"
+              label="Critical error (WiFi/internet lost)"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Fires once WiFi/internet has failed several wakes in a row (same threshold as the
+              Error Overlay, General tab), repeating each further failed wake, up to 5 times, then
+              resets once connectivity recovers.
+            </div>
+          </v-tabs-window-item>
+
+          <!-- Climate Tab -->
+          <v-tabs-window-item
+            v-if="settingsStore.deviceSettings.climateSensorAvailable"
+            class="mt-2"
+            value="climate"
+          >
+            <div class="text-subtitle-2 mb-2">Room</div>
+            <v-row dense>
+              <v-col cols="12" sm="7">
+                <v-select
+                  v-model="settingsStore.deviceSettings.climateRoomType"
+                  :items="climateRoomTypeOptions"
+                  item-title="title"
+                  item-value="value"
+                  label="Room type"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="12" sm="5">
+                <v-select
+                  v-model="settingsStore.deviceSettings.climateTempUnit"
+                  :items="climateTempUnitOptions"
+                  item-title="title"
+                  item-value="value"
+                  label="Unit"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Temperature and humidity are classified separately, each into Bad (mold/dryness risk),
+              Good, or Super (optimal), based on the selected room type. For
+              {{
+                climateRoomTypeOptions.find(
+                  (o) => o.value === settingsStore.deviceSettings.climateRoomType
+                )?.title
+              }}: temperature is Bad {{ climateRoomLegend.tempBad }}, Super
+              {{ climateRoomLegend.tempSuper }}; humidity is Bad {{ climateRoomLegend.humBad }},
+              Super {{ climateRoomLegend.humSuper }} - anything else counts as Good.
+            </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Calibration</div>
+            <v-row dense>
+              <v-col cols="6">
+                <v-text-field
+                  v-model.number="climateTempOffsetDisplay"
+                  :label="`Temperature offset (${settingsStore.deviceSettings.climateTempUnit === 'fahrenheit' ? '°F' : '°C'})`"
+                  type="number"
+                  step="0.1"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="6">
+                <v-text-field
+                  v-model.number="settingsStore.deviceSettings.climateHumOffset"
+                  label="Humidity offset (percentage points)"
+                  type="number"
+                  step="0.1"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Added to every raw sensor reading before it's displayed or logged - use this if the
+              sensor consistently reads too high/low. Default 0. Does not affect the raw reading
+              shown by the device's own diagnostic endpoint.
+            </div>
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Display</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.climateLoggingEnabled"
+              label="Log readings for the history chart"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Records one reading per successfully displayed image (photo or Agenda render) to the
+              Climate History chart below the settings. On by default - has no effect on the display
+              itself.
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.climateOverlayEnabled"
+              label="Show on photos (top-right badge)"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Draws the latest temperature and humidity as two small colored badges in the top-right
+              corner of every photo - color shows the category (red/orange/green for Bad/Good/Super;
+              a single black badge on grayscale-only displays).
+            </div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.climateAgendaHeaderEnabled"
+              label="Show in Agenda header"
+              color="primary"
+              class="mb-1"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              Adds the same readout, right-aligned, to the ToDo and Calendar column headers in
+              Agenda mode.
+            </div>
+          </v-tabs-window-item>
+
           <!-- Home Assistant Tab -->
           <v-tabs-window-item class="mt-2" value="homeAssistant">
             <v-switch
@@ -1962,13 +2854,14 @@ async function performFactoryReset() {
                   density="compact"
                   hide-details
                   class="mb-2"
-                  label="Include credentials in export (Telegram bot token, AI API keys, access token, custom auth header)"
+                  label="Include credentials and URLs in export (Telegram bot token, AI API keys, access token, custom auth header, ToDo/Calendar URLs)"
                 />
                 <div class="text-caption text-grey mb-3">
                   Off by default: an export is a plaintext JSON file. Enable this for a fully
-                  self-contained backup, e.g. before restoring to a fresh device. WiFi password and
-                  Calendar/ToDo URLs can never be included (the device never returns them at all) -
-                  re-enter those manually after importing.
+                  self-contained backup, e.g. before restoring to a fresh device - ToDo/Calendar
+                  URLs can carry an embedded credential (e.g. a Google Calendar "secret address"),
+                  same reasoning as the other fields here. WiFi password can never be included (the
+                  device never returns it at all) - re-enter that manually after importing.
                 </div>
                 <v-btn variant="outlined" class="mr-2" @click="exportConfig">
                   <v-icon start>mdi-download</v-icon>

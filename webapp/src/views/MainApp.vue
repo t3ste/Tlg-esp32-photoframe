@@ -7,6 +7,7 @@ import ImageUpload from "../components/ImageUpload.vue";
 import SettingsPanel from "../components/SettingsPanel.vue";
 import OtaUpdate from "../components/OtaUpdate.vue";
 import BatteryHistory from "../components/BatteryHistory.vue";
+import ClimateHistory from "../components/ClimateHistory.vue";
 
 const appStore = useAppStore();
 const settingsStore = useSettingsStore();
@@ -131,6 +132,9 @@ onUnmounted(() => {
           <v-tab value="gallery">Gallery</v-tab>
           <v-tab value="settings">Settings</v-tab>
           <v-tab value="battery">Battery History</v-tab>
+          <v-tab v-if="settingsStore.deviceSettings.climateSensorAvailable" value="climate">
+            Climate History
+          </v-tab>
           <v-tab value="updates">Updates</v-tab>
         </v-tabs>
 
@@ -149,6 +153,13 @@ onUnmounted(() => {
 
           <v-tabs-window-item value="battery">
             <BatteryHistory />
+          </v-tabs-window-item>
+
+          <v-tabs-window-item
+            v-if="settingsStore.deviceSettings.climateSensorAvailable"
+            value="climate"
+          >
+            <ClimateHistory />
           </v-tabs-window-item>
 
           <v-tabs-window-item value="updates">

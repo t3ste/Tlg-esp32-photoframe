@@ -36,7 +36,13 @@ export const useSettingsStore = defineStore("settings", () => {
   const deviceSettings = ref({
     // General
     deviceName: "PhotoFrame",
-    timezoneOffset: 0,
+    // Raw POSIX TZ string (e.g. "UTC-2" or a full DST rule like
+    // "CET-1CEST,M3.5.0/2,M10.5.0/3") - the device's own canonical value
+    // (main/config_manager.c passes it to setenv("TZ", ...) as-is). Never
+    // round-tripped through a numeric UTC-offset field - that lossy
+    // conversion silently discarded DST-aware strings and could overwrite
+    // them with "UTC0" on save (see webapp/src/utils/timezone.js).
+    timezone: "UTC0",
     ntpServer: "pool.ntp.org",
     // Network: static IP / DNS override (#43)
     ipMode: "dhcp",
@@ -76,6 +82,7 @@ export const useSettingsStore = defineStore("settings", () => {
     otaCheckEnabled: true,
     wifiPerformanceModeEnabled: true,
     wifiTxPowerCapEnabled: true,
+    wifiExtendedRetryEnabled: false,
     rotationPairingEnabled: false,
     variantSelectionEnabled: false,
     telegramRotationNotifyEnabled: false,
@@ -104,6 +111,40 @@ export const useSettingsStore = defineStore("settings", () => {
     showExifDatetimeEnabled: false,
     lowBatteryOverlayEnabled: false,
     lowBatteryOverlayThreshold: 16,
+    // Chimes (speaker feedback, waveshare_photopainter_73 only) -
+    // chimeSpeakerAvailable is a read-only hardware capability flag, never
+    // sent in a PATCH. Off by default across the board, per-event flags
+    // mirror the firmware's own conservative defaults (see config.h).
+    chimeSpeakerAvailable: false,
+    chimeSpeakerMode: "off",
+    chimeVolume: 80,
+    chimeQuietEnabled: false,
+    chimeQuietStart: "22:00",
+    chimeQuietEnd: "07:00",
+    chimeEventRotationEnabled: false,
+    chimeEventTelegramPhotoEnabled: false,
+    chimeEventLowBatteryEnabled: true,
+    chimeEventWifiReprovisionEnabled: true,
+    chimeEventAgendaDueEnabled: false,
+    chimeEventOtaSuccessEnabled: true,
+    chimeEventCriticalErrorEnabled: true,
+    // Climate (SHTC3 temperature/humidity) - generic feature (works on any
+    // board whose sensor actually answers, not just
+    // waveshare_photopainter_73, unlike Chimes above).
+    // climateSensorAvailable is a read-only, live hardware probe (not a
+    // fixed capability flag - the same board can succeed or fail at
+    // runtime), never sent in a PATCH.
+    climateSensorAvailable: false,
+    climateRoomType: "living_room",
+    climateTempUnit: "celsius",
+    climateLoggingEnabled: true,
+    climateOverlayEnabled: false,
+    climateAgendaHeaderEnabled: false,
+    // Calibration offsets, always in Celsius/percentage-points regardless of
+    // climateTempUnit - SettingsPanel.vue converts to/from the display unit
+    // for its own input fields.
+    climateTempOffset: 0,
+    climateHumOffset: 0,
     // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
     // overlay. agendaTodoUrl/agendaCalUrl are write-only (never returned by
     // GET /api/config, same treatment as wifiPassword above) - both start
@@ -116,10 +157,40 @@ export const useSettingsStore = defineStore("settings", () => {
     agendaCalEnabled: false,
     agendaTodoUrl: "",
     agendaCalUrl: "",
+    // Read-only, server-reported "is a URL actually saved?" flag - since the
+    // write-only field above always starts empty, this is the only way the
+    // UI can show a persistent "configured" confirmation across a reload.
+    agendaCalUrlConfigured: false,
     // Optional second calendar (e.g. work vs. personal) - merged with the
     // first at render time, colored per its own origin. Same write-only
     // treatment as agendaCalUrl above.
     agendaCalUrl2: "",
+    agendaCalUrl2Configured: false,
+    // Three extra ICS sources (e.g. holidays/school-holidays/other
+    // special-days feeds) shown in the same Calendar column as A/B, each
+    // independently enabled/named/colored. Unlike A/B above, these are
+    // NEVER refreshed automatically - only when the URL is set/changed, the
+    // user clicks "refresh now" (agendaCalCRefetch etc., a one-shot flag,
+    // not a persisted setting), or a file is uploaded directly via
+    // /api/agenda/extra-ics. Same write-only URL treatment as agendaCalUrl.
+    agendaCalCEnabled: false,
+    agendaCalDEnabled: false,
+    agendaCalEEnabled: false,
+    agendaCalCUrl: "",
+    agendaCalDUrl: "",
+    agendaCalEUrl: "",
+    // Read-only, server-reported "is a raw .ics file on disk right now?"
+    // flag - true whether it got there via URL fetch or direct upload; same
+    // "otherwise no persistent confirmation" reasoning as agendaCalUrlConfigured.
+    agendaCalCConfigured: false,
+    agendaCalDConfigured: false,
+    agendaCalEConfigured: false,
+    agendaCalCName: "",
+    agendaCalDName: "",
+    agendaCalEName: "",
+    agendaCalCColor: "red",
+    agendaCalDColor: "yellow",
+    agendaCalEColor: "red",
     // Optional display names shown in the Calendar header instead of the
     // generic "Calendar A"/"Calendar B" fallback - not secrets, always
     // returned/saved plainly (unlike the URL fields above).
@@ -133,9 +204,16 @@ export const useSettingsStore = defineStore("settings", () => {
     // Placement only - centered (default) or right-aligned; doesn't change
     // how much forecast text can fit (see agenda_renderer.c).
     agendaCalWeatherRightAligned: false,
-    // A multi-day event is shown once (first visible day) with an "N/M: "
-    // position prefix instead of repeated under every day it spans.
-    agendaCalCompactMultiday: false,
+    // How a multi-day event is displayed - "repeat" (default, shown under
+    // every day it spans, no prefix), "compact" (shown once, on its first
+    // visible day, with an "N/M: " position prefix), or "repeat_numbered"
+    // (repeated under every day like "repeat", but each occurrence also
+    // gets its own "N/M: " prefix).
+    agendaCalMultidayMode: "repeat",
+    // "off" (default): timed events show just "HH:MM Summary". "duration":
+    // appends a compact "[Xm]"/"[Xh]" suffix. "range": shows the full
+    // "HH:MM-HH:MM" span instead. Never affects all-day events.
+    agendaCalTimeDisplayMode: "off",
     agendaCron: ["0 6-18 *"],
     // true = ToDo above Calendar (default), false = side by side. Portrait
     // boards always stack regardless of this setting - see agenda_renderer.c.
@@ -304,6 +382,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.wifiPerformanceModeEnabled =
         data.wifi_performance_mode_enabled !== false;
       deviceSettings.value.wifiTxPowerCapEnabled = data.wifi_tx_power_cap_enabled !== false;
+      deviceSettings.value.wifiExtendedRetryEnabled = data.wifi_extended_retry_enabled === true;
       deviceSettings.value.rotationPairingEnabled = data.rotation_pairing_enabled === true;
       deviceSettings.value.variantSelectionEnabled = data.variant_selection_enabled === true;
       deviceSettings.value.telegramRotationNotifyEnabled =
@@ -336,18 +415,60 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.showExifDatetimeEnabled = data.show_exif_datetime_enabled === true;
       deviceSettings.value.lowBatteryOverlayEnabled = data.low_battery_overlay_enabled === true;
       deviceSettings.value.lowBatteryOverlayThreshold = data.low_battery_overlay_threshold ?? 16;
+      deviceSettings.value.chimeSpeakerAvailable = data.chime_speaker_available === true;
+      deviceSettings.value.chimeSpeakerMode = data.chime_speaker_mode || "off";
+      deviceSettings.value.chimeVolume = data.chime_volume ?? 80;
+      deviceSettings.value.chimeQuietEnabled = data.chime_quiet_enabled === true;
+      deviceSettings.value.chimeQuietStart = data.chime_quiet_start || "22:00";
+      deviceSettings.value.chimeQuietEnd = data.chime_quiet_end || "07:00";
+      deviceSettings.value.chimeEventRotationEnabled = data.chime_event_rotation_enabled === true;
+      deviceSettings.value.chimeEventTelegramPhotoEnabled =
+        data.chime_event_telegram_photo_enabled === true;
+      deviceSettings.value.chimeEventLowBatteryEnabled =
+        data.chime_event_low_battery_enabled === true;
+      deviceSettings.value.chimeEventWifiReprovisionEnabled =
+        data.chime_event_wifi_reprovision_enabled === true;
+      deviceSettings.value.chimeEventAgendaDueEnabled =
+        data.chime_event_agenda_due_enabled === true;
+      deviceSettings.value.chimeEventOtaSuccessEnabled =
+        data.chime_event_ota_success_enabled === true;
+      deviceSettings.value.chimeEventCriticalErrorEnabled =
+        data.chime_event_critical_error_enabled === true;
+      deviceSettings.value.climateSensorAvailable = data.climate_sensor_available === true;
+      deviceSettings.value.climateRoomType = data.climate_room_type || "living_room";
+      deviceSettings.value.climateTempUnit = data.climate_temp_unit || "celsius";
+      deviceSettings.value.climateLoggingEnabled = data.climate_logging_enabled === true;
+      deviceSettings.value.climateOverlayEnabled = data.climate_overlay_enabled === true;
+      deviceSettings.value.climateAgendaHeaderEnabled = data.climate_agenda_header_enabled === true;
+      deviceSettings.value.climateTempOffset = data.climate_temp_offset ?? 0;
+      deviceSettings.value.climateHumOffset = data.climate_hum_offset ?? 0;
       deviceSettings.value.agendaTodoEnabled = data.agenda_todo_enabled === true;
       deviceSettings.value.agendaCalEnabled = data.agenda_cal_enabled === true;
       // agenda_todo_url/agenda_cal_url are intentionally never present in
       // this response (see http_server.c) - stay empty even when a URL is actually
       // configured, same write-only treatment as wifiPassword above.
+      deviceSettings.value.agendaCalCEnabled = data.agenda_cal_c_enabled === true;
+      deviceSettings.value.agendaCalDEnabled = data.agenda_cal_d_enabled === true;
+      deviceSettings.value.agendaCalEEnabled = data.agenda_cal_e_enabled === true;
+      deviceSettings.value.agendaCalCName = data.agenda_cal_c_name || "";
+      deviceSettings.value.agendaCalDName = data.agenda_cal_d_name || "";
+      deviceSettings.value.agendaCalEName = data.agenda_cal_e_name || "";
+      deviceSettings.value.agendaCalCColor = data.agenda_cal_c_color || "red";
+      deviceSettings.value.agendaCalDColor = data.agenda_cal_d_color || "yellow";
+      deviceSettings.value.agendaCalEColor = data.agenda_cal_e_color || "red";
       deviceSettings.value.agendaCalName = data.agenda_cal_name || "";
       deviceSettings.value.agendaCalName2 = data.agenda_cal_name2 || "";
       deviceSettings.value.agendaCalDays = data.agenda_cal_days ?? 2;
       deviceSettings.value.agendaCalWeatherEnabled = data.agenda_cal_weather_enabled === true;
       deviceSettings.value.agendaCalWeatherRightAligned =
         data.agenda_cal_weather_right_aligned === true;
-      deviceSettings.value.agendaCalCompactMultiday = data.agenda_cal_compact_multiday === true;
+      deviceSettings.value.agendaCalMultidayMode = data.agenda_cal_multiday_mode || "repeat";
+      deviceSettings.value.agendaCalTimeDisplayMode = data.agenda_cal_time_display_mode || "off";
+      deviceSettings.value.agendaCalUrlConfigured = data.agenda_cal_url_configured === true;
+      deviceSettings.value.agendaCalUrl2Configured = data.agenda_cal_url2_configured === true;
+      deviceSettings.value.agendaCalCConfigured = data.agenda_cal_c_configured === true;
+      deviceSettings.value.agendaCalDConfigured = data.agenda_cal_d_configured === true;
+      deviceSettings.value.agendaCalEConfigured = data.agenda_cal_e_configured === true;
       deviceSettings.value.agendaCron =
         Array.isArray(data.agenda_cron) && data.agenda_cron.length
           ? data.agenda_cron
@@ -397,39 +518,15 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.aiCredentials.openaiApiKey = data.openai_api_key || "";
       deviceSettings.value.aiCredentials.googleApiKey = data.google_api_key || "";
 
-      // Parse timezone from POSIX format (e.g., "UTC-8" -> 8)
-      const timezone = data.timezone || "UTC0";
-      let offset = 0;
-      const match = timezone.match(/UTC([+-]?)(\d+)(?::(\d+))?/);
-      if (match) {
-        const sign = match[1] === "-" ? 1 : -1; // POSIX format is inverted
-        const hours = parseInt(match[2]) || 0;
-        const minutes = parseInt(match[3]) || 0;
-        offset = sign * (hours + minutes / 60);
-      }
-      deviceSettings.value.timezoneOffset = offset;
+      // Kept as the raw POSIX string - see the `timezone` field's own
+      // comment above for why this is never parsed into a numeric offset.
+      deviceSettings.value.timezone = data.timezone || "UTC0";
     } catch (_error) {
       console.log("Device settings API not available (standalone mode)");
     }
   }
 
   async function saveDeviceSettings() {
-    // Convert UTC offset to POSIX timezone format
-    const offsetValue = deviceSettings.value.timezoneOffset || 0;
-    let timezone = "UTC0";
-    if (offsetValue !== 0) {
-      const absOffset = Math.abs(offsetValue);
-      const hours = Math.floor(absOffset);
-      const minutes = Math.round((absOffset - hours) * 60);
-      const sign = offsetValue > 0 ? "-" : "+"; // Inverted for POSIX
-
-      if (minutes === 0) {
-        timezone = `UTC${sign}${hours}`;
-      } else {
-        timezone = `UTC${sign}${hours}:${String(minutes).padStart(2, "0")}`;
-      }
-    }
-
     const currentConfig = {
       auto_rotate: deviceSettings.value.autoRotate,
       rotate_cron: deviceSettings.value.rotateCron,
@@ -447,6 +544,7 @@ export const useSettingsStore = defineStore("settings", () => {
       ota_check_enabled: deviceSettings.value.otaCheckEnabled,
       wifi_performance_mode_enabled: deviceSettings.value.wifiPerformanceModeEnabled,
       wifi_tx_power_cap_enabled: deviceSettings.value.wifiTxPowerCapEnabled,
+      wifi_extended_retry_enabled: deviceSettings.value.wifiExtendedRetryEnabled,
       rotation_pairing_enabled: deviceSettings.value.rotationPairingEnabled,
       variant_selection_enabled: deviceSettings.value.variantSelectionEnabled,
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,
@@ -474,14 +572,43 @@ export const useSettingsStore = defineStore("settings", () => {
       show_exif_datetime_enabled: deviceSettings.value.showExifDatetimeEnabled,
       low_battery_overlay_enabled: deviceSettings.value.lowBatteryOverlayEnabled,
       low_battery_overlay_threshold: deviceSettings.value.lowBatteryOverlayThreshold,
+      chime_speaker_mode: deviceSettings.value.chimeSpeakerMode,
+      chime_volume: deviceSettings.value.chimeVolume,
+      chime_quiet_enabled: deviceSettings.value.chimeQuietEnabled,
+      chime_quiet_start: deviceSettings.value.chimeQuietStart,
+      chime_quiet_end: deviceSettings.value.chimeQuietEnd,
+      chime_event_rotation_enabled: deviceSettings.value.chimeEventRotationEnabled,
+      chime_event_telegram_photo_enabled: deviceSettings.value.chimeEventTelegramPhotoEnabled,
+      chime_event_low_battery_enabled: deviceSettings.value.chimeEventLowBatteryEnabled,
+      chime_event_wifi_reprovision_enabled: deviceSettings.value.chimeEventWifiReprovisionEnabled,
+      chime_event_agenda_due_enabled: deviceSettings.value.chimeEventAgendaDueEnabled,
+      chime_event_ota_success_enabled: deviceSettings.value.chimeEventOtaSuccessEnabled,
+      chime_event_critical_error_enabled: deviceSettings.value.chimeEventCriticalErrorEnabled,
+      climate_room_type: deviceSettings.value.climateRoomType,
+      climate_temp_unit: deviceSettings.value.climateTempUnit,
+      climate_logging_enabled: deviceSettings.value.climateLoggingEnabled,
+      climate_overlay_enabled: deviceSettings.value.climateOverlayEnabled,
+      climate_agenda_header_enabled: deviceSettings.value.climateAgendaHeaderEnabled,
+      climate_temp_offset: deviceSettings.value.climateTempOffset,
+      climate_hum_offset: deviceSettings.value.climateHumOffset,
       agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
+      agenda_cal_c_enabled: deviceSettings.value.agendaCalCEnabled,
+      agenda_cal_d_enabled: deviceSettings.value.agendaCalDEnabled,
+      agenda_cal_e_enabled: deviceSettings.value.agendaCalEEnabled,
+      agenda_cal_c_name: deviceSettings.value.agendaCalCName,
+      agenda_cal_d_name: deviceSettings.value.agendaCalDName,
+      agenda_cal_e_name: deviceSettings.value.agendaCalEName,
+      agenda_cal_c_color: deviceSettings.value.agendaCalCColor,
+      agenda_cal_d_color: deviceSettings.value.agendaCalDColor,
+      agenda_cal_e_color: deviceSettings.value.agendaCalEColor,
       agenda_cal_name: deviceSettings.value.agendaCalName,
       agenda_cal_name2: deviceSettings.value.agendaCalName2,
       agenda_cal_days: deviceSettings.value.agendaCalDays,
       agenda_cal_weather_enabled: deviceSettings.value.agendaCalWeatherEnabled,
       agenda_cal_weather_right_aligned: deviceSettings.value.agendaCalWeatherRightAligned,
-      agenda_cal_compact_multiday: deviceSettings.value.agendaCalCompactMultiday,
+      agenda_cal_multiday_mode: deviceSettings.value.agendaCalMultidayMode,
+      agenda_cal_time_display_mode: deviceSettings.value.agendaCalTimeDisplayMode,
       agenda_cron: deviceSettings.value.agendaCron,
       agenda_stack_layout: deviceSettings.value.agendaStackLayout,
       agenda_bg_color: deviceSettings.value.agendaBgColor,
@@ -507,7 +634,7 @@ export const useSettingsStore = defineStore("settings", () => {
       static_netmask: deviceSettings.value.staticNetmask,
       static_gateway: deviceSettings.value.staticGateway,
       dns_server: deviceSettings.value.dnsServer,
-      timezone: timezone,
+      timezone: deviceSettings.value.timezone,
       access_token: deviceSettings.value.accessToken,
       http_header_key: deviceSettings.value.httpHeaderKey,
       http_header_value: deviceSettings.value.httpHeaderValue,
@@ -534,6 +661,15 @@ export const useSettingsStore = defineStore("settings", () => {
     }
     if (deviceSettings.value.agendaCalUrl2 && deviceSettings.value.agendaCalUrl2.length > 0) {
       currentConfig.agenda_cal_url2 = deviceSettings.value.agendaCalUrl2;
+    }
+    if (deviceSettings.value.agendaCalCUrl && deviceSettings.value.agendaCalCUrl.length > 0) {
+      currentConfig.agenda_cal_c_url = deviceSettings.value.agendaCalCUrl;
+    }
+    if (deviceSettings.value.agendaCalDUrl && deviceSettings.value.agendaCalDUrl.length > 0) {
+      currentConfig.agenda_cal_d_url = deviceSettings.value.agendaCalDUrl;
+    }
+    if (deviceSettings.value.agendaCalEUrl && deviceSettings.value.agendaCalEUrl.length > 0) {
+      currentConfig.agenda_cal_e_url = deviceSettings.value.agendaCalEUrl;
     }
 
     // Compare with original config and only send changed fields.

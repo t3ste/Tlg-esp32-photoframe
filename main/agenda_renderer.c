@@ -529,24 +529,64 @@ typedef struct {
 // background. Grayscale boards have no spare hue for this at all (same
 // reasoning as priority_color()'s grayscale fallback) and fall back to
 // plain body-colored text.
+// calendar_index 0/1 are the two auto-refreshing Calendar sources (A/B);
+// 2/3/4 are the three extra, never-auto-refreshed ICS sources (C/D/E - see
+// NVS_AGENDA_CAL_C_URL_KEY etc. in config.h) - same per-source-hue
+// treatment, just three more roles.
 static void calendar_source_color(int calendar_index, bool grayscale, uint8_t bg_r, uint8_t bg_g,
                                   uint8_t bg_b, uint8_t *fr, uint8_t *fg, uint8_t *fb, bool *has_bg)
 {
     *has_bg = false;
-    if (calendar_index == 0) {
+    switch (calendar_index) {
+    case 0:
         resolve_plain_color(config_manager_get_agenda_cal_a_color(), grayscale, 0, 0, 255, bg_r,
                             bg_g, bg_b, fr, fg, fb);
-    } else {
+        break;
+    case 1:
         resolve_plain_color(config_manager_get_agenda_cal_b_color(), grayscale, 0, 255, 0, bg_r,
                             bg_g, bg_b, fr, fg, fb);
+        break;
+    case 2:
+        resolve_plain_color(config_manager_get_agenda_cal_c_color(), grayscale, 255, 0, 0, bg_r,
+                            bg_g, bg_b, fr, fg, fb);
+        break;
+    case 3:
+        resolve_plain_color(config_manager_get_agenda_cal_d_color(), grayscale, 255, 255, 0, bg_r,
+                            bg_g, bg_b, fr, fg, fb);
+        break;
+    default:
+        resolve_plain_color(config_manager_get_agenda_cal_e_color(), grayscale, 255, 0, 0, bg_r,
+                            bg_g, bg_b, fr, fg, fb);
+        break;
     }
 }
 
-// Builds one event's display text - "HH:MM " (omitted for an all-day
-// event) followed by the summary - and resolves the single color (plus
-// optional chip) the whole row draws in, per calendar_source_color()
-// above. No date/day-of-week here: draw_calendar_column() shows that once
-// per day group via draw_day_divider(), not repeated on every event.
+// Formats a duration in whole minutes as a compact bracket-free token:
+// under an hour "45m", an exact number of hours "1h"/"2h", otherwise
+// "1h30m" - matches the granularity ICS events actually have (minutes),
+// without ever needing more than a handful of characters next to the
+// "HH:MM " prefix it follows.
+static void format_duration_compact(int total_minutes, char *out, size_t out_len)
+{
+    if (total_minutes < 60) {
+        snprintf(out, out_len, "%dm", total_minutes);
+    } else if (total_minutes % 60 == 0) {
+        snprintf(out, out_len, "%dh", total_minutes / 60);
+    } else {
+        snprintf(out, out_len, "%dh%02dm", total_minutes / 60, total_minutes % 60);
+    }
+}
+
+// Builds one event's display text - the start time (omitted for an all-day
+// event), in one of three forms depending on
+// config_manager_get_agenda_cal_time_display_mode() (NVS_AGENDA_CAL_SHOW_DURATION_KEY):
+// plain "HH:MM " (off, default), "HH:MM [duration] " (duration), or
+// "HH:MM-HH:MM " (range, only when a real end time is known - falls back to
+// plain "HH:MM " otherwise, same as duration mode already does) - then the
+// summary. Also resolves the single color (plus optional chip) the whole
+// row draws in, per calendar_source_color() above. No date/day-of-week
+// here: draw_calendar_column() shows that once per day group via
+// draw_day_divider(), not repeated on every event.
 static void build_event_line(const ics_event_t *ev, int calendar_index, bool grayscale,
                              uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, agenda_event_line_t *out)
 {
@@ -557,11 +597,32 @@ static void build_event_line(const ics_event_t *ev, int calendar_index, bool gra
     if (!ev->all_day) {
         struct tm start_tm;
         localtime_r(&ev->start, &start_tm);
-        int n = snprintf(out->text + pos, cap - pos + 1, "%02d:%02d ", start_tm.tm_hour,
+        agenda_time_display_mode_t time_mode = config_manager_get_agenda_cal_time_display_mode();
+        int duration_min = (ev->end > ev->start) ? (int) ((ev->end - ev->start) / 60) : 0;
+
+        int n;
+        if (time_mode == AGENDA_TIME_DISPLAY_RANGE && duration_min > 0) {
+            struct tm end_tm;
+            localtime_r(&ev->end, &end_tm);
+            n = snprintf(out->text + pos, cap - pos + 1, "%02d:%02d-%02d:%02d ", start_tm.tm_hour,
+                         start_tm.tm_min, end_tm.tm_hour, end_tm.tm_min);
+        } else {
+            n = snprintf(out->text + pos, cap - pos + 1, "%02d:%02d ", start_tm.tm_hour,
                          start_tm.tm_min);
+        }
         if (n > 0) {
             size_t written = ((size_t) n <= cap - pos) ? (size_t) n : cap - pos;
             pos += written;
+        }
+
+        if (time_mode == AGENDA_TIME_DISPLAY_DURATION && duration_min > 0) {
+            char dur[16];
+            format_duration_compact(duration_min, dur, sizeof(dur));
+            int dn = snprintf(out->text + pos, cap - pos + 1, "[%s] ", dur);
+            if (dn > 0) {
+                size_t dwritten = ((size_t) dn <= cap - pos) ? (size_t) dn : cap - pos;
+                pos += dwritten;
+            }
         }
     }
 
@@ -730,8 +791,8 @@ static bool event_touches_day(const ics_event_t *ev, time_t day)
 }
 
 // Total whole days `ev` spans (inclusive of both its first and last day) -
-// used only by the opt-in "compact multi-day" display below. A 1-day event
-// (the overwhelming majority) returns 1.
+// used by the COMPACT/REPEAT_NUMBERED multi-day display modes below. A
+// 1-day event (the overwhelming majority) returns 1.
 static int event_total_days(const ics_event_t *ev)
 {
     time_t ev_day_start = day_start(ev->start);
@@ -750,7 +811,7 @@ static int event_day_index(const ics_event_t *ev, time_t day)
 }
 
 #define AGENDA_MAX_CAL_DAYS 8  // generous vs. the 1-4 calendar days a 1-3 day lookahead can touch
-#define AGENDA_MAX_TAGGED_EVENTS (ICS_MAX_EVENTS * 2)  // events_a + events_b, worst case both full
+#define AGENDA_MAX_TAGGED_EVENTS (ICS_MAX_EVENTS * 5)  // events_a/b/c/d/e, worst case all five full
 
 // One event plus the pre-resolved line/color build_event_line() computed
 // for it (which already baked in which calendar it came from) - merging
@@ -792,9 +853,10 @@ static int compare_tagged_by_start(const void *a, const void *b)
 // timestamp - no day-count parenthetical, see the Web UI/README for that),
 // then one draw_day_divider() per distinct calendar day touched by any
 // event from either source, each followed by every event that touches
-// that day - including a multi-day event, which is deliberately repeated
-// under each day it spans rather than shown once under its start day
-// only. The day list is derived from the merged events but clipped to the
+// that day - including a multi-day event, which by default (REPEAT mode)
+// is repeated under each day it spans rather than shown once under its
+// start day only; see agenda_multiday_mode_t for the other two modes. The
+// day list is derived from the merged events but clipped to the
 // lookahead window explicitly too, since a multi-day event's own span can
 // extend past the window on either side even though it overlaps it. Stops
 // once the column runs out of vertical room, reserving a row for "+N more"
@@ -824,11 +886,112 @@ static bool find_weather_for_day(const weather_forecast_t *weather, time_t day,
     return false;
 }
 
+// Colors mirror image_processor_draw_climate_badges()'s convention exactly
+// (Bad=Red, Good=Yellow standing in for orange - this board's real palette
+// has no true orange, Super=Green; a single black chip on grayscale
+// boards, no color distinction possible there). No background-collision
+// avoidance is needed for the box itself (always high-contrast by
+// construction - same reasoning as the day-count "N/N:" prefix and the
+// per-source name swatches elsewhere in this file) - but the TEXT color
+// still needs to pick white vs. black per background, see
+// climate_chip_text_color() below.
+static void climate_chip_colors(climate_category_t category, bool grayscale, uint8_t *bg_r,
+                                uint8_t *bg_g, uint8_t *bg_b)
+{
+    if (grayscale) {
+        *bg_r = *bg_g = *bg_b = 0;
+        return;
+    }
+    switch (category) {
+    case CLIMATE_CATEGORY_BAD:
+        *bg_r = 255;
+        *bg_g = 0;
+        *bg_b = 0;
+        break;
+    case CLIMATE_CATEGORY_SUPER:
+        *bg_r = 0;
+        *bg_g = 255;
+        *bg_b = 0;
+        break;
+    case CLIMATE_CATEGORY_GOOD:
+    default:
+        *bg_r = 255;
+        *bg_g = 255;
+        *bg_b = 0;
+        break;
+    }
+}
+
+// White text reads fine on Red/Green/the grayscale chip's Black, but not on
+// Good's Yellow background - too little contrast to read on the actual
+// e-paper panel (confirmed live, same issue as the photo-overlay badges'
+// climate_badge_text_color()). Black text instead, only for that one case.
+static void climate_chip_text_color(climate_category_t category, bool grayscale, uint8_t *fg_r,
+                                    uint8_t *fg_g, uint8_t *fg_b)
+{
+    if (!grayscale && category == CLIMATE_CATEGORY_GOOD) {
+        *fg_r = *fg_g = *fg_b = 0;
+        return;
+    }
+    *fg_r = *fg_g = *fg_b = 255;
+}
+
+// Draws one right-aligned chip (colored box + text) in a column header,
+// anchored so its right edge sits at `right_edge_x` - returns the x the
+// next (further left) chip should use as its own right edge, same
+// chaining shape as image_processor_draw_climate_badges()'s photo-overlay
+// counterpart.
+static int draw_header_climate_chip(uint8_t *rgb, int width, int height, int right_edge_x, int y,
+                                    const char *text, climate_category_t category, bool grayscale)
+{
+    int text_len = (int) strlen(text);
+    int chip_w = text_len * IMAGE_PROCESSOR_FONT_WIDTH + IMAGE_PROCESSOR_FONT_WIDTH / 2;
+    int x = right_edge_x - chip_w;
+    if (x < 0) {
+        x = 0;
+    }
+    uint8_t bg_r, bg_g, bg_b;
+    climate_chip_colors(category, grayscale, &bg_r, &bg_g, &bg_b);
+    image_processor_fill_rect(rgb, width, height, x, y, chip_w, IMAGE_PROCESSOR_FONT_HEIGHT, bg_r,
+                              bg_g, bg_b);
+    uint8_t fg_r, fg_g, fg_b;
+    climate_chip_text_color(category, grayscale, &fg_r, &fg_g, &fg_b);
+    image_processor_draw_text(rgb, width, height, x + IMAGE_PROCESSOR_FONT_WIDTH / 4, y, text, fg_r,
+                              fg_g, fg_b);
+    return x - IMAGE_PROCESSOR_FONT_WIDTH / 2;
+}
+
+// Draws the optional climate readout (see agenda_climate_t) right-aligned
+// in a column header bar - shared by both draw_todo_column() and
+// draw_calendar_column(), which otherwise leave this space empty after
+// their own header text (confirmed free in both). No-op if `climate` is
+// NULL (feature off, or both sensor reads failed).
+static void draw_header_climate(uint8_t *rgb, int width, int height, agenda_rect_t rect,
+                                const agenda_climate_t *climate)
+{
+    if (!climate) {
+        return;
+    }
+    bool grayscale = agenda_board_is_grayscale();
+    int y = rect.y + AGENDA_PADDING;
+    int right_edge_x = rect.x + rect.w - AGENDA_PADDING;
+    if (climate->has_hum) {
+        right_edge_x =
+            draw_header_climate_chip(rgb, width, height, right_edge_x, y, climate->hum_text,
+                                     climate->hum_category, grayscale);
+    }
+    if (climate->has_temp) {
+        draw_header_climate_chip(rgb, width, height, right_edge_x, y, climate->temp_text,
+                                 climate->temp_category, grayscale);
+    }
+}
+
 static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rect_t rect,
                                  time_t now, int lookahead_days, uint8_t body_r, uint8_t body_g,
                                  uint8_t body_b, const agenda_tagged_event_t *tagged,
                                  int tagged_count, const weather_forecast_t *cal_weather,
-                                 agenda_cal_name_tag_t name_a, agenda_cal_name_tag_t name_b)
+                                 agenda_cal_name_tag_t name_a, agenda_cal_name_tag_t name_b,
+                                 const agenda_climate_t *climate)
 {
     uint8_t header_text_r, header_text_g, header_text_b;
     agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g, &header_text_b);
@@ -885,6 +1048,7 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
              now_tm.tm_mon + 1, now_tm.tm_year + 1900, now_tm.tm_hour, now_tm.tm_min);
     image_processor_draw_text(rgb, width, height, hx, hy, datetime, header_text_r, header_text_g,
                               header_text_b);
+    draw_header_climate(rgb, width, height, rect, climate);
 
     int row_h = IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
     int content_top = rect.y + header_h + AGENDA_PADDING;
@@ -908,13 +1072,17 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         }
     }
 
-    // Opt-in: a multi-day event is shown only once, on the first day of the
-    // *visible* window it touches, with an "N/M: " prefix (N = its position
-    // within its own full span, M = that span's total length) instead of
-    // being repeated under every day it spans. Precomputed once per tagged
-    // event rather than re-derived per day, since both the budgeting pass
-    // and the render pass below need the same answer.
-    bool compact_multiday = config_manager_get_agenda_cal_compact_multiday();
+    // Multi-day event display mode - see agenda_multiday_mode_t (config.h).
+    // COMPACT shows the event only once, on the first day of the *visible*
+    // window it touches; REPEAT_NUMBERED keeps repeating it under every day
+    // like plain REPEAT but adds the same "N/M: " prefix COMPACT uses (N =
+    // position within the event's own full span, M = that span's total
+    // length). Precomputed once per tagged event rather than re-derived per
+    // day, since both the budgeting pass and the render pass below need the
+    // same answer.
+    agenda_multiday_mode_t multiday_mode = config_manager_get_agenda_cal_multiday_mode();
+    bool skip_repeats = (multiday_mode == AGENDA_MULTIDAY_COMPACT);
+    bool show_prefix = (multiday_mode != AGENDA_MULTIDAY_REPEAT);
     bool is_multiday[AGENDA_MAX_TAGGED_EVENTS];
     int first_visible_idx[AGENDA_MAX_TAGGED_EVENTS];
     for (int k = 0; k < tagged_count; k++) {
@@ -939,7 +1107,7 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
             if (!event_touches_day(tagged[k].ev, days[di])) {
                 continue;
             }
-            if (compact_multiday && is_multiday[k] && di != first_visible_idx[k]) {
+            if (skip_repeats && is_multiday[k] && di != first_visible_idx[k]) {
                 continue;
             }
             total_event_instances++;
@@ -991,14 +1159,14 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
             if (!event_touches_day(tagged[i].ev, days[di])) {
                 continue;
             }
-            if (compact_multiday && is_multiday[i] && di != first_visible_idx[i]) {
+            if (skip_repeats && is_multiday[i] && di != first_visible_idx[i]) {
                 continue;
             }
             const agenda_event_line_t *line = tagged[i].line;
 
             char prefix[16] = "";
             int prefix_len = 0;
-            if (compact_multiday && is_multiday[i]) {
+            if (show_prefix && is_multiday[i]) {
                 prefix_len = snprintf(prefix, sizeof(prefix),
                                       "%d/%d: ", event_day_index(tagged[i].ev, days[di]),
                                       event_total_days(tagged[i].ev));
@@ -1049,7 +1217,8 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
 // straddling the cutoff is shortened to match).
 static void draw_todo_column(uint8_t *rgb, int width, int height, agenda_rect_t rect, time_t now,
                              uint8_t body_r, uint8_t body_g, uint8_t body_b,
-                             const agenda_line_t *todo_lines, int line_count)
+                             const agenda_line_t *todo_lines, int line_count,
+                             const agenda_climate_t *climate)
 {
     uint8_t header_text_r, header_text_g, header_text_b;
     agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g, &header_text_b);
@@ -1065,6 +1234,7 @@ static void draw_todo_column(uint8_t *rgb, int width, int height, agenda_rect_t 
                               body_b);
     image_processor_draw_text(rgb, width, height, rect.x + AGENDA_PADDING, rect.y + AGENDA_PADDING,
                               header, header_text_r, header_text_g, header_text_b);
+    draw_header_climate(rgb, width, height, rect, climate);
 
     int row_h = IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
     int content_top = rect.y + header_h + AGENDA_PADDING;
@@ -1118,9 +1288,11 @@ static void draw_todo_column(uint8_t *rgb, int width, int height, agenda_rect_t 
 }
 
 esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t *events_a,
-                                 const ics_event_list_t *events_b,
+                                 const ics_event_list_t *events_b, const ics_event_list_t *events_c,
+                                 const ics_event_list_t *events_d, const ics_event_list_t *events_e,
                                  const weather_forecast_t *cal_weather, int lookahead_days,
-                                 const char *output_path, image_format_t out_format)
+                                 const char *output_path, image_format_t out_format,
+                                 const agenda_climate_t *climate)
 {
     if (!output_path) {
         return ESP_ERR_INVALID_ARG;
@@ -1128,7 +1300,10 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
     bool show_todo = todo && todo->count > 0;
     bool have_a = events_a && events_a->count > 0;
     bool have_b = events_b && events_b->count > 0;
-    bool show_cal = have_a || have_b;
+    bool have_c = events_c && events_c->count > 0;
+    bool have_d = events_d && events_d->count > 0;
+    bool have_e = events_e && events_e->count > 0;
+    bool show_cal = have_a || have_b || have_c || have_d || have_e;
     if (!show_todo && !show_cal) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -1191,7 +1366,7 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                 build_todo_line(&todo->items[i], now, grayscale, bg_r, bg_g, bg_b, &todo_lines[i]);
             }
             draw_todo_column(rgb, width, height, todo_rect, now, body_r, body_g, body_b, todo_lines,
-                             todo->count);
+                             todo->count, climate);
         } else {
             ESP_LOGW(TAG, "Failed to allocate ToDo render scratch buffers - skipping ToDo column");
         }
@@ -1201,15 +1376,24 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
     if (show_cal) {
         int count_a = have_a ? events_a->count : 0;
         int count_b = have_b ? events_b->count : 0;
+        int count_c = have_c ? events_c->count : 0;
+        int count_d = have_d ? events_d->count : 0;
+        int count_e = have_e ? events_e->count : 0;
 
         agenda_event_line_t *lines_a = heap_caps_malloc(
             (size_t) (count_a > 0 ? count_a : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
         agenda_event_line_t *lines_b = heap_caps_malloc(
             (size_t) (count_b > 0 ? count_b : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
+        agenda_event_line_t *lines_c = heap_caps_malloc(
+            (size_t) (count_c > 0 ? count_c : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
+        agenda_event_line_t *lines_d = heap_caps_malloc(
+            (size_t) (count_d > 0 ? count_d : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
+        agenda_event_line_t *lines_e = heap_caps_malloc(
+            (size_t) (count_e > 0 ? count_e : 1) * sizeof(agenda_event_line_t), MALLOC_CAP_SPIRAM);
         agenda_tagged_event_t *tagged = heap_caps_malloc(
             AGENDA_MAX_TAGGED_EVENTS * sizeof(agenda_tagged_event_t), MALLOC_CAP_SPIRAM);
 
-        if (lines_a && lines_b && tagged) {
+        if (lines_a && lines_b && lines_c && lines_d && lines_e && tagged) {
             int tagged_count = 0;
             for (int i = 0; i < count_a && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
                 build_event_line(&events_a->events[i], 0, grayscale, bg_r, bg_g, bg_b, &lines_a[i]);
@@ -1221,6 +1405,28 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                 build_event_line(&events_b->events[i], 1, grayscale, bg_r, bg_g, bg_b, &lines_b[i]);
                 tagged[tagged_count].ev = &events_b->events[i];
                 tagged[tagged_count].line = &lines_b[i];
+                tagged_count++;
+            }
+            // C/D/E: same tagging shape as A/B, just a different
+            // calendar_index (2/3/4) so calendar_source_color() picks each
+            // one's own configured hue - see NVS_AGENDA_CAL_C_URL_KEY etc.
+            // in config.h for why these three never auto-refresh.
+            for (int i = 0; i < count_c && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
+                build_event_line(&events_c->events[i], 2, grayscale, bg_r, bg_g, bg_b, &lines_c[i]);
+                tagged[tagged_count].ev = &events_c->events[i];
+                tagged[tagged_count].line = &lines_c[i];
+                tagged_count++;
+            }
+            for (int i = 0; i < count_d && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
+                build_event_line(&events_d->events[i], 3, grayscale, bg_r, bg_g, bg_b, &lines_d[i]);
+                tagged[tagged_count].ev = &events_d->events[i];
+                tagged[tagged_count].line = &lines_d[i];
+                tagged_count++;
+            }
+            for (int i = 0; i < count_e && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
+                build_event_line(&events_e->events[i], 4, grayscale, bg_r, bg_g, bg_b, &lines_e[i]);
+                tagged[tagged_count].ev = &events_e->events[i];
+                tagged[tagged_count].line = &lines_e[i];
                 tagged_count++;
             }
             if (tagged_count > 1) {
@@ -1264,12 +1470,15 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                 tag_b.b = lines_b[0].fb;
             }
             draw_calendar_column(rgb, width, height, cal_rect, now, lookahead_days, body_r, body_g,
-                                 body_b, tagged, tagged_count, cal_weather, tag_a, tag_b);
+                                 body_b, tagged, tagged_count, cal_weather, tag_a, tag_b, climate);
         } else {
             ESP_LOGW(TAG, "Failed to allocate Calendar render scratch buffers - skipping column");
         }
         heap_caps_free(lines_a);
         heap_caps_free(lines_b);
+        heap_caps_free(lines_c);
+        heap_caps_free(lines_d);
+        heap_caps_free(lines_e);
         heap_caps_free(tagged);
     }
 

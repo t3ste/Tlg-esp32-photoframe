@@ -8,7 +8,9 @@
 
 #include "board_hal.h"
 #include "cJSON.h"
+#include "calendar_ics.h"
 #include "cert_pin.h"
+#include "chime.h"
 #include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
@@ -146,6 +148,56 @@ const char *utils_consume_config_error(void)
     out[sizeof(out) - 1] = '\0';
     last_config_error[0] = '\0';
     return out;
+}
+
+// Applies one of the three extra ICS sources' URL fields (see
+// NVS_AGENDA_CAL_C_URL_KEY etc. in config.h): if the incoming value differs
+// from what's already stored, OR the matching "<field>_refetch" flag was
+// sent (the Web UI's "refresh now" button, which doesn't change the URL
+// itself), does a one-shot, unconditional download into `cache_path` right
+// now - unlike Calendar A/B, these sources are otherwise never fetched
+// again on their own once saved. A fetch failure is logged but doesn't fail
+// the whole config save (the URL is still saved either way - a currently
+// unreachable source may become reachable later, and there's no ETag/prior
+// state to roll back to). `set_url` is one of the config_manager setters
+// for this slot (config_manager_set_agenda_cal_c_url() etc.).
+//
+// A successful fetch also deletes `flat_cache_path` (the already-expanded
+// cache agenda_manager.c's load_extra_ics_source() otherwise keeps reusing
+// for up to AGENDA_EXTRA_ICS_EXPAND_DAYS) - without this, a fresh raw file
+// from "refresh now" or a changed URL could sit unused for weeks behind a
+// still-fresh-looking old expansion, defeating the whole point of the
+// button.
+static void apply_extra_ics_url(cJSON *root, const char *url_field, const char *refetch_field,
+                                const char *old_url, const char *cache_path,
+                                const char *flat_cache_path, void (*set_url)(const char *))
+{
+    cJSON *url_item = cJSON_GetObjectItem(root, url_field);
+    const char *new_url =
+        (url_item && cJSON_IsString(url_item)) ? cJSON_GetStringValue(url_item) : NULL;
+    // Same "empty means untouched, not cleared" write-only convention as
+    // agenda_cal_url/_url2 above - never treat an empty string as an actual
+    // new value.
+    bool have_new_url = new_url && new_url[0] != '\0';
+    cJSON *refetch_item = cJSON_GetObjectItem(root, refetch_field);
+    bool refetch_requested = refetch_item && cJSON_IsTrue(refetch_item);
+
+    bool url_changed = have_new_url && strcmp(new_url, old_url) != 0;
+    const char *effective_url = have_new_url ? new_url : old_url;
+
+    if ((url_changed || refetch_requested) && effective_url && effective_url[0] != '\0') {
+        esp_err_t err = calendar_ics_fetch_once(effective_url, 0, cache_path);
+        if (err == ESP_OK) {
+            unlink(flat_cache_path);
+            ESP_LOGI(TAG, "Fetched extra ICS source (%s)", url_field);
+        } else {
+            ESP_LOGW(TAG, "Failed to fetch extra ICS source (%s): %s", url_field,
+                     esp_err_to_name(err));
+        }
+    }
+    if (have_new_url) {
+        set_url(new_url);
+    }
 }
 
 esp_err_t apply_config_from_json(cJSON *root)
@@ -547,6 +599,11 @@ esp_err_t apply_config_from_json(cJSON *root)
         config_manager_set_wifi_tx_power_cap_enabled(cJSON_IsTrue(item));
     }
 
+    item = cJSON_GetObjectItem(root, "wifi_extended_retry_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_wifi_extended_retry_enabled(cJSON_IsTrue(item));
+    }
+
     // Auto-rotate orientation pairing (random mode only)
     item = cJSON_GetObjectItem(root, "rotation_pairing_enabled");
     if (item && cJSON_IsBool(item)) {
@@ -712,10 +769,125 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_cal_weather_right_aligned(cJSON_IsTrue(item));
     }
-    item = cJSON_GetObjectItem(root, "agenda_cal_compact_multiday");
-    if (item && cJSON_IsBool(item)) {
-        config_manager_set_agenda_cal_compact_multiday(cJSON_IsTrue(item));
+    item = cJSON_GetObjectItem(root, "agenda_cal_multiday_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *mode_str = cJSON_GetStringValue(item);
+        agenda_multiday_mode_t mode = AGENDA_MULTIDAY_REPEAT;
+        if (strcmp(mode_str, "compact") == 0) {
+            mode = AGENDA_MULTIDAY_COMPACT;
+        } else if (strcmp(mode_str, "repeat_numbered") == 0) {
+            mode = AGENDA_MULTIDAY_REPEAT_NUMBERED;
+        }
+        config_manager_set_agenda_cal_multiday_mode(mode);
     }
+    item = cJSON_GetObjectItem(root, "agenda_cal_time_display_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *time_mode_str = cJSON_GetStringValue(item);
+        agenda_time_display_mode_t time_mode = AGENDA_TIME_DISPLAY_OFF;
+        if (strcmp(time_mode_str, "duration") == 0) {
+            time_mode = AGENDA_TIME_DISPLAY_DURATION;
+        } else if (strcmp(time_mode_str, "range") == 0) {
+            time_mode = AGENDA_TIME_DISPLAY_RANGE;
+        }
+        config_manager_set_agenda_cal_time_display_mode(time_mode);
+    }
+
+    // Chimes (speaker feedback) - see chime_speaker_mode_t/chime_event_t in
+    // config.h and main/chime.c.
+    item = cJSON_GetObjectItem(root, "chime_speaker_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *mode_str = cJSON_GetStringValue(item);
+        chime_speaker_mode_t mode = CHIME_SPEAKER_OFF;
+        if (strcmp(mode_str, "battery_and_mains") == 0) {
+            mode = CHIME_SPEAKER_BATTERY_AND_MAINS;
+        } else if (strcmp(mode_str, "mains_only") == 0) {
+            mode = CHIME_SPEAKER_MAINS_ONLY;
+        }
+        config_manager_set_chime_speaker_mode(mode);
+    }
+    item = cJSON_GetObjectItem(root, "chime_volume");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_chime_volume(item->valueint);
+    }
+    item = cJSON_GetObjectItem(root, "chime_quiet_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_chime_quiet_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "chime_quiet_start");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_chime_quiet_start(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "chime_quiet_end");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_chime_quiet_end(cJSON_GetStringValue(item));
+    }
+    static const struct {
+        const char *field;
+        chime_event_t event;
+    } chime_event_fields[] = {
+        {"chime_event_rotation_enabled", CHIME_EVENT_ROTATION},
+        {"chime_event_telegram_photo_enabled", CHIME_EVENT_TELEGRAM_PHOTO},
+        {"chime_event_low_battery_enabled", CHIME_EVENT_LOW_BATTERY},
+        {"chime_event_wifi_reprovision_enabled", CHIME_EVENT_WIFI_REPROVISION},
+        {"chime_event_agenda_due_enabled", CHIME_EVENT_AGENDA_DUE},
+        {"chime_event_ota_success_enabled", CHIME_EVENT_OTA_SUCCESS},
+        {"chime_event_critical_error_enabled", CHIME_EVENT_CRITICAL_ERROR},
+    };
+    for (size_t i = 0; i < sizeof(chime_event_fields) / sizeof(chime_event_fields[0]); i++) {
+        item = cJSON_GetObjectItem(root, chime_event_fields[i].field);
+        if (item && cJSON_IsBool(item)) {
+            config_manager_set_chime_event_enabled(chime_event_fields[i].event, cJSON_IsTrue(item));
+        }
+    }
+
+    // Climate (SHTC3 temperature/humidity) - see climate_room_type_t/
+    // climate_temp_unit_t in config.h and main/climate.[ch].
+    item = cJSON_GetObjectItem(root, "climate_room_type");
+    if (item && cJSON_IsString(item)) {
+        const char *room_str = cJSON_GetStringValue(item);
+        climate_room_type_t room = CLIMATE_ROOM_LIVING_ROOM;
+        if (strcmp(room_str, "bedroom") == 0) {
+            room = CLIMATE_ROOM_BEDROOM;
+        } else if (strcmp(room_str, "bathroom") == 0) {
+            room = CLIMATE_ROOM_BATHROOM;
+        } else if (strcmp(room_str, "kitchen") == 0) {
+            room = CLIMATE_ROOM_KITCHEN;
+        } else if (strcmp(room_str, "basement") == 0) {
+            room = CLIMATE_ROOM_BASEMENT;
+        }
+        config_manager_set_climate_room_type(room);
+    }
+    item = cJSON_GetObjectItem(root, "climate_temp_unit");
+    if (item && cJSON_IsString(item)) {
+        const char *unit_str = cJSON_GetStringValue(item);
+        config_manager_set_climate_temp_unit(
+            strcmp(unit_str, "fahrenheit") == 0 ? CLIMATE_UNIT_FAHRENHEIT : CLIMATE_UNIT_CELSIUS);
+    }
+    item = cJSON_GetObjectItem(root, "climate_logging_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_climate_logging_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "climate_overlay_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_climate_overlay_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "climate_agenda_header_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_climate_agenda_header_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "climate_temp_offset");
+    if (item && cJSON_IsNumber(item)) {
+        char offset_str[CLIMATE_OFFSET_MAX_LEN];
+        snprintf(offset_str, sizeof(offset_str), "%.2f", item->valuedouble);
+        config_manager_set_climate_temp_offset(offset_str);
+    }
+    item = cJSON_GetObjectItem(root, "climate_hum_offset");
+    if (item && cJSON_IsNumber(item)) {
+        char offset_str[CLIMATE_OFFSET_MAX_LEN];
+        snprintf(offset_str, sizeof(offset_str), "%.2f", item->valuedouble);
+        config_manager_set_climate_hum_offset(offset_str);
+    }
+
     // Plain display names, not credentials - unlike agenda_cal_url above,
     // applied even when empty (an empty save genuinely means "cleared back
     // to the generic default", not "field left untouched").
@@ -727,6 +899,44 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsString(item)) {
         config_manager_set_agenda_cal_name2(cJSON_GetStringValue(item));
     }
+    // Three extra ICS sources - no periodic refresh, see
+    // apply_extra_ics_url()'s comment above. Enabled/name are plain
+    // settings; URL is write-only like agenda_cal_url/_url2 above, but
+    // unlike those, an actual change (or an explicit "<x>_refetch": true)
+    // triggers an immediate one-shot download.
+    item = cJSON_GetObjectItem(root, "agenda_cal_c_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_c_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_d_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_d_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_e_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_agenda_cal_e_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_c_name");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_cal_c_name(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_d_name");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_cal_d_name(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_e_name");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_cal_e_name(cJSON_GetStringValue(item));
+    }
+    apply_extra_ics_url(root, "agenda_cal_c_url", "agenda_cal_c_refetch",
+                        config_manager_get_agenda_cal_c_url(), AGENDA_CAL_CACHE_PATH_C,
+                        AGENDA_CAL_CACHE_PATH_C_FLAT, config_manager_set_agenda_cal_c_url);
+    apply_extra_ics_url(root, "agenda_cal_d_url", "agenda_cal_d_refetch",
+                        config_manager_get_agenda_cal_d_url(), AGENDA_CAL_CACHE_PATH_D,
+                        AGENDA_CAL_CACHE_PATH_D_FLAT, config_manager_set_agenda_cal_d_url);
+    apply_extra_ics_url(root, "agenda_cal_e_url", "agenda_cal_e_refetch",
+                        config_manager_get_agenda_cal_e_url(), AGENDA_CAL_CACHE_PATH_E,
+                        AGENDA_CAL_CACHE_PATH_E_FLAT, config_manager_set_agenda_cal_e_url);
     // Agenda schedule: same shape/validation as rotate_cron above, but an
     // empty array is allowed here (agenda_manager_is_enabled() already
     // requires a non-empty schedule before agenda mode can ever fire, so
@@ -826,6 +1036,18 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "agenda_cal_b_color");
     if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
         config_manager_set_agenda_cal_b_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_c_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_c_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_d_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_d_color(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_e_color");
+    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
+        config_manager_set_agenda_cal_e_color(cJSON_GetStringValue(item));
     }
     config_manager_end_agenda_batch();
 
@@ -1602,6 +1824,7 @@ void utils_handle_wifi_connect_result(bool connected)
         if (config_manager_get_wifi_fail_count() != 0) {
             config_manager_set_wifi_fail_count(0);
         }
+        chime_repeat_gate(CHIME_EVENT_CRITICAL_ERROR, false);  // resolved - reset the repeat count
         return;
     }
 
@@ -1609,6 +1832,11 @@ void utils_handle_wifi_connect_result(bool connected)
     config_manager_set_wifi_fail_count(count);
     ESP_LOGW(TAG, "WiFi connect failed (%d consecutive)", count);
 
+    // Repeats once per wake while still failing (not just on the first
+    // crossing), up to CHIME_REPEAT_MAX times - see chime_repeat_gate().
+    if (chime_repeat_gate(CHIME_EVENT_CRITICAL_ERROR, count >= WIFI_FAIL_OVERLAY_THRESHOLD)) {
+        chime_play_if_enabled(CHIME_EVENT_CRITICAL_ERROR);
+    }
     if (!config_manager_get_error_overlay_enabled() || count < WIFI_FAIL_OVERLAY_THRESHOLD) {
         return;
     }
@@ -1647,6 +1875,7 @@ void utils_finalize_internet_health(void)
         if (config_manager_get_wifi_fail_count() != 0) {
             config_manager_set_wifi_fail_count(0);
         }
+        chime_repeat_gate(CHIME_EVENT_CRITICAL_ERROR, false);  // resolved - reset the repeat count
         return;
     }
 
@@ -1656,6 +1885,9 @@ void utils_finalize_internet_health(void)
              "Internet-dependent request(s) failed despite WiFi being connected (%d consecutive)",
              count);
 
+    if (chime_repeat_gate(CHIME_EVENT_CRITICAL_ERROR, count >= WIFI_FAIL_OVERLAY_THRESHOLD)) {
+        chime_play_if_enabled(CHIME_EVENT_CRITICAL_ERROR);
+    }
     if (!config_manager_get_error_overlay_enabled() || count < WIFI_FAIL_OVERLAY_THRESHOLD) {
         return;
     }

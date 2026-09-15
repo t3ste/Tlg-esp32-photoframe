@@ -3532,14 +3532,18 @@ static void sanitize_caption_ascii(const char *utf8, char *out, size_t out_len)
     out[o] = '\0';
 }
 
-// Fills a solid horizontal bar (top or bottom edge) and centers each of
-// `line_count` pre-built, already-fits-the-width lines within it. Shared by
-// image_processor_draw_caption() (word-wrapped single string, bottom-anchored)
-// and image_processor_draw_overlay_bar() (independent pre-truncated lines,
-// top-anchored) so the two can never visually collide on the same image.
+// Fills a solid horizontal bar (top or bottom edge, full `width`) and
+// centers each of `line_count` pre-built, already-fits-the-width lines
+// within `usable_width` (<= width - the caption bar always passes `width`
+// itself; the overlay bar passes a narrower value to reserve room for the
+// top-right climate badges, see image_processor_add_overlay_to_file()).
+// Shared by image_processor_draw_caption() (word-wrapped single string,
+// bottom-anchored) and image_processor_draw_overlay_bar() (independent
+// pre-truncated lines, top-anchored) so the two can never visually collide
+// on the same image.
 static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
                             char lines[][CAPTION_LINE_MAX_CHARS], int line_count, bool anchor_top,
-                            rgb_t bg, rgb_t fg)
+                            int usable_width, rgb_t bg, rgb_t fg)
 {
     int bar_height = line_count * (Font24.Height + CAPTION_LINE_PADDING) + CAPTION_LINE_PADDING;
     if (bar_height > height) {
@@ -3558,7 +3562,7 @@ static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
 
     for (int i = 0; i < line_count; i++) {
         int text_width = (int) strlen(lines[i]) * Font24.Width;
-        int x = (width - text_width) / 2;
+        int x = (usable_width - text_width) / 2;
         if (x < CAPTION_LINE_PADDING) {
             x = CAPTION_LINE_PADDING;
         }
@@ -3672,7 +3676,7 @@ void image_processor_draw_caption(uint8_t *rgb_buffer, int width, int height, co
     // setting, though callers typically pass the same value through).
     rgb_t bg = invert_colors ? palette[1] : palette[0];
     rgb_t fg = invert_colors ? palette[0] : palette[1];
-    render_text_bar(rgb_buffer, width, height, lines, line_count, false, bg, fg);
+    render_text_bar(rgb_buffer, width, height, lines, line_count, false, width, bg, fg);
 }
 
 int image_processor_wrap_text(const char *text, int width, int max_lines,
@@ -3690,7 +3694,8 @@ int image_processor_wrap_text(const char *text, int width, int max_lines,
 }
 
 void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height,
-                                      const char *const *lines, int line_count, bool invert_colors)
+                                      const char *const *lines, int line_count, bool invert_colors,
+                                      int right_margin_px)
 {
     if (!rgb_buffer || !lines || line_count <= 0) {
         return;
@@ -3698,8 +3703,12 @@ void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height
     if (line_count > OVERLAY_MAX_LINES) {
         line_count = OVERLAY_MAX_LINES;
     }
+    if (right_margin_px < 0) {
+        right_margin_px = 0;
+    }
+    int usable_width = width - right_margin_px;
 
-    int chars_per_line = (width - 2 * CAPTION_LINE_PADDING) / Font24.Width;
+    int chars_per_line = (usable_width - 2 * CAPTION_LINE_PADDING) / Font24.Width;
     if (chars_per_line < 1) {
         return;  // display too narrow for this font, skip silently
     }
@@ -3740,7 +3749,8 @@ void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height
     // way, so the result stays a valid "processed" buffer.
     rgb_t bg = invert_colors ? palette[1] : palette[0];
     rgb_t fg = invert_colors ? palette[0] : palette[1];
-    render_text_bar(rgb_buffer, width, height, built_lines, built_count, true, bg, fg);
+    render_text_bar(rgb_buffer, width, height, built_lines, built_count, true, usable_width, bg,
+                    fg);
 }
 
 void image_processor_draw_battery_badge(uint8_t *rgb_buffer, int width, int height,
@@ -3790,6 +3800,108 @@ void image_processor_draw_battery_badge(uint8_t *rgb_buffer, int width, int heig
     for (const char *p = text; *p != '\0'; p++) {
         draw_glyph(rgb_buffer, width, height, tx, ty, *p, fg);
         tx += Font24.Width;
+    }
+}
+
+// Bad=Red, Super=Green; Good stands in for the report's "orange" since this
+// board's real palette (see `palette[]` above) has no true orange.
+// Grayscale-only boards can't represent any of these distinctly, so they
+// all collapse to the same black badge as the battery badge above.
+static rgb_t climate_badge_color(climate_category_t category)
+{
+    if (board_is_grayscale()) {
+        return palette[0];
+    }
+    switch (category) {
+    case CLIMATE_CATEGORY_BAD:
+        return palette[3];
+    case CLIMATE_CATEGORY_SUPER:
+        return palette[6];
+    case CLIMATE_CATEGORY_GOOD:
+    default:
+        return palette[2];
+    }
+}
+
+// White text reads fine on Red/Green/the grayscale badge's Black, but not on
+// Good's Yellow background - too little contrast to read on the actual
+// e-paper panel (confirmed live). Black text instead, only for that one case.
+static rgb_t climate_badge_text_color(climate_category_t category)
+{
+    if (!board_is_grayscale() && category == CLIMATE_CATEGORY_GOOD) {
+        return palette[0];
+    }
+    return palette[1];
+}
+
+// Pixel width one climate badge will occupy for the given text, box padding
+// included - shared by draw_one_climate_badge() (the actual draw) and
+// image_processor_add_overlay_to_file() (which needs this ahead of time, to
+// tell the overlay bar how much room to reserve on the right so its own
+// text doesn't run underneath the badge - see right_margin_px).
+static int climate_badge_width(const char *text)
+{
+    return (int) strlen(text) * Font24.Width + 2 * CAPTION_LINE_PADDING;
+}
+
+// Draws one badge anchored so its RIGHT edge sits at `right_edge_x` -
+// returns the x coordinate the next (further left) badge should use as its
+// own right edge, so image_processor_draw_climate_badges() can chain two
+// without overlap. Otherwise identical box+glyph-loop shape to
+// image_processor_draw_battery_badge() above.
+static int draw_one_climate_badge(uint8_t *rgb_buffer, int width, int height, int right_edge_x,
+                                  const char *text, rgb_t bg, rgb_t fg)
+{
+    int badge_width = climate_badge_width(text);
+    int badge_height = Font24.Height + 2 * CAPTION_LINE_PADDING;
+    if (badge_width > width) {
+        badge_width = width;
+    }
+    if (badge_height > height) {
+        badge_height = height;
+    }
+
+    int box_x = right_edge_x - badge_width;
+    if (box_x < 0) {
+        box_x = 0;
+    }
+
+    for (int y = 0; y < badge_height; y++) {
+        for (int x = 0; x < badge_width; x++) {
+            int idx = (y * width + (box_x + x)) * 3;
+            rgb_buffer[idx] = bg.r;
+            rgb_buffer[idx + 1] = bg.g;
+            rgb_buffer[idx + 2] = bg.b;
+        }
+    }
+
+    int tx = box_x + CAPTION_LINE_PADDING;
+    int ty = CAPTION_LINE_PADDING;
+    for (const char *p = text; *p != '\0'; p++) {
+        draw_glyph(rgb_buffer, width, height, tx, ty, *p, fg);
+        tx += Font24.Width;
+    }
+    return box_x - CAPTION_LINE_PADDING;  // small gap before the next badge
+}
+
+void image_processor_draw_climate_badges(uint8_t *rgb_buffer, int width, int height, bool has_temp,
+                                         const char *temp_text, climate_category_t temp_category,
+                                         bool has_hum, const char *hum_text,
+                                         climate_category_t hum_category)
+{
+    if (!rgb_buffer || width <= 0 || height <= 0) {
+        return;
+    }
+    int right_edge_x = width;
+    if (has_hum && hum_text && hum_text[0] != '\0') {
+        right_edge_x = draw_one_climate_badge(rgb_buffer, width, height, right_edge_x, hum_text,
+                                              climate_badge_color(hum_category),
+                                              climate_badge_text_color(hum_category));
+    }
+    if (has_temp && temp_text && temp_text[0] != '\0') {
+        draw_one_climate_badge(rgb_buffer, width, height, right_edge_x, temp_text,
+                               climate_badge_color(temp_category),
+                               climate_badge_text_color(temp_category));
     }
 }
 
@@ -3869,22 +3981,28 @@ typedef struct {
     const char *const *lines;
     int line_count;
     bool invert_colors;
+    int right_margin_px;
 } overlay_draw_arg_t;
 
 static void overlay_draw_trampoline(uint8_t *rgb_buffer, int width, int height, const void *arg)
 {
     const overlay_draw_arg_t *a = (const overlay_draw_arg_t *) arg;
     image_processor_draw_overlay_bar(rgb_buffer, width, height, a->lines, a->line_count,
-                                     a->invert_colors);
+                                     a->invert_colors, a->right_margin_px);
 }
 
 esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lines, int line_count,
                                               bool invert_colors, bool draw_battery_badge,
-                                              int battery_percent, const char *exif_caption)
+                                              int battery_percent, const char *exif_caption,
+                                              bool draw_climate_temp, const char *climate_temp_text,
+                                              climate_category_t climate_temp_category,
+                                              bool draw_climate_hum, const char *climate_hum_text,
+                                              climate_category_t climate_hum_category)
 {
     bool has_lines = lines && line_count > 0;
     bool has_exif_caption = exif_caption && exif_caption[0] != '\0';
-    if (!has_lines && !draw_battery_badge && !has_exif_caption) {
+    if (!has_lines && !draw_battery_badge && !has_exif_caption && !draw_climate_temp &&
+        !draw_climate_hum) {
         return ESP_OK;
     }
     if (!path) {
@@ -3927,14 +4045,38 @@ esp_err_t image_processor_add_overlay_to_file(char *path, const char *const *lin
     }
 
     if (has_lines) {
-        overlay_draw_arg_t arg = {
-            .lines = lines, .line_count = line_count, .invert_colors = invert_colors};
+        // Reserve room for whichever climate badges are about to be drawn
+        // (below), so their box doesn't overwrite this bar's own text -
+        // the text truncates ahead of it instead. See right_margin_px's
+        // doc comment.
+        int climate_margin = 0;
+        if (draw_climate_temp && climate_temp_text && climate_temp_text[0] != '\0') {
+            climate_margin += climate_badge_width(climate_temp_text);
+        }
+        if (draw_climate_hum && climate_hum_text && climate_hum_text[0] != '\0') {
+            climate_margin += climate_badge_width(climate_hum_text);
+        }
+        if (climate_margin > 0 && draw_climate_temp && draw_climate_hum && climate_temp_text &&
+            climate_temp_text[0] != '\0' && climate_hum_text && climate_hum_text[0] != '\0') {
+            climate_margin += CAPTION_LINE_PADDING;  // gap between the two badges
+        }
+        overlay_draw_arg_t arg = {.lines = lines,
+                                  .line_count = line_count,
+                                  .invert_colors = invert_colors,
+                                  .right_margin_px = climate_margin};
         overlay_draw_trampoline(rgb_buffer, width, height, &arg);
     }
     if (draw_battery_badge) {
         // Drawn after the overlay bar above (if any) so it visually sits in
         // front of it, inset into the left edge - see the doc comment.
         image_processor_draw_battery_badge(rgb_buffer, width, height, battery_percent);
+    }
+    if (draw_climate_temp || draw_climate_hum) {
+        // Top-right corner - independent of the top-left battery badge
+        // above, can never collide with it.
+        image_processor_draw_climate_badges(
+            rgb_buffer, width, height, draw_climate_temp, climate_temp_text, climate_temp_category,
+            draw_climate_hum, climate_hum_text, climate_hum_category);
     }
     if (has_exif_caption) {
         // Bottom-anchored (image_processor_draw_caption()), so it can never

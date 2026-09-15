@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 
@@ -14,22 +15,46 @@ STEPS = ["webapp", "splash", "firmware"]
 
 
 def idf_py_command():
-    """Locate the real idf.py script via $IDF_PATH instead of relying on the
-    bare "idf.py" command. On Windows, the official ESP-IDF installer's
-    PowerShell activation profile defines "idf.py" as a PowerShell alias/
-    function (`New-Alias idf.py -> Invoke-idfpy`) - that works when typed
+    """Locate a working way to run idf.py on this platform.
+
+    On Windows, the official ESP-IDF installer's PowerShell activation
+    profile defines "idf.py" as a PowerShell alias/function
+    (`New-Alias idf.py -> Invoke-idfpy`) - that works when typed
     interactively, but subprocess.run() bypasses the shell entirely and
-    launches processes directly, so it can never see a shell alias and fails
-    with FileNotFoundError. Resolving the real script file sidesteps that.
-    Falls back to the bare command if IDF_PATH isn't set or doesn't contain
-    it (e.g. an environment where idf.py is already a real, PATH-resolvable
-    script/symlink, as with a typical Linux/Mac `export.sh` setup)."""
+    launches processes directly (CreateProcess), which can neither see a
+    shell alias nor execute a bare .py script (WinError 193, "%1 is not a
+    valid Win32 application"), so it fails with FileNotFoundError either
+    way. Non-Windows platforms are unaffected (a typical Linux/Mac
+    `export.sh` setup already puts a real, directly executable idf.py
+    script/symlink on PATH) and keep using the bare command as before.
+
+    On Windows, prefer the real idf.py.exe wrapper the installer (classic
+    or EIM) puts on PATH, if there is one - it's the officially supported
+    entry point and needs nothing else resolved. Otherwise fall back to
+    running $IDF_PATH/tools/idf.py directly through the ESP-IDF virtualenv's
+    own interpreter (IDF_PYTHON_ENV_PATH, set by the activation script) -
+    this is more likely to be the correct dependency-complete interpreter
+    than `sys.executable` (whatever launched this script) in an atypical
+    invocation, though in the documented "activate, then `python build.py`"
+    workflow the two are normally the same. Falls back to the bare command
+    if nothing above resolves, same failure mode as before this existed."""
+    if os.name != "nt":
+        return ["idf.py"]
+
+    found = shutil.which("idf.py")
+    if found and found.lower().endswith(".exe"):
+        return [found]
+
     idf_path = os.environ.get("IDF_PATH")
-    if idf_path:
-        candidate = os.path.join(idf_path, "tools", "idf.py")
-        if os.path.isfile(candidate):
-            return [sys.executable, candidate]
-    return ["idf.py"]
+    script = os.path.join(idf_path, "tools", "idf.py") if idf_path else found
+    if not script or not os.path.isfile(script):
+        return ["idf.py"]  # let subprocess raise FileNotFoundError
+
+    env_path = os.environ.get("IDF_PYTHON_ENV_PATH")
+    python = os.path.join(env_path, "Scripts", "python.exe") if env_path else ""
+    if not os.path.isfile(python):
+        python = sys.executable
+    return [python, script]
 
 
 def build_webapp():
@@ -150,8 +175,6 @@ def main():
 
     if args.fullclean:
         print("Performing full clean...")
-        import shutil
-
         for f in ["sdkconfig", "partitions.csv"]:
             if os.path.exists(f):
                 os.remove(f)

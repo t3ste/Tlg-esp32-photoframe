@@ -9,6 +9,8 @@
 #include "agenda_manager.h"
 #include "album_manager.h"
 #include "board_hal.h"
+#include "chime.h"
+#include "climate_history.h"
 #include "color_palette.h"
 #include "config.h"
 #include "config_manager.h"
@@ -263,6 +265,15 @@ static void log_wall_clock(const char *label)
 
 void deep_sleep_wake_main(wakeup_source_t wakeup_src)
 {
+    // Every real wake gets a climate reading, regardless of whether this
+    // cycle ends up rotating/rendering anything - board_hal_init() already
+    // ran in app_main() before this task was created, so the I2C sensor is
+    // ready, and this needs neither WiFi nor a corrected clock. Deliberately
+    // ahead of every early-sleep-return branch below (the "woke too early"
+    // checks, the agenda/HA-veto sleeps) - see climate_history_record()'s
+    // own debounce for why calling it this often is still cheap.
+    climate_history_record();
+
     bool is_button_wake = (wakeup_src == WAKEUP_SOURCE_ROTATE_BUTTON);
     // Check rotation mode and HA configuration
     rotation_mode_t rotation_mode = config_manager_get_rotation_mode();
@@ -720,6 +731,7 @@ void app_main(void)
     case WAKEUP_SOURCE_CLEAR_BUTTON:
         ESP_LOGI(TAG, "CLEAR button wakeup detected - clearing display and sleeping");
         board_hal_init();             // Ensure HAL is active
+        climate_history_record();     // Every physical wake gets a reading too
         display_manager_init();       // Initialize display
         display_manager_clear();      // Clear screen
         power_manager_enter_sleep();  // Go back to sleep
@@ -843,6 +855,24 @@ void app_main(void)
     // password, so it short-circuits straight to clearing after just one.
 #define WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS 3
 #define WIFI_COLD_BOOT_CONNECT_RETRY_DELAY_MS 3000
+    // Real incident (2026-09-13): a cold boot got stuck retrying
+    // WIFI_REASON_AUTH_EXPIRE/WIFI_REASON_CONNECTION_FAIL (both already
+    // correctly classified as "not a credential rejection" above) right
+    // after the AP's signal had degraded to -70dBm - never once a genuine
+    // reject reason, yet the then-unconditional wipe below still fired once
+    // all WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS were exhausted, forcing an
+    // unnecessary reprovisioning even though the password was fine. When
+    // config_manager_get_wifi_extended_retry_enabled() is on (default), a
+    // non-reject exhaustion now persists a running attempt count across
+    // reboots (NVS, survives a genuine power-on-reset unlike RTC memory) and
+    // retries via a fresh reboot instead of wiping immediately, up to
+    // WIFI_COLD_BOOT_EXTENDED_MAX_TOTAL_ATTEMPTS total individual attempts -
+    // a genuine credential rejection is completely unaffected either way,
+    // still wiping after a single attempt as before.
+#define WIFI_COLD_BOOT_EXTENDED_MAX_TOTAL_ATTEMPTS 10
+#define WIFI_COLD_BOOT_REBOOT_BACKOFF_MS 60000
+    bool extended_retry = config_manager_get_wifi_extended_retry_enabled();
+    int total_attempts = extended_retry ? config_manager_get_wifi_coldboot_fail_count() : 0;
     bool wifi_ok = false;
     bool credential_reject = false;
     for (int attempt = 1; attempt <= WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS; attempt++) {
@@ -856,6 +886,7 @@ void app_main(void)
                      WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS);
             break;
         }
+        total_attempts++;
         if (attempt < WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS) {
             ESP_LOGW(TAG,
                      "WiFi connect attempt %d/%d failed (not a credential rejection) - "
@@ -867,6 +898,10 @@ void app_main(void)
     }
 
     if (wifi_ok) {
+        if (extended_retry) {
+            config_manager_set_wifi_coldboot_fail_count(0);  // clean slate after a real success
+        }
+
         // Check and run periodic tasks (OTA check, SNTP sync if due)
         // Note: If RTC was invalid at boot, sntp_sync was already forced via
         // periodic_tasks_force_run()
@@ -875,9 +910,21 @@ void app_main(void)
 
         // Start mDNS service
         ESP_ERROR_CHECK(mdns_service_init());
+    } else if (!credential_reject && extended_retry &&
+               total_attempts < WIFI_COLD_BOOT_EXTENDED_MAX_TOTAL_ATTEMPTS) {
+        config_manager_set_wifi_coldboot_fail_count(total_attempts);
+        ESP_LOGW(TAG,
+                 "WiFi still unreachable after %d/%d total attempts (not a credential "
+                 "rejection) - retrying after a longer pause instead of reprovisioning",
+                 total_attempts, WIFI_COLD_BOOT_EXTENDED_MAX_TOTAL_ATTEMPTS);
+        vTaskDelay(pdMS_TO_TICKS(WIFI_COLD_BOOT_REBOOT_BACKOFF_MS));
+        esp_restart();
     } else {
         ESP_LOGW(TAG, "Failed to connect to WiFi after %d attempt(s) - clearing credentials",
-                 credential_reject ? 1 : WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS);
+                 credential_reject ? 1 : total_attempts);
+        if (extended_retry) {
+            config_manager_set_wifi_coldboot_fail_count(0);  // reprovisioning anyway
+        }
         nvs_handle_t nvs_handle;
         if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
             nvs_erase_key(nvs_handle, NVS_WIFI_SSID_KEY);
@@ -886,6 +933,10 @@ void app_main(void)
             nvs_close(nvs_handle);
         }
         ESP_LOGI(TAG, "Restarting to enter provisioning mode...");
+        // Fires before the credentials are gone for good and the device
+        // reboots into provisioning - the 2s delay below gives a short beep
+        // enough headroom to actually play.
+        chime_play_if_enabled(CHIME_EVENT_WIFI_REPROVISION);
         vTaskDelay(pdMS_TO_TICKS(2000));
         esp_restart();
     }

@@ -6,6 +6,7 @@
 
 #include "board_hal.h"
 #include "cJSON.h"
+#include "chime.h"
 #include "config.h"
 #include "config_manager.h"
 #include "esp_crt_bundle.h"
@@ -380,6 +381,9 @@ esp_err_t ota_manager_init(void)
         if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
             ESP_LOGI(TAG, "First boot after OTA update, marking as valid");
             esp_ota_mark_app_valid_cancel_rollback();
+            // Post-reboot, on the new firmware - board_hal_init() (and thus
+            // the speaker hardware) already ran earlier in app_main().
+            chime_play_if_enabled(CHIME_EVENT_OTA_SUCCESS);
         }
     }
 
