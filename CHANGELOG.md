@@ -2,6 +2,34 @@
 
 All notable changes to this fork are documented here. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full running list of everything this fork adds on top of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe); this file covers per-release deltas only.
 
+## [v218.2.0] - 2026-09-15
+
+### Added
+
+- **Chimes** (`waveshare_photopainter_73` only — onboard ES8311 codec + NS4150B speaker amp, previously unused): short synthesized beep feedback for 7 events — photo rotated, Telegram photo received, low battery, WiFi reprovisioning, an overdue/due-today Agenda ToDo item, a successful firmware update, and WiFi/internet lost — each independently toggleable from a new **Chimes** settings tab
+  - 3-way speaker mode (Off/Battery + mains/Mains-USB only), optional daily quiet hours, a 0-100% volume slider
+  - The three "actionable" events (low battery, Agenda due, WiFi/internet critical error) repeat up to 5 times while their condition stays true, then reset once it resolves; the rest remain one-shot
+  - See [docs/DIFF.md](docs/DIFF.md) for the full ES8311/NS4150B hardware bring-up notes
+- **Climate**: temperature/humidity monitoring via the onboard SHTC3 sensor — generic, available on any board whose sensor actually answers, not tied to one specific board
+  - 5 preset room-type comfort profiles (Living Room/Office, Bedroom, Bathroom, Kitchen, Basement), classifying temperature and humidity independently as Bad/Good/Super; Celsius or Fahrenheit display
+  - Optional top-right photo-overlay badges and an Agenda-header readout, both colored by category
+  - New **Climate History** chart (alongside Battery History), with Y-axis gridlines and a manual reset
+  - A reading is logged on every wake (not only when an image is actually displayed) plus every ~6 minutes while the device stays continuously awake, throttled to at most once every 5 minutes
+  - User-settable calibration offset (°C/°F and percentage points) for hardware that reads consistently high/low
+- Config-backup export can now optionally include the write-only ToDo/Calendar URLs (which can carry an embedded credential) alongside the existing credentials checkbox — previously these could never be recovered after a restore
+
+### Fixed
+
+- Settings timezone field silently destroyed a DST-aware POSIX timezone (e.g. `CET-1CEST,M3.5.0/2,M10.5.0/3` for Amsterdam/Berlin) back to a fixed `UTC0` on *any* Settings save, not just an edit to timezone itself — the raw POSIX string is now the only source of truth, edited via a combobox (presets + free text) instead of a lossy numeric-offset field; the device's own time-keeping was never at fault
+- Gallery per-thumbnail delete button was undiscoverable (an unmarked 48px hover hotspot) and unusable on touch screens at all — now reveals on hovering/focusing the whole thumbnail and stays visible on touch devices
+- Settings-save confirmation next to the Save button disappeared after 3 seconds, often too quickly to read — doubled to 6 seconds
+- `build.py`/`CMakeLists.txt` could silently fail on a stock Windows + official ESP-IDF installer setup with no separate `python3` shim on PATH (resolving to the Microsoft Store stub) — version detection and partition-table generation now use the interpreter `idf.py` already provides; `build.py` also now prefers a real `idf.py.exe` wrapper when present
+- Two latent bugs found while building the Climate feature above: an NVS key one character over its 15-character limit silently never persisted (a debounce timestamp resetting to 0 on every reboot instead of surviving it), and the HTTP server's handler-registration limit was exactly exhausted by the new endpoints, silently dropping the last-registered one
+- Both the climate photo-overlay badges and the Agenda-header climate chip drew white text on the Good category's Yellow background, illegible on the actual e-paper panel — black text now used for that one case
+- The climate overlay badges could visually overwrite the tail of the weather/headlines overlay bar instead of leaving room for it — the bar now reserves space and truncates with "…" ahead of the badges
+
+---
+
 ## [v218.1.0] - 2026-09-12
 
 ### Added
@@ -47,5 +75,6 @@ All notable changes to this fork are documented here. See [README.md → Changes
 
 First independent release of this fork. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full feature list at this point.
 
+[v218.2.0]: https://github.com/t3ste/Tlg-esp32-photoframe/compare/v218.1.0...v218.2.0
 [v218.1.0]: https://github.com/t3ste/Tlg-esp32-photoframe/compare/v218.0.0...v218.1.0
 [v218.0.0]: https://github.com/t3ste/Tlg-esp32-photoframe/releases/tag/v218.0.0
