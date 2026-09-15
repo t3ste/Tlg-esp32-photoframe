@@ -470,8 +470,9 @@ async function exportConfig() {
     if (configRes.ok) {
       const config = await configRes.json();
       // Always write-only at the device level - never returned by GET, so
-      // these deletes are belt-and-suspenders and unaffected by the
-      // checkbox below.
+      // these deletes are belt-and-suspenders (the real source of these
+      // fields, when opted in below, is the dedicated /api/config/urls
+      // fetch further down - GET /api/config itself never carries them).
       delete config.wifi_password;
       delete config.agenda_todo_url;
       delete config.agenda_cal_url;
@@ -489,6 +490,21 @@ async function exportConfig() {
         delete config.google_api_key;
       }
       exported.config = config;
+    }
+    // ToDo/Calendar URLs are write-only at the device level (GET /api/config
+    // never returns them - either can carry a credential embedded as a
+    // query param), so a full backup needs this dedicated opt-in fetch
+    // instead. Only requested when the checkbox is checked, same opt-in
+    // gate as the credential fields above.
+    if (exportIncludeSecrets.value && exported.config) {
+      try {
+        const urlsRes = await fetch("/api/config/urls");
+        if (urlsRes.ok) {
+          Object.assign(exported.config, await urlsRes.json());
+        }
+      } catch (_error) {
+        console.log("Failed to fetch URLs for export");
+      }
     }
     if (processingRes.ok) exported.processing = await processingRes.json();
     if (paletteRes.ok) exported.palette = await paletteRes.json();
@@ -2787,13 +2803,14 @@ async function performFactoryReset() {
                   density="compact"
                   hide-details
                   class="mb-2"
-                  label="Include credentials in export (Telegram bot token, AI API keys, access token, custom auth header)"
+                  label="Include credentials and URLs in export (Telegram bot token, AI API keys, access token, custom auth header, ToDo/Calendar URLs)"
                 />
                 <div class="text-caption text-grey mb-3">
                   Off by default: an export is a plaintext JSON file. Enable this for a fully
-                  self-contained backup, e.g. before restoring to a fresh device. WiFi password and
-                  Calendar/ToDo URLs can never be included (the device never returns them at all) -
-                  re-enter those manually after importing.
+                  self-contained backup, e.g. before restoring to a fresh device - ToDo/Calendar
+                  URLs can carry an embedded credential (e.g. a Google Calendar "secret address"),
+                  same reasoning as the other fields here. WiFi password can never be included (the
+                  device never returns it at all) - re-enter that manually after importing.
                 </div>
                 <v-btn variant="outlined" class="mr-2" @click="exportConfig">
                   <v-icon start>mdi-download</v-icon>

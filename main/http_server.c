@@ -1962,6 +1962,45 @@ static esp_err_t config_handler(httpd_req_t *req)
     httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
     return ESP_FAIL;
 }
+
+// Deliberately NOT part of GET /api/config's response (see the write-only
+// comment on agenda_todo_url/agenda_cal_url etc. there - either can carry a
+// credential embedded as a query param) - this exists only so the Web UI's
+// "Export Config" opt-in checkbox can include a fully self-contained
+// backup on request, without these URLs being readable on every normal
+// Settings-page load. Same fields, same plain-text-JSON exposure as the
+// existing credential fields GET /api/config already returns unconditionally
+// - reachable by anyone who can reach this device's HTTP server either way.
+static esp_err_t config_urls_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "Failed to create JSON response");
+        return ESP_FAIL;
+    }
+    cJSON_AddStringToObject(root, "agenda_todo_url", config_manager_get_agenda_todo_url());
+    cJSON_AddStringToObject(root, "agenda_cal_url", config_manager_get_agenda_cal_url());
+    cJSON_AddStringToObject(root, "agenda_cal_url2", config_manager_get_agenda_cal_url2());
+    cJSON_AddStringToObject(root, "agenda_cal_c_url", config_manager_get_agenda_cal_c_url());
+    cJSON_AddStringToObject(root, "agenda_cal_d_url", config_manager_get_agenda_cal_d_url());
+    cJSON_AddStringToObject(root, "agenda_cal_e_url", config_manager_get_agenda_cal_e_url());
+
+    char *json_str = cJSON_Print(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
+
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
 static esp_err_t albums_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -3051,6 +3090,12 @@ esp_err_t http_server_init(void)
                                         .handler = config_handler,
                                         .user_ctx = NULL};
         httpd_register_uri_handler(server, &config_patch_uri);
+
+        httpd_uri_t config_urls_uri = {.uri = "/api/config/urls",
+                                       .method = HTTP_GET,
+                                       .handler = config_urls_handler,
+                                       .user_ctx = NULL};
+        httpd_register_uri_handler(server, &config_urls_uri);
 
         httpd_uri_t debug_log_uri = {.uri = "/api/debug/log",
                                      .method = HTTP_GET,
