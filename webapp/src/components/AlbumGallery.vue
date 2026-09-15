@@ -195,6 +195,8 @@ function onShowThumbnailsChange(val) {
                   size="x-small"
                   color="error"
                   class="delete-overlay"
+                  title="Delete image"
+                  aria-label="Delete image"
                   @click.stop="confirmDeleteImage(image)"
                 />
               </div>
@@ -344,8 +346,20 @@ function onShowThumbnailsChange(val) {
   opacity: 0;
   transition: opacity 0.2s;
 }
-.delete-hotspot:hover .delete-overlay {
+/* Reveal the button as soon as the thumbnail itself is hovered or focused,
+   not only its top-right corner (which nobody found). */
+.image-card:hover .delete-overlay,
+.image-card:focus-within .delete-overlay,
+.delete-overlay:focus-visible {
   opacity: 1;
+}
+/* Touch screens have no hover: keep the button visible, with a larger target. */
+@media (hover: none) {
+  .image-card .delete-overlay {
+    opacity: 0.92;
+    width: 36px;
+    height: 36px;
+  }
 }
 .confirm-thumb {
   max-width: 100%;
