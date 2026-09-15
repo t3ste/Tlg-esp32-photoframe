@@ -1,6 +1,10 @@
 #include "climate.h"
 
 #include <math.h>
+#include <stdlib.h>
+
+#include "board_hal.h"
+#include "config_manager.h"
 
 // One row per climate_room_type_t value (same order). Bad is an outer
 // exclusion band (value below bad_low or above bad_high); Super is the
@@ -60,4 +64,26 @@ climate_category_t climate_classify_humidity(float humidity_percent, climate_roo
 int climate_celsius_to_fahrenheit(float celsius)
 {
     return (int) lroundf(celsius * 9.0f / 5.0f + 32.0f);
+}
+
+esp_err_t climate_read_temperature(float *out_celsius)
+{
+    float raw;
+    esp_err_t err = board_hal_get_temperature(&raw);
+    if (err != ESP_OK) {
+        return err;
+    }
+    *out_celsius = raw + strtof(config_manager_get_climate_temp_offset(), NULL);
+    return ESP_OK;
+}
+
+esp_err_t climate_read_humidity(float *out_percent)
+{
+    float raw;
+    esp_err_t err = board_hal_get_humidity(&raw);
+    if (err != ESP_OK) {
+        return err;
+    }
+    *out_percent = raw + strtof(config_manager_get_climate_hum_offset(), NULL);
+    return ESP_OK;
 }

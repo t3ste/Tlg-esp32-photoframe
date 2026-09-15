@@ -94,8 +94,8 @@ static bool climate_badge_should_show(char *out_temp_text, size_t temp_text_len,
     }
 
     float temp_c, humidity;
-    bool have_temp = (board_hal_get_temperature(&temp_c) == ESP_OK);
-    bool have_hum = (board_hal_get_humidity(&humidity) == ESP_OK);
+    bool have_temp = (climate_read_temperature(&temp_c) == ESP_OK);
+    bool have_hum = (climate_read_humidity(&humidity) == ESP_OK);
     if (!have_temp && !have_hum) {
         return false;
     }

@@ -134,6 +134,11 @@ export const useSettingsStore = defineStore("settings", () => {
     climateLoggingEnabled: true,
     climateOverlayEnabled: false,
     climateAgendaHeaderEnabled: false,
+    // Calibration offsets, always in Celsius/percentage-points regardless of
+    // climateTempUnit - SettingsPanel.vue converts to/from the display unit
+    // for its own input fields.
+    climateTempOffset: 0,
+    climateHumOffset: 0,
     // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
     // overlay. agendaTodoUrl/agendaCalUrl are write-only (never returned by
     // GET /api/config, same treatment as wifiPassword above) - both start
@@ -429,6 +434,8 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.climateLoggingEnabled = data.climate_logging_enabled === true;
       deviceSettings.value.climateOverlayEnabled = data.climate_overlay_enabled === true;
       deviceSettings.value.climateAgendaHeaderEnabled = data.climate_agenda_header_enabled === true;
+      deviceSettings.value.climateTempOffset = data.climate_temp_offset ?? 0;
+      deviceSettings.value.climateHumOffset = data.climate_hum_offset ?? 0;
       deviceSettings.value.agendaTodoEnabled = data.agenda_todo_enabled === true;
       deviceSettings.value.agendaCalEnabled = data.agenda_cal_enabled === true;
       // agenda_todo_url/agenda_cal_url are intentionally never present in
@@ -600,6 +607,8 @@ export const useSettingsStore = defineStore("settings", () => {
       climate_logging_enabled: deviceSettings.value.climateLoggingEnabled,
       climate_overlay_enabled: deviceSettings.value.climateOverlayEnabled,
       climate_agenda_header_enabled: deviceSettings.value.climateAgendaHeaderEnabled,
+      climate_temp_offset: deviceSettings.value.climateTempOffset,
+      climate_hum_offset: deviceSettings.value.climateHumOffset,
       agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
       agenda_cal_c_enabled: deviceSettings.value.agendaCalCEnabled,

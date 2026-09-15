@@ -7,7 +7,6 @@
 #include <time.h>
 
 #include "agenda_renderer.h"
-#include "board_hal.h"
 #include "calendar_ics.h"
 #include "chime.h"
 #include "config.h"
@@ -37,8 +36,8 @@ static bool build_agenda_climate(agenda_climate_t *out)
     }
 
     float temp_c, humidity;
-    out->has_temp = (board_hal_get_temperature(&temp_c) == ESP_OK);
-    out->has_hum = (board_hal_get_humidity(&humidity) == ESP_OK);
+    out->has_temp = (climate_read_temperature(&temp_c) == ESP_OK);
+    out->has_hum = (climate_read_humidity(&humidity) == ESP_OK);
     if (!out->has_temp && !out->has_hum) {
         return false;
     }

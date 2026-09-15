@@ -231,6 +231,14 @@ typedef enum {
 // reset.
 #define CLIMATE_HISTORY_PATH FS_MOUNT_POINT "/.climate_history"
 #define CLIMATE_HISTORY_MAX_AGE_DAYS 180
+// A reading is logged on every wake (main.c) and, while the device stays
+// awake continuously, every CLIMATE_ACTIVE_LOG_INTERVAL_SEC (power_manager.c)
+// - CLIMATE_LOG_MIN_INTERVAL_SEC is a shared debounce inside
+// climate_history_record() itself (persisted in NVS, since deep sleep wipes
+// RAM) so neither trigger can log more often than this, even if both fire
+// close together.
+#define CLIMATE_LOG_MIN_INTERVAL_SEC (5 * 60)
+#define CLIMATE_ACTIVE_LOG_INTERVAL_SEC (6 * 60)
 
 #ifdef DEBUG_DEEP_SLEEP_WAKE
 #define AUTO_SLEEP_TIMEOUT_SEC 60
@@ -859,5 +867,19 @@ typedef enum {
 #define NVS_CLIMATE_LOGGING_ENABLED_KEY "climate_log_en"
 #define NVS_CLIMATE_OVERLAY_ENABLED_KEY "climate_ovl_en"
 #define NVS_CLIMATE_AGENDA_HEADER_ENABLED_KEY "climate_hdr_en"
+// Persisted debounce anchor for CLIMATE_LOG_MIN_INTERVAL_SEC above - unix
+// timestamp of the last actually-recorded reading (not every check), same
+// int64 NVS pattern as "cfg_updated" (config_manager_get_config_last_updated()).
+#define NVS_CLIMATE_LAST_LOG_KEY "climate_lastlog"
+// User-correctable calibration offset, applied to every displayed/logged
+// climate value (NOT to GET /api/sensor's raw reading, which stays
+// unadjusted on purpose - useful as a reference for picking these values).
+// Always stored/transmitted in Celsius/percentage-points regardless of the
+// user's display-unit preference; climate_temp_offset_c is a DELTA, so
+// converting it to/from Fahrenheit for display never adds the usual +32
+// (see climate_celsius_to_fahrenheit() vs. a plain *9/5 delta conversion).
+#define NVS_CLIMATE_TEMP_OFFSET_KEY "climate_toff"
+#define NVS_CLIMATE_HUM_OFFSET_KEY "climate_hoff"
+#define CLIMATE_OFFSET_MAX_LEN 16
 
 #endif

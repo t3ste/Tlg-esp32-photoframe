@@ -61,8 +61,10 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - feat: real top-level tabs (Gallery / Settings / Battery History / Updates) instead of one long stacked page
 - feat: on-display error banner, testable on demand via a Web UI button
 - feat: WiFi TX-power cap for Waveshare PhotoPainter battery-brownout mitigation, now user-toggleable (default on)
-- feat: opt-in checkbox to include credentials (Telegram bot token, AI API keys, access token, custom auth header) in an exported config backup — off by default since an export is a plaintext JSON file; WiFi password and Calendar/ToDo URLs can never be included since the device never returns them at all
+- feat: opt-in checkbox to include credentials and ToDo/Calendar URLs (Telegram bot token, AI API keys, access token, custom auth header, plus the write-only-at-the-device-level ToDo/Calendar URLs, which can carry an embedded credential like a Google Calendar "secret address") in an exported config backup, via a new `GET /api/config/urls` endpoint that's only ever called when this checkbox is checked — off by default since an export is a plaintext JSON file; WiFi password can never be included since the device never returns it at all
 - fix: three Settings-panel actions (save settings, save palette, factory reset) referenced the wrong variable name in their error handler, throwing an unhandled `ReferenceError` on any real failure instead of surfacing it
+- fix: the gallery's per-thumbnail delete button only appeared in an unmarked 48px hover hotspot in the top-right corner — undiscoverable on desktop, never visible at all on touch screens; now reveals on hovering/focusing the whole thumbnail, and stays visible (larger, 92% opacity) on touch devices
+- fix: the Settings-save success confirmation next to the Save button disappeared after 3 seconds, often too quickly to read — doubled to 6 seconds
 
 **Stability fixes**:
 - fix: resolve battery-wake stability issues on Waveshare PhotoPainter — a dynamic-frequency-scaling/WiFi-interrupt race and a main-task stack overflow, both confirmed via on-device coredump
@@ -116,6 +118,12 @@ This fork is ahead of [aitjcize/esp32-photoframe](https://github.com/aitjcize/es
 - feat: the same readout, right-aligned, optionally shown in both column headers (ToDo and Calendar) in Agenda mode; off by default
 - feat: a new **Climate History** chart (alongside the existing Battery History tab) logging one reading per successfully displayed image, with a manual reset button — logging is on by default and has no effect on what's displayed
 - feat: new `GET/DELETE /api/climate-history` endpoints and `climate_room_type`/`climate_temp_unit`/`climate_logging_enabled`/`climate_overlay_enabled`/`climate_agenda_header_enabled`/`climate_sensor_available` fields on `GET`/`PATCH /api/config`
+- feat: a reading is now logged on every wake (deep-sleep timer/rotate-button/clear-button, plus every ~6 minutes while the device stays awake continuously) instead of only when an image is actually displayed, so the history stays meaningful even on wakes that don't rotate/render anything — throttled to at most once every 5 minutes regardless of which trigger fires, via a debounce that survives deep sleep
+- feat: a user-settable calibration offset (°C/°F and percentage points, default 0) is applied to every displayed/logged climate value, for hardware that reads consistently high/low — the raw, un-offset reading stays available via the existing `/api/sensor` diagnostic endpoint for reference
+- feat: the Climate History chart now shows Y-axis gridlines/labels (in the selected unit) on both the temperature and humidity mini-charts, matching the existing Battery History chart's convention
+- fix: the top-right climate overlay badges could visually overwrite the tail of the weather/headlines(RSS) bar instead of leaving room for it — the bar now reserves space and truncates with "…" ahead of the badges instead
+- fix: `config_manager`'s `climate_last_log_time` used a 16-character NVS key (`"climate_last_log"`), one over NVS's hard 15-character limit — the debounce silently never persisted across a reboot, only across an already-running session (renamed to `"climate_lastlog"`)
+- fix: `http_server_init()`'s `max_uri_handlers` margin (55) was exactly consumed by this feature's own new endpoints, silently dropping the last-registered handler with only a one-line boot warning (`no slots left for registering handler`) and no other symptom — raised to 64
 
 **Reliability & infrastructure**:
 - feat: DNS backup/fallback servers (Cloudflare `1.1.1.1`, Google `8.8.8.8`) now populate lwIP's built-in multi-server fallback slots, previously left empty — a single flaky or unreachable DNS server (typically the router's own, handed out via DHCP) could otherwise fail to resolve *any* hostname (weather, Telegram, headlines alike) for a whole wake cycle with no automatic recovery

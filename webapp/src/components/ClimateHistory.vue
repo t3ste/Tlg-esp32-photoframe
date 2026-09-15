@@ -1,5 +1,8 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
+import { useSettingsStore } from "../stores";
+
+const settingsStore = useSettingsStore();
 
 const API_BASE = "";
 
@@ -67,22 +70,52 @@ function xForTime(t) {
   return PAD.left + ((t - min) / (max - min)) * plotWidth;
 }
 
-function makeYScale(values) {
+// Range (with headroom) and the scale function are split so the same range
+// can also drive a set of Y-axis ticks (below) without duplicating or
+// drifting from the headroom math the plotted points themselves use.
+function computeYRange(values) {
   const lo = Math.min(...values);
   const hi = Math.max(...values);
   // A little headroom above/below so points never sit flush on the edge.
   const span = hi - lo || 1;
-  const min = lo - span * 0.1;
-  const max = hi + span * 0.1;
-  return (v) => PAD.top + plotHeight - ((v - min) / (max - min)) * plotHeight;
+  return { min: lo - span * 0.1, max: hi + span * 0.1 };
 }
 
-const yForTemp = computed(() =>
-  entries.value.length ? makeYScale(entries.value.map((e) => e.temp_c)) : (v) => v
+function yScaleFromRange(range) {
+  return (v) => PAD.top + plotHeight - ((v - range.min) / (range.max - range.min)) * plotHeight;
+}
+
+const tempRange = computed(() =>
+  entries.value.length ? computeYRange(entries.value.map((e) => e.temp_c)) : { min: 0, max: 1 }
 );
-const yForHum = computed(() =>
-  entries.value.length ? makeYScale(entries.value.map((e) => e.hum)) : (v) => v
+const humRange = computed(() =>
+  entries.value.length ? computeYRange(entries.value.map((e) => e.hum)) : { min: 0, max: 1 }
 );
+
+const yForTemp = computed(() => yScaleFromRange(tempRange.value));
+const yForHum = computed(() => yScaleFromRange(humRange.value));
+
+const Y_TICK_COUNT = 5;
+function ticksForRange(range) {
+  const ticks = [];
+  for (let i = 0; i < Y_TICK_COUNT; i++) {
+    ticks.push(range.min + ((range.max - range.min) * i) / (Y_TICK_COUNT - 1));
+  }
+  return ticks;
+}
+
+const tempYTicks = computed(() => ticksForRange(tempRange.value));
+const humYTicks = computed(() => ticksForRange(humRange.value));
+
+function formatTempTick(c) {
+  if (settingsStore.deviceSettings.climateTempUnit === "fahrenheit") {
+    return `${Math.round((c * 9) / 5 + 32)}°F`;
+  }
+  return `${Math.round(c * 10) / 10}°C`;
+}
+function formatHumTick(h) {
+  return `${Math.round(h)}%`;
+}
 
 const tempLinePoints = computed(() =>
   entries.value
@@ -160,6 +193,26 @@ function pointTitle(e, kind) {
           preserveAspectRatio="xMidYMid meet"
           style="width: 100%; height: auto; max-height: 260px"
         >
+          <g v-for="(tick, i) in tempYTicks" :key="'yt' + i">
+            <line
+              :x1="PAD.left"
+              :x2="CHART_WIDTH - PAD.right"
+              :y1="yForTemp(tick)"
+              :y2="yForTemp(tick)"
+              stroke="currentColor"
+              stroke-opacity="0.12"
+            />
+            <text
+              :x="PAD.left - 8"
+              :y="yForTemp(tick) + 4"
+              text-anchor="end"
+              font-size="11"
+              fill="currentColor"
+              fill-opacity="0.6"
+            >
+              {{ formatTempTick(tick) }}
+            </text>
+          </g>
           <text
             v-for="tick in xTicks"
             :key="'xt' + tick.label + tick.x"
@@ -191,6 +244,26 @@ function pointTitle(e, kind) {
           preserveAspectRatio="xMidYMid meet"
           style="width: 100%; height: auto; max-height: 260px"
         >
+          <g v-for="(tick, i) in humYTicks" :key="'yh' + i">
+            <line
+              :x1="PAD.left"
+              :x2="CHART_WIDTH - PAD.right"
+              :y1="yForHum(tick)"
+              :y2="yForHum(tick)"
+              stroke="currentColor"
+              stroke-opacity="0.12"
+            />
+            <text
+              :x="PAD.left - 8"
+              :y="yForHum(tick) + 4"
+              text-anchor="end"
+              font-size="11"
+              fill="currentColor"
+              fill-opacity="0.6"
+            >
+              {{ formatHumTick(tick) }}
+            </text>
+          </g>
           <text
             v-for="tick in xTicks"
             :key="'xh' + tick.label + tick.x"

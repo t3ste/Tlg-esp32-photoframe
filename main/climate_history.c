@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <time.h>
 
-#include "board_hal.h"
 #include "climate.h"
 #include "config.h"
 #include "config_manager.h"
@@ -39,9 +38,20 @@ void climate_history_record(void)
     if (!config_manager_get_climate_logging_enabled()) {
         return;
     }
+
+    // Shared debounce for the two callers (every wake, main.c; every
+    // CLIMATE_ACTIVE_LOG_INTERVAL_SEC while always-on, power_manager.c) -
+    // persisted in NVS (not a static/RTC variable) since a deep-sleep wake
+    // wipes RAM between calls. Checked before the sensor read itself so a
+    // wake that's skipped doesn't even wake the SHTC3 for nothing.
+    time_t now = time(NULL);
+    int64_t last_log = config_manager_get_climate_last_log_time();
+    if (last_log != 0 && difftime(now, (time_t) last_log) < CLIMATE_LOG_MIN_INTERVAL_SEC) {
+        return;
+    }
+
     float temp_c, humidity;
-    if (board_hal_get_temperature(&temp_c) != ESP_OK ||
-        board_hal_get_humidity(&humidity) != ESP_OK) {
+    if (climate_read_temperature(&temp_c) != ESP_OK || climate_read_humidity(&humidity) != ESP_OK) {
         return;  // No sensor on this board, or a transient read error.
     }
     if (!storage_has_persistent_storage()) {
@@ -50,7 +60,7 @@ void climate_history_record(void)
 
     time_t oldest;
     if (peek_oldest_timestamp(&oldest)) {
-        double age_days = difftime(time(NULL), oldest) / 86400.0;
+        double age_days = difftime(now, oldest) / 86400.0;
         if (age_days > CLIMATE_HISTORY_MAX_AGE_DAYS) {
             remove(CLIMATE_HISTORY_PATH);
             ESP_LOGI(TAG, "Climate history reset (log too old)");
@@ -62,8 +72,10 @@ void climate_history_record(void)
         ESP_LOGW(TAG, "Failed to open climate history for append");
         return;
     }
-    fprintf(f, "%lld,%.1f,%.1f\n", (long long) time(NULL), (double) temp_c, (double) humidity);
+    fprintf(f, "%lld,%.1f,%.1f\n", (long long) now, (double) temp_c, (double) humidity);
     fclose(f);
+
+    config_manager_set_climate_last_log_time((int64_t) now);
 }
 
 cJSON *climate_history_build_json(void)

@@ -270,9 +270,15 @@ esp_err_t image_processor_add_caption_to_file(const char *png_path, const char *
  * @param invert_colors false (default) = black bar, white text; true = white
  * bar, black text - Web UI toggle, independent of the caption bar's colors
  * (though callers may choose to pass the same value through).
+ * @param right_margin_px Pixels to reserve on the right edge, kept out of
+ * both the truncation-width and centering math (though the bar's background
+ * still fills edge to edge) - lets a caller avoid the top-right climate
+ * badges overwriting this bar's text instead of the text simply running
+ * under them. 0 when nothing needs the reservation.
  */
 void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height,
-                                      const char *const *lines, int line_count, bool invert_colors);
+                                      const char *const *lines, int line_count, bool invert_colors,
+                                      int right_margin_px);
 
 /**
  * @brief Same as image_processor_draw_overlay_bar(), but reads an already

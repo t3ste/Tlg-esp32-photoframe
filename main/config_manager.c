@@ -211,6 +211,9 @@ static climate_temp_unit_t climate_temp_unit = CLIMATE_UNIT_CELSIUS;
 static bool climate_logging_enabled = true;
 static bool climate_overlay_enabled = false;
 static bool climate_agenda_header_enabled = false;
+static char climate_temp_offset[CLIMATE_OFFSET_MAX_LEN] = "0";
+static char climate_hum_offset[CLIMATE_OFFSET_MAX_LEN] = "0";
+static int64_t climate_last_log_time = 0;
 
 // ----------------------------------------------------------------------------
 // Cron schedule helpers
@@ -1359,6 +1362,13 @@ esp_err_t config_manager_init(void)
             ESP_OK) {
             climate_agenda_header_enabled = (stored_climate_hdr != 0);
         }
+        size_t climate_temp_offset_len = sizeof(climate_temp_offset);
+        nvs_get_str(nvs_handle, NVS_CLIMATE_TEMP_OFFSET_KEY, climate_temp_offset,
+                    &climate_temp_offset_len);
+        size_t climate_hum_offset_len = sizeof(climate_hum_offset);
+        nvs_get_str(nvs_handle, NVS_CLIMATE_HUM_OFFSET_KEY, climate_hum_offset,
+                    &climate_hum_offset_len);
+        nvs_get_i64(nvs_handle, NVS_CLIMATE_LAST_LOG_KEY, &climate_last_log_time);
 
         nvs_close(nvs_handle);
     }
@@ -3946,4 +3956,45 @@ void config_manager_set_climate_agenda_header_enabled(bool enabled)
 bool config_manager_get_climate_agenda_header_enabled(void)
 {
     return climate_agenda_header_enabled;
+}
+
+void config_manager_set_climate_temp_offset(const char *offset_c_str)
+{
+    strncpy(climate_temp_offset, offset_c_str ? offset_c_str : "0",
+            sizeof(climate_temp_offset) - 1);
+    climate_temp_offset[sizeof(climate_temp_offset) - 1] = '\0';
+    agenda_nvs_set_str(NVS_CLIMATE_TEMP_OFFSET_KEY, climate_temp_offset);
+}
+
+const char *config_manager_get_climate_temp_offset(void)
+{
+    return climate_temp_offset;
+}
+
+void config_manager_set_climate_hum_offset(const char *offset_str)
+{
+    strncpy(climate_hum_offset, offset_str ? offset_str : "0", sizeof(climate_hum_offset) - 1);
+    climate_hum_offset[sizeof(climate_hum_offset) - 1] = '\0';
+    agenda_nvs_set_str(NVS_CLIMATE_HUM_OFFSET_KEY, climate_hum_offset);
+}
+
+const char *config_manager_get_climate_hum_offset(void)
+{
+    return climate_hum_offset;
+}
+
+void config_manager_set_climate_last_log_time(int64_t timestamp)
+{
+    climate_last_log_time = timestamp;
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_i64(nvs_handle, NVS_CLIMATE_LAST_LOG_KEY, climate_last_log_time);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+int64_t config_manager_get_climate_last_log_time(void)
+{
+    return climate_last_log_time;
 }
