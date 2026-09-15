@@ -71,6 +71,26 @@ typedef enum {
     CHIME_EVENT_COUNT,  // not a real event - array size for chime.c's fire-count cap
 } chime_event_t;
 
+// Preset room profile the SHTC3 climate sensor is classified against - see
+// climate_classify_temperature()/climate_classify_humidity() in climate.c.
+// Values are stored as-is in NVS, so the numbering must stay stable.
+typedef enum {
+    CLIMATE_ROOM_LIVING_ROOM = 0,
+    CLIMATE_ROOM_BEDROOM = 1,
+    CLIMATE_ROOM_BATHROOM = 2,
+    CLIMATE_ROOM_KITCHEN = 3,
+    CLIMATE_ROOM_BASEMENT = 4,
+} climate_room_type_t;
+
+// Display-only unit for the climate feature - classification thresholds are
+// always defined in Celsius (climate.c); this only affects how a reading is
+// formatted for the overlay badge, Agenda header, and Web UI. Values are
+// stored as-is in NVS.
+typedef enum {
+    CLIMATE_UNIT_CELSIUS = 0,
+    CLIMATE_UNIT_FAHRENHEIT = 1,
+} climate_temp_unit_t;
+
 #define IP_ADDR_STR_MAX_LEN 16  // dotted IPv4 + NUL
 
 #define DEVICE_NAME_MAX_LEN 64
@@ -203,6 +223,14 @@ typedef enum {
 #define BATTERY_HISTORY_RESET_PERCENT 95
 #define BATTERY_HISTORY_MAX_AGE_DAYS 180
 #define BATTERY_HISTORY_TARGET_PERCENT 20
+
+// Climate (SHTC3 temperature/humidity) history log (one
+// "<unix_ts>,<temp_c>,<humidity>" line per recorded reading). See
+// climate_history.[ch]. No natural "reset" event like a battery recharge, so
+// this only ever clears on CLIMATE_HISTORY_MAX_AGE_DAYS or a user-requested
+// reset.
+#define CLIMATE_HISTORY_PATH FS_MOUNT_POINT "/.climate_history"
+#define CLIMATE_HISTORY_MAX_AGE_DAYS 180
 
 #ifdef DEBUG_DEEP_SLEEP_WAKE
 #define AUTO_SLEEP_TIMEOUT_SEC 60
@@ -817,5 +845,19 @@ typedef enum {
 #define NVS_CHIME_REPEAT_LOWBATT_KEY "chime_rc_lowbat"
 #define NVS_CHIME_REPEAT_CRIT_KEY "chime_rc_crit"
 #define NVS_CHIME_REPEAT_AGENDA_KEY "chime_rc_agenda"
+
+// Climate (SHTC3) settings - see climate_room_type_t/climate_temp_unit_t
+// above and main/climate.[ch]. Generic feature: available on any board
+// whose board_hal_get_temperature()/get_humidity() actually succeed, not
+// gated to one specific board.
+#define NVS_CLIMATE_ROOM_TYPE_KEY "climate_room"
+#define NVS_CLIMATE_TEMP_UNIT_KEY "climate_unit"
+// Logging defaults on (mirrors battery history's always-on-when-hardware-
+// present behavior, no visual clutter involved); the overlay badge and
+// Agenda-header readout default off since they add visible clutter to
+// every image/render until the user opts in.
+#define NVS_CLIMATE_LOGGING_ENABLED_KEY "climate_log_en"
+#define NVS_CLIMATE_OVERLAY_ENABLED_KEY "climate_ovl_en"
+#define NVS_CLIMATE_AGENDA_HEADER_ENABLED_KEY "climate_hdr_en"
 
 #endif

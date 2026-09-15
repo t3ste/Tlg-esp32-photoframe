@@ -122,6 +122,18 @@ export const useSettingsStore = defineStore("settings", () => {
     chimeEventAgendaDueEnabled: false,
     chimeEventOtaSuccessEnabled: true,
     chimeEventCriticalErrorEnabled: true,
+    // Climate (SHTC3 temperature/humidity) - generic feature (works on any
+    // board whose sensor actually answers, not just
+    // waveshare_photopainter_73, unlike Chimes above).
+    // climateSensorAvailable is a read-only, live hardware probe (not a
+    // fixed capability flag - the same board can succeed or fail at
+    // runtime), never sent in a PATCH.
+    climateSensorAvailable: false,
+    climateRoomType: "living_room",
+    climateTempUnit: "celsius",
+    climateLoggingEnabled: true,
+    climateOverlayEnabled: false,
+    climateAgendaHeaderEnabled: false,
     // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
     // overlay. agendaTodoUrl/agendaCalUrl are write-only (never returned by
     // GET /api/config, same treatment as wifiPassword above) - both start
@@ -411,6 +423,12 @@ export const useSettingsStore = defineStore("settings", () => {
         data.chime_event_ota_success_enabled === true;
       deviceSettings.value.chimeEventCriticalErrorEnabled =
         data.chime_event_critical_error_enabled === true;
+      deviceSettings.value.climateSensorAvailable = data.climate_sensor_available === true;
+      deviceSettings.value.climateRoomType = data.climate_room_type || "living_room";
+      deviceSettings.value.climateTempUnit = data.climate_temp_unit || "celsius";
+      deviceSettings.value.climateLoggingEnabled = data.climate_logging_enabled === true;
+      deviceSettings.value.climateOverlayEnabled = data.climate_overlay_enabled === true;
+      deviceSettings.value.climateAgendaHeaderEnabled = data.climate_agenda_header_enabled === true;
       deviceSettings.value.agendaTodoEnabled = data.agenda_todo_enabled === true;
       deviceSettings.value.agendaCalEnabled = data.agenda_cal_enabled === true;
       // agenda_todo_url/agenda_cal_url are intentionally never present in
@@ -577,6 +595,11 @@ export const useSettingsStore = defineStore("settings", () => {
       chime_event_agenda_due_enabled: deviceSettings.value.chimeEventAgendaDueEnabled,
       chime_event_ota_success_enabled: deviceSettings.value.chimeEventOtaSuccessEnabled,
       chime_event_critical_error_enabled: deviceSettings.value.chimeEventCriticalErrorEnabled,
+      climate_room_type: deviceSettings.value.climateRoomType,
+      climate_temp_unit: deviceSettings.value.climateTempUnit,
+      climate_logging_enabled: deviceSettings.value.climateLoggingEnabled,
+      climate_overlay_enabled: deviceSettings.value.climateOverlayEnabled,
+      climate_agenda_header_enabled: deviceSettings.value.climateAgendaHeaderEnabled,
       agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
       agenda_cal_c_enabled: deviceSettings.value.agendaCalCEnabled,

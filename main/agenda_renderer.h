@@ -2,10 +2,26 @@
 #define AGENDA_RENDERER_H
 
 #include "calendar_ics.h"
+#include "climate.h"
 #include "esp_err.h"
 #include "image_processor.h"
 #include "todo.h"
 #include "weather.h"
+
+// Optional climate readout for both column headers (ToDo and Calendar
+// alike, unlike cal_weather below which is Calendar-only) - see
+// config_manager_get_climate_agenda_header_enabled(). Pre-formatted text
+// (e.g. "21C"/"48%"), same reasoning as the photo-overlay climate badges:
+// agenda_renderer.c stays unit-agnostic. Each channel is independently
+// optional (has_temp/has_hum), same as the overlay badges.
+typedef struct {
+    bool has_temp;
+    char temp_text[8];
+    climate_category_t temp_category;
+    bool has_hum;
+    char hum_text[8];
+    climate_category_t hum_category;
+} agenda_climate_t;
 
 /**
  * @brief Renders ToDo and/or Calendar content as a full-screen grid - no
@@ -51,6 +67,11 @@
  * @param lookahead_days Only used for the Calendar column's day-window
  * bookkeeping (the actual event filtering already happened when
  * `events_a`/`events_b` were fetched) - no longer shown in the header text.
+ * @param climate Optional (NULL if the opt-in
+ * config_manager_get_climate_agenda_header_enabled() setting is off, or
+ * both sensor reads failed) - when present, a small right-aligned readout
+ * is drawn into BOTH column headers (ToDo and Calendar alike), in the free
+ * space after the existing header text.
  * @return ESP_ERR_INVALID_ARG on bad arguments, ESP_ERR_INVALID_STATE if
  * `todo`, `events_a`, and `events_b` are all NULL/empty (nothing to render -
  * callers should check this first rather than relying on it),
@@ -61,6 +82,7 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                                  const ics_event_list_t *events_b, const ics_event_list_t *events_c,
                                  const ics_event_list_t *events_d, const ics_event_list_t *events_e,
                                  const weather_forecast_t *cal_weather, int lookahead_days,
-                                 const char *output_path, image_format_t out_format);
+                                 const char *output_path, image_format_t out_format,
+                                 const agenda_climate_t *climate);
 
 #endif

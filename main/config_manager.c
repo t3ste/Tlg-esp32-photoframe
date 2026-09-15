@@ -204,6 +204,14 @@ static bool chime_event_enabled[CHIME_EVENT_COUNT] = {
 static int chime_volume = CHIME_DEFAULT_VOLUME_PERCENT;
 static int chime_repeat_count[CHIME_EVENT_COUNT] = {0};
 
+// Climate (SHTC3) - logging on by default (no visual clutter), the overlay
+// badge and Agenda-header readout off by default, see config.h.
+static climate_room_type_t climate_room_type = CLIMATE_ROOM_LIVING_ROOM;
+static climate_temp_unit_t climate_temp_unit = CLIMATE_UNIT_CELSIUS;
+static bool climate_logging_enabled = true;
+static bool climate_overlay_enabled = false;
+static bool climate_agenda_header_enabled = false;
+
 // ----------------------------------------------------------------------------
 // Cron schedule helpers
 // ----------------------------------------------------------------------------
@@ -1321,6 +1329,35 @@ esp_err_t config_manager_init(void)
         }
         if (nvs_get_i32(nvs_handle, NVS_CHIME_REPEAT_AGENDA_KEY, &stored_chime_rc) == ESP_OK) {
             chime_repeat_count[CHIME_EVENT_AGENDA_DUE] = (int) stored_chime_rc;
+        }
+
+        // Climate
+        uint8_t stored_climate_room = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_ROOM_TYPE_KEY, &stored_climate_room) == ESP_OK) {
+            climate_room_type = (stored_climate_room <= CLIMATE_ROOM_BASEMENT)
+                                    ? (climate_room_type_t) stored_climate_room
+                                    : CLIMATE_ROOM_LIVING_ROOM;
+        }
+        uint8_t stored_climate_unit = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_TEMP_UNIT_KEY, &stored_climate_unit) == ESP_OK) {
+            climate_temp_unit = (stored_climate_unit <= CLIMATE_UNIT_FAHRENHEIT)
+                                    ? (climate_temp_unit_t) stored_climate_unit
+                                    : CLIMATE_UNIT_CELSIUS;
+        }
+        uint8_t stored_climate_log = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_LOGGING_ENABLED_KEY, &stored_climate_log) ==
+            ESP_OK) {
+            climate_logging_enabled = (stored_climate_log != 0);
+        }
+        uint8_t stored_climate_ovl = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_OVERLAY_ENABLED_KEY, &stored_climate_ovl) ==
+            ESP_OK) {
+            climate_overlay_enabled = (stored_climate_ovl != 0);
+        }
+        uint8_t stored_climate_hdr = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_AGENDA_HEADER_ENABLED_KEY, &stored_climate_hdr) ==
+            ESP_OK) {
+            climate_agenda_header_enabled = (stored_climate_hdr != 0);
         }
 
         nvs_close(nvs_handle);
@@ -3844,4 +3881,69 @@ int config_manager_get_chime_repeat_count(chime_event_t event)
         return 0;
     }
     return chime_repeat_count[event];
+}
+
+// ============================================================================
+// Climate (SHTC3 temperature/humidity)
+// ============================================================================
+
+void config_manager_set_climate_room_type(climate_room_type_t room)
+{
+    if (room < CLIMATE_ROOM_LIVING_ROOM || room > CLIMATE_ROOM_BASEMENT) {
+        room = CLIMATE_ROOM_LIVING_ROOM;
+    }
+    climate_room_type = room;
+    agenda_nvs_set_u8(NVS_CLIMATE_ROOM_TYPE_KEY, (uint8_t) room);
+}
+
+climate_room_type_t config_manager_get_climate_room_type(void)
+{
+    return climate_room_type;
+}
+
+void config_manager_set_climate_temp_unit(climate_temp_unit_t unit)
+{
+    if (unit < CLIMATE_UNIT_CELSIUS || unit > CLIMATE_UNIT_FAHRENHEIT) {
+        unit = CLIMATE_UNIT_CELSIUS;
+    }
+    climate_temp_unit = unit;
+    agenda_nvs_set_u8(NVS_CLIMATE_TEMP_UNIT_KEY, (uint8_t) unit);
+}
+
+climate_temp_unit_t config_manager_get_climate_temp_unit(void)
+{
+    return climate_temp_unit;
+}
+
+void config_manager_set_climate_logging_enabled(bool enabled)
+{
+    climate_logging_enabled = enabled;
+    agenda_nvs_set_u8(NVS_CLIMATE_LOGGING_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_climate_logging_enabled(void)
+{
+    return climate_logging_enabled;
+}
+
+void config_manager_set_climate_overlay_enabled(bool enabled)
+{
+    climate_overlay_enabled = enabled;
+    agenda_nvs_set_u8(NVS_CLIMATE_OVERLAY_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_climate_overlay_enabled(void)
+{
+    return climate_overlay_enabled;
+}
+
+void config_manager_set_climate_agenda_header_enabled(bool enabled)
+{
+    climate_agenda_header_enabled = enabled;
+    agenda_nvs_set_u8(NVS_CLIMATE_AGENDA_HEADER_ENABLED_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_climate_agenda_header_enabled(void)
+{
+    return climate_agenda_header_enabled;
 }

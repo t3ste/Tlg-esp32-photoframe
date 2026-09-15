@@ -6,6 +6,8 @@ set(SOURCES
     "calendar_ics.c"
     "cert_pin.c"
     "chime.c"
+    "climate.c"
+    "climate_history.c"
     "color_palette.c"
     "config_manager.c"
     "debug_log.c"
