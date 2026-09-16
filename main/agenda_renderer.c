@@ -722,17 +722,23 @@ static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t 
         // with a long day label (unlikely, but the label itself is
         // already clipped above for the same reason) is the only case
         // this ever triggers.
-        int max_weather_chars =
-            (total_w - label_w - (dash_len + gap_len)) / IMAGE_PROCESSOR_FONT_WIDTH;
-        if (max_weather_chars < 0) {
-            max_weather_chars = 0;
+        int max_weather_width = total_w - label_w - (dash_len + gap_len);
+        if (max_weather_width < 0) {
+            max_weather_width = 0;
         }
         strncpy(weather_clipped, weather_text, sizeof(weather_clipped) - 1);
         weather_clipped[sizeof(weather_clipped) - 1] = '\0';
-        if ((int) strlen(weather_clipped) > max_weather_chars) {
-            weather_clipped[max_weather_chars] = '\0';
+        // Trim from the end until it fits - a plain char-count cutoff would
+        // be wrong once a weather-icon marker byte (wider than a normal
+        // character) is embedded; this string is short (one day's forecast
+        // chip, well under WEATHER_DAY_LINE_MAX_LEN), so re-measuring the
+        // whole string per trimmed byte is negligible cost, once per
+        // calendar day per render.
+        while (weather_clipped[0] != '\0' &&
+               image_processor_measure_text_width(weather_clipped) > max_weather_width) {
+            weather_clipped[strlen(weather_clipped) - 1] = '\0';
         }
-        weather_w = (int) strlen(weather_clipped) * IMAGE_PROCESSOR_FONT_WIDTH;
+        weather_w = image_processor_measure_text_width(weather_clipped);
         weather_x = weather_right_aligned ? (right_end - weather_w)
                                           : (rect.x + AGENDA_PADDING + (total_w - weather_w) / 2);
         int min_weather_x = label_x + label_w + dash_len;
@@ -1147,8 +1153,23 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         if (find_weather_for_day(cal_weather, days[di], &wday)) {
             int tmin = (int) lroundf(wday->temp_min_c);
             int tmax = (int) lroundf(wday->temp_max_c);
-            const char *cond = weather_condition_text(wday->weather_code, german);
-            snprintf(weather_buf, sizeof(weather_buf), "[%d/%d %s]", tmin, tmax, cond);
+            const char *icon_set = config_manager_get_weather_icon_set();
+            int icon_id =
+                (strcmp(icon_set, "none") != 0) ? weather_code_to_icon_id(wday->weather_code) : -1;
+            if (icon_id >= 0) {
+                // Same marker-byte embedding as weather.c's format_day_line()
+                // - image_processor_draw_text() (used by draw_day_divider()
+                // below) draws the small icon variant in its place.
+                int prefix_len = snprintf(weather_buf, sizeof(weather_buf), "[%d/%d ", tmin, tmax);
+                if (prefix_len > 0 && (size_t) prefix_len + 2 < sizeof(weather_buf)) {
+                    weather_buf[prefix_len] = (char) (WEATHER_ICON_MARKER_BASE + icon_id);
+                    weather_buf[prefix_len + 1] = ']';
+                    weather_buf[prefix_len + 2] = '\0';
+                }
+            } else {
+                const char *cond = weather_condition_text(wday->weather_code, german);
+                snprintf(weather_buf, sizeof(weather_buf), "[%d/%d %s]", tmin, tmax, cond);
+            }
         }
         draw_day_divider(rgb, width, height, rect, content_top + rows_used * row_h, label,
                          weather_mode, weather_right_aligned, weather_buf[0] ? weather_buf : NULL,

@@ -371,9 +371,23 @@ void image_processor_fill_rect(uint8_t *rgb_buffer, int width, int height, int x
  * text-drawing function in this module, in a single solid color. No
  * wrapping/truncation - pre-wrap with image_processor_wrap_text() first if
  * the text might not fit.
+ *
+ * Also recognizes a weather-icon marker byte (see WEATHER_ICON_MARKER_BASE
+ * in weather.h) and draws the small icon variant instead of a font glyph at
+ * that position - agenda_renderer.c's Calendar day-divider weather chip is
+ * the only caller that ever actually embeds one.
  */
 void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x, int y,
                                const char *ascii_text, uint8_t r, uint8_t g, uint8_t b);
+
+/**
+ * @brief Pixel width image_processor_draw_text() will occupy drawing
+ * `ascii_text` - like `strlen(ascii_text) * IMAGE_PROCESSOR_FONT_WIDTH`, but
+ * accounts for any embedded weather-icon marker byte (wider than a normal
+ * character) - use this instead of the strlen-based formula for any layout
+ * math (centering, truncation) once the text might contain one.
+ */
+int image_processor_measure_text_width(const char *ascii_text);
 
 /**
  * @brief One colored substring of a string drawn by

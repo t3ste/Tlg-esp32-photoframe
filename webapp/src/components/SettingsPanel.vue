@@ -884,6 +884,7 @@ async function performFactoryReset() {
         <v-tab value="autoRotate"> Auto Rotate </v-tab>
         <v-tab value="agenda"> Agenda </v-tab>
         <v-tab value="power"> Power </v-tab>
+        <v-tab value="overlays"> Overlays </v-tab>
         <v-tab v-if="settingsStore.deviceSettings.chimeSpeakerAvailable" value="chimes">
           Chimes
         </v-tab>
@@ -2188,9 +2189,9 @@ async function performFactoryReset() {
               to preview what it looks like. Overlays onto the current image if there is one,
               otherwise shows it on a blank screen.
             </div>
+          </v-tabs-window-item>
 
-            <v-divider class="my-6" />
-
+          <v-tabs-window-item value="overlays">
             <div class="text-subtitle-2 mb-2">Weather + Headline Overlays</div>
             <div class="text-caption text-medium-emphasis mb-4">
               On-device alternative to the companion image server's weather overlay - no separate
@@ -2364,7 +2365,8 @@ async function performFactoryReset() {
             <div class="text-caption text-medium-emphasis mb-4">
               Shows a small icon instead of the spelled-out condition word (e.g. a cloud instead of
               "cloudy") to save space. Two icon sets to choose from - try both and see which reads
-              better on your panel.
+              better on your panel. Also applies to the Agenda tab's Calendar day-divider weather
+              annotation, if that's enabled.
             </div>
 
             <v-switch
@@ -2435,11 +2437,14 @@ async function performFactoryReset() {
               gets its own line.
             </div>
 
+            <v-divider class="my-6" />
+
+            <div class="text-subtitle-2 mb-2">Low Battery Badge</div>
             <v-switch
               v-model="settingsStore.deviceSettings.lowBatteryOverlayEnabled"
               label="Low battery badge"
               color="primary"
-              class="mb-2 mt-4"
+              class="mb-2"
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
@@ -2591,7 +2596,7 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Fires when the battery is below the Low Battery Overlay threshold (Power tab),
+              Fires when the battery is below the Low Battery Overlay threshold (Overlays tab),
               repeating once per wake while still low, up to 5 times, then resets once the level
               recovers.
             </div>

@@ -3392,50 +3392,73 @@ static bool is_weather_icon_marker(char c)
     return b >= WEATHER_ICON_MARKER_BASE && b < WEATHER_ICON_MARKER_BASE + WEATHER_ICON_COUNT;
 }
 
-// Pixel width render_text_bar()/image_processor_draw_overlay_bar() advance
-// by for one byte of a line - Font24.Width for a normal character,
-// WEATHER_ICON_WIDTH for a weather-icon marker byte. Single source of truth
-// so the centering/truncation math below and the actual draw loop can never
-// disagree.
-static int glyph_advance_width(char c)
+// Pixel width render_text_bar()/image_processor_draw_overlay_bar() (and,
+// via the small=true variants below, agenda_renderer.c's weather chip)
+// advance by for one byte of a line - Font24.Width for a normal character,
+// the icon width for a weather-icon marker byte. Single source of truth so
+// the centering/truncation math below and the actual draw loop can never
+// disagree. Two icon sizes exist (see WEATHER_ICON_WIDTH_SMALL's doc
+// comment in weather_icons_data.h): the photo overlay bar owns its own bar
+// height and can grow it for the standard size, but agenda_renderer.c's
+// Calendar day-divider row height is a fixed global shared by every row in
+// that grid, so its weather chip needs the small variant to fit without
+// changing that grid's spacing at all.
+static int glyph_advance_width_ex(char c, bool small_icon)
 {
-    return is_weather_icon_marker(c) ? WEATHER_ICON_WIDTH : Font24.Width;
+    if (is_weather_icon_marker(c)) {
+        return small_icon ? WEATHER_ICON_WIDTH_SMALL : WEATHER_ICON_WIDTH;
+    }
+    return Font24.Width;
 }
 
-// Sums glyph_advance_width() over a whole line - the pixel-accurate
+static int glyph_advance_width(char c)
+{
+    return glyph_advance_width_ex(c, false);
+}
+
+// Sums glyph_advance_width_ex() over a whole line - the pixel-accurate
 // replacement for the old `strlen(line) * Font24.Width` (still exactly
 // equal to that for any line with no icon markers, i.e. every line type
 // except weather-in-icon-mode).
-static int measure_line_width(const char *line)
+static int measure_line_width_ex(const char *line, bool small_icon)
 {
     int w = 0;
     for (const char *p = line; *p != '\0'; p++) {
-        w += glyph_advance_width(*p);
+        w += glyph_advance_width_ex(*p, small_icon);
     }
     return w;
 }
 
-// Blits one weather-condition icon (1bpp, MSB-first, WEATHER_ICON_WIDTH x
-// WEATHER_ICON_HEIGHT, from main/weather_icons_data.h) onto an RGB888
-// buffer - structurally identical to draw_glyph() above, just indexing the
-// currently-selected icon set's table instead of Font24. `icon_id` is
-// 0-based (the caller has already subtracted WEATHER_ICON_MARKER_BASE from
-// the marker byte).
+static int measure_line_width(const char *line)
+{
+    return measure_line_width_ex(line, false);
+}
+
+// Blits one weather-condition icon (1bpp, MSB-first, from
+// main/weather_icons_data.h) onto an RGB888 buffer - structurally identical
+// to draw_glyph() above, just indexing the currently-selected icon set's
+// table instead of Font24. `icon_id` is 0-based (the caller has already
+// subtracted WEATHER_ICON_MARKER_BASE from the marker byte); `small`
+// selects the WEATHER_ICON_*_SMALL table/dimensions instead of the
+// standard ones.
 static void draw_weather_icon(uint8_t *rgb, int width, int height, int x, int y, int icon_id,
-                              rgb_t color)
+                              rgb_t color, bool small)
 {
     if (icon_id < 0 || icon_id >= WEATHER_ICON_COUNT) {
         return;
     }
-    const char *icon_set = config_manager_get_weather_icon_set();
+    bool metno = (strcmp(config_manager_get_weather_icon_set(), "metno") == 0);
     const uint8_t *const *table =
-        (strcmp(icon_set, "metno") == 0) ? weather_icon_table_metno : weather_icon_table_flaticon;
+        small ? (metno ? weather_icon_table_metno_small : weather_icon_table_flaticon_small)
+              : (metno ? weather_icon_table_metno : weather_icon_table_flaticon);
+    int icon_w = small ? WEATHER_ICON_WIDTH_SMALL : WEATHER_ICON_WIDTH;
+    int icon_h = small ? WEATHER_ICON_HEIGHT_SMALL : WEATHER_ICON_HEIGHT;
     const uint8_t *bitmap = table[icon_id];
 
-    uint32_t bytes_per_row = WEATHER_ICON_WIDTH / 8 + (WEATHER_ICON_WIDTH % 8 ? 1 : 0);
-    for (int row = 0; row < WEATHER_ICON_HEIGHT; row++) {
+    uint32_t bytes_per_row = icon_w / 8 + (icon_w % 8 ? 1 : 0);
+    for (int row = 0; row < icon_h; row++) {
         const uint8_t *ptr = &bitmap[row * bytes_per_row];
-        for (int col = 0; col < WEATHER_ICON_WIDTH; col++) {
+        for (int col = 0; col < icon_w; col++) {
             if (ptr[col / 8] & (0x80 >> (col % 8))) {
                 int px = x + col, py = y + row;
                 if (px >= 0 && px < width && py >= 0 && py < height) {
@@ -3480,9 +3503,23 @@ void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x
     rgb_t color = {r, g, b};
     int cx = x;
     for (const char *p = ascii_text; *p != '\0'; p++) {
+        if (is_weather_icon_marker(*p)) {
+            // Small variant: this call site (agenda_renderer.c's Calendar
+            // day-divider weather chip) shares its row height with the rest
+            // of that grid - see WEATHER_ICON_WIDTH_SMALL's doc comment.
+            draw_weather_icon(rgb_buffer, width, height, cx, y,
+                              (unsigned char) *p - WEATHER_ICON_MARKER_BASE, color, true);
+            cx += WEATHER_ICON_WIDTH_SMALL;
+            continue;
+        }
         draw_glyph(rgb_buffer, width, height, cx, y, *p, color);
         cx += Font24.Width;
     }
+}
+
+int image_processor_measure_text_width(const char *ascii_text)
+{
+    return ascii_text ? measure_line_width_ex(ascii_text, true) : 0;
 }
 
 void image_processor_draw_text_runs(uint8_t *rgb_buffer, int width, int height, int x, int y,
@@ -3659,7 +3696,7 @@ static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
         for (const char *p = lines[i]; *p != '\0'; p++) {
             if (is_weather_icon_marker(*p)) {
                 draw_weather_icon(rgb_buffer, width, height, x, y,
-                                  (unsigned char) *p - WEATHER_ICON_MARKER_BASE, fg);
+                                  (unsigned char) *p - WEATHER_ICON_MARKER_BASE, fg, false);
                 x += WEATHER_ICON_WIDTH;
                 continue;
             }
