@@ -374,6 +374,10 @@ bool config_manager_get_weather_multiline_enabled(void);
 // value falls back to "none".
 void config_manager_set_weather_icon_set(const char *icon_set);
 const char *config_manager_get_weather_icon_set(void);
+// Traffic-light severity coloring for the icon above. See
+// NVS_WEATHER_ICON_COLORED_KEY in config.h.
+void config_manager_set_weather_icon_colored(bool enabled);
+bool config_manager_get_weather_icon_colored(void);
 
 // ============================================================================
 // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo

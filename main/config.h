@@ -598,6 +598,15 @@ typedef enum {
 #define WEATHER_ICON_SET_MAX_LEN 9  // "flaticon\0" is the longest value
 #define WEATHER_ICON_SET_DEFAULT "none"
 
+// Traffic-light severity coloring for the icon above (e.g. red for heavy
+// rain, green for light rain, blue for snow) instead of the overlay bar's
+// plain single foreground color - off by default (monochrome, matching
+// every other overlay-bar element). Meaningless with NVS_WEATHER_ICON_SET_KEY
+// = "none" (no icon to color) and automatically ignored on grayscale-only
+// boards (see board_is_grayscale() in image_processor.c) the same way the
+// Climate feature's badge colors already are.
+#define NVS_WEATHER_ICON_COLORED_KEY "wthr_colored"
+
 // Small always-on-render corner badge (not a full-width bar, unlike the
 // overlays above) shown whenever the battery is below a configurable
 // threshold - independent of Telegram/Web UI reachability, so the user

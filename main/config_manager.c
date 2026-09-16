@@ -115,6 +115,7 @@ static char overlay_language[OVERLAY_LANGUAGE_MAX_LEN] = OVERLAY_LANGUAGE_DEFAUL
 static bool caption_invert_colors_enabled = false;
 static bool weather_multiline_enabled = false;
 static char weather_icon_set[WEATHER_ICON_SET_MAX_LEN] = WEATHER_ICON_SET_DEFAULT;
+static bool weather_icon_colored = false;
 static bool show_exif_datetime_enabled = false;
 static bool low_battery_overlay_enabled = false;
 static uint8_t low_battery_overlay_threshold = LOW_BATTERY_OVERLAY_THRESHOLD_DEFAULT;
@@ -1058,6 +1059,11 @@ esp_err_t config_manager_init(void)
                         &weather_icon_set_len) != ESP_OK) {
             strncpy(weather_icon_set, WEATHER_ICON_SET_DEFAULT, sizeof(weather_icon_set) - 1);
             weather_icon_set[sizeof(weather_icon_set) - 1] = '\0';
+        }
+        uint8_t stored_weather_icon_colored = 0;
+        if (nvs_get_u8(nvs_handle, NVS_WEATHER_ICON_COLORED_KEY, &stored_weather_icon_colored) ==
+            ESP_OK) {
+            weather_icon_colored = (stored_weather_icon_colored != 0);
         }
         uint8_t stored_show_exif_datetime = 0;
         if (nvs_get_u8(nvs_handle, NVS_SHOW_EXIF_DATETIME_KEY, &stored_show_exif_datetime) ==
@@ -2975,6 +2981,23 @@ void config_manager_set_weather_icon_set(const char *icon_set)
 const char *config_manager_get_weather_icon_set(void)
 {
     return weather_icon_set;
+}
+
+void config_manager_set_weather_icon_colored(bool enabled)
+{
+    weather_icon_colored = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_WEATHER_ICON_COLORED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+bool config_manager_get_weather_icon_colored(void)
+{
+    return weather_icon_colored;
 }
 
 void config_manager_set_show_exif_datetime_enabled(bool enabled)

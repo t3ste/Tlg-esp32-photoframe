@@ -378,7 +378,7 @@ This project is based on the ESP32-S3-PhotoPainter sample code. Please refer to 
 - Original PhotoPainter sample: Waveshare ESP32-S3-PhotoPainter
 - E-paper drivers: Waveshare
 - ESP-IDF: Espressif Systems
-- Weather condition icons (Settings → Weather → "Weather condition display", optional): two
+- Weather condition icons (Settings → Overlays → "Weather condition display", optional): two
   selectable sets, both re-rendered at a small fixed size for this project's overlay bar (see
   `scripts/generate_weather_icons.py`) -
   [MET Norway/yr.no weathericons](https://github.com/metno/weathericons) (MIT License), and a set

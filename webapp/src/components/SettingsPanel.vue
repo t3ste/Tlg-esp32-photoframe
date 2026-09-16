@@ -2362,11 +2362,31 @@ async function performFactoryReset() {
               style="max-width: 320px"
               :disabled="!settingsStore.deviceSettings.weatherOverlayEnabled"
             />
-            <div class="text-caption text-medium-emphasis mb-4">
+            <div class="text-caption text-medium-emphasis mb-2">
               Shows a small icon instead of the spelled-out condition word (e.g. a cloud instead of
               "cloudy") to save space. Two icon sets to choose from - try both and see which reads
               better on your panel. Also applies to the Agenda tab's Calendar day-divider weather
               annotation, if that's enabled.
+            </div>
+            <v-checkbox
+              v-model="settingsStore.deviceSettings.weatherIconColored"
+              label="Colored icons (traffic-light severity: green/yellow/red, blue for snow)"
+              color="primary"
+              density="compact"
+              hide-details
+              class="mb-4"
+              :disabled="
+                !settingsStore.deviceSettings.weatherOverlayEnabled ||
+                settingsStore.deviceSettings.weatherIconSet === 'none'
+              "
+            />
+            <div
+              v-if="settingsStore.deviceSettings.weatherIconColored"
+              class="text-caption text-medium-emphasis mb-4"
+            >
+              Color reflects severity, not the icon set's own artwork colors - e.g. heavy rain and
+              heavy snow both show red. Ignored on grayscale-only panels (falls back to plain
+              black/white, same as everything else there).
             </div>
 
             <v-switch

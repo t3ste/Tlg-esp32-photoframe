@@ -665,22 +665,27 @@ int weather_code_to_icon_id(int code)
         int icon_id;
     } code_icon_entry_t;
     static const code_icon_entry_t table[] = {
-        {0, 0},                        // Clear sky
-        {1, 1},                        // Mainly clear
-        {2, 2},                        // Partly cloudy
-        {3, 3},                        // Overcast
-        {45, 4},                       // Fog
-        {48, 5},                       // Icy fog
-        {51, 6},  {61, 6},  {80, 6},   // Drizzle/rain/showers - light
-        {53, 7},  {63, 7},  {81, 7},   // Drizzle/rain/showers - moderate
-        {55, 8},  {65, 8},  {82, 8},   // Drizzle/rain/showers - heavy
-        {56, 9},  {66, 9},             // Freezing drizzle - light
-        {57, 10}, {67, 10},            // Freezing drizzle
-        {71, 11}, {85, 11},            // Snow - light
-        {73, 12},                      // Snow - moderate
-        {75, 13}, {86, 13},            // Snow - heavy
-        {77, 14},                      // Snow grains
-        {95, 15}, {96, 15}, {99, 15},  // Thunderstorm, +/- hail
+        {0, 0},                       // Clear sky
+        {1, 1},                       // Mainly clear
+        {2, 2},                       // Partly cloudy
+        {3, 3},                       // Overcast
+        {45, 4},                      // Fog
+        {48, 5},                      // Icy fog
+        {51, 6},  {61, 6},  {80, 6},  // Drizzle/rain/showers - light
+        {53, 7},  {63, 7},  {81, 7},  // Drizzle/rain/showers - moderate
+        {55, 8},  {65, 8},  {82, 8},  // Drizzle/rain/showers - heavy
+        {56, 9},  {66, 9},            // Freezing drizzle - light
+        {57, 10}, {67, 10},           // Freezing drizzle
+        {71, 11}, {85, 11},           // Snow - light
+        {73, 12},                     // Snow - moderate
+        {75, 13}, {86, 13},           // Snow - heavy
+        {77, 14},                     // Snow grains
+        {95, 15},                     // Thunderstorm
+        {96, 16}, {99, 16},           // Thunderstorm with hail - separate icon id from plain
+                                      // thunderstorm even though both icon sets draw the same
+                                      // glyph for it (neither has a distinct hail icon), so the
+                                      // severity-color table in image_processor.c can still tell
+                                      // the two apart in colored-icon mode
     };
     for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
         if (table[i].code == code) {

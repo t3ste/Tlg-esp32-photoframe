@@ -3392,73 +3392,97 @@ static bool is_weather_icon_marker(char c)
     return b >= WEATHER_ICON_MARKER_BASE && b < WEATHER_ICON_MARKER_BASE + WEATHER_ICON_COUNT;
 }
 
-// Pixel width render_text_bar()/image_processor_draw_overlay_bar() (and,
-// via the small=true variants below, agenda_renderer.c's weather chip)
-// advance by for one byte of a line - Font24.Width for a normal character,
-// the icon width for a weather-icon marker byte. Single source of truth so
-// the centering/truncation math below and the actual draw loop can never
-// disagree. Two icon sizes exist (see WEATHER_ICON_WIDTH_SMALL's doc
-// comment in weather_icons_data.h): the photo overlay bar owns its own bar
-// height and can grow it for the standard size, but agenda_renderer.c's
-// Calendar day-divider row height is a fixed global shared by every row in
-// that grid, so its weather chip needs the small variant to fit without
-// changing that grid's spacing at all.
-static int glyph_advance_width_ex(char c, bool small_icon)
-{
-    if (is_weather_icon_marker(c)) {
-        return small_icon ? WEATHER_ICON_WIDTH_SMALL : WEATHER_ICON_WIDTH;
-    }
-    return Font24.Width;
-}
-
+// Pixel width render_text_bar()/image_processor_draw_overlay_bar()/
+// image_processor_draw_text() advance by for one byte of a line -
+// Font24.Width for a normal character, WEATHER_ICON_WIDTH for a
+// weather-icon marker byte. Single source of truth so the
+// centering/truncation math below and the actual draw loop can never
+// disagree. One icon size (24px, matching Font24.Height) is used
+// everywhere - both the photo overlay bar and agenda_renderer.c's Calendar
+// day-divider weather chip, which shares a fixed row height with the rest
+// of that grid and can't grow it.
 static int glyph_advance_width(char c)
 {
-    return glyph_advance_width_ex(c, false);
+    return is_weather_icon_marker(c) ? WEATHER_ICON_WIDTH : Font24.Width;
 }
 
-// Sums glyph_advance_width_ex() over a whole line - the pixel-accurate
+// Sums glyph_advance_width() over a whole line - the pixel-accurate
 // replacement for the old `strlen(line) * Font24.Width` (still exactly
 // equal to that for any line with no icon markers, i.e. every line type
 // except weather-in-icon-mode).
-static int measure_line_width_ex(const char *line, bool small_icon)
+static int measure_line_width(const char *line)
 {
     int w = 0;
     for (const char *p = line; *p != '\0'; p++) {
-        w += glyph_advance_width_ex(*p, small_icon);
+        w += glyph_advance_width(*p);
     }
     return w;
 }
 
-static int measure_line_width(const char *line)
+// Traffic-light severity color per icon id, shown instead of the plain
+// foreground color when config_manager_get_weather_icon_colored() is on
+// (and the board can actually show color - see board_is_grayscale() below).
+// A fixed per-icon-id table rather than a live per-WMO-code lookup: the one
+// case that would otherwise need dynamic coloring - thunderstorm with vs.
+// without hail - already gets its own icon id in weather_icons_data.h (both
+// icon sets draw the same glyph for both, since neither has a distinct hail
+// icon) specifically so this can stay a simple static table indexed the
+// same way as the bitmap tables themselves. See docs/DIFF.md's weather-icon
+// entry for the full WMO-code-to-color mapping this mirrors.
+static rgb_t weather_icon_color_for_id(int icon_id)
 {
-    return measure_line_width_ex(line, false);
+    // palette[]: 0=Black 1=White 2=Yellow 3=Red 5=Blue 6=Green
+    static const int color_by_icon_id[WEATHER_ICON_COUNT] = {
+        6,  // 0  clear                    -> Green
+        6,  // 1  mostly_clear             -> Green
+        0,  // 2  partly_cloudy            -> Black (neutral)
+        0,  // 3  overcast                 -> Black (neutral)
+        2,  // 4  fog                      -> Yellow
+        3,  // 5  icy_fog                  -> Red
+        6,  // 6  rain_light               -> Green
+        2,  // 7  rain_moderate            -> Yellow
+        3,  // 8  rain_heavy               -> Red
+        2,  // 9  freezing_drizzle_light   -> Yellow
+        3,  // 10 freezing_drizzle         -> Red
+        5,  // 11 snow_light               -> Blue
+        2,  // 12 snow_moderate            -> Yellow
+        3,  // 13 snow_heavy               -> Red
+        0,  // 14 snow_grains              -> Black (neutral)
+        2,  // 15 thunderstorm             -> Yellow
+        3,  // 16 thunderstorm_hail        -> Red
+    };
+    if (icon_id < 0 || icon_id >= WEATHER_ICON_COUNT) {
+        return palette[0];
+    }
+    return palette[color_by_icon_id[icon_id]];
 }
 
-// Blits one weather-condition icon (1bpp, MSB-first, from
-// main/weather_icons_data.h) onto an RGB888 buffer - structurally identical
-// to draw_glyph() above, just indexing the currently-selected icon set's
-// table instead of Font24. `icon_id` is 0-based (the caller has already
-// subtracted WEATHER_ICON_MARKER_BASE from the marker byte); `small`
-// selects the WEATHER_ICON_*_SMALL table/dimensions instead of the
-// standard ones.
+// Blits one weather-condition icon (1bpp, MSB-first, WEATHER_ICON_WIDTH x
+// WEATHER_ICON_HEIGHT, from main/weather_icons_data.h) onto an RGB888
+// buffer - structurally identical to draw_glyph() above, just indexing the
+// currently-selected icon set's table instead of Font24. `icon_id` is
+// 0-based (the caller has already subtracted WEATHER_ICON_MARKER_BASE from
+// the marker byte). `default_color` is used as-is unless colored-icon mode
+// is on and the board can show color, in which case
+// weather_icon_color_for_id() overrides it.
 static void draw_weather_icon(uint8_t *rgb, int width, int height, int x, int y, int icon_id,
-                              rgb_t color, bool small)
+                              rgb_t default_color)
 {
     if (icon_id < 0 || icon_id >= WEATHER_ICON_COUNT) {
         return;
     }
-    bool metno = (strcmp(config_manager_get_weather_icon_set(), "metno") == 0);
+    const char *icon_set = config_manager_get_weather_icon_set();
     const uint8_t *const *table =
-        small ? (metno ? weather_icon_table_metno_small : weather_icon_table_flaticon_small)
-              : (metno ? weather_icon_table_metno : weather_icon_table_flaticon);
-    int icon_w = small ? WEATHER_ICON_WIDTH_SMALL : WEATHER_ICON_WIDTH;
-    int icon_h = small ? WEATHER_ICON_HEIGHT_SMALL : WEATHER_ICON_HEIGHT;
+        (strcmp(icon_set, "metno") == 0) ? weather_icon_table_metno : weather_icon_table_flaticon;
     const uint8_t *bitmap = table[icon_id];
+    rgb_t color = (config_manager_get_weather_icon_colored() && !board_is_grayscale())
+                      ? weather_icon_color_for_id(icon_id)
+                      : default_color;
 
-    uint32_t bytes_per_row = icon_w / 8 + (icon_w % 8 ? 1 : 0);
-    for (int row = 0; row < icon_h; row++) {
+    uint32_t bytes_per_row = WEATHER_ICON_WIDTH / 8 + (WEATHER_ICON_WIDTH % 8 ? 1 : 0);
+    for (int row = 0; row < WEATHER_ICON_HEIGHT; row++) {
         const uint8_t *ptr = &bitmap[row * bytes_per_row];
-        for (int col = 0; col < icon_w; col++) {
+        for (int col = 0; col < WEATHER_ICON_WIDTH; col++) {
             if (ptr[col / 8] & (0x80 >> (col % 8))) {
                 int px = x + col, py = y + row;
                 if (px >= 0 && px < width && py >= 0 && py < height) {
@@ -3504,12 +3528,9 @@ void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x
     int cx = x;
     for (const char *p = ascii_text; *p != '\0'; p++) {
         if (is_weather_icon_marker(*p)) {
-            // Small variant: this call site (agenda_renderer.c's Calendar
-            // day-divider weather chip) shares its row height with the rest
-            // of that grid - see WEATHER_ICON_WIDTH_SMALL's doc comment.
             draw_weather_icon(rgb_buffer, width, height, cx, y,
-                              (unsigned char) *p - WEATHER_ICON_MARKER_BASE, color, true);
-            cx += WEATHER_ICON_WIDTH_SMALL;
+                              (unsigned char) *p - WEATHER_ICON_MARKER_BASE, color);
+            cx += WEATHER_ICON_WIDTH;
             continue;
         }
         draw_glyph(rgb_buffer, width, height, cx, y, *p, color);
@@ -3519,7 +3540,7 @@ void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x
 
 int image_processor_measure_text_width(const char *ascii_text)
 {
-    return ascii_text ? measure_line_width_ex(ascii_text, true) : 0;
+    return ascii_text ? measure_line_width(ascii_text) : 0;
 }
 
 void image_processor_draw_text_runs(uint8_t *rgb_buffer, int width, int height, int x, int y,
@@ -3646,30 +3667,11 @@ static void sanitize_caption_ascii(const char *utf8, char *out, size_t out_len)
 // bottom-anchored) and image_processor_draw_overlay_bar() (independent
 // pre-truncated lines, top-anchored) so the two can never visually collide
 // on the same image.
-// A line's row height is Font24.Height, unless it contains a weather-icon
-// marker byte and the icon is taller than the text - then the whole row
-// grows to fit it. Byte-for-byte identical to the old fixed Font24.Height
-// for any line without a marker (i.e. everything except weather-in-icon-mode
-// lines), so this never changes existing headline/caption/weather-text
-// layout.
-static int line_row_height(const char *line)
-{
-    for (const char *p = line; *p != '\0'; p++) {
-        if (is_weather_icon_marker(*p)) {
-            return (WEATHER_ICON_HEIGHT > Font24.Height) ? WEATHER_ICON_HEIGHT : Font24.Height;
-        }
-    }
-    return Font24.Height;
-}
-
 static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
                             char lines[][CAPTION_LINE_MAX_CHARS], int line_count, bool anchor_top,
                             int usable_width, rgb_t bg, rgb_t fg)
 {
-    int bar_height = CAPTION_LINE_PADDING;
-    for (int i = 0; i < line_count; i++) {
-        bar_height += line_row_height(lines[i]) + CAPTION_LINE_PADDING;
-    }
+    int bar_height = line_count * (Font24.Height + CAPTION_LINE_PADDING) + CAPTION_LINE_PADDING;
     if (bar_height > height) {
         bar_height = height;
     }
@@ -3684,29 +3686,23 @@ static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
         }
     }
 
-    int y_cursor = bar_top + CAPTION_LINE_PADDING;
     for (int i = 0; i < line_count; i++) {
-        int row_h = line_row_height(lines[i]);
         int text_width = measure_line_width(lines[i]);
         int x = (usable_width - text_width) / 2;
         if (x < CAPTION_LINE_PADDING) {
             x = CAPTION_LINE_PADDING;
         }
-        int y = y_cursor;
+        int y = bar_top + CAPTION_LINE_PADDING + i * (Font24.Height + CAPTION_LINE_PADDING);
         for (const char *p = lines[i]; *p != '\0'; p++) {
             if (is_weather_icon_marker(*p)) {
                 draw_weather_icon(rgb_buffer, width, height, x, y,
-                                  (unsigned char) *p - WEATHER_ICON_MARKER_BASE, fg, false);
+                                  (unsigned char) *p - WEATHER_ICON_MARKER_BASE, fg);
                 x += WEATHER_ICON_WIDTH;
                 continue;
             }
-            // Vertically center the Font24 glyph within a row taller than it
-            // (only happens when this same line also has an icon marker).
-            int glyph_y = y + (row_h - Font24.Height) / 2;
-            draw_glyph(rgb_buffer, width, height, x, glyph_y, *p, fg);
+            draw_glyph(rgb_buffer, width, height, x, y, *p, fg);
             x += Font24.Width;
         }
-        y_cursor += row_h + CAPTION_LINE_PADDING;
     }
 }
 
