@@ -190,16 +190,23 @@ static void decode_ics_text(const char *in, size_t in_len, char *out, size_t out
     out[o] = '\0';
 }
 
-// RRULE-lite: FREQ=DAILY/WEEKLY only, optional INTERVAL (default 1) and
-// COUNT. Anything else in the rule (BYDAY, EXDATE, UNTIL, BYMONTHDAY,
-// WKST, an unrecognized FREQ, ...) makes `supported` false - the caller
-// then skips the whole event rather than risk showing a wrong occurrence.
+// RRULE-lite: FREQ=DAILY/WEEKLY only, optional INTERVAL (default 1), COUNT,
+// and a single-value BYDAY. Anything else in the rule (a multi-value BYDAY
+// like "MO,WE,FR", EXDATE, UNTIL, BYMONTHDAY, WKST, an unrecognized FREQ,
+// ...) makes `supported` false - the caller then skips the whole event
+// rather than risk showing a wrong occurrence.
 typedef struct {
     bool supported;
     bool weekly;   // false = daily
     int interval;  // >= 1
     bool has_count;
     int count;
+    // 0=SU..6=SA, or -1 if the rule had no BYDAY at all. A single BYDAY
+    // value is common (real calendar apps almost always emit one for a
+    // "weekly" recurrence, even a plain single-weekday one) and safe to
+    // accept ONLY once finalize_vevent() confirms it matches DTSTART's own
+    // weekday - see its comment for why a mismatch still fails closed.
+    int byday;
 } ics_rrule_t;
 
 // Parses one RRULE value ("FREQ=DAILY;INTERVAL=2;COUNT=10"-style,
@@ -211,6 +218,7 @@ static bool parse_rrule(const char *value, size_t value_len, ics_rrule_t *out)
 {
     memset(out, 0, sizeof(*out));
     out->interval = 1;
+    out->byday = -1;
     bool have_freq = false;
 
     size_t i = 0;
@@ -259,11 +267,37 @@ static bool parse_rrule(const char *value, size_t value_len, ics_rrule_t *out)
             buf[n] = '\0';
             out->count = atoi(buf);
             out->has_count = true;
+        } else if (key_len == 5 && strncmp(part, "BYDAY", 5) == 0) {
+            // A single day value is common - real calendar apps almost
+            // always emit BYDAY for a "weekly" recurrence, even a plain
+            // single-weekday one - and safe to accept here; finalize_vevent()
+            // still cross-checks it against DTSTART's own weekday before
+            // actually trusting it (this function doesn't have DTSTART yet,
+            // since RRULE can appear before it in the VEVENT block).
+            // Multiple comma-separated values ("MO,WE,FR") describe a
+            // genuinely different pattern this project's simple
+            // weekly-with-interval model can't represent - still fails
+            // closed, same as before.
+            if (memchr(val_ptr, ',', val_len) != NULL) {
+                return false;
+            }
+            static const char *const day_codes[7] = {"SU", "MO", "TU", "WE", "TH", "FR", "SA"};
+            int day = -1;
+            for (int d = 0; d < 7; d++) {
+                if (val_len == 2 && strncmp(val_ptr, day_codes[d], 2) == 0) {
+                    day = d;
+                    break;
+                }
+            }
+            if (day < 0) {
+                return false;  // unrecognized value (e.g. "1MO" ordinal form) - fail closed
+            }
+            out->byday = day;
         } else {
-            // BYDAY, EXDATE, UNTIL, BYMONTHDAY, WKST, BYSETPOS, ... - none
-            // of these are safe to just ignore (they'd change which
-            // occurrences are actually valid), so the whole rule is
-            // unsupported rather than silently wrong.
+            // EXDATE, UNTIL, BYMONTHDAY, WKST, BYSETPOS, ... - none of these
+            // are safe to just ignore (they'd change which occurrences are
+            // actually valid), so the whole rule is unsupported rather than
+            // silently wrong.
             return false;
         }
     }
@@ -412,6 +446,22 @@ static void finalize_vevent(const ics_vevent_state_t *st, time_t window_start, t
     if (st->has_rrule) {
         if (!st->rrule.supported) {
             return;
+        }
+        if (st->rrule.byday >= 0) {
+            // parse_rrule() accepted a single BYDAY value without knowing
+            // FREQ/DTSTART yet (RRULE components can appear in any order
+            // per RFC 5545) - only trust it now: BYDAY on a DAILY rule is a
+            // genuinely different pattern ("every day, but only Mondays" is
+            // not "every day") this project's model can't represent, and a
+            // BYDAY that names a different weekday than DTSTART's own is
+            // likewise something this model can't reproduce. Both fail
+            // closed exactly like any other unsupported rule, rather than
+            // silently showing the wrong days.
+            struct tm start_tm;
+            localtime_r(&start, &start_tm);
+            if (!st->rrule.weekly || start_tm.tm_wday != st->rrule.byday) {
+                return;
+            }
         }
         expand_rrule(&st->rrule, start, end - start, st->all_day, summary, window_start, window_end,
                      out);

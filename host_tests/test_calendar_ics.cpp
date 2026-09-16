@@ -407,6 +407,46 @@ TEST_F(CalendarIcs, RruleWithBydayUnsupportedSkippedEntirely)
     EXPECT_EQ(out.count, 0);
 }
 
+TEST_F(CalendarIcs, RruleWithSingleBydayMatchingDtstartWeekdayAccepted)
+{
+    // DTSTART is a Monday (2024-01-01); a single BYDAY=MO matches it
+    // exactly - the common case real calendar apps (Google/Outlook/Apple)
+    // emit for a plain "repeat weekly" event even with no other special
+    // pattern, so this is now accepted instead of failing closed like a
+    // multi-value BYDAY does.
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240101T100000Z\n"
+        "SUMMARY:Weekly sync\n"
+        "RRULE:FREQ=WEEKLY;BYDAY=MO\n"
+        "END:VEVENT\n";
+
+    ics_event_list_t out =
+        parse(ics, make_utc(2024, 1, 8, 0, 0, 0), make_utc(2024, 1, 22, 0, 0, 0));
+    ASSERT_EQ(out.count, 2);
+    EXPECT_EQ(out.events[0].start, make_utc(2024, 1, 8, 10, 0, 0));
+    EXPECT_EQ(out.events[1].start, make_utc(2024, 1, 15, 10, 0, 0));
+}
+
+TEST_F(CalendarIcs, RruleWithSingleBydayMismatchingDtstartWeekdaySkipped)
+{
+    // DTSTART is a Monday, but BYDAY names Wednesday instead - a genuinely
+    // different pattern (occurrences that don't follow DTSTART's own
+    // weekday) this project's simple weekly-with-interval model can't
+    // represent, so the whole event is still skipped entirely (fail
+    // closed), same as any other unsupported RRULE.
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240101T100000Z\n"
+        "SUMMARY:Mismatched weekday\n"
+        "RRULE:FREQ=WEEKLY;BYDAY=WE\n"
+        "END:VEVENT\n";
+
+    ics_event_list_t out =
+        parse(ics, make_utc(2024, 1, 8, 0, 0, 0), make_utc(2024, 1, 22, 0, 0, 0));
+    EXPECT_EQ(out.count, 0);
+}
+
 TEST_F(CalendarIcs, RruleWithUnsupportedFreqSkippedEntirely)
 {
     const char *ics =
