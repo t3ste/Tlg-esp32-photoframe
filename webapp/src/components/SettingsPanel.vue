@@ -2162,33 +2162,6 @@ async function performFactoryReset() {
               cleanly - capping TX power lowers that peak, at some cost to WiFi range. Turn off if
               you'd rather keep full range and haven't seen any instability.
             </div>
-
-            <v-switch
-              v-model="settingsStore.deviceSettings.errorOverlayEnabled"
-              label="Show error overlay on display for persistent failures"
-              color="primary"
-              hide-details
-            />
-            <div class="text-caption text-medium-emphasis mb-2">
-              After 3 consecutive failed WiFi connection attempts on a scheduled wake, overlays a
-              short error message on the currently displayed image (without modifying the saved
-              file) so the problem is visible on the frame itself, not just in logs. Also togglable
-              via the "/error_overlay" Telegram bot command.
-            </div>
-            <v-btn
-              variant="outlined"
-              size="small"
-              :loading="testingErrorOverlay"
-              @click="testErrorOverlay"
-            >
-              <v-icon icon="mdi-alert-outline" start />
-              Test Error Overlay
-            </v-btn>
-            <div class="text-caption text-medium-emphasis mt-1">
-              Displays an example error message right now, regardless of the setting above - useful
-              to preview what it looks like. Overlays onto the current image if there is one,
-              otherwise shows it on a blank screen.
-            </div>
           </v-tabs-window-item>
 
           <v-tabs-window-item value="overlays">
@@ -2487,6 +2460,36 @@ async function performFactoryReset() {
                 />
               </v-col>
             </v-row>
+
+            <v-divider class="my-6" />
+
+            <div class="text-subtitle-2 mb-2">Error Overlay</div>
+            <v-switch
+              v-model="settingsStore.deviceSettings.errorOverlayEnabled"
+              label="Show error overlay on display for persistent failures"
+              color="primary"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              After 3 consecutive failed WiFi connection attempts on a scheduled wake, overlays a
+              short error message on the currently displayed image (without modifying the saved
+              file) so the problem is visible on the frame itself, not just in logs. Also togglable
+              via the "/error_overlay" Telegram bot command.
+            </div>
+            <v-btn
+              variant="outlined"
+              size="small"
+              :loading="testingErrorOverlay"
+              @click="testErrorOverlay"
+            >
+              <v-icon icon="mdi-alert-outline" start />
+              Test Error Overlay
+            </v-btn>
+            <div class="text-caption text-medium-emphasis mt-1">
+              Displays an example error message right now, regardless of the setting above - useful
+              to preview what it looks like. Overlays onto the current image if there is one,
+              otherwise shows it on a blank screen.
+            </div>
           </v-tabs-window-item>
 
           <!-- Chimes Tab -->
@@ -2661,7 +2664,7 @@ async function performFactoryReset() {
             />
             <div class="text-caption text-medium-emphasis mb-2">
               Fires once WiFi/internet has failed several wakes in a row (same threshold as the
-              Error Overlay, General tab), repeating each further failed wake, up to 5 times, then
+              Error Overlay, Overlays tab), repeating each further failed wake, up to 5 times, then
               resets once connectivity recovers.
             </div>
           </v-tabs-window-item>
