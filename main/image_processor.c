@@ -3450,7 +3450,9 @@ static bool weather_icon_color_for_id(int icon_id, rgb_t *out)
         -1,  // 3  overcast                 -> neutral
         2,   // 4  fog                      -> Yellow
         3,   // 5  icy_fog                  -> Red
-        6,   // 6  rain_light               -> Green
+        5,   // 6  rain_light               -> Blue (distinguishes it from
+             //    "good weather" green now that snow's own light tier is
+             //    also blue - shape tells the two apart, not color)
         2,   // 7  rain_moderate            -> Yellow
         3,   // 8  rain_heavy               -> Red
         2,   // 9  freezing_drizzle_light   -> Yellow

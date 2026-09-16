@@ -54,7 +54,7 @@ COLORS_BY_ICON_ID = [
     (None, None, "Neutral - no warning implied, so no fixed color of its own"),
     ("Yellow", "#ffff00", "Caution - reduced visibility"),
     ("Red", "#ff0000", "Hazard - icy + reduced visibility"),
-    ("Green", "#00ff00", "Light - no particular concern"),
+    ("Blue", "#0000ff", "Light - harmless, distinguished from clear/sunny green by shape not color"),
     ("Yellow", "#ffff00", "Moderate - umbrella recommended"),
     ("Red", "#ff0000", "Heavy - storm risk"),
     ("Yellow", "#ffff00", "Light icing forming - drive carefully"),
