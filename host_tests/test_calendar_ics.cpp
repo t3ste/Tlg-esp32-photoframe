@@ -428,6 +428,33 @@ TEST_F(CalendarIcs, RruleWithSingleBydayMatchingDtstartWeekdayAccepted)
     EXPECT_EQ(out.events[1].start, make_utc(2024, 1, 15, 10, 0, 0));
 }
 
+TEST_F(CalendarIcs, RruleWithWkstAndSingleBydayAccepted)
+{
+    // Real-world regression: an all-day weekly event exported from a real
+    // calendar app (aCalendar, via Android) - DTSTART is a Wednesday
+    // (2026-09-16), and the RRULE includes WKST alongside a single BYDAY.
+    // WKST alone used to reject the whole rule even after BYDAY itself was
+    // accepted, since it fell through to the generic unsupported-component
+    // branch - confirmed live against the reporting user's actual .ics
+    // export.
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "SUMMARY:16:30 Lia Sport\n"
+        "DTSTART;VALUE=DATE:20260916\n"
+        "DTEND;VALUE=DATE:20260917\n"
+        "RRULE:FREQ=WEEKLY;WKST=MO;BYDAY=WE\n"
+        "END:VEVENT\n";
+
+    // Window covers 2026-09-16 (Wed) through 2026-09-30 inclusive - three
+    // Wednesdays (16th, 23rd, 30th).
+    ics_event_list_t out =
+        parse(ics, make_utc(2026, 9, 16, 0, 0, 0), make_utc(2026, 10, 1, 0, 0, 0));
+    ASSERT_EQ(out.count, 3);
+    EXPECT_EQ(out.events[0].start, make_utc(2026, 9, 16, 0, 0, 0));
+    EXPECT_EQ(out.events[1].start, make_utc(2026, 9, 23, 0, 0, 0));
+    EXPECT_EQ(out.events[2].start, make_utc(2026, 9, 30, 0, 0, 0));
+}
+
 TEST_F(CalendarIcs, RruleWithSingleBydayMismatchingDtstartWeekdaySkipped)
 {
     // DTSTART is a Monday, but BYDAY names Wednesday instead - a genuinely

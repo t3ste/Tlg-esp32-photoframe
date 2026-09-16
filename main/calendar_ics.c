@@ -293,9 +293,19 @@ static bool parse_rrule(const char *value, size_t value_len, ics_rrule_t *out)
                 return false;  // unrecognized value (e.g. "1MO" ordinal form) - fail closed
             }
             out->byday = day;
+        } else if (key_len == 4 && strncmp(part, "WKST", 4) == 0) {
+            // Week-start-day only affects which occurrences are valid for
+            // patterns this project doesn't support anyway (BYSETPOS,
+            // BYWEEKNO, or multiple BYDAY values combined with INTERVAL>1) -
+            // with at most one BYDAY value, the only case ever accepted
+            // above, WKST changes nothing about the actual result, so it's
+            // safe to just ignore instead of rejecting the whole rule.
+            // Confirmed live: a real calendar export's simple weekly
+            // Wednesday event ("FREQ=WEEKLY;WKST=MO;BYDAY=WE") was being
+            // dropped by this alone, even after BYDAY itself was accepted.
         } else {
-            // EXDATE, UNTIL, BYMONTHDAY, WKST, BYSETPOS, ... - none of these
-            // are safe to just ignore (they'd change which occurrences are
+            // EXDATE, UNTIL, BYMONTHDAY, BYSETPOS, ... - none of these are
+            // safe to just ignore (they'd change which occurrences are
             // actually valid), so the whole rule is unsupported rather than
             // silently wrong.
             return false;
