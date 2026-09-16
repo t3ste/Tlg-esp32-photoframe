@@ -1065,17 +1065,17 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
     time_t win_day_start = day_start(now);
     time_t win_day_end = day_start(now + (time_t) lookahead_days * 86400 - 1);
 
+    // Every day in the visible window gets a divider row, even one with no
+    // events at all - a day used to be dropped entirely when it had no
+    // matching event (saved a row), but that silently hid that day's
+    // weather annotation too (confirmed live: today's row, and its
+    // forecast, vanished whenever today happened to have no events) -
+    // surprising given the header right above already names today's date.
     time_t days[AGENDA_MAX_CAL_DAYS];
     int day_count = 0;
     for (time_t d = win_day_start; d <= win_day_end && day_count < AGENDA_MAX_CAL_DAYS;
          d += 86400) {
-        bool has_event = false;
-        for (int k = 0; k < tagged_count && !has_event; k++) {
-            has_event = event_touches_day(tagged[k].ev, d);
-        }
-        if (has_event) {
-            days[day_count++] = d;
-        }
+        days[day_count++] = d;
     }
 
     // Multi-day event display mode - see agenda_multiday_mode_t (config.h).
