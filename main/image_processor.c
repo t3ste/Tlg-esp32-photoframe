@@ -3429,32 +3429,45 @@ static int measure_line_width(const char *line)
 // icon) specifically so this can stay a simple static table indexed the
 // same way as the bitmap tables themselves. See docs/DIFF.md's weather-icon
 // entry for the full WMO-code-to-color mapping this mirrors.
-static rgb_t weather_icon_color_for_id(int icon_id)
+//
+// -1 = "neutral" (partly cloudy/overcast/snow grains) - deliberately NOT a
+// literal black constant: both call sites (the overlay bar's default
+// black-background bar, and Agenda mode's day-divider chip, which can be
+// either polarity depending on the chosen page background) already pass in
+// whichever of black/white actually contrasts with THEIR OWN background as
+// `default_color` - a fixed "Black" here went invisible against a black
+// background in either context (confirmed live: an Agenda chip on a dark
+// background swallowed a black icon whole). Falling through to
+// `default_color` for the neutral categories reuses that same
+// already-contrast-safe choice instead of guessing a color of our own.
+static bool weather_icon_color_for_id(int icon_id, rgb_t *out)
 {
     // palette[]: 0=Black 1=White 2=Yellow 3=Red 5=Blue 6=Green
     static const int color_by_icon_id[WEATHER_ICON_COUNT] = {
-        6,  // 0  clear                    -> Green
-        6,  // 1  mostly_clear             -> Green
-        0,  // 2  partly_cloudy            -> Black (neutral)
-        0,  // 3  overcast                 -> Black (neutral)
-        2,  // 4  fog                      -> Yellow
-        3,  // 5  icy_fog                  -> Red
-        6,  // 6  rain_light               -> Green
-        2,  // 7  rain_moderate            -> Yellow
-        3,  // 8  rain_heavy               -> Red
-        2,  // 9  freezing_drizzle_light   -> Yellow
-        3,  // 10 freezing_drizzle         -> Red
-        5,  // 11 snow_light               -> Blue
-        2,  // 12 snow_moderate            -> Yellow
-        3,  // 13 snow_heavy               -> Red
-        0,  // 14 snow_grains              -> Black (neutral)
-        2,  // 15 thunderstorm             -> Yellow
-        3,  // 16 thunderstorm_hail        -> Red
+        6,   // 0  clear                    -> Green
+        6,   // 1  mostly_clear             -> Green
+        -1,  // 2  partly_cloudy            -> neutral (caller's own color)
+        -1,  // 3  overcast                 -> neutral
+        2,   // 4  fog                      -> Yellow
+        3,   // 5  icy_fog                  -> Red
+        6,   // 6  rain_light               -> Green
+        2,   // 7  rain_moderate            -> Yellow
+        3,   // 8  rain_heavy               -> Red
+        2,   // 9  freezing_drizzle_light   -> Yellow
+        3,   // 10 freezing_drizzle         -> Red
+        5,   // 11 snow_light               -> Blue
+        2,   // 12 snow_moderate            -> Yellow
+        3,   // 13 snow_heavy               -> Red
+        -1,  // 14 snow_grains              -> neutral
+        2,   // 15 thunderstorm             -> Yellow
+        3,   // 16 thunderstorm_hail        -> Red
     };
-    if (icon_id < 0 || icon_id >= WEATHER_ICON_COUNT) {
-        return palette[0];
+    int idx = (icon_id >= 0 && icon_id < WEATHER_ICON_COUNT) ? color_by_icon_id[icon_id] : -1;
+    if (idx < 0) {
+        return false;
     }
-    return palette[color_by_icon_id[icon_id]];
+    *out = palette[idx];
+    return true;
 }
 
 // Blits one weather-condition icon (1bpp, MSB-first, WEATHER_ICON_WIDTH x
@@ -3475,9 +3488,10 @@ static void draw_weather_icon(uint8_t *rgb, int width, int height, int x, int y,
     const uint8_t *const *table =
         (strcmp(icon_set, "metno") == 0) ? weather_icon_table_metno : weather_icon_table_flaticon;
     const uint8_t *bitmap = table[icon_id];
-    rgb_t color = (config_manager_get_weather_icon_colored() && !board_is_grayscale())
-                      ? weather_icon_color_for_id(icon_id)
-                      : default_color;
+    rgb_t color = default_color;
+    if (config_manager_get_weather_icon_colored() && !board_is_grayscale()) {
+        weather_icon_color_for_id(icon_id, &color);  // no-op (color stays default_color) if neutral
+    }
 
     uint32_t bytes_per_row = WEATHER_ICON_WIDTH / 8 + (WEATHER_ICON_WIDTH % 8 ? 1 : 0);
     for (int row = 0; row < WEATHER_ICON_HEIGHT; row++) {
