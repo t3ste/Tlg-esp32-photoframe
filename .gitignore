@@ -65,3 +65,11 @@ docs/HOLIDAYS_API_PLAN.md
 bmp_overlay_plan.txt
 coredump_report.txt
 sd_card_locking_plan.txt
+
+# Superseded weather-icon experiments (unresized 512px source -> multi-MB
+# headers, see scripts/generate_weather_icons.py for the actual pipeline).
+# _icons/src_png/, _icons/metno_src/, and the preview_*.png files ARE
+# tracked - they're the real, small, still-used source assets.
+_icons/HEX/
+_icons/XBM/
+_icons/drafts/

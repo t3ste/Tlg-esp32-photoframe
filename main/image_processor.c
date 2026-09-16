@@ -22,6 +22,8 @@
 #include "freertos/task.h"
 #include "jpeg_decoder.h"
 #include "processing_settings.h"
+#include "weather.h"
+#include "weather_icons_data.h"
 #include "zlib.h"
 
 // Same header choice as jpeg_decoder.c (the wrapper the streaming JPEG
@@ -3381,6 +3383,72 @@ static void draw_glyph(uint8_t *rgb, int width, int height, int x, int y, char c
     }
 }
 
+// True if `c` is a reserved weather-icon marker byte (see
+// WEATHER_ICON_MARKER_BASE's doc comment in weather.h) rather than a
+// printable character.
+static bool is_weather_icon_marker(char c)
+{
+    unsigned char b = (unsigned char) c;
+    return b >= WEATHER_ICON_MARKER_BASE && b < WEATHER_ICON_MARKER_BASE + WEATHER_ICON_COUNT;
+}
+
+// Pixel width render_text_bar()/image_processor_draw_overlay_bar() advance
+// by for one byte of a line - Font24.Width for a normal character,
+// WEATHER_ICON_WIDTH for a weather-icon marker byte. Single source of truth
+// so the centering/truncation math below and the actual draw loop can never
+// disagree.
+static int glyph_advance_width(char c)
+{
+    return is_weather_icon_marker(c) ? WEATHER_ICON_WIDTH : Font24.Width;
+}
+
+// Sums glyph_advance_width() over a whole line - the pixel-accurate
+// replacement for the old `strlen(line) * Font24.Width` (still exactly
+// equal to that for any line with no icon markers, i.e. every line type
+// except weather-in-icon-mode).
+static int measure_line_width(const char *line)
+{
+    int w = 0;
+    for (const char *p = line; *p != '\0'; p++) {
+        w += glyph_advance_width(*p);
+    }
+    return w;
+}
+
+// Blits one weather-condition icon (1bpp, MSB-first, WEATHER_ICON_WIDTH x
+// WEATHER_ICON_HEIGHT, from main/weather_icons_data.h) onto an RGB888
+// buffer - structurally identical to draw_glyph() above, just indexing the
+// currently-selected icon set's table instead of Font24. `icon_id` is
+// 0-based (the caller has already subtracted WEATHER_ICON_MARKER_BASE from
+// the marker byte).
+static void draw_weather_icon(uint8_t *rgb, int width, int height, int x, int y, int icon_id,
+                              rgb_t color)
+{
+    if (icon_id < 0 || icon_id >= WEATHER_ICON_COUNT) {
+        return;
+    }
+    const char *icon_set = config_manager_get_weather_icon_set();
+    const uint8_t *const *table =
+        (strcmp(icon_set, "metno") == 0) ? weather_icon_table_metno : weather_icon_table_flaticon;
+    const uint8_t *bitmap = table[icon_id];
+
+    uint32_t bytes_per_row = WEATHER_ICON_WIDTH / 8 + (WEATHER_ICON_WIDTH % 8 ? 1 : 0);
+    for (int row = 0; row < WEATHER_ICON_HEIGHT; row++) {
+        const uint8_t *ptr = &bitmap[row * bytes_per_row];
+        for (int col = 0; col < WEATHER_ICON_WIDTH; col++) {
+            if (ptr[col / 8] & (0x80 >> (col % 8))) {
+                int px = x + col, py = y + row;
+                if (px >= 0 && px < width && py >= 0 && py < height) {
+                    int idx = (py * width + px) * 3;
+                    rgb[idx] = color.r;
+                    rgb[idx + 1] = color.g;
+                    rgb[idx + 2] = color.b;
+                }
+            }
+        }
+    }
+}
+
 // Exported general-purpose primitives (agenda_renderer.c's grid layout is
 // the first caller that draws onto a from-scratch canvas rather than a
 // decoded photo, so unlike the overlay/caption/badge helpers above - each
@@ -3541,11 +3609,30 @@ static void sanitize_caption_ascii(const char *utf8, char *out, size_t out_len)
 // bottom-anchored) and image_processor_draw_overlay_bar() (independent
 // pre-truncated lines, top-anchored) so the two can never visually collide
 // on the same image.
+// A line's row height is Font24.Height, unless it contains a weather-icon
+// marker byte and the icon is taller than the text - then the whole row
+// grows to fit it. Byte-for-byte identical to the old fixed Font24.Height
+// for any line without a marker (i.e. everything except weather-in-icon-mode
+// lines), so this never changes existing headline/caption/weather-text
+// layout.
+static int line_row_height(const char *line)
+{
+    for (const char *p = line; *p != '\0'; p++) {
+        if (is_weather_icon_marker(*p)) {
+            return (WEATHER_ICON_HEIGHT > Font24.Height) ? WEATHER_ICON_HEIGHT : Font24.Height;
+        }
+    }
+    return Font24.Height;
+}
+
 static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
                             char lines[][CAPTION_LINE_MAX_CHARS], int line_count, bool anchor_top,
                             int usable_width, rgb_t bg, rgb_t fg)
 {
-    int bar_height = line_count * (Font24.Height + CAPTION_LINE_PADDING) + CAPTION_LINE_PADDING;
+    int bar_height = CAPTION_LINE_PADDING;
+    for (int i = 0; i < line_count; i++) {
+        bar_height += line_row_height(lines[i]) + CAPTION_LINE_PADDING;
+    }
     if (bar_height > height) {
         bar_height = height;
     }
@@ -3560,17 +3647,29 @@ static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
         }
     }
 
+    int y_cursor = bar_top + CAPTION_LINE_PADDING;
     for (int i = 0; i < line_count; i++) {
-        int text_width = (int) strlen(lines[i]) * Font24.Width;
+        int row_h = line_row_height(lines[i]);
+        int text_width = measure_line_width(lines[i]);
         int x = (usable_width - text_width) / 2;
         if (x < CAPTION_LINE_PADDING) {
             x = CAPTION_LINE_PADDING;
         }
-        int y = bar_top + CAPTION_LINE_PADDING + i * (Font24.Height + CAPTION_LINE_PADDING);
+        int y = y_cursor;
         for (const char *p = lines[i]; *p != '\0'; p++) {
-            draw_glyph(rgb_buffer, width, height, x, y, *p, fg);
+            if (is_weather_icon_marker(*p)) {
+                draw_weather_icon(rgb_buffer, width, height, x, y,
+                                  (unsigned char) *p - WEATHER_ICON_MARKER_BASE, fg);
+                x += WEATHER_ICON_WIDTH;
+                continue;
+            }
+            // Vertically center the Font24 glyph within a row taller than it
+            // (only happens when this same line also has an icon marker).
+            int glyph_y = y + (row_h - Font24.Height) / 2;
+            draw_glyph(rgb_buffer, width, height, x, glyph_y, *p, fg);
             x += Font24.Width;
         }
+        y_cursor += row_h + CAPTION_LINE_PADDING;
     }
 }
 
@@ -3708,12 +3807,9 @@ void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height
     }
     int usable_width = width - right_margin_px;
 
-    int chars_per_line = (usable_width - 2 * CAPTION_LINE_PADDING) / Font24.Width;
-    if (chars_per_line < 1) {
+    int max_line_width = usable_width - 2 * CAPTION_LINE_PADDING;
+    if (max_line_width < Font24.Width) {
         return;  // display too narrow for this font, skip silently
-    }
-    if (chars_per_line > CAPTION_LINE_MAX_CHARS - 1) {
-        chars_per_line = CAPTION_LINE_MAX_CHARS - 1;
     }
 
     // Each input line stands alone (weather line, or one headline) - sanitize
@@ -3729,9 +3825,24 @@ void image_processor_draw_overlay_bar(uint8_t *rgb_buffer, int width, int height
         if (ascii_line[0] == '\0') {
             continue;
         }
-        size_t len = strlen(ascii_line);
-        if ((int) len > chars_per_line) {
-            size_t cut = (chars_per_line > 3) ? (size_t) (chars_per_line - 3) : 0;
+        if (measure_line_width(ascii_line) > max_line_width) {
+            // Walk the line accumulating pixel width, cutting as soon as the
+            // *next* unit (plus the "..." about to be appended) would
+            // overflow - replaces a plain strlen()-based char-count cutoff,
+            // which assumed every character was Font24.Width wide (wrong
+            // once a weather-icon marker byte, wider than a character, is
+            // present - see glyph_advance_width()).
+            int ellipsis_width = 3 * Font24.Width;
+            int w = 0;
+            size_t cut = 0;
+            for (const char *p = ascii_line; *p != '\0'; p++) {
+                int next_w = w + glyph_advance_width(*p);
+                if (next_w + ellipsis_width > max_line_width) {
+                    break;
+                }
+                w = next_w;
+                cut++;
+            }
             ascii_line[cut] = '\0';
             strcat(ascii_line, "...");
         }

@@ -114,6 +114,7 @@ static bool overlay_epdgz_enabled = false;
 static char overlay_language[OVERLAY_LANGUAGE_MAX_LEN] = OVERLAY_LANGUAGE_DEFAULT;
 static bool caption_invert_colors_enabled = false;
 static bool weather_multiline_enabled = false;
+static char weather_icon_set[WEATHER_ICON_SET_MAX_LEN] = WEATHER_ICON_SET_DEFAULT;
 static bool show_exif_datetime_enabled = false;
 static bool low_battery_overlay_enabled = false;
 static uint8_t low_battery_overlay_threshold = LOW_BATTERY_OVERLAY_THRESHOLD_DEFAULT;
@@ -1051,6 +1052,12 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_WEATHER_MULTILINE_KEY, &stored_weather_multiline) ==
             ESP_OK) {
             weather_multiline_enabled = (stored_weather_multiline != 0);
+        }
+        size_t weather_icon_set_len = sizeof(weather_icon_set);
+        if (nvs_get_str(nvs_handle, NVS_WEATHER_ICON_SET_KEY, weather_icon_set,
+                        &weather_icon_set_len) != ESP_OK) {
+            strncpy(weather_icon_set, WEATHER_ICON_SET_DEFAULT, sizeof(weather_icon_set) - 1);
+            weather_icon_set[sizeof(weather_icon_set) - 1] = '\0';
         }
         uint8_t stored_show_exif_datetime = 0;
         if (nvs_get_u8(nvs_handle, NVS_SHOW_EXIF_DATETIME_KEY, &stored_show_exif_datetime) ==
@@ -2945,6 +2952,29 @@ void config_manager_set_weather_multiline_enabled(bool enabled)
 bool config_manager_get_weather_multiline_enabled(void)
 {
     return weather_multiline_enabled;
+}
+
+void config_manager_set_weather_icon_set(const char *icon_set)
+{
+    const char *new_set =
+        (icon_set && (strcmp(icon_set, "none") == 0 || strcmp(icon_set, "flaticon") == 0 ||
+                      strcmp(icon_set, "metno") == 0))
+            ? icon_set
+            : WEATHER_ICON_SET_DEFAULT;
+    strncpy(weather_icon_set, new_set, sizeof(weather_icon_set) - 1);
+    weather_icon_set[sizeof(weather_icon_set) - 1] = '\0';
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_str(nvs_handle, NVS_WEATHER_ICON_SET_KEY, weather_icon_set);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+}
+
+const char *config_manager_get_weather_icon_set(void)
+{
+    return weather_icon_set;
 }
 
 void config_manager_set_show_exif_datetime_enabled(bool enabled)

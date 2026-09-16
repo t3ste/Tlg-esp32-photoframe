@@ -653,15 +653,67 @@ const char *weather_condition_text(int code, bool german)
     return german ? "unbekannt" : "unknown";
 }
 
+// WMO weather code -> icon id (0-based index into main/weather_icons_data.h's
+// per-set bitmap tables, shared by both selectable icon sets). Broader
+// coverage than weather_condition_text() above - a handful of codes that
+// fall through to "unknown" as text (56/57/66/67/77) do have a dedicated
+// icon here, since the icon sets happen to distinguish them.
+int weather_code_to_icon_id(int code)
+{
+    typedef struct {
+        int code;
+        int icon_id;
+    } code_icon_entry_t;
+    static const code_icon_entry_t table[] = {
+        {0, 0},                        // Clear sky
+        {1, 1},                        // Mainly clear
+        {2, 2},                        // Partly cloudy
+        {3, 3},                        // Overcast
+        {45, 4},                       // Fog
+        {48, 5},                       // Icy fog
+        {51, 6},  {61, 6},  {80, 6},   // Drizzle/rain/showers - light
+        {53, 7},  {63, 7},  {81, 7},   // Drizzle/rain/showers - moderate
+        {55, 8},  {65, 8},  {82, 8},   // Drizzle/rain/showers - heavy
+        {56, 9},  {66, 9},             // Freezing drizzle - light
+        {57, 10}, {67, 10},            // Freezing drizzle
+        {71, 11}, {85, 11},            // Snow - light
+        {73, 12},                      // Snow - moderate
+        {75, 13}, {86, 13},            // Snow - heavy
+        {77, 14},                      // Snow grains
+        {95, 15}, {96, 15}, {99, 15},  // Thunderstorm, +/- hail
+    };
+    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
+        if (table[i].code == code) {
+            return table[i].icon_id;
+        }
+    }
+    return -1;
+}
+
 static void format_day_line(const weather_day_t *day, bool german, char *out, size_t out_len)
 {
     int year = 0, month = 0, mday = 0;
     sscanf(day->date, "%d-%d-%d", &year, &month, &mday);
     const char *wd = weather_weekday_abbr(weekday_from_date(year, month, mday), german);
-    const char *cond = weather_condition_text(day->weather_code, german);
     int tmin = (int) lroundf(day->temp_min_c);
     int tmax = (int) lroundf(day->temp_max_c);
-    snprintf(out, out_len, "%s %d/%d %s", wd, tmin, tmax, cond);
+
+    const char *icon_set = config_manager_get_weather_icon_set();
+    int icon_id = (strcmp(icon_set, "none") != 0) ? weather_code_to_icon_id(day->weather_code) : -1;
+    if (icon_id >= 0) {
+        // Embed the reserved marker byte in place of the condition word -
+        // see WEATHER_ICON_MARKER_BASE's doc comment in weather.h for why
+        // this is safe to pass through the rest of the formatting/rendering
+        // pipeline unchanged.
+        int prefix_len = snprintf(out, out_len, "%s %d/%d ", wd, tmin, tmax);
+        if (prefix_len > 0 && (size_t) prefix_len + 1 < out_len) {
+            out[prefix_len] = (char) (WEATHER_ICON_MARKER_BASE + icon_id);
+            out[prefix_len + 1] = '\0';
+        }
+    } else {
+        const char *cond = weather_condition_text(day->weather_code, german);
+        snprintf(out, out_len, "%s %d/%d %s", wd, tmin, tmax, cond);
+    }
 }
 
 void weather_format_line(const weather_forecast_t *f, char *out, size_t out_len)

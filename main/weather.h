@@ -105,4 +105,27 @@ const char *weather_weekday_abbr(int wday, bool german);
  */
 const char *weather_condition_text(int code, bool german);
 
+// Reserved control-byte range embedded directly inside the lines
+// weather_format_line()/weather_format_day_lines() build (in place of the
+// condition word) when weather icon mode is active
+// (config_manager_get_weather_icon_set() != "none"). These values are
+// outside draw_glyph()'s printable-ASCII range (0x20-0x7E) and confirmed to
+// survive image_processor.c's sanitize_caption_ascii() unchanged (it passes
+// bytes < 0x80 through as-is) - render_text_bar()/
+// image_processor_draw_overlay_bar() recognize a byte in this range and draw
+// the matching icon bitmap (main/weather_icons_data.h) instead of a font
+// glyph.
+#define WEATHER_ICON_MARKER_BASE 0x01
+
+/**
+ * @brief Maps a WMO weather code to an icon id (see main/weather_icons_data.h
+ * for the actual bitmaps, indexed identically for both selectable icon
+ * sets), or -1 if unmapped - callers fall back to weather_condition_text()
+ * for that day in that case. Table mirrors weather_condition_text()'s WMO
+ * vocabulary but with full coverage of every code this project ever
+ * produces, including a few (56/57/66/67/77) that fall through to "unknown"
+ * as text but do have a dedicated icon.
+ */
+int weather_code_to_icon_id(int code);
+
 #endif

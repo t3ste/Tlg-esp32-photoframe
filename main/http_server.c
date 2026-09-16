@@ -1671,6 +1671,7 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_caption_invert_colors_enabled());
         cJSON_AddBoolToObject(root, "weather_multiline_enabled",
                               config_manager_get_weather_multiline_enabled());
+        cJSON_AddStringToObject(root, "weather_icon_set", config_manager_get_weather_icon_set());
         cJSON_AddBoolToObject(root, "show_exif_datetime_enabled",
                               config_manager_get_show_exif_datetime_enabled());
         cJSON_AddBoolToObject(root, "low_battery_overlay_enabled",

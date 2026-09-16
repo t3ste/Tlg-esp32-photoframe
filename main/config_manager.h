@@ -369,6 +369,11 @@ bool config_manager_get_low_battery_overlay_active(void);
 // weather always renders as one line whenever headlines are also enabled.
 void config_manager_set_weather_multiline_enabled(bool enabled);
 bool config_manager_get_weather_multiline_enabled(void);
+// Weather condition as icon instead of text - "none" (default), "flaticon",
+// or "metno". See NVS_WEATHER_ICON_SET_KEY in config.h. An unrecognized
+// value falls back to "none".
+void config_manager_set_weather_icon_set(const char *icon_set);
+const char *config_manager_get_weather_icon_set(void);
 
 // ============================================================================
 // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo

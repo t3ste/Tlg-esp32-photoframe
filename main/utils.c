@@ -709,6 +709,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_weather_multiline_enabled(cJSON_IsTrue(item));
     }
+    item = cJSON_GetObjectItem(root, "weather_icon_set");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_weather_icon_set(cJSON_GetStringValue(item));
+    }
     item = cJSON_GetObjectItem(root, "show_exif_datetime_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_show_exif_datetime_enabled(cJSON_IsTrue(item));

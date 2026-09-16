@@ -2346,6 +2346,27 @@ async function performFactoryReset() {
               room for both).
             </div>
 
+            <v-select
+              v-model="settingsStore.deviceSettings.weatherIconSet"
+              :items="[
+                { title: 'Text (default)', value: 'none' },
+                { title: 'Icons - Flaticon set', value: 'flaticon' },
+                { title: 'Icons - MET Norway/yr.no set', value: 'metno' },
+              ]"
+              label="Weather condition display"
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="mb-2"
+              style="max-width: 320px"
+              :disabled="!settingsStore.deviceSettings.weatherOverlayEnabled"
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              Shows a small icon instead of the spelled-out condition word (e.g. a cloud instead of
+              "cloudy") to save space. Two icon sets to choose from - try both and see which reads
+              better on your panel.
+            </div>
+
             <v-switch
               v-model="settingsStore.deviceSettings.headlinesOverlayEnabled"
               label="Headlines overlay"
