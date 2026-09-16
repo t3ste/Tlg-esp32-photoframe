@@ -10,7 +10,17 @@ const API_BASE = "";
 const loading = ref(true);
 const resetting = ref(false);
 const confirmingReset = ref(false);
+const savingBackupSetting = ref(false);
 const entries = ref([]); // [{ t, temp_c, hum, tcat: 0/1/2, hcat: 0/1/2 }]
+
+async function onBackupToggle() {
+  savingBackupSetting.value = true;
+  try {
+    await settingsStore.saveDeviceSettings();
+  } finally {
+    savingBackupSetting.value = false;
+  }
+}
 
 async function loadHistory() {
   loading.value = true;
@@ -158,6 +168,19 @@ function pointTitle(e, kind) {
       <v-icon icon="mdi-thermometer" class="mr-2" />
       Climate History
       <v-spacer />
+      <v-switch
+        v-model="settingsStore.deviceSettings.climateHistoryBackupEnabled"
+        :loading="savingBackupSetting"
+        color="primary"
+        density="compact"
+        hide-details
+        class="flex-grow-0 mr-2"
+        @update:model-value="onBackupToggle"
+      >
+        <template #label>
+          <span class="text-caption">Auto-backup to SD</span>
+        </template>
+      </v-switch>
       <v-btn
         v-if="entries.length > 0"
         variant="text"
@@ -307,7 +330,9 @@ function pointTitle(e, kind) {
 
         <div class="text-caption text-medium-emphasis mt-4">
           One reading is recorded after each image change, while logging is enabled. The history
-          resets automatically after 180 days, or any time via the button above.
+          resets automatically after 180 days, or any time via the button above. With "Auto-backup
+          to SD" on (default), the 180-day reset saves a copy of the discarded readings to storage
+          first, named after the date range it covers.
         </div>
       </template>
     </v-card-text>

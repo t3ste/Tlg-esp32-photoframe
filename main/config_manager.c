@@ -120,6 +120,7 @@ static bool show_exif_datetime_enabled = false;
 static bool low_battery_overlay_enabled = false;
 static uint8_t low_battery_overlay_threshold = LOW_BATTERY_OVERLAY_THRESHOLD_DEFAULT;
 static bool low_battery_overlay_active = false;
+static bool battery_history_backup_enabled = false;
 
 // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo overlay
 static bool agenda_todo_enabled = false;
@@ -211,6 +212,7 @@ static int chime_repeat_count[CHIME_EVENT_COUNT] = {0};
 static climate_room_type_t climate_room_type = CLIMATE_ROOM_LIVING_ROOM;
 static climate_temp_unit_t climate_temp_unit = CLIMATE_UNIT_CELSIUS;
 static bool climate_logging_enabled = true;
+static bool climate_history_backup_enabled = true;
 static bool climate_overlay_enabled = false;
 static bool climate_agenda_header_enabled = false;
 static char climate_temp_offset[CLIMATE_OFFSET_MAX_LEN] = "0";
@@ -1082,6 +1084,11 @@ esp_err_t config_manager_init(void)
             stored_low_batt_threshold <= LOW_BATTERY_OVERLAY_THRESHOLD_MAX) {
             low_battery_overlay_threshold = stored_low_batt_threshold;
         }
+        uint8_t stored_batt_hist_backup = 0;
+        if (nvs_get_u8(nvs_handle, NVS_BATTERY_HISTORY_BACKUP_KEY, &stored_batt_hist_backup) ==
+            ESP_OK) {
+            battery_history_backup_enabled = (stored_batt_hist_backup != 0);
+        }
         uint8_t stored_low_batt_overlay_active = 0;
         if (nvs_get_u8(nvs_handle, NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY,
                        &stored_low_batt_overlay_active) == ESP_OK) {
@@ -1364,6 +1371,11 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u8(nvs_handle, NVS_CLIMATE_LOGGING_ENABLED_KEY, &stored_climate_log) ==
             ESP_OK) {
             climate_logging_enabled = (stored_climate_log != 0);
+        }
+        uint8_t stored_climate_hist_backup = 0;
+        if (nvs_get_u8(nvs_handle, NVS_CLIMATE_HISTORY_BACKUP_KEY, &stored_climate_hist_backup) ==
+            ESP_OK) {
+            climate_history_backup_enabled = (stored_climate_hist_backup != 0);
         }
         uint8_t stored_climate_ovl = 0;
         if (nvs_get_u8(nvs_handle, NVS_CLIMATE_OVERLAY_ENABLED_KEY, &stored_climate_ovl) ==
@@ -3062,6 +3074,17 @@ int config_manager_get_low_battery_overlay_threshold(void)
     return low_battery_overlay_threshold;
 }
 
+void config_manager_set_battery_history_backup_enabled(bool enabled)
+{
+    battery_history_backup_enabled = enabled;
+    agenda_nvs_set_u8(NVS_BATTERY_HISTORY_BACKUP_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_battery_history_backup_enabled(void)
+{
+    return battery_history_backup_enabled;
+}
+
 // Internal hysteresis state - not a user setting, see NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY.
 void config_manager_set_low_battery_overlay_active(bool active)
 {
@@ -3987,6 +4010,17 @@ void config_manager_set_climate_logging_enabled(bool enabled)
 bool config_manager_get_climate_logging_enabled(void)
 {
     return climate_logging_enabled;
+}
+
+void config_manager_set_climate_history_backup_enabled(bool enabled)
+{
+    climate_history_backup_enabled = enabled;
+    agenda_nvs_set_u8(NVS_CLIMATE_HISTORY_BACKUP_KEY, enabled ? 1 : 0);
+}
+
+bool config_manager_get_climate_history_backup_enabled(void)
+{
+    return climate_history_backup_enabled;
 }
 
 void config_manager_set_climate_overlay_enabled(bool enabled)

@@ -1,14 +1,27 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
+import { useSettingsStore } from "../stores";
 import { formatTimeAxisTick } from "../utils/chartAxis";
+
+const settingsStore = useSettingsStore();
 
 const API_BASE = "";
 
 const loading = ref(true);
 const resetting = ref(false);
 const confirmingReset = ref(false);
+const savingBackupSetting = ref(false);
 const entries = ref([]); // [{ t: unixSeconds, p: 0-100, c: boolean }]
 const daysRemaining = ref(null);
+
+async function onBackupToggle() {
+  savingBackupSetting.value = true;
+  try {
+    await settingsStore.saveDeviceSettings();
+  } finally {
+    savingBackupSetting.value = false;
+  }
+}
 
 async function loadHistory() {
   loading.value = true;
@@ -113,6 +126,19 @@ function pointTitle(e) {
       <v-icon icon="mdi-battery-clock-outline" class="mr-2" />
       Battery History
       <v-spacer />
+      <v-switch
+        v-model="settingsStore.deviceSettings.batteryHistoryBackupEnabled"
+        :loading="savingBackupSetting"
+        color="primary"
+        density="compact"
+        hide-details
+        class="flex-grow-0 mr-2"
+        @update:model-value="onBackupToggle"
+      >
+        <template #label>
+          <span class="text-caption">Auto-backup to SD</span>
+        </template>
+      </v-switch>
       <v-btn
         v-if="entries.length > 0"
         variant="text"
@@ -234,7 +260,9 @@ function pointTitle(e) {
         <div class="text-caption text-medium-emphasis mt-4">
           One reading is recorded after each image change. The history (and the estimate above)
           resets automatically once the battery reaches 95% or after 180 days, whichever comes
-          first.
+          first. With "Auto-backup to SD" on, the 180-day reset saves a copy of the discarded
+          readings to storage first (named after the date range it covers) - off by default since a
+          full-charge reset happens far more often than 180 days.
         </div>
       </template>
     </v-card-text>

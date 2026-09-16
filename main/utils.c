@@ -729,6 +729,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsNumber(item)) {
         config_manager_set_low_battery_overlay_threshold(item->valueint);
     }
+    item = cJSON_GetObjectItem(root, "battery_history_backup_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_battery_history_backup_enabled(cJSON_IsTrue(item));
+    }
 
     // Batches every agenda_*_set_* call below into one NVS open/commit
     // instead of one each (~25 fields can appear in one Agenda settings
@@ -874,6 +878,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "climate_logging_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_climate_logging_enabled(cJSON_IsTrue(item));
+    }
+    item = cJSON_GetObjectItem(root, "climate_history_backup_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_climate_history_backup_enabled(cJSON_IsTrue(item));
     }
     item = cJSON_GetObjectItem(root, "climate_overlay_enabled");
     if (item && cJSON_IsBool(item)) {

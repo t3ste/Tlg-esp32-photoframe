@@ -891,6 +891,14 @@ typedef enum {
 // every image/render until the user opts in.
 #define NVS_CLIMATE_LOGGING_ENABLED_KEY "climate_log_en"
 #define NVS_CLIMATE_OVERLAY_ENABLED_KEY "climate_ovl_en"
+// Auto-backup to persistent storage (see battery_history.c/climate_history.c)
+// right before either history log's automatic 180-day-age reset would
+// otherwise discard it. Climate defaults on (matches its logging-enabled
+// default above); battery defaults off since a full discharge/recharge
+// cycle - and therefore a fresh reset - happens far more often than for
+// climate, so backups would accumulate faster unless a user opts in.
+#define NVS_BATTERY_HISTORY_BACKUP_KEY "batt_hist_bkup"
+#define NVS_CLIMATE_HISTORY_BACKUP_KEY "clim_hist_bkup"
 #define NVS_CLIMATE_AGENDA_HEADER_ENABLED_KEY "climate_hdr_en"
 // Persisted debounce anchor for CLIMATE_LOG_MIN_INTERVAL_SEC above - unix
 // timestamp of the last actually-recorded reading (not every check), same

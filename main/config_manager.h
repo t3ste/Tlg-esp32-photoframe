@@ -360,6 +360,11 @@ bool config_manager_get_low_battery_overlay_enabled(void);
 // Percent (default 16, clamped 1-50) - see NVS_LOW_BATTERY_OVERLAY_THRESHOLD_KEY.
 void config_manager_set_low_battery_overlay_threshold(int threshold);
 int config_manager_get_low_battery_overlay_threshold(void);
+// Auto-backup to persistent storage before battery_history.c's automatic
+// 180-day-age reset discards the log. Off by default - see
+// NVS_BATTERY_HISTORY_BACKUP_KEY in config.h.
+void config_manager_set_battery_history_backup_enabled(bool enabled);
+bool config_manager_get_battery_history_backup_enabled(void);
 // Internal hysteresis state, not a user setting - never exposed to the Web
 // UI. See NVS_LOW_BATTERY_OVERLAY_ACTIVE_KEY in config.h.
 void config_manager_set_low_battery_overlay_active(bool active);
@@ -612,6 +617,9 @@ climate_temp_unit_t config_manager_get_climate_temp_unit(void);
 
 void config_manager_set_climate_logging_enabled(bool enabled);
 bool config_manager_get_climate_logging_enabled(void);
+
+void config_manager_set_climate_history_backup_enabled(bool enabled);
+bool config_manager_get_climate_history_backup_enabled(void);
 
 void config_manager_set_climate_overlay_enabled(bool enabled);
 bool config_manager_get_climate_overlay_enabled(void);

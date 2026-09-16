@@ -7,6 +7,7 @@
 
 #include "board_hal.h"
 #include "config.h"
+#include "config_manager.h"
 #include "esp_log.h"
 #include "storage.h"
 
@@ -49,6 +50,64 @@ static bool peek_oldest_timestamp(time_t *out_ts)
     return found;
 }
 
+// Copies the about-to-be-discarded history log to a uniquely named file
+// (named after the date range it actually covers, so its content is clear
+// without opening it) before the age-based reset below removes the original.
+// Best-effort: any failure here just means no backup, never blocks the
+// reset itself. Not called for the "fresh charge" reset (see caller) - that
+// one happens far more often and isn't the 180-day retention limit this
+// setting is about.
+static void backup_history_before_reset(void)
+{
+    FILE *src = fopen(BATTERY_HISTORY_PATH, "r");
+    if (!src) {
+        return;
+    }
+    char line[64];
+    time_t oldest = 0, newest = 0;
+    bool have_range = false;
+    while (fgets(line, sizeof(line), src)) {
+        long long ts = 0;
+        if (sscanf(line, "%lld,", &ts) == 1) {
+            if (!have_range) {
+                oldest = (time_t) ts;
+                have_range = true;
+            }
+            newest = (time_t) ts;
+        }
+    }
+    fclose(src);
+    if (!have_range) {
+        return;
+    }
+
+    struct tm tm_old, tm_new;
+    localtime_r(&oldest, &tm_old);
+    localtime_r(&newest, &tm_new);
+    char dst_path[96];
+    snprintf(dst_path, sizeof(dst_path),
+             FS_MOUNT_POINT "/battery_history_backup_%04d%02d%02d-%04d%02d%02d.csv",
+             tm_old.tm_year + 1900, tm_old.tm_mon + 1, tm_old.tm_mday, tm_new.tm_year + 1900,
+             tm_new.tm_mon + 1, tm_new.tm_mday);
+
+    src = fopen(BATTERY_HISTORY_PATH, "r");
+    if (!src) {
+        return;
+    }
+    FILE *dst = fopen(dst_path, "w");
+    if (!dst) {
+        ESP_LOGW(TAG, "Failed to create battery history backup at %s", dst_path);
+        fclose(src);
+        return;
+    }
+    while (fgets(line, sizeof(line), src)) {
+        fputs(line, dst);
+    }
+    fclose(src);
+    fclose(dst);
+    ESP_LOGI(TAG, "Battery history backed up to %s before reset", dst_path);
+}
+
 void battery_history_record(void)
 {
     int percent;
@@ -64,6 +123,7 @@ void battery_history_record(void)
     // the log has simply gotten too old (e.g. permanently on USB, never
     // reaching the reset-percent trigger).
     bool should_reset = (percent >= BATTERY_HISTORY_RESET_PERCENT);
+    bool age_reset = false;
     const char *reset_reason = "fresh charge";
     if (!should_reset) {
         time_t oldest;
@@ -71,11 +131,15 @@ void battery_history_record(void)
             double age_days = difftime(time(NULL), oldest) / 86400.0;
             if (age_days > BATTERY_HISTORY_MAX_AGE_DAYS) {
                 should_reset = true;
+                age_reset = true;
                 reset_reason = "log too old";
             }
         }
     }
     if (should_reset) {
+        if (age_reset && config_manager_get_battery_history_backup_enabled()) {
+            backup_history_before_reset();
+        }
         remove(BATTERY_HISTORY_PATH);
         ESP_LOGI(TAG, "Battery history reset (%s)", reset_reason);
     }

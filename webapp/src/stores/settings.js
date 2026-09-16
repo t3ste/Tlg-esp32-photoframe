@@ -142,6 +142,14 @@ export const useSettingsStore = defineStore("settings", () => {
     climateLoggingEnabled: true,
     climateOverlayEnabled: false,
     climateAgendaHeaderEnabled: false,
+    // Auto-backup to SD before each history log's 180-day-age reset -
+    // climate defaults on (mirrors climateLoggingEnabled's default),
+    // battery defaults off (a full charge cycle resets far more often than
+    // 180 days, so backups would pile up unless opted into). Surfaced as a
+    // switch directly on each chart card (BatteryHistory.vue/
+    // ClimateHistory.vue), not in this settings tab.
+    batteryHistoryBackupEnabled: false,
+    climateHistoryBackupEnabled: true,
     // Calibration offsets, always in Celsius/percentage-points regardless of
     // climateTempUnit - SettingsPanel.vue converts to/from the display unit
     // for its own input fields.
@@ -419,6 +427,8 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.showExifDatetimeEnabled = data.show_exif_datetime_enabled === true;
       deviceSettings.value.lowBatteryOverlayEnabled = data.low_battery_overlay_enabled === true;
       deviceSettings.value.lowBatteryOverlayThreshold = data.low_battery_overlay_threshold ?? 16;
+      deviceSettings.value.batteryHistoryBackupEnabled =
+        data.battery_history_backup_enabled === true;
       deviceSettings.value.chimeSpeakerAvailable = data.chime_speaker_available === true;
       deviceSettings.value.chimeSpeakerMode = data.chime_speaker_mode || "off";
       deviceSettings.value.chimeVolume = data.chime_volume ?? 80;
@@ -442,6 +452,8 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.climateRoomType = data.climate_room_type || "living_room";
       deviceSettings.value.climateTempUnit = data.climate_temp_unit || "celsius";
       deviceSettings.value.climateLoggingEnabled = data.climate_logging_enabled === true;
+      deviceSettings.value.climateHistoryBackupEnabled =
+        data.climate_history_backup_enabled === true;
       deviceSettings.value.climateOverlayEnabled = data.climate_overlay_enabled === true;
       deviceSettings.value.climateAgendaHeaderEnabled = data.climate_agenda_header_enabled === true;
       deviceSettings.value.climateTempOffset = data.climate_temp_offset ?? 0;
@@ -578,6 +590,7 @@ export const useSettingsStore = defineStore("settings", () => {
       show_exif_datetime_enabled: deviceSettings.value.showExifDatetimeEnabled,
       low_battery_overlay_enabled: deviceSettings.value.lowBatteryOverlayEnabled,
       low_battery_overlay_threshold: deviceSettings.value.lowBatteryOverlayThreshold,
+      battery_history_backup_enabled: deviceSettings.value.batteryHistoryBackupEnabled,
       chime_speaker_mode: deviceSettings.value.chimeSpeakerMode,
       chime_volume: deviceSettings.value.chimeVolume,
       chime_quiet_enabled: deviceSettings.value.chimeQuietEnabled,
@@ -593,6 +606,7 @@ export const useSettingsStore = defineStore("settings", () => {
       climate_room_type: deviceSettings.value.climateRoomType,
       climate_temp_unit: deviceSettings.value.climateTempUnit,
       climate_logging_enabled: deviceSettings.value.climateLoggingEnabled,
+      climate_history_backup_enabled: deviceSettings.value.climateHistoryBackupEnabled,
       climate_overlay_enabled: deviceSettings.value.climateOverlayEnabled,
       climate_agenda_header_enabled: deviceSettings.value.climateAgendaHeaderEnabled,
       climate_temp_offset: deviceSettings.value.climateTempOffset,

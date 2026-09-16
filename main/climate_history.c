@@ -33,6 +33,62 @@ static bool peek_oldest_timestamp(time_t *out_ts)
     return found;
 }
 
+// Copies the about-to-be-discarded history log to a uniquely named file
+// (named after the date range it actually covers) before the age-based
+// reset below removes the original - same approach as
+// battery_history.c's backup_history_before_reset(). Best-effort: any
+// failure here just means no backup, never blocks the reset itself.
+static void backup_history_before_reset(void)
+{
+    FILE *src = fopen(CLIMATE_HISTORY_PATH, "r");
+    if (!src) {
+        return;
+    }
+    char line[64];
+    time_t oldest = 0, newest = 0;
+    bool have_range = false;
+    while (fgets(line, sizeof(line), src)) {
+        long long ts = 0;
+        if (sscanf(line, "%lld,", &ts) == 1) {
+            if (!have_range) {
+                oldest = (time_t) ts;
+                have_range = true;
+            }
+            newest = (time_t) ts;
+        }
+    }
+    fclose(src);
+    if (!have_range) {
+        return;
+    }
+
+    struct tm tm_old, tm_new;
+    localtime_r(&oldest, &tm_old);
+    localtime_r(&newest, &tm_new);
+    char dst_path[96];
+    snprintf(dst_path, sizeof(dst_path),
+             FS_MOUNT_POINT "/climate_history_backup_%04d%02d%02d-%04d%02d%02d.csv",
+             tm_old.tm_year + 1900, tm_old.tm_mon + 1, tm_old.tm_mday, tm_new.tm_year + 1900,
+             tm_new.tm_mon + 1, tm_new.tm_mday);
+
+    src = fopen(CLIMATE_HISTORY_PATH, "r");
+    if (!src) {
+        return;
+    }
+    FILE *dst = fopen(dst_path, "w");
+    if (!dst) {
+        ESP_LOGW(TAG, "Failed to create climate history backup at %s", dst_path);
+        fclose(src);
+        return;
+    }
+    while (fgets(line, sizeof(line), src)) {
+        fputs(line, dst);
+    }
+    fclose(src);
+    fclose(dst);
+    ESP_LOGI(TAG, "Climate history backed up to %s before reset", dst_path);
+}
+
 void climate_history_record(void)
 {
     if (!config_manager_get_climate_logging_enabled()) {
@@ -62,6 +118,9 @@ void climate_history_record(void)
     if (peek_oldest_timestamp(&oldest)) {
         double age_days = difftime(now, oldest) / 86400.0;
         if (age_days > CLIMATE_HISTORY_MAX_AGE_DAYS) {
+            if (config_manager_get_climate_history_backup_enabled()) {
+                backup_history_before_reset();
+            }
             remove(CLIMATE_HISTORY_PATH);
             ESP_LOGI(TAG, "Climate history reset (log too old)");
         }

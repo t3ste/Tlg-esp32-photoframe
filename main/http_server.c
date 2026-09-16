@@ -1680,6 +1680,8 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_low_battery_overlay_enabled());
         cJSON_AddNumberToObject(root, "low_battery_overlay_threshold",
                                 config_manager_get_low_battery_overlay_threshold());
+        cJSON_AddBoolToObject(root, "battery_history_backup_enabled",
+                              config_manager_get_battery_history_backup_enabled());
         // Hardware capability, not a user setting - lets the Web UI hide the
         // whole Chimes tab on boards with no onboard speaker.
         cJSON_AddBoolToObject(root, "chime_speaker_available", board_hal_has_speaker());
@@ -1750,6 +1752,8 @@ static esp_err_t config_handler(httpd_req_t *req)
                                     : "celsius");
         cJSON_AddBoolToObject(root, "climate_logging_enabled",
                               config_manager_get_climate_logging_enabled());
+        cJSON_AddBoolToObject(root, "climate_history_backup_enabled",
+                              config_manager_get_climate_history_backup_enabled());
         cJSON_AddBoolToObject(root, "climate_overlay_enabled",
                               config_manager_get_climate_overlay_enabled());
         cJSON_AddBoolToObject(root, "climate_agenda_header_enabled",
