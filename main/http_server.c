@@ -901,7 +901,11 @@ static esp_err_t serve_image_handler(httpd_req_t *req)
     // Cache images for 1 hour to reduce server load
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=3600");
 
-    char buffer[1024];
+    // 4KB rather than 1KB: this handler is hit once per gallery thumbnail, and
+    // with many concurrent requests (a large album with thumbnails enabled)
+    // fewer, bigger chunks means each connection ties up the single httpd
+    // task for less time, freeing sockets for the next request sooner.
+    char buffer[4096];
     size_t read_bytes;
     while ((read_bytes = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
         if (httpd_resp_send_chunk(req, buffer, read_bytes) != ESP_OK) {
@@ -2255,6 +2259,46 @@ static esp_err_t album_images_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    // Collect the base names of every thumbnail (".jpg", never used by a main
+    // image - see the extension check below) present in this album with a
+    // single readdir() pass, so the loop below can check existence via an
+    // in-memory string compare instead of a stat() syscall per image. On a
+    // large album (hundreds of images) that used to mean hundreds of
+    // sequential storage lookups inside one handler call - since
+    // esp_http_server processes requests on a single task, that blocked the
+    // entire Web UI (not just this request) for as long as the scan ran.
+    char(*thumb_bases)[256] = NULL;
+    size_t thumb_count = 0;
+    size_t thumb_capacity = 0;
+    if (include_thumbnails) {
+        struct dirent *tentry;
+        while ((tentry = readdir(dir)) != NULL) {
+            if (tentry->d_type != DT_REG) {
+                continue;
+            }
+            const char *tent_ext = strrchr(tentry->d_name, '.');
+            if (!tent_ext || strcasecmp(tent_ext, ".jpg") != 0) {
+                continue;
+            }
+            if (thumb_count == thumb_capacity) {
+                size_t new_capacity = thumb_capacity == 0 ? 32 : thumb_capacity * 2;
+                char(*grown)[256] = heap_caps_realloc(thumb_bases, new_capacity * sizeof(*grown),
+                                                      MALLOC_CAP_SPIRAM);
+                if (!grown) {
+                    break;  // Keep what we have - a missed thumbnail just falls back to the
+                            // placeholder icon.
+                }
+                thumb_bases = grown;
+                thumb_capacity = new_capacity;
+            }
+            int tbase_len = (int) (tent_ext - tentry->d_name);
+            snprintf(thumb_bases[thumb_count], sizeof(thumb_bases[0]), "%.*s", tbase_len,
+                     tentry->d_name);
+            thumb_count++;
+        }
+        rewinddir(dir);
+    }
+
     cJSON *response = cJSON_CreateArray();
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
@@ -2282,20 +2326,23 @@ static esp_err_t album_images_handler(httpd_req_t *req)
                 // ".jpg" thumbnail can never collide with a listed
                 // .bmp/.png/.epdgz main image. Skipped entirely when the
                 // client doesn't want thumbnails (Web UI "Show thumbnails"
-                // off) - the per-file stat() here was adding measurable
-                // list-load latency for no benefit in that case.
+                // off). Checked against the thumb_bases[] set collected
+                // above instead of stat()-ing the candidate path directly -
+                // see the comment above that pass for why.
                 if (include_thumbnails) {
-                    char thumbnail_name[256];
-                    char thumbnail_path[512];
-
-                    int base_len = ext - entry->d_name;
-                    snprintf(thumbnail_name, sizeof(thumbnail_name), "%.*s.jpg", base_len,
-                             entry->d_name);
-                    snprintf(thumbnail_path, sizeof(thumbnail_path), "%s/%s", album_path,
-                             thumbnail_name);
-
-                    struct stat st;
-                    if (stat(thumbnail_path, &st) == 0) {
+                    int base_len = (int) (ext - entry->d_name);
+                    bool has_thumb = false;
+                    for (size_t i = 0; i < thumb_count; i++) {
+                        if ((int) strlen(thumb_bases[i]) == base_len &&
+                            strncmp(thumb_bases[i], entry->d_name, base_len) == 0) {
+                            has_thumb = true;
+                            break;
+                        }
+                    }
+                    if (has_thumb) {
+                        char thumbnail_name[256];
+                        snprintf(thumbnail_name, sizeof(thumbnail_name), "%.*s.jpg", base_len,
+                                 entry->d_name);
                         cJSON_AddStringToObject(image_obj, "thumbnail", thumbnail_name);
                     }
                 }
@@ -2305,6 +2352,7 @@ static esp_err_t album_images_handler(httpd_req_t *req)
         }
     }
     closedir(dir);
+    free(thumb_bases);
 
     char *json_str = cJSON_Print(response);
     httpd_resp_set_type(req, "application/json");
