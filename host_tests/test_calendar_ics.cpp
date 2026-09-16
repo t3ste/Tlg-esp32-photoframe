@@ -394,6 +394,45 @@ TEST_F(CalendarIcs, CountExcludesOccurrenceBeyondLimit)
     EXPECT_EQ(out2.count, 3);
 }
 
+TEST_F(CalendarIcs, RruleUntilBoundsActiveSeriesMidWindow)
+{
+    // DTSTART 2024-01-01 (Mon), WEEKLY, UNTIL 2024-01-15 (inclusive per RFC
+    // 5545) - occurrences on Jan 1/8/15 are valid, Jan 22 is not. A window
+    // spanning Jan 1 through Jan 29 should see exactly the first three.
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20240101T100000Z\n"
+        "SUMMARY:Limited-run class\n"
+        "RRULE:FREQ=WEEKLY;UNTIL=20240115T100000Z\n"
+        "END:VEVENT\n";
+
+    ics_event_list_t out =
+        parse(ics, make_utc(2024, 1, 1, 0, 0, 0), make_utc(2024, 1, 29, 0, 0, 0));
+    ASSERT_EQ(out.count, 3);
+    EXPECT_EQ(out.events[0].start, make_utc(2024, 1, 1, 10, 0, 0));
+    EXPECT_EQ(out.events[1].start, make_utc(2024, 1, 8, 10, 0, 0));
+    EXPECT_EQ(out.events[2].start, make_utc(2024, 1, 15, 10, 0, 0));
+}
+
+TEST_F(CalendarIcs, RruleUntilInPastYieldsNoOccurrencesButStaysSupported)
+{
+    // UNTIL entirely before the query window - a series that has simply
+    // ended, not an unsupported rule. Distinguishes this from the old
+    // behavior (before UNTIL was supported) where the whole rule, and any
+    // still-relevant part of it, would have been rejected outright by
+    // fall-through to the generic unsupported-component branch.
+    const char *ics =
+        "BEGIN:VEVENT\n"
+        "DTSTART:20200101T100000Z\n"
+        "SUMMARY:Long-ended series\n"
+        "RRULE:FREQ=WEEKLY;UNTIL=20200201T100000Z\n"
+        "END:VEVENT\n";
+
+    ics_event_list_t out =
+        parse(ics, make_utc(2024, 1, 1, 0, 0, 0), make_utc(2024, 1, 8, 0, 0, 0));
+    EXPECT_EQ(out.count, 0);
+}
+
 TEST_F(CalendarIcs, RruleWithBydayUnsupportedSkippedEntirely)
 {
     const char *ics =

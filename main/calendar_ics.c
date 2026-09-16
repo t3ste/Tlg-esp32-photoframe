@@ -191,10 +191,11 @@ static void decode_ics_text(const char *in, size_t in_len, char *out, size_t out
 }
 
 // RRULE-lite: FREQ=DAILY/WEEKLY only, optional INTERVAL (default 1), COUNT,
-// and a single-value BYDAY. Anything else in the rule (a multi-value BYDAY
-// like "MO,WE,FR", EXDATE, UNTIL, BYMONTHDAY, WKST, an unrecognized FREQ,
-// ...) makes `supported` false - the caller then skips the whole event
-// rather than risk showing a wrong occurrence.
+// UNTIL, WKST (ignored, see parse_rrule()), and a single-value BYDAY.
+// Anything else in the rule (a multi-value BYDAY like "MO,WE,FR", EXDATE,
+// BYMONTHDAY, BYSETPOS, an unrecognized FREQ, ...) makes `supported` false -
+// the caller then skips the whole event rather than risk showing a wrong
+// occurrence.
 typedef struct {
     bool supported;
     bool weekly;   // false = daily
@@ -207,6 +208,13 @@ typedef struct {
     // accept ONLY once finalize_vevent() confirms it matches DTSTART's own
     // weekday - see its comment for why a mismatch still fails closed.
     int byday;
+    // Inclusive end bound (RFC 5545: an occurrence starting after this
+    // instant is excluded) - unlike the other unsupported components,
+    // UNTIL only ever narrows the result (same idea as the already-supported
+    // COUNT, just date-bounded instead of count-bounded), so it's always
+    // safe to honor rather than reject the whole rule.
+    bool has_until;
+    time_t until;
 } ics_rrule_t;
 
 // Parses one RRULE value ("FREQ=DAILY;INTERVAL=2;COUNT=10"-style,
@@ -267,6 +275,14 @@ static bool parse_rrule(const char *value, size_t value_len, ics_rrule_t *out)
             buf[n] = '\0';
             out->count = atoi(buf);
             out->has_count = true;
+        } else if (key_len == 5 && strncmp(part, "UNTIL", 5) == 0) {
+            struct tm until_tm;
+            bool until_all_day, until_utc;
+            if (!parse_ics_datetime(val_ptr, val_len, &until_tm, &until_all_day, &until_utc)) {
+                return false;  // malformed UNTIL value - fail closed
+            }
+            out->until = ics_datetime_to_time(&until_tm, until_utc);
+            out->has_until = true;
         } else if (key_len == 5 && strncmp(part, "BYDAY", 5) == 0) {
             // A single day value is common - real calendar apps almost
             // always emit BYDAY for a "weekly" recurrence, even a plain
@@ -304,10 +320,10 @@ static bool parse_rrule(const char *value, size_t value_len, ics_rrule_t *out)
             // Wednesday event ("FREQ=WEEKLY;WKST=MO;BYDAY=WE") was being
             // dropped by this alone, even after BYDAY itself was accepted.
         } else {
-            // EXDATE, UNTIL, BYMONTHDAY, BYSETPOS, ... - none of these are
-            // safe to just ignore (they'd change which occurrences are
-            // actually valid), so the whole rule is unsupported rather than
-            // silently wrong.
+            // EXDATE, BYMONTHDAY, BYSETPOS, ... - none of these are safe to
+            // just ignore (they'd change which occurrences are actually
+            // valid), so the whole rule is unsupported rather than silently
+            // wrong.
             return false;
         }
     }
@@ -419,6 +435,9 @@ static void expand_rrule(const ics_rrule_t *rule, time_t base_start, time_t dura
         time_t occ_start = base_start + (time_t) (k * period_secs);
         if (occ_start >= window_end) {
             break;  // start only increases with k - nothing further can matter
+        }
+        if (rule->has_until && occ_start > rule->until) {
+            break;  // UNTIL is inclusive (RFC 5545) - past it, nothing further can matter either
         }
         time_t occ_end = occ_start + duration;
         if (time_overlaps_window(occ_start, occ_end, window_start, window_end)) {
