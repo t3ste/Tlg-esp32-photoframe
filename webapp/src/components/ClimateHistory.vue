@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import { useSettingsStore } from "../stores";
+import { formatTimeAxisTick } from "../utils/chartAxis";
 
 const settingsStore = useSettingsStore();
 
@@ -139,7 +140,7 @@ const xTicks = computed(() => {
     const t = min + ((max - min) * i) / (count - 1);
     ticks.push({
       x: xForTime(t),
-      label: new Date(t * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      label: formatTimeAxisTick(t, max - min),
     });
   }
   return ticks;
