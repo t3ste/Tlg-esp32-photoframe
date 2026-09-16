@@ -2,7 +2,7 @@
 
 All notable changes to this fork are documented here. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full running list of everything this fork adds on top of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe); this file covers per-release deltas only.
 
-## [v218.2.0] - 2026-09-15
+## [v218.2.0] - 2026-09-16
 
 ### Added
 
@@ -17,6 +17,7 @@ All notable changes to this fork are documented here. See [README.md → Changes
   - A reading is logged on every wake (not only when an image is actually displayed) plus every ~6 minutes while the device stays continuously awake, throttled to at most once every 5 minutes
   - User-settable calibration offset (°C/°F and percentage points) for hardware that reads consistently high/low
 - Config-backup export can now optionally include the write-only ToDo/Calendar URLs (which can carry an embedded credential) alongside the existing credentials checkbox — previously these could never be recovered after a restore
+- Battery/Climate History chart x-axis ticks now show a time (or day+time) instead of just a date once the visible history is short enough that a bare date would repeat across every tick
 
 ### Fixed
 
@@ -28,6 +29,8 @@ All notable changes to this fork are documented here. See [README.md → Changes
 - Two latent bugs found while building the Climate feature above: an NVS key one character over its 15-character limit silently never persisted (a debounce timestamp resetting to 0 on every reboot instead of surviving it), and the HTTP server's handler-registration limit was exactly exhausted by the new endpoints, silently dropping the last-registered one
 - Both the climate photo-overlay badges and the Agenda-header climate chip drew white text on the Good category's Yellow background, illegible on the actual e-paper panel — black text now used for that one case
 - The climate overlay badges could visually overwrite the tail of the weather/headlines overlay bar instead of leaving room for it — the bar now reserves space and truncates with "…" ahead of the badges
+- Enabling "Show thumbnails" on a large album could make the entire Web UI unreachable for a long time — a per-image `stat()` syscall used to check for a thumbnail blocked the device's single-threaded HTTP server for as long as a large album's directory scan took; now checked via one directory read collected into memory instead. The gallery grid also now renders a bounded batch of images at a time (with a "Load more" button) instead of every image in the album at once
+- The external RTC read back a time exactly one hour ahead of true time whenever daylight saving time was active, self-correcting only until the next reboot — `mktime()` was being forced to assume standard time instead of working it out from the date; also affected local (non-UTC) Agenda Calendar event times
 
 ---
 
