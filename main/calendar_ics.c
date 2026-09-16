@@ -105,6 +105,11 @@ static bool parse_ics_datetime(const char *value, size_t value_len, struct tm *o
         }
     }
     memset(out_tm, 0, sizeof(*out_tm));
+    // -1 (not the 0 the memset above leaves) so ics_datetime_to_time()'s
+    // mktime() call determines DST itself for a local (non-UTC) event's
+    // date instead of always assuming standard time - see the identical fix
+    // in rtc_driver_pcf85063/pcf8563 for the full mechanics.
+    out_tm->tm_isdst = -1;
     out_tm->tm_year = (value[0] - '0') * 1000 + (value[1] - '0') * 100 + (value[2] - '0') * 10 +
                       (value[3] - '0') - 1900;
     out_tm->tm_mon = (value[4] - '0') * 10 + (value[5] - '0') - 1;
