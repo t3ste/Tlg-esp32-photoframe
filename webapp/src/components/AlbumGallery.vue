@@ -1,8 +1,28 @@
 <script setup>
-import { ref } from "vue";
+import { ref, computed, watch } from "vue";
 import { useAppStore } from "../stores";
 
 const appStore = useAppStore();
+
+// Rendering every image in a large album at once (each with its own
+// thumbnail fetch once "Show thumbnails" is on) can pile up enough
+// concurrent requests to overwhelm the device's own HTTP server - it only
+// allows a handful of concurrent connections, so a big burst leaves the
+// whole Web UI unresponsive for a while. Rendering a bounded batch first,
+// with a button to reveal more, keeps that burst small regardless of album
+// size.
+const GALLERY_BATCH_SIZE = 60;
+const visibleCount = ref(GALLERY_BATCH_SIZE);
+watch(
+  () => appStore.selectedAlbum,
+  () => {
+    visibleCount.value = GALLERY_BATCH_SIZE;
+  }
+);
+const visibleImages = computed(() => appStore.currentAlbumImages.slice(0, visibleCount.value));
+function showMoreImages() {
+  visibleCount.value += GALLERY_BATCH_SIZE;
+}
 
 const newAlbumDialog = ref(false);
 const newAlbumName = ref("");
@@ -154,14 +174,7 @@ function onShowThumbnailsChange(val) {
 
       <template v-else>
         <v-row v-if="appStore.currentAlbumImages.length > 0">
-          <v-col
-            v-for="image in appStore.currentAlbumImages"
-            :key="image.filename"
-            cols="6"
-            sm="4"
-            md="3"
-            lg="2"
-          >
+          <v-col v-for="image in visibleImages" :key="image.filename" cols="6" sm="4" md="3" lg="2">
             <v-card variant="outlined" class="image-card">
               <v-img
                 v-if="showThumbnails && image.thumbnail"
@@ -204,7 +217,21 @@ function onShowThumbnailsChange(val) {
           </v-col>
         </v-row>
 
-        <v-alert v-else type="info" variant="tonal" class="mt-4">
+        <div
+          v-if="visibleCount < appStore.currentAlbumImages.length"
+          class="d-flex justify-center mt-2"
+        >
+          <v-btn variant="tonal" @click="showMoreImages">
+            Load more ({{ appStore.currentAlbumImages.length - visibleCount }} remaining)
+          </v-btn>
+        </div>
+
+        <v-alert
+          v-if="appStore.currentAlbumImages.length === 0"
+          type="info"
+          variant="tonal"
+          class="mt-4"
+        >
           No images in this album. Upload images to get started.
         </v-alert>
       </template>
