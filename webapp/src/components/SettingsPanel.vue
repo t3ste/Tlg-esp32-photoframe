@@ -2758,9 +2758,11 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Records one reading per successfully displayed image (photo or Agenda render) to the
-              Climate History chart below the settings. On by default - has no effect on the display
-              itself.
+              Logs a reading to the Climate History page (its own tab, not under Settings) on every
+              wake, and every few minutes while the device stays continuously awake - independent of
+              whether an image actually changed. On by default. Turning this off only stops the
+              history log growing; it does not affect the sensor readings shown below, which are
+              always read fresh at the moment each photo or Agenda page renders.
             </div>
             <v-switch
               v-model="settingsStore.deviceSettings.climateOverlayEnabled"
@@ -2770,9 +2772,10 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Draws the latest temperature and humidity as two small colored badges in the top-right
-              corner of every photo - color shows the category (red/orange/green for Bad/Good/Super;
-              a single black badge on grayscale-only displays).
+              Draws a fresh temperature/humidity reading (not the history log) as two small colored
+              badges in the top-right corner of every photo - color shows the category (red/orange/
+              green for Bad/Good/Super; a single black badge on grayscale-only displays). Works the
+              same whether or not history logging above is enabled.
             </div>
             <v-switch
               v-model="settingsStore.deviceSettings.climateAgendaHeaderEnabled"
@@ -2782,8 +2785,8 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              Adds the same readout, right-aligned, to the ToDo and Calendar column headers in
-              Agenda mode.
+              Adds the same fresh readout, right-aligned, to the ToDo and Calendar column headers in
+              Agenda mode - also independent of history logging above.
             </div>
           </v-tabs-window-item>
 
