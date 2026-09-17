@@ -3479,9 +3479,16 @@ static bool weather_icon_color_for_id(int icon_id, rgb_t *out)
 // 0-based (the caller has already subtracted WEATHER_ICON_MARKER_BASE from
 // the marker byte). `default_color` is used as-is unless colored-icon mode
 // is on and the board can show color, in which case
-// weather_icon_color_for_id() overrides it.
+// weather_icon_color_for_id() overrides it - UNLESS that override would be
+// invisible against `avoid_bg` (non-NULL only for a caller whose actual
+// background isn't guaranteed plain black/white, e.g. agenda_renderer.c's
+// shift-model-colored day header - every other caller passes NULL, since a
+// fixed traffic-light hue can never collide with a plain black/white
+// background by construction). Falls back to `default_color` in that case,
+// same as the neutral-category fallback already does - it's already
+// guaranteed contrast-safe against this exact background by the caller.
 static void draw_weather_icon(uint8_t *rgb, int width, int height, int x, int y, int icon_id,
-                              rgb_t default_color)
+                              rgb_t default_color, const rgb_t *avoid_bg)
 {
     if (icon_id < 0 || icon_id >= WEATHER_ICON_COUNT) {
         return;
@@ -3493,6 +3500,10 @@ static void draw_weather_icon(uint8_t *rgb, int width, int height, int x, int y,
     rgb_t color = default_color;
     if (config_manager_get_weather_icon_colored() && !board_is_grayscale()) {
         weather_icon_color_for_id(icon_id, &color);  // no-op (color stays default_color) if neutral
+        if (avoid_bg && color.r == avoid_bg->r && color.g == avoid_bg->g &&
+            color.b == avoid_bg->b) {
+            color = default_color;
+        }
     }
 
     uint32_t bytes_per_row = WEATHER_ICON_WIDTH / 8 + (WEATHER_ICON_WIDTH % 8 ? 1 : 0);
@@ -3534,24 +3545,40 @@ void image_processor_fill_rect(uint8_t *rgb_buffer, int width, int height, int x
     }
 }
 
-void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x, int y,
-                               const char *ascii_text, uint8_t r, uint8_t g, uint8_t b)
+// Shared by both public entry points below - `avoid_bg` is only non-NULL
+// via image_processor_draw_text_on_bg(), see draw_weather_icon()'s comment
+// for why most callers don't need it.
+static void draw_text_impl(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                           const char *ascii_text, rgb_t color, const rgb_t *avoid_bg)
 {
     if (!ascii_text) {
         return;
     }
-    rgb_t color = {r, g, b};
     int cx = x;
     for (const char *p = ascii_text; *p != '\0'; p++) {
         if (is_weather_icon_marker(*p)) {
             draw_weather_icon(rgb_buffer, width, height, cx, y,
-                              (unsigned char) *p - WEATHER_ICON_MARKER_BASE, color);
+                              (unsigned char) *p - WEATHER_ICON_MARKER_BASE, color, avoid_bg);
             cx += WEATHER_ICON_WIDTH;
             continue;
         }
         draw_glyph(rgb_buffer, width, height, cx, y, *p, color);
         cx += Font24.Width;
     }
+}
+
+void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                               const char *ascii_text, uint8_t r, uint8_t g, uint8_t b)
+{
+    draw_text_impl(rgb_buffer, width, height, x, y, ascii_text, (rgb_t){r, g, b}, NULL);
+}
+
+void image_processor_draw_text_on_bg(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                                     const char *ascii_text, uint8_t r, uint8_t g, uint8_t b,
+                                     uint8_t bg_r, uint8_t bg_g, uint8_t bg_b)
+{
+    rgb_t bg = {bg_r, bg_g, bg_b};
+    draw_text_impl(rgb_buffer, width, height, x, y, ascii_text, (rgb_t){r, g, b}, &bg);
 }
 
 int image_processor_measure_text_width(const char *ascii_text)
@@ -3711,8 +3738,11 @@ static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
         int y = bar_top + CAPTION_LINE_PADDING + i * (Font24.Height + CAPTION_LINE_PADDING);
         for (const char *p = lines[i]; *p != '\0'; p++) {
             if (is_weather_icon_marker(*p)) {
+                // NULL avoid_bg: this bar's own background is always plain
+                // black/white (overlay_invert_colors), never one of the
+                // traffic-light hues - no collision possible here.
                 draw_weather_icon(rgb_buffer, width, height, x, y,
-                                  (unsigned char) *p - WEATHER_ICON_MARKER_BASE, fg);
+                                  (unsigned char) *p - WEATHER_ICON_MARKER_BASE, fg, NULL);
                 x += WEATHER_ICON_WIDTH;
                 continue;
             }

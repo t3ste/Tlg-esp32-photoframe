@@ -381,6 +381,19 @@ void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x
                                const char *ascii_text, uint8_t r, uint8_t g, uint8_t b);
 
 /**
+ * @brief Same as image_processor_draw_text(), but for a caller whose actual
+ * background isn't guaranteed to be plain black/white (e.g. agenda_renderer.c's
+ * shift-model-colored day headers) - an embedded weather-icon marker byte's
+ * traffic-light color override (weather_icon_color_for_id()) is skipped in
+ * favor of the plain `r/g/b` given if it would otherwise be invisible
+ * against `bg_r/bg_g/bg_b`. Every other caller can keep using the plain
+ * function above unchanged.
+ */
+void image_processor_draw_text_on_bg(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                                     const char *ascii_text, uint8_t r, uint8_t g, uint8_t b,
+                                     uint8_t bg_r, uint8_t bg_g, uint8_t bg_b);
+
+/**
  * @brief Pixel width image_processor_draw_text() will occupy drawing
  * `ascii_text` - like `strlen(ascii_text) * IMAGE_PROCESSOR_FONT_WIDTH`, but
  * accounts for any embedded weather-icon marker byte (wider than a normal

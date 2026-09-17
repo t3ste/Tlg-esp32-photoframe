@@ -765,8 +765,14 @@ static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t 
     if (weather_w > 0) {
         image_processor_fill_rect(rgb, width, height, weather_x - 2, y, weather_w + 4,
                                   IMAGE_PROCESSOR_FONT_HEIGHT, fill_r, fill_g, fill_b);
-        image_processor_draw_text(rgb, width, height, weather_x, y, weather_clipped, text_r, text_g,
-                                  text_b);
+        // _on_bg: this chip can embed a colored weather-icon marker byte
+        // (see WEATHER_ICON_MARKER_BASE) - fill_r/g/b is a shift-model
+        // color here, not always plain black/white, so the icon's fixed
+        // traffic-light override needs to know the actual background to
+        // avoid drawing invisibly against a same-colored day (see
+        // draw_weather_icon()'s own comment).
+        image_processor_draw_text_on_bg(rgb, width, height, weather_x, y, weather_clipped, text_r,
+                                        text_g, text_b, fill_r, fill_g, fill_b);
     }
 }
 
@@ -1119,147 +1125,215 @@ static int draw_calendar_letter_badge(uint8_t *rgb, int width, int height, int x
     return x + badge_w + IMAGE_PROCESSOR_FONT_WIDTH / 2;
 }
 
-// Draws one day's divider row plus as many of its events as fit within
-// `cell` - the 7-day grid's per-cell counterpart to draw_calendar_column()'s
-// shared-budget day loop. Unlike list mode (one budget shared across the
-// whole day list, so a busy day can eat into the next day's rows), each
-// grid cell gets its own independent budget derived purely from `cell.h` -
-// deliberately written this way (an explicit sub-rect in, nothing about a
-// fixed 4x2 grid assumed) so a future dynamic-grid layout (config.h's
-// "out of scope for now" note) can reuse this function unchanged, only the
-// caller's geometry math would need to change.
-static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cell, int day_index,
-                          time_t day, const agenda_tagged_event_t *tagged, int tagged_count,
-                          const bool *is_multiday, const int *first_visible_idx, bool skip_repeats,
-                          bool show_prefix, const weather_forecast_t *cal_weather,
-                          bool weather_mode, bool weather_right_aligned, bool german,
-                          uint8_t body_r, uint8_t body_g, uint8_t body_b, bool has_shift_bg,
-                          uint8_t shift_r, uint8_t shift_g, uint8_t shift_b, bool shift_whole_cell)
+// Given the background a piece of plain (no-own-fill) text is about to sit
+// on, returns a version of `*fr/*fg/*fb` that's guaranteed visible against
+// it - a no-op if it already contrasts fine. Needed because event text
+// colors are precomputed once (build_event_line(), against the page's own
+// background) long before it's known whether this particular row will
+// actually be painted with a shift-model color instead (see
+// draw_calendar_grid_column() below) - e.g. Calendar B's green text drawn
+// unmodified over a green shift-colored day would otherwise be invisible,
+// exactly the kind of bug this project has hit before with the weather
+// icon's own neutral-color case.
+static void agenda_ensure_contrast(uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, uint8_t *fr,
+                                   uint8_t *fg, uint8_t *fb)
 {
-    uint8_t header_bg_r = has_shift_bg ? shift_r : body_r;
-    uint8_t header_bg_g = has_shift_bg ? shift_g : body_g;
-    uint8_t header_bg_b = has_shift_bg ? shift_b : body_b;
+    agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
+}
 
-    struct tm day_tm;
-    localtime_r(&day, &day_tm);
-    char label[16];
-    snprintf(label, sizeof(label), "%s %d.", weather_weekday_abbr(day_tm.tm_wday, german),
-             day_tm.tm_mday);
-
-    // Same marker-byte weather-chip construction as
-    // draw_calendar_column()'s list-mode loop - kept in sync by hand since
-    // the two live in genuinely different budgeting loops (see this
-    // function's own top comment).
-    char weather_buf[WEATHER_DAY_LINE_MAX_LEN] = "";
-    const weather_day_t *wday;
-    if (find_weather_for_day(cal_weather, day, &wday)) {
-        int tmin = (int) lroundf(wday->temp_min_c);
-        int tmax = (int) lroundf(wday->temp_max_c);
-        const char *icon_set = config_manager_get_weather_icon_set();
-        int icon_id =
-            (strcmp(icon_set, "none") != 0) ? weather_code_to_icon_id(wday->weather_code) : -1;
-        if (icon_id >= 0) {
-            int prefix_len = snprintf(weather_buf, sizeof(weather_buf), "[%d/%d ", tmin, tmax);
-            if (prefix_len > 0 && (size_t) prefix_len + 2 < sizeof(weather_buf)) {
-                weather_buf[prefix_len] = (char) (WEATHER_ICON_MARKER_BASE + icon_id);
-                weather_buf[prefix_len + 1] = ']';
-                weather_buf[prefix_len + 2] = '\0';
-            }
-        } else {
-            const char *cond = weather_condition_text(wday->weather_code, german);
-            snprintf(weather_buf, sizeof(weather_buf), "[%d/%d %s]", tmin, tmax, cond);
-        }
+// Sequentially packs `day_count` consecutive days (from `days`, each day's
+// "global" index for is_multiday[]/first_visible_idx[] lookups being
+// `day_index_offset` + its position in `days`) into `col` - every day's
+// header immediately follows the previous day's last drawn line, unlike a
+// fixed-height grid cell that leaves whatever's left of its allotted rows
+// blank. Same shared-budget/"+N more" algorithm as draw_calendar_column()'s
+// list-mode loop, just scoped to this column's own rect and day subset -
+// used for both the "today" slot (day_count==1, so it naturally only ever
+// uses as many lines as it actually has) and each of the two 2-4-day
+// columns. Returns the total pixel height actually used, so the caller can
+// start whatever comes next (in GRID_B, the 2 more days sharing today's
+// column) right below it instead of at a fixed offset.
+static int draw_calendar_grid_column(
+    uint8_t *rgb, int width, int height, agenda_rect_t col, const time_t *days, int day_count,
+    int day_index_offset, const agenda_tagged_event_t *tagged, int tagged_count,
+    const bool *is_multiday, const int *first_visible_idx, bool skip_repeats, bool show_prefix,
+    const weather_forecast_t *cal_weather, bool weather_mode, bool weather_right_aligned,
+    bool german, uint8_t body_r, uint8_t body_g, uint8_t body_b, agenda_shift_model_t shift_model,
+    const char *shift_start, const uint8_t *shift_group_r, const uint8_t *shift_group_g,
+    const uint8_t *shift_group_b, bool shift_whole_cell)
+{
+    if (day_count <= 0) {
+        return 0;
     }
-
-    draw_day_divider(rgb, width, height, cell, cell.y, label, weather_mode, weather_right_aligned,
-                     weather_buf[0] ? weather_buf : NULL, header_bg_r, header_bg_g, header_bg_b);
-
     int row_h = IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
-    int text_width = cell.w - 2 * AGENDA_PADDING;
-    int content_top = cell.y + IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
-    int content_h = cell.h - IMAGE_PROCESSOR_FONT_HEIGHT - AGENDA_PADDING;
-    int max_rows = (content_h > 0) ? content_h / row_h : 0;
+    int max_rows = (col.h > 0) ? col.h / row_h : 0;
+    int text_width = col.w - 2 * AGENDA_PADDING;
 
-    if (shift_whole_cell && has_shift_bg && max_rows > 0) {
-        image_processor_fill_rect(rgb, width, height, cell.x, content_top, cell.w, max_rows * row_h,
-                                  shift_r, shift_g, shift_b);
-    }
-
-    int total_instances = 0;
-    for (int i = 0; i < tagged_count; i++) {
-        if (!event_touches_day(tagged[i].ev, day)) {
-            continue;
+    int total_event_instances = 0;
+    for (int di = 0; di < day_count; di++) {
+        int global_di = day_index_offset + di;
+        for (int k = 0; k < tagged_count; k++) {
+            if (!event_touches_day(tagged[k].ev, days[di])) {
+                continue;
+            }
+            if (skip_repeats && is_multiday[k] && global_di != first_visible_idx[k]) {
+                continue;
+            }
+            total_event_instances++;
         }
-        if (skip_repeats && is_multiday[i] && day_index != first_visible_idx[i]) {
-            continue;
-        }
-        total_instances++;
     }
-    int budget = (total_instances > max_rows) ? max_rows - 1 : max_rows;
+    int total_rows_needed = day_count + total_event_instances;
+    int budget = (total_rows_needed > max_rows) ? max_rows - 1 : max_rows;
     if (budget < 0) {
         budget = 0;
     }
 
     int rows_used = 0, instances_shown = 0;
-    for (int i = 0; i < tagged_count && rows_used < budget; i++) {
-        if (!event_touches_day(tagged[i].ev, day)) {
-            continue;
-        }
-        if (skip_repeats && is_multiday[i] && day_index != first_visible_idx[i]) {
-            continue;
-        }
-        const agenda_event_line_t *line = tagged[i].line;
+    for (int di = 0; di < day_count && rows_used < budget; di++) {
+        int global_di = day_index_offset + di;
 
-        char prefix[16] = "";
-        int prefix_len = 0;
-        if (show_prefix && is_multiday[i]) {
-            prefix_len =
-                snprintf(prefix, sizeof(prefix), "%d/%d: ", event_day_index(tagged[i].ev, day),
-                         event_total_days(tagged[i].ev));
-        }
-        int avail_width = text_width - prefix_len * IMAGE_PROCESSOR_FONT_WIDTH;
-        if (avail_width < IMAGE_PROCESSOR_FONT_WIDTH) {
-            avail_width = IMAGE_PROCESSOR_FONT_WIDTH;
+        int group = (shift_model != AGENDA_SHIFT_MODEL_NONE)
+                        ? agenda_shift_group_for_day(shift_model, shift_start, days[di])
+                        : -1;
+        bool has_shift_bg = group >= 0;
+        uint8_t shift_r = has_shift_bg ? shift_group_r[group] : 0;
+        uint8_t shift_g = has_shift_bg ? shift_group_g[group] : 0;
+        uint8_t shift_b = has_shift_bg ? shift_group_b[group] : 0;
+        uint8_t header_bg_r = has_shift_bg ? shift_r : body_r;
+        uint8_t header_bg_g = has_shift_bg ? shift_g : body_g;
+        uint8_t header_bg_b = has_shift_bg ? shift_b : body_b;
+
+        struct tm day_tm;
+        localtime_r(&days[di], &day_tm);
+        char label[16];
+        snprintf(label, sizeof(label), "%s %d.", weather_weekday_abbr(day_tm.tm_wday, german),
+                 day_tm.tm_mday);
+
+        char weather_buf[WEATHER_DAY_LINE_MAX_LEN] = "";
+        const weather_day_t *wday;
+        if (find_weather_for_day(cal_weather, days[di], &wday)) {
+            int tmin = (int) lroundf(wday->temp_min_c);
+            int tmax = (int) lroundf(wday->temp_max_c);
+            const char *icon_set = config_manager_get_weather_icon_set();
+            int icon_id =
+                (strcmp(icon_set, "none") != 0) ? weather_code_to_icon_id(wday->weather_code) : -1;
+            if (icon_id >= 0) {
+                int prefix_len = snprintf(weather_buf, sizeof(weather_buf), "[%d/%d ", tmin, tmax);
+                if (prefix_len > 0 && (size_t) prefix_len + 2 < sizeof(weather_buf)) {
+                    weather_buf[prefix_len] = (char) (WEATHER_ICON_MARKER_BASE + icon_id);
+                    weather_buf[prefix_len + 1] = ']';
+                    weather_buf[prefix_len + 2] = '\0';
+                }
+            } else {
+                const char *cond = weather_condition_text(wday->weather_code, german);
+                snprintf(weather_buf, sizeof(weather_buf), "[%d/%d %s]", tmin, tmax, cond);
+            }
         }
 
-        char wrapped[1][OVERLAY_LINE_MAX_CHARS];
-        int wrapped_count = image_processor_wrap_text(line->text, avail_width, 1, wrapped);
-        if (wrapped_count > 0) {
-            int y = content_top + rows_used * row_h;
-            int x = cell.x + AGENDA_PADDING;
-            if (prefix_len > 0) {
-                image_processor_draw_text(rgb, width, height, x, y, prefix, body_r, body_g, body_b);
-                x += prefix_len * IMAGE_PROCESSOR_FONT_WIDTH;
+        int header_y = col.y + rows_used * row_h;
+        if (has_shift_bg) {
+            // A solid header bar, not just draw_day_divider()'s own
+            // decorative chip/dash fills - "the header is colored" should
+            // read as an obvious colored bar, matching Layout_B.jpg.
+            image_processor_fill_rect(rgb, width, height, col.x, header_y, col.w,
+                                      IMAGE_PROCESSOR_FONT_HEIGHT, shift_r, shift_g, shift_b);
+        }
+        draw_day_divider(rgb, width, height, col, header_y, label, weather_mode,
+                         weather_right_aligned, weather_buf[0] ? weather_buf : NULL, header_bg_r,
+                         header_bg_g, header_bg_b);
+        rows_used++;
+
+        for (int i = 0; i < tagged_count && rows_used < budget; i++) {
+            if (!event_touches_day(tagged[i].ev, days[di])) {
+                continue;
             }
-            int visible_len = (int) strlen(wrapped[0]);
-            if (line->has_bg) {
-                image_processor_fill_rect(
-                    rgb, width, height, x, y, visible_len * IMAGE_PROCESSOR_FONT_WIDTH,
-                    IMAGE_PROCESSOR_FONT_HEIGHT, line->br, line->bgg, line->bb);
+            if (skip_repeats && is_multiday[i] && global_di != first_visible_idx[i]) {
+                continue;
             }
-            image_processor_draw_text(rgb, width, height, x, y, wrapped[0], line->fr, line->fg,
-                                      line->fb);
-            rows_used++;
-            instances_shown++;
+            const agenda_event_line_t *line = tagged[i].line;
+
+            char prefix[16] = "";
+            int prefix_len = 0;
+            if (show_prefix && is_multiday[i]) {
+                prefix_len = snprintf(prefix, sizeof(prefix),
+                                      "%d/%d: ", event_day_index(tagged[i].ev, days[di]),
+                                      event_total_days(tagged[i].ev));
+            }
+            int avail_width = text_width - prefix_len * IMAGE_PROCESSOR_FONT_WIDTH;
+            if (avail_width < IMAGE_PROCESSOR_FONT_WIDTH) {
+                avail_width = IMAGE_PROCESSOR_FONT_WIDTH;
+            }
+
+            char wrapped[1][OVERLAY_LINE_MAX_CHARS];
+            int wrapped_count = image_processor_wrap_text(line->text, avail_width, 1, wrapped);
+            if (wrapped_count > 0) {
+                int y = col.y + rows_used * row_h;
+                int x = col.x + AGENDA_PADDING;
+                bool row_shift_bg = has_shift_bg && shift_whole_cell;
+                if (row_shift_bg) {
+                    image_processor_fill_rect(rgb, width, height, col.x, y, col.w,
+                                              IMAGE_PROCESSOR_FONT_HEIGHT, shift_r, shift_g,
+                                              shift_b);
+                }
+                // Whichever background this row actually ends up on -
+                // the shift color if painted above, otherwise the plain
+                // page background both prefix/event colors were already
+                // resolved against.
+                uint8_t row_bg_r = row_shift_bg ? shift_r : body_r;
+                uint8_t row_bg_g = row_shift_bg ? shift_g : body_g;
+                uint8_t row_bg_b = row_shift_bg ? shift_b : body_b;
+                if (prefix_len > 0) {
+                    uint8_t prefix_r, prefix_g, prefix_b;
+                    agenda_safe_text_color(row_bg_r, row_bg_g, row_bg_b, &prefix_r, &prefix_g,
+                                           &prefix_b);
+                    image_processor_draw_text(rgb, width, height, x, y, prefix, prefix_r, prefix_g,
+                                              prefix_b);
+                    x += prefix_len * IMAGE_PROCESSOR_FONT_WIDTH;
+                }
+                int visible_len = (int) strlen(wrapped[0]);
+                uint8_t event_r = line->fr, event_g = line->fg, event_b = line->fb;
+                if (line->has_bg) {
+                    image_processor_fill_rect(
+                        rgb, width, height, x, y, visible_len * IMAGE_PROCESSOR_FONT_WIDTH,
+                        IMAGE_PROCESSOR_FONT_HEIGHT, line->br, line->bgg, line->bb);
+                } else if (row_shift_bg) {
+                    // The event's own color was only ever collision-
+                    // checked against the plain page background at build
+                    // time - re-check against this row's actual (shift)
+                    // background too, e.g. a Calendar source using the
+                    // same hue as today's shift-model group.
+                    agenda_ensure_contrast(row_bg_r, row_bg_g, row_bg_b, &event_r, &event_g,
+                                           &event_b);
+                }
+                image_processor_draw_text(rgb, width, height, x, y, wrapped[0], event_r, event_g,
+                                          event_b);
+                rows_used++;
+                instances_shown++;
+            }
         }
     }
 
-    if (instances_shown < total_instances && rows_used < max_rows) {
+    if (instances_shown < total_event_instances && rows_used < max_rows) {
         char more[32];
-        snprintf(more, sizeof(more), "+%d more", total_instances - instances_shown);
-        int y = content_top + rows_used * row_h;
-        image_processor_draw_text(rgb, width, height, cell.x + AGENDA_PADDING, y, more, body_r,
+        snprintf(more, sizeof(more), "+%d more", total_event_instances - instances_shown);
+        int y = col.y + rows_used * row_h;
+        image_processor_draw_text(rgb, width, height, col.x + AGENDA_PADDING, y, more, body_r,
                                   body_g, body_b);
+        rows_used++;
     }
+    return rows_used * row_h;
 }
 
-// Lays out the 7-day grid's 4x2 cell skeleton (agenda_cal_layout_mode_t
-// GRID_A/GRID_B, config.h) and draws each day into its cell via
-// draw_day_cell() above. `template_b` selects which of the two today-gets-
-// double-space arrangements to use - both give today exactly 2 of the 8
-// cell-units, just split across width (GRID_A) or height (GRID_B); see
-// config.h's enum comment and the two Layout_*.jpg concept images this was
-// designed against.
+// Lays out the 7-day grid (agenda_cal_layout_mode_t GRID_A/GRID_B, config.h)
+// as 3 independently-packed columns via draw_calendar_grid_column() above:
+// "today" alone (capped at grid_row_h in GRID_A, 2*grid_row_h in GRID_B -
+// its "2 of 8 cell-units"), then the remaining days split into a left and
+// right run. `template_b` selects which of the two today-gets-double-space
+// arrangements to use; see config.h's enum comment and the two
+// Layout_*.jpg concept images this was designed against. Column-major day
+// order (matches both images exactly): GRID_A's left column gets days
+// 1-3, right column 4-6; GRID_B's left column gets today plus days 1-2,
+// right column gets days 3-6.
 static void draw_calendar_grid(uint8_t *rgb, int width, int height, agenda_rect_t rect,
                                int content_top, int content_h, const time_t *days, int day_count,
                                const agenda_tagged_event_t *tagged, int tagged_count,
@@ -1319,50 +1393,59 @@ static void draw_calendar_grid(uint8_t *rgb, int width, int height, agenda_rect_
     int grid_row_h = content_h / 4;
     int grid_col_w = rect.w / 2;
 
-    // Cell 0 is always "today". Cells 1-6 are the remaining days, laid out
-    // column-major (matches Layout_A.jpg/Layout_B.jpg exactly) - GRID_A
-    // fills the left column top-to-bottom then the right column; GRID_B's
-    // left column already has "today" occupying its first 2 row-slots, so
-    // only 2 more days fit there, and the right column takes the other 4.
-    agenda_rect_t cells[7];
     if (!template_b) {
-        cells[0] = (agenda_rect_t){rect.x, content_top, rect.w, grid_row_h};
-        for (int i = 1; i <= 3 && i < day_count; i++) {
-            cells[i] =
-                (agenda_rect_t){rect.x, content_top + i * grid_row_h, grid_col_w, grid_row_h};
+        agenda_rect_t today_rect = {rect.x, content_top, rect.w, grid_row_h};
+        int today_used_h = draw_calendar_grid_column(
+            rgb, width, height, today_rect, &days[0], 1, 0, tagged, tagged_count, is_multiday,
+            first_visible_idx, skip_repeats, show_prefix, cal_weather, weather_mode,
+            weather_right_aligned, german, body_r, body_g, body_b, shift_model, shift_start,
+            shift_group_r, shift_group_g, shift_group_b, shift_whole_cell);
+        int cols_y = content_top + today_used_h;
+        int cols_h = content_h - today_used_h;
+        int left_count = (day_count > 4) ? 3 : day_count - 1;
+        int right_count = (day_count > 4) ? day_count - 4 : 0;
+        if (left_count > 0) {
+            agenda_rect_t left_rect = {rect.x, cols_y, grid_col_w, cols_h};
+            draw_calendar_grid_column(
+                rgb, width, height, left_rect, &days[1], left_count, 1, tagged, tagged_count,
+                is_multiday, first_visible_idx, skip_repeats, show_prefix, cal_weather,
+                weather_mode, weather_right_aligned, german, body_r, body_g, body_b, shift_model,
+                shift_start, shift_group_r, shift_group_g, shift_group_b, shift_whole_cell);
         }
-        for (int i = 4; i <= 6 && i < day_count; i++) {
-            cells[i] = (agenda_rect_t){rect.x + grid_col_w, content_top + (i - 3) * grid_row_h,
-                                       grid_col_w, grid_row_h};
+        if (right_count > 0) {
+            agenda_rect_t right_rect = {rect.x + grid_col_w, cols_y, grid_col_w, cols_h};
+            draw_calendar_grid_column(
+                rgb, width, height, right_rect, &days[4], right_count, 4, tagged, tagged_count,
+                is_multiday, first_visible_idx, skip_repeats, show_prefix, cal_weather,
+                weather_mode, weather_right_aligned, german, body_r, body_g, body_b, shift_model,
+                shift_start, shift_group_r, shift_group_g, shift_group_b, shift_whole_cell);
         }
     } else {
-        cells[0] = (agenda_rect_t){rect.x, content_top, grid_col_w, grid_row_h * 2};
-        for (int i = 1; i <= 2 && i < day_count; i++) {
-            cells[i] =
-                (agenda_rect_t){rect.x, content_top + (i + 1) * grid_row_h, grid_col_w, grid_row_h};
+        agenda_rect_t today_rect = {rect.x, content_top, grid_col_w, grid_row_h * 2};
+        int today_used_h = draw_calendar_grid_column(
+            rgb, width, height, today_rect, &days[0], 1, 0, tagged, tagged_count, is_multiday,
+            first_visible_idx, skip_repeats, show_prefix, cal_weather, weather_mode,
+            weather_right_aligned, german, body_r, body_g, body_b, shift_model, shift_start,
+            shift_group_r, shift_group_g, shift_group_b, shift_whole_cell);
+        int left_count = (day_count > 1) ? (day_count > 3 ? 2 : day_count - 1) : 0;
+        if (left_count > 0) {
+            agenda_rect_t left_rect = {rect.x, content_top + today_used_h, grid_col_w,
+                                       content_h - today_used_h};
+            draw_calendar_grid_column(
+                rgb, width, height, left_rect, &days[1], left_count, 1, tagged, tagged_count,
+                is_multiday, first_visible_idx, skip_repeats, show_prefix, cal_weather,
+                weather_mode, weather_right_aligned, german, body_r, body_g, body_b, shift_model,
+                shift_start, shift_group_r, shift_group_g, shift_group_b, shift_whole_cell);
         }
-        for (int i = 3; i <= 6 && i < day_count; i++) {
-            cells[i] = (agenda_rect_t){rect.x + grid_col_w, content_top + (i - 3) * grid_row_h,
-                                       grid_col_w, grid_row_h};
+        int right_count = (day_count > 3) ? day_count - 3 : 0;
+        if (right_count > 0) {
+            agenda_rect_t right_rect = {rect.x + grid_col_w, content_top, grid_col_w, content_h};
+            draw_calendar_grid_column(
+                rgb, width, height, right_rect, &days[3], right_count, 3, tagged, tagged_count,
+                is_multiday, first_visible_idx, skip_repeats, show_prefix, cal_weather,
+                weather_mode, weather_right_aligned, german, body_r, body_g, body_b, shift_model,
+                shift_start, shift_group_r, shift_group_g, shift_group_b, shift_whole_cell);
         }
-    }
-
-    for (int di = 0; di < day_count; di++) {
-        bool has_shift_bg = false;
-        uint8_t shift_r = 0, shift_g = 0, shift_b = 0;
-        if (shift_model != AGENDA_SHIFT_MODEL_NONE) {
-            int group = agenda_shift_group_for_day(shift_model, shift_start, days[di]);
-            if (group >= 0) {
-                has_shift_bg = true;
-                shift_r = shift_group_r[group];
-                shift_g = shift_group_g[group];
-                shift_b = shift_group_b[group];
-            }
-        }
-        draw_day_cell(rgb, width, height, cells[di], di, days[di], tagged, tagged_count,
-                      is_multiday, first_visible_idx, skip_repeats, show_prefix, cal_weather,
-                      weather_mode, weather_right_aligned, german, body_r, body_g, body_b,
-                      has_shift_bg, shift_r, shift_g, shift_b, shift_whole_cell);
     }
 
     heap_caps_free(is_multiday);
@@ -1406,9 +1489,9 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         hx += (int) strlen(name_a.name) * IMAGE_PROCESSOR_FONT_WIDTH;
     }
     if (name_a.show && name_b.show) {
-        image_processor_draw_text(rgb, width, height, hx, hy, ", ", header_text_r, header_text_g,
+        image_processor_draw_text(rgb, width, height, hx, hy, ",", header_text_r, header_text_g,
                                   header_text_b);
-        hx += 2 * IMAGE_PROCESSOR_FONT_WIDTH;
+        hx += IMAGE_PROCESSOR_FONT_WIDTH;
     }
     if (name_b.show) {
         if (name_b.has_swatch) {
@@ -1437,13 +1520,13 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
 
     struct tm now_tm;
     localtime_r(&now, &now_tm);
-    // Oversized vs. the typical ~20-char result - GCC's format-truncation
-    // checker can't prove tm_year+1900 always fits in 4 digits from this
-    // call site alone (same reason todo_item_role() widened its own date
-    // buffer earlier in this feature).
+    // No surrounding spaces (saves 2 header-width character cells) and a
+    // 2-digit year - the header is already tight once C/D/E badges and a
+    // long calendar name are all present. tm_year % 100 is always 0-99, so
+    // this is a fixed-width result unlike the old 4-digit year.
     char datetime[40];
-    snprintf(datetime, sizeof(datetime), " - %02d.%02d.%04d %02d:%02d", now_tm.tm_mday,
-             now_tm.tm_mon + 1, now_tm.tm_year + 1900, now_tm.tm_hour, now_tm.tm_min);
+    snprintf(datetime, sizeof(datetime), "-%02d.%02d.%02d %02d:%02d", now_tm.tm_mday,
+             now_tm.tm_mon + 1, now_tm.tm_year % 100, now_tm.tm_hour, now_tm.tm_min);
     image_processor_draw_text(rgb, width, height, hx, hy, datetime, header_text_r, header_text_g,
                               header_text_b);
     draw_header_climate(rgb, width, height, rect, climate);
