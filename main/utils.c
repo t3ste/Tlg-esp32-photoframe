@@ -773,6 +773,48 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsNumber(item)) {
         config_manager_set_agenda_cal_days(item->valueint);
     }
+    item = cJSON_GetObjectItem(root, "agenda_cal_layout_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *layout_str = cJSON_GetStringValue(item);
+        agenda_cal_layout_mode_t layout_mode = AGENDA_CAL_LAYOUT_LIST;
+        if (strcmp(layout_str, "grid_a") == 0) {
+            layout_mode = AGENDA_CAL_LAYOUT_GRID_A;
+        } else if (strcmp(layout_str, "grid_b") == 0) {
+            layout_mode = AGENDA_CAL_LAYOUT_GRID_B;
+        }
+        config_manager_set_agenda_cal_layout_mode(layout_mode);
+    }
+    item = cJSON_GetObjectItem(root, "agenda_shift_model");
+    if (item && cJSON_IsString(item)) {
+        const char *model_str = cJSON_GetStringValue(item);
+        agenda_shift_model_t shift_model = AGENDA_SHIFT_MODEL_NONE;
+        if (strcmp(model_str, "2-2-3") == 0) {
+            shift_model = AGENDA_SHIFT_MODEL_2_2_3;
+        } else if (strcmp(model_str, "week_week") == 0) {
+            shift_model = AGENDA_SHIFT_MODEL_WEEK_WEEK;
+        } else if (strcmp(model_str, "3-4") == 0) {
+            shift_model = AGENDA_SHIFT_MODEL_3_4;
+        }
+        config_manager_set_agenda_shift_model(shift_model);
+    }
+    item = cJSON_GetObjectItem(root, "agenda_shift_start");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_shift_start(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_shift_color1");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_shift_color1(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_shift_color2");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_shift_color2(cJSON_GetStringValue(item));
+    }
+    item = cJSON_GetObjectItem(root, "agenda_shift_color_scope");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_shift_color_scope(strcmp(cJSON_GetStringValue(item), "cell") == 0
+                                                        ? AGENDA_SHIFT_SCOPE_CELL
+                                                        : AGENDA_SHIFT_SCOPE_HEADER);
+    }
     item = cJSON_GetObjectItem(root, "agenda_cal_weather_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_cal_weather_enabled(cJSON_IsTrue(item));

@@ -456,6 +456,31 @@ const char *config_manager_get_agenda_cal_etag2(void);
 void config_manager_set_agenda_cal_days(int days);
 int config_manager_get_agenda_cal_days(void);
 
+// Calendar-only-fullscreen layout - see agenda_cal_layout_mode_t (config.h).
+// GRID_A/GRID_B only take effect when the Calendar column is shown alone.
+void config_manager_set_agenda_cal_layout_mode(agenda_cal_layout_mode_t mode);
+agenda_cal_layout_mode_t config_manager_get_agenda_cal_layout_mode(void);
+
+// 2-group rotation/"shift" coloring for the 7-day grid layouts - see
+// agenda_shift_model_t (config.h). NONE (default) means no coloring at all,
+// regardless of the start date/colors below.
+void config_manager_set_agenda_shift_model(agenda_shift_model_t model);
+agenda_shift_model_t config_manager_get_agenda_shift_model(void);
+// "YYYY-MM-DD", empty = unset (treated as "no coloring" even if a model is
+// selected above).
+void config_manager_set_agenda_shift_start(const char *start_date);
+const char *config_manager_get_agenda_shift_start(void);
+// One of "red"/"yellow"/"blue"/"green" (Spectra6/color boards only, same as
+// every other agenda role color) - unrecognized/empty falls back to the
+// original default at read time (role_hue()'s existing convention).
+void config_manager_set_agenda_shift_color1(const char *color);
+const char *config_manager_get_agenda_shift_color1(void);
+void config_manager_set_agenda_shift_color2(const char *color);
+const char *config_manager_get_agenda_shift_color2(void);
+// Where the shift color is painted - see agenda_shift_color_scope_t.
+void config_manager_set_agenda_shift_color_scope(agenda_shift_color_scope_t scope);
+agenda_shift_color_scope_t config_manager_get_agenda_shift_color_scope(void);
+
 // Opt-in per-day weather annotation on the Calendar column - see
 // NVS_AGENDA_CAL_WEATHER_KEY in config.h.
 void config_manager_set_agenda_cal_weather_enabled(bool enabled);

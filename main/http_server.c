@@ -1781,6 +1781,43 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_agenda_todo_enabled());
         cJSON_AddBoolToObject(root, "agenda_cal_enabled", config_manager_get_agenda_cal_enabled());
         cJSON_AddNumberToObject(root, "agenda_cal_days", config_manager_get_agenda_cal_days());
+        const char *agenda_cal_layout_str = "list";
+        switch (config_manager_get_agenda_cal_layout_mode()) {
+        case AGENDA_CAL_LAYOUT_GRID_A:
+            agenda_cal_layout_str = "grid_a";
+            break;
+        case AGENDA_CAL_LAYOUT_GRID_B:
+            agenda_cal_layout_str = "grid_b";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "agenda_cal_layout_mode", agenda_cal_layout_str);
+        const char *agenda_shift_model_str = "none";
+        switch (config_manager_get_agenda_shift_model()) {
+        case AGENDA_SHIFT_MODEL_2_2_3:
+            agenda_shift_model_str = "2-2-3";
+            break;
+        case AGENDA_SHIFT_MODEL_WEEK_WEEK:
+            agenda_shift_model_str = "week_week";
+            break;
+        case AGENDA_SHIFT_MODEL_3_4:
+            agenda_shift_model_str = "3-4";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "agenda_shift_model", agenda_shift_model_str);
+        cJSON_AddStringToObject(root, "agenda_shift_start",
+                                config_manager_get_agenda_shift_start());
+        cJSON_AddStringToObject(root, "agenda_shift_color1",
+                                config_manager_get_agenda_shift_color1());
+        cJSON_AddStringToObject(root, "agenda_shift_color2",
+                                config_manager_get_agenda_shift_color2());
+        cJSON_AddStringToObject(
+            root, "agenda_shift_color_scope",
+            config_manager_get_agenda_shift_color_scope() == AGENDA_SHIFT_SCOPE_CELL ? "cell"
+                                                                                     : "header");
         cJSON_AddBoolToObject(root, "agenda_cal_weather_enabled",
                               config_manager_get_agenda_cal_weather_enabled());
         cJSON_AddBoolToObject(root, "agenda_cal_weather_right_aligned",

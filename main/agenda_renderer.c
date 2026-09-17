@@ -1134,8 +1134,22 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
     agenda_multiday_mode_t multiday_mode = config_manager_get_agenda_cal_multiday_mode();
     bool skip_repeats = (multiday_mode == AGENDA_MULTIDAY_COMPACT);
     bool show_prefix = (multiday_mode != AGENDA_MULTIDAY_REPEAT);
-    bool is_multiday[AGENDA_MAX_TAGGED_EVENTS];
-    int first_visible_idx[AGENDA_MAX_TAGGED_EVENTS];
+    // Heap, not stack locals - AGENDA_MAX_TAGGED_EVENTS scales with
+    // ICS_MAX_EVENTS (48 per source x 5 sources = 240 today), and this
+    // project has a documented history of stack-overflow bugs from
+    // exactly this class of "array sized by a generous capacity constant"
+    // local (see agenda_manager.c's own todo/events buffers, heap-
+    // allocated for the same reason).
+    bool *is_multiday =
+        heap_caps_malloc(AGENDA_MAX_TAGGED_EVENTS * sizeof(bool), MALLOC_CAP_SPIRAM);
+    int *first_visible_idx =
+        heap_caps_malloc(AGENDA_MAX_TAGGED_EVENTS * sizeof(int), MALLOC_CAP_SPIRAM);
+    if (!is_multiday || !first_visible_idx) {
+        ESP_LOGW(TAG, "Failed to allocate Calendar column scratch buffers");
+        heap_caps_free(is_multiday);
+        heap_caps_free(first_visible_idx);
+        return;
+    }
     for (int k = 0; k < tagged_count; k++) {
         is_multiday[k] = event_total_days(tagged[k].ev) > 1;
         first_visible_idx[k] = -1;
@@ -1273,6 +1287,9 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         image_processor_draw_text(rgb, width, height, rect.x + AGENDA_PADDING, y, more, body_r,
                                   body_g, body_b);
     }
+
+    heap_caps_free(is_multiday);
+    heap_caps_free(first_visible_idx);
 }
 
 // Same header/row-budget/"+N more" behavior as draw_column() above, but for
