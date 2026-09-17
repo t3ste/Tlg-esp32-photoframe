@@ -992,11 +992,42 @@ static void draw_header_climate(uint8_t *rgb, int width, int height, agenda_rect
     }
 }
 
+// Small "letter badge" for Calendar C/D/E: a filled box in that source's
+// resolved color with the single letter drawn on top in a contrast-safe
+// color. Unlike A/B (which have room for their full configured name plus a
+// plain color swatch - see name_a/name_b above), C/D/E only ever get a
+// 1-letter identifier here, no room for a name. Needed even on grayscale
+// (calendar_source_color() gives every source the same plain black there,
+// so color alone can't tell C/D/E apart - the letter itself is what
+// actually disambiguates them, and matters even on color boards since C
+// and E currently default to the identical color, see
+// NVS_AGENDA_CAL_C_COLOR_KEY/NVS_AGENDA_CAL_E_COLOR_KEY in config.h).
+// Returns the x the next badge (or following text) should start at.
+static int draw_calendar_letter_badge(uint8_t *rgb, int width, int height, int x, int y,
+                                      char letter, int calendar_index, bool grayscale,
+                                      uint8_t page_bg_r, uint8_t page_bg_g, uint8_t page_bg_b)
+{
+    uint8_t badge_r, badge_g, badge_b;
+    bool unused_has_bg;
+    calendar_source_color(calendar_index, grayscale, page_bg_r, page_bg_g, page_bg_b, &badge_r,
+                          &badge_g, &badge_b, &unused_has_bg);
+    int badge_w = IMAGE_PROCESSOR_FONT_WIDTH + IMAGE_PROCESSOR_FONT_WIDTH / 2;
+    image_processor_fill_rect(rgb, width, height, x, y, badge_w, IMAGE_PROCESSOR_FONT_HEIGHT,
+                              badge_r, badge_g, badge_b);
+    uint8_t text_r, text_g, text_b;
+    agenda_safe_text_color(badge_r, badge_g, badge_b, &text_r, &text_g, &text_b);
+    char label[2] = {letter, '\0'};
+    image_processor_draw_text(rgb, width, height, x + IMAGE_PROCESSOR_FONT_WIDTH / 4, y, label,
+                              text_r, text_g, text_b);
+    return x + badge_w + IMAGE_PROCESSOR_FONT_WIDTH / 2;
+}
+
 static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rect_t rect,
                                  time_t now, int lookahead_days, uint8_t body_r, uint8_t body_g,
                                  uint8_t body_b, const agenda_tagged_event_t *tagged,
                                  int tagged_count, const weather_forecast_t *cal_weather,
                                  agenda_cal_name_tag_t name_a, agenda_cal_name_tag_t name_b,
+                                 bool show_c, bool show_d, bool show_e,
                                  const agenda_climate_t *climate)
 {
     uint8_t header_text_r, header_text_g, header_text_b;
@@ -1041,6 +1072,20 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         image_processor_draw_text(rgb, width, height, hx, hy, name_b.name, header_text_r,
                                   header_text_g, header_text_b);
         hx += (int) strlen(name_b.name) * IMAGE_PROCESSOR_FONT_WIDTH;
+    }
+
+    bool grayscale = agenda_board_is_grayscale();
+    if (show_c) {
+        hx = draw_calendar_letter_badge(rgb, width, height, hx, hy, 'C', 2, grayscale, body_r,
+                                        body_g, body_b);
+    }
+    if (show_d) {
+        hx = draw_calendar_letter_badge(rgb, width, height, hx, hy, 'D', 3, grayscale, body_r,
+                                        body_g, body_b);
+    }
+    if (show_e) {
+        hx = draw_calendar_letter_badge(rgb, width, height, hx, hy, 'E', 4, grayscale, body_r,
+                                        body_g, body_b);
     }
 
     struct tm now_tm;
@@ -1491,7 +1536,8 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
                 tag_b.b = lines_b[0].fb;
             }
             draw_calendar_column(rgb, width, height, cal_rect, now, lookahead_days, body_r, body_g,
-                                 body_b, tagged, tagged_count, cal_weather, tag_a, tag_b, climate);
+                                 body_b, tagged, tagged_count, cal_weather, tag_a, tag_b, have_c,
+                                 have_d, have_e, climate);
         } else {
             ESP_LOGW(TAG, "Failed to allocate Calendar render scratch buffers - skipping column");
         }
