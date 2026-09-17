@@ -269,6 +269,24 @@ const agendaTimeDisplayModeOptions = [
   { title: "Range - e.g. 08:15-09:00", value: "range" },
 ];
 
+const agendaCalLayoutModeOptions = [
+  { title: "List (default)", value: "list" },
+  { title: "7-Day Grid - Template A (today: full width)", value: "grid_a" },
+  { title: "7-Day Grid - Template B (today: double height)", value: "grid_b" },
+];
+
+const agendaShiftModelOptions = [
+  { title: "Off (default)", value: "none" },
+  { title: "2-2-3", value: "2-2-3" },
+  { title: "Week / week", value: "week_week" },
+  { title: "3-4", value: "3-4" },
+];
+
+const agendaShiftScopeOptions = [
+  { title: "Day header only", value: "header" },
+  { title: "Whole day cell", value: "cell" },
+];
+
 const chimeSpeakerModeOptions = [
   { title: "Off (default)", value: "off" },
   { title: "Battery + mains", value: "battery_and_mains" },
@@ -1761,6 +1779,92 @@ async function performFactoryReset() {
               (e.g. "08:00 [1h30m]" vs. "08:00-09:30" for Range) - pick whichever reads better for
               your events. Neither affects all-day events.
             </div>
+            <v-select
+              v-model="settingsStore.deviceSettings.agendaCalLayoutMode"
+              :items="agendaCalLayoutModeOptions"
+              item-title="title"
+              item-value="value"
+              label="Layout"
+              variant="outlined"
+              class="mt-2 mb-1"
+              hide-details
+              :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              List (default): today's existing 1-3 day list, set by "Days ahead" above. 7-Day Grid:
+              a full week at a glance, laid out as 4 rows x 2 columns with today getting extra space
+              (Template A: full width; Template B: double height) - only takes effect when the ToDo
+              column above is off (Calendar shown full-screen), falling back to List otherwise.
+              Forecasts (if enabled above) cover all 7 days in grid mode, still 3 in List mode.
+            </div>
+            <template v-if="settingsStore.deviceSettings.agendaCalLayoutMode !== 'list'">
+              <v-select
+                v-model="settingsStore.deviceSettings.agendaShiftModel"
+                :items="agendaShiftModelOptions"
+                item-title="title"
+                item-value="value"
+                label="Rotation pattern"
+                variant="outlined"
+                class="mt-2 mb-1"
+                hide-details
+                :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+              />
+              <div class="text-caption text-medium-emphasis mb-2">
+                Colors each grid day by an alternating custody-style schedule (e.g. "2-2-3": 2
+                days/2 days/3 days, then which side starts flips the following week) - off by
+                default. Needs a start date below to anchor which day the pattern begins on.
+              </div>
+              <v-row v-if="settingsStore.deviceSettings.agendaShiftModel !== 'none'" dense>
+                <v-col cols="6" sm="4">
+                  <v-text-field
+                    v-model="settingsStore.deviceSettings.agendaShiftStart"
+                    label="Start date"
+                    type="date"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaShiftColorScope"
+                    :items="agendaShiftScopeOptions"
+                    item-title="title"
+                    item-value="value"
+                    label="Apply color to"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+              </v-row>
+              <v-row
+                v-if="settingsStore.deviceSettings.agendaShiftModel !== 'none'"
+                dense
+                class="mt-1 mb-2"
+              >
+                <v-col cols="6" sm="4">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaShiftColor1"
+                    :items="agendaHueOptions"
+                    label="Group 1 color"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+                <v-col cols="6" sm="4">
+                  <v-select
+                    v-model="settingsStore.deviceSettings.agendaShiftColor2"
+                    :items="agendaHueOptions"
+                    label="Group 2 color"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+              </v-row>
+            </template>
 
             <v-divider class="mb-4 mt-2" />
 
@@ -1768,12 +1872,13 @@ async function performFactoryReset() {
             <div class="text-caption text-medium-emphasis mb-2">
               Up to three additional calendars (e.g. holidays, school holidays, or any other .ics
               feed) shown in the same Calendar column above, each in its own color (see Appearance
-              tab). Unlike Calendar A/B, these are <strong>never refreshed automatically</strong> -
-              only when you save a new/changed URL, click "Refresh now", or upload a replacement
-              file directly. If a source runs out of upcoming events, a permanent reminder appears
-              in the calendar identifying which one needs updating. Each source shows up to 24
-              events within its 30-day window - plenty for holidays/school-holidays, but a very
-              densely-booked file could hit that cap.
+              tab) plus a colored letter badge (C/D/E) in the header when active. Unlike Calendar
+              A/B, these are <strong>never refreshed automatically</strong> - only when you save a
+              new/changed URL, click "Refresh now", or upload a replacement file directly. If a
+              source runs out of upcoming events, a permanent reminder appears in the calendar
+              identifying which one needs updating. Each source shows up to 48 events within its
+              30-day window - plenty for holidays/school-holidays, but a very densely-booked file
+              could hit that cap.
             </div>
 
             <v-card variant="tonal" class="mb-3">

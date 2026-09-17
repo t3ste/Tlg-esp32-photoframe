@@ -224,6 +224,19 @@ export const useSettingsStore = defineStore("settings", () => {
     // appends a compact "[Xm]"/"[Xh]" suffix. "range": shows the full
     // "HH:MM-HH:MM" span instead. Never affects all-day events.
     agendaCalTimeDisplayMode: "off",
+    // Calendar-only-fullscreen layout - "list" (default, today's 1-3 day
+    // list) or a 7-day grid template ("grid_a"/"grid_b"). Only takes
+    // effect when the ToDo column is off - see agenda_renderer.c.
+    agendaCalLayoutMode: "list",
+    // Optional 2-group rotation/"shift" coloring for the 7-day grid - see
+    // agenda_shift_model_t (config.h). "none" (default) = no coloring.
+    agendaShiftModel: "none",
+    // "YYYY-MM-DD", empty = unset (no coloring even if a model is chosen).
+    agendaShiftStart: "",
+    agendaShiftColor1: "blue",
+    agendaShiftColor2: "green",
+    // "header" (default) or "cell" - see agenda_shift_color_scope_t.
+    agendaShiftColorScope: "header",
     agendaCron: ["0 6-18 *"],
     // true = ToDo above Calendar (default), false = side by side. Portrait
     // boards always stack regardless of this setting - see agenda_renderer.c.
@@ -480,6 +493,12 @@ export const useSettingsStore = defineStore("settings", () => {
         data.agenda_cal_weather_right_aligned === true;
       deviceSettings.value.agendaCalMultidayMode = data.agenda_cal_multiday_mode || "repeat";
       deviceSettings.value.agendaCalTimeDisplayMode = data.agenda_cal_time_display_mode || "off";
+      deviceSettings.value.agendaCalLayoutMode = data.agenda_cal_layout_mode || "list";
+      deviceSettings.value.agendaShiftModel = data.agenda_shift_model || "none";
+      deviceSettings.value.agendaShiftStart = data.agenda_shift_start || "";
+      deviceSettings.value.agendaShiftColor1 = data.agenda_shift_color1 || "blue";
+      deviceSettings.value.agendaShiftColor2 = data.agenda_shift_color2 || "green";
+      deviceSettings.value.agendaShiftColorScope = data.agenda_shift_color_scope || "header";
       deviceSettings.value.agendaCalUrlConfigured = data.agenda_cal_url_configured === true;
       deviceSettings.value.agendaCalUrl2Configured = data.agenda_cal_url2_configured === true;
       deviceSettings.value.agendaCalCConfigured = data.agenda_cal_c_configured === true;
@@ -629,6 +648,12 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_cal_weather_right_aligned: deviceSettings.value.agendaCalWeatherRightAligned,
       agenda_cal_multiday_mode: deviceSettings.value.agendaCalMultidayMode,
       agenda_cal_time_display_mode: deviceSettings.value.agendaCalTimeDisplayMode,
+      agenda_cal_layout_mode: deviceSettings.value.agendaCalLayoutMode,
+      agenda_shift_model: deviceSettings.value.agendaShiftModel,
+      agenda_shift_start: deviceSettings.value.agendaShiftStart,
+      agenda_shift_color1: deviceSettings.value.agendaShiftColor1,
+      agenda_shift_color2: deviceSettings.value.agendaShiftColor2,
+      agenda_shift_color_scope: deviceSettings.value.agendaShiftColorScope,
       agenda_cron: deviceSettings.value.agendaCron,
       agenda_stack_layout: deviceSettings.value.agendaStackLayout,
       agenda_bg_color: deviceSettings.value.agendaBgColor,
