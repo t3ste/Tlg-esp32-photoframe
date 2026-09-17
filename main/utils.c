@@ -809,12 +809,6 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsString(item)) {
         config_manager_set_agenda_shift_color2(cJSON_GetStringValue(item));
     }
-    item = cJSON_GetObjectItem(root, "agenda_shift_color_scope");
-    if (item && cJSON_IsString(item)) {
-        config_manager_set_agenda_shift_color_scope(strcmp(cJSON_GetStringValue(item), "cell") == 0
-                                                        ? AGENDA_SHIFT_SCOPE_CELL
-                                                        : AGENDA_SHIFT_SCOPE_HEADER);
-    }
     item = cJSON_GetObjectItem(root, "agenda_cal_weather_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_cal_weather_enabled(cJSON_IsTrue(item));

@@ -235,8 +235,6 @@ export const useSettingsStore = defineStore("settings", () => {
     agendaShiftStart: "",
     agendaShiftColor1: "blue",
     agendaShiftColor2: "green",
-    // "header" (default) or "cell" - see agenda_shift_color_scope_t.
-    agendaShiftColorScope: "header",
     agendaCron: ["0 6-18 *"],
     // true = ToDo above Calendar (default), false = side by side. Portrait
     // boards always stack regardless of this setting - see agenda_renderer.c.
@@ -498,7 +496,6 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.agendaShiftStart = data.agenda_shift_start || "";
       deviceSettings.value.agendaShiftColor1 = data.agenda_shift_color1 || "blue";
       deviceSettings.value.agendaShiftColor2 = data.agenda_shift_color2 || "green";
-      deviceSettings.value.agendaShiftColorScope = data.agenda_shift_color_scope || "header";
       deviceSettings.value.agendaCalUrlConfigured = data.agenda_cal_url_configured === true;
       deviceSettings.value.agendaCalUrl2Configured = data.agenda_cal_url2_configured === true;
       deviceSettings.value.agendaCalCConfigured = data.agenda_cal_c_configured === true;
@@ -653,7 +650,6 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_shift_start: deviceSettings.value.agendaShiftStart,
       agenda_shift_color1: deviceSettings.value.agendaShiftColor1,
       agenda_shift_color2: deviceSettings.value.agendaShiftColor2,
-      agenda_shift_color_scope: deviceSettings.value.agendaShiftColorScope,
       agenda_cron: deviceSettings.value.agendaCron,
       agenda_stack_layout: deviceSettings.value.agendaStackLayout,
       agenda_bg_color: deviceSettings.value.agendaBgColor,

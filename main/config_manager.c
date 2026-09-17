@@ -143,7 +143,6 @@ static agenda_shift_model_t agenda_shift_model = AGENDA_SHIFT_MODEL_NONE;
 static char agenda_shift_start[AGENDA_SHIFT_START_MAX_LEN] = {0};
 static char agenda_shift_color1[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_SHIFT_COLOR1_DEFAULT;
 static char agenda_shift_color2[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_SHIFT_COLOR2_DEFAULT;
-static agenda_shift_color_scope_t agenda_shift_color_scope = AGENDA_SHIFT_SCOPE_HEADER;
 static char agenda_cron_rules_store[MAX_CRON_RULES][CRON_RULE_MAX_LEN] = {{0}};
 static int agenda_cron_rule_count = 0;
 // Memoizes config_manager_get_compiled_agenda_cron_rules()'s cron_parse()
@@ -1202,12 +1201,6 @@ esp_err_t config_manager_init(void)
                                sizeof(agenda_shift_color1), AGENDA_SHIFT_COLOR1_DEFAULT);
         agenda_role_color_load(nvs_handle, NVS_AGENDA_SHIFT_COLOR2_KEY, agenda_shift_color2,
                                sizeof(agenda_shift_color2), AGENDA_SHIFT_COLOR2_DEFAULT);
-        uint8_t stored_agenda_shift_scope = 0;
-        if (nvs_get_u8(nvs_handle, NVS_AGENDA_SHIFT_SCOPE_KEY, &stored_agenda_shift_scope) ==
-                ESP_OK &&
-            stored_agenda_shift_scope <= AGENDA_SHIFT_SCOPE_CELL) {
-            agenda_shift_color_scope = (agenda_shift_color_scope_t) stored_agenda_shift_scope;
-        }
         {
             // static: this large a buffer on the main task's stack
             // (CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144) is unnecessary stack
@@ -3513,20 +3506,6 @@ void config_manager_set_agenda_shift_start(const char *start_date)
 const char *config_manager_get_agenda_shift_start(void)
 {
     return agenda_shift_start;
-}
-
-void config_manager_set_agenda_shift_color_scope(agenda_shift_color_scope_t scope)
-{
-    if (scope < AGENDA_SHIFT_SCOPE_HEADER || scope > AGENDA_SHIFT_SCOPE_CELL) {
-        scope = AGENDA_SHIFT_SCOPE_HEADER;
-    }
-    agenda_shift_color_scope = scope;
-    agenda_nvs_set_u8(NVS_AGENDA_SHIFT_SCOPE_KEY, (uint8_t) scope);
-}
-
-agenda_shift_color_scope_t config_manager_get_agenda_shift_color_scope(void)
-{
-    return agenda_shift_color_scope;
 }
 
 int config_manager_get_agenda_cron_rule_count(void)

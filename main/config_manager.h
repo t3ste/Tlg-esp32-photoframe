@@ -477,9 +477,6 @@ void config_manager_set_agenda_shift_color1(const char *color);
 const char *config_manager_get_agenda_shift_color1(void);
 void config_manager_set_agenda_shift_color2(const char *color);
 const char *config_manager_get_agenda_shift_color2(void);
-// Where the shift color is painted - see agenda_shift_color_scope_t.
-void config_manager_set_agenda_shift_color_scope(agenda_shift_color_scope_t scope);
-agenda_shift_color_scope_t config_manager_get_agenda_shift_color_scope(void);
 
 // Opt-in per-day weather annotation on the Calendar column - see
 // NVS_AGENDA_CAL_WEATHER_KEY in config.h.

@@ -71,13 +71,6 @@ typedef enum {
     AGENDA_SHIFT_MODEL_3_4 = 3,        // 3/4-day segments
 } agenda_shift_model_t;
 
-// Where the shift-model color (above) is actually painted - see
-// draw_day_cell() in agenda_renderer.c. Values are stored as-is in NVS.
-typedef enum {
-    AGENDA_SHIFT_SCOPE_HEADER = 0,  // day-header bar only
-    AGENDA_SHIFT_SCOPE_CELL = 1,    // whole day cell (header + event area)
-} agenda_shift_color_scope_t;
-
 // Master mode for the Chimes speaker feature (see board_hal_has_speaker() /
 // board_hal_play_beep_pattern() and main/chime.c). Values are stored as-is
 // in NVS, so the numbering must stay stable across firmware versions.
@@ -704,8 +697,9 @@ typedef enum {
 // Calendar-only-fullscreen layout - see agenda_cal_layout_mode_t above.
 // Only takes effect when the Calendar column is shown alone (no ToDo).
 #define NVS_AGENDA_CAL_LAYOUT_KEY "agenda_cal_lay"
-// 2-group rotation/"shift" coloring for the 7-day grid layouts - see
-// agenda_shift_model_t/agenda_shift_color_scope_t above.
+// 2-group rotation/"shift" coloring for the 7-day grid layouts (event rows
+// only - the day header itself is never shift-colored, see draw_day_cell()
+// in agenda_renderer.c for why) - see agenda_shift_model_t above.
 #define NVS_AGENDA_SHIFT_MODEL_KEY "agenda_shft_md"
 // "YYYY-MM-DD" anchor date - which day the first segment of the first
 // (non-flipped) half starts on. Empty = unset, treated as "no coloring"
@@ -721,7 +715,6 @@ typedef enum {
 #define AGENDA_SHIFT_COLOR1_DEFAULT "blue"
 #define NVS_AGENDA_SHIFT_COLOR2_KEY "agenda_shft_c2"
 #define AGENDA_SHIFT_COLOR2_DEFAULT "green"
-#define NVS_AGENDA_SHIFT_SCOPE_KEY "agenda_shft_sc"
 // Opt-in: annotates each Calendar day divider with that day's forecast
 // (min/max temp + short condition, e.g. "Fr 11. [18/25 cloudy]"), reusing
 // the same weather_fetch_forecast() / location / provider settings as the

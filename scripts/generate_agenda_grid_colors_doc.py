@@ -53,8 +53,8 @@ def final_event_color(hue_name, page_bg, shift_bg):
     base = calendar_text_color(hue_name, page_bg)
     if shift_bg is None:
         return base, False
-    # agenda_ensure_contrast() - only reached for whole-cell scope, only
-    # for a plain (no has_bg) event line, i.e. every Calendar event today.
+    # agenda_ensure_contrast() - reached for every plain (no has_bg) event
+    # line on a shift-colored day.
     fixed = avoid_collision(shift_bg, base)
     return fixed, fixed != base
 
@@ -66,7 +66,7 @@ def chip_html(bg, fg, label, note=""):
     )
 
 
-def build_whole_cell_table(page_bg_name):
+def build_event_line_table(page_bg_name):
     page_bg = PAGE_BG[page_bg_name]
     cols = ["None (page bg)"] + list(HUES.keys())
     rows = []
@@ -87,7 +87,7 @@ def build_whole_cell_table(page_bg_name):
             )
         rows.append("<tr>" + "".join(cells) + "</tr>")
     return (
-        f"<h3>Whole-cell scope, {page_bg_name} agenda background</h3>\n"
+        f"<h3>Appointment line color, {page_bg_name} agenda background</h3>\n"
         f"<table><caption>Event text color actually drawn, by Calendar source color (rows) and the "
         f"day's shift-model background (columns) - '&larr; auto-corrected' marks a cell where "
         f"the source's own color exactly matched the shift background and "
@@ -97,21 +97,17 @@ def build_whole_cell_table(page_bg_name):
     )
 
 
-def build_header_only_table(page_bg_name):
+def build_header_table(page_bg_name):
     page_bg = PAGE_BG[page_bg_name]
-    cols = ["None (page bg)"] + list(HUES.keys())
-    cells = []
-    for col in cols:
-        bg = page_bg if col == "None (page bg)" else HUES[col]
-        fg = safe_text_color(bg)
-        cells.append(f'<td class="swatch-cell">{chip_html(bg, fg, "Fr 18.")}</td>')
-    header = "".join(f"<th>{c}</th>" for c in cols)
+    fg = safe_text_color(page_bg)
     return (
-        f"<h3>Header-only scope, {page_bg_name} agenda background</h3>\n"
-        f"<table><caption>The day-header label/weather-chip text color is derived directly from "
-        f"its own background at draw time (<code>agenda_safe_text_color()</code>), never a stale "
-        f"precomputed value - always safe by construction, shown here for completeness only.</caption>\n"
-        f"<tr>{header}</tr>\n<tr>{''.join(cells)}</tr>\n</table>\n"
+        f"<h3>Day header, {page_bg_name} agenda background</h3>\n"
+        f"<table><caption>The day header (and any weather-icon marker byte drawn inside it) is "
+        f"never shift-colored - always the plain page background, with "
+        f"<code>agenda_safe_text_color()</code> picking the matching contrast color. This is what "
+        f"structurally rules out a same-colored weather icon or day label, rather than checking for "
+        f"it case by case.</caption>\n"
+        f"<tr><td class=\"swatch-cell\">{chip_html(page_bg, fg, 'Fr 18.')}</td></tr>\n</table>\n"
     )
 
 
@@ -120,24 +116,23 @@ def main():
     parts.append("<h2>8. 7-Day Grid &mdash; shift-model background interaction</h2>")
     parts.append(
         "<p>The 7-day grid's optional rotation/&ldquo;shift&rdquo; coloring "
-        "(<code>agenda_shift_model_t</code>) paints a day's header bar (and, in "
-        "&ldquo;whole cell&rdquo; scope, its event rows too) with one of 2 configurable "
-        "group colors. Calendar event text color is resolved once, at "
-        "<code>build_event_line()</code> time, against the page's own background - "
-        "<strong>a day whose shift color happens to match that event's own Calendar "
-        "source color would draw invisible text without a fix</strong> (reported live: "
-        "green Calendar text on a green shift-colored day). "
-        "<code>draw_calendar_grid_column()</code> now re-checks a plain event's text "
-        "color against whatever background the row actually ends up on "
-        "(<code>agenda_ensure_contrast()</code>) before drawing it - the tables below "
-        "are generated directly from that same logic (see "
-        "<code>scripts/generate_agenda_grid_colors_doc.py</code>), so they reflect real "
-        "behavior, not a hand-drawn approximation.</p>"
+        "(<code>agenda_shift_model_t</code>) paints only a day's appointment lines with one of 2 "
+        "configurable group colors - the day header itself is always left plain (see below), "
+        "specifically to avoid this class of bug at the source rather than patching around it. "
+        "Calendar event text color is resolved once, at <code>build_event_line()</code> time, "
+        "against the page's own background - <strong>a day whose shift color happens to match "
+        "that event's own Calendar source color would still draw invisible text without a "
+        "further fix</strong> (reported live: green Calendar text on a green shift-colored day). "
+        "<code>draw_day_cell()</code> re-checks a plain event's text color against whatever "
+        "background the row actually ends up on (<code>agenda_ensure_contrast()</code>) before "
+        "drawing it - the tables below are generated directly from that same logic (see "
+        "<code>scripts/generate_agenda_grid_colors_doc.py</code>), so they reflect real behavior, "
+        "not a hand-drawn approximation.</p>"
     )
     for page_bg_name in PAGE_BG:
-        parts.append(build_whole_cell_table(page_bg_name))
+        parts.append(build_event_line_table(page_bg_name))
     for page_bg_name in PAGE_BG:
-        parts.append(build_header_only_table(page_bg_name))
+        parts.append(build_header_table(page_bg_name))
     parts.append(
         "<p><strong>Grayscale-only boards are unaffected</strong> - "
         "<code>resolve_plain_color()</code> always renders every Calendar source as "

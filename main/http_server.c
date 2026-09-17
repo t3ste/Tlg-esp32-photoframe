@@ -1814,10 +1814,6 @@ static esp_err_t config_handler(httpd_req_t *req)
                                 config_manager_get_agenda_shift_color1());
         cJSON_AddStringToObject(root, "agenda_shift_color2",
                                 config_manager_get_agenda_shift_color2());
-        cJSON_AddStringToObject(
-            root, "agenda_shift_color_scope",
-            config_manager_get_agenda_shift_color_scope() == AGENDA_SHIFT_SCOPE_CELL ? "cell"
-                                                                                     : "header");
         cJSON_AddBoolToObject(root, "agenda_cal_weather_enabled",
                               config_manager_get_agenda_cal_weather_enabled());
         cJSON_AddBoolToObject(root, "agenda_cal_weather_right_aligned",

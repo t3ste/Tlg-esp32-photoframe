@@ -282,11 +282,6 @@ const agendaShiftModelOptions = [
   { title: "3-4", value: "3-4" },
 ];
 
-const agendaShiftScopeOptions = [
-  { title: "Day header only", value: "header" },
-  { title: "Whole day cell", value: "cell" },
-];
-
 const chimeSpeakerModeOptions = [
   { title: "Off (default)", value: "off" },
   { title: "Battery + mains", value: "battery_and_mains" },
@@ -1810,9 +1805,12 @@ async function performFactoryReset() {
                 :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
               />
               <div class="text-caption text-medium-emphasis mb-2">
-                Colors each grid day by an alternating custody-style schedule (e.g. "2-2-3": 2
-                days/2 days/3 days, then which side starts flips the following week) - off by
-                default. Needs a start date below to anchor which day the pattern begins on.
+                Colors each grid day's appointment lines by an alternating custody-style schedule
+                (e.g. "2-2-3": 2 days/2 days/3 days, then which side starts flips the following
+                week) - off by default. Needs a start date below to anchor which day the pattern
+                begins on. The day header itself always stays plain black/white, regardless of this
+                setting - avoids a colored icon or Calendar text ever landing on a same-colored
+                background.
               </div>
               <v-row v-if="settingsStore.deviceSettings.agendaShiftModel !== 'none'" dense>
                 <v-col cols="6" sm="4">
@@ -1820,18 +1818,6 @@ async function performFactoryReset() {
                     v-model="settingsStore.deviceSettings.agendaShiftStart"
                     label="Start date"
                     type="date"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaShiftColorScope"
-                    :items="agendaShiftScopeOptions"
-                    item-title="title"
-                    item-value="value"
-                    label="Apply color to"
                     variant="outlined"
                     density="compact"
                     hide-details
