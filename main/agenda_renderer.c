@@ -1153,8 +1153,11 @@ static void agenda_ensure_contrast(uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, uin
 // "dynamic grid", config.h's own comment). The header row itself is never
 // shift-colored (avoids the whole class of "traffic-light icon/text color
 // vs. shift color" contrast bugs at the source - see
-// docs/AGENDA_COLORS.html); only the event rows below it are, when a shift
-// model is active for this day.
+// docs/AGENDA_COLORS.html); the entire event area below it is, as one
+// continuous fill down to the cell's own bottom edge, when a shift model
+// is active for this day - including whatever's left over past the last
+// drawn line, so an under-booked day never shows a plain black/white gap
+// inside an otherwise-colored cell.
 static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cell, int day_index,
                           time_t day, const agenda_tagged_event_t *tagged, int tagged_count,
                           const bool *is_multiday, const int *first_visible_idx, bool skip_repeats,
@@ -1201,7 +1204,25 @@ static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cel
     int text_width = cell.w - 2 * AGENDA_PADDING;
     int content_top = cell.y + IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
     int content_h = cell.h - IMAGE_PROCESSOR_FONT_HEIGHT - AGENDA_PADDING;
-    int max_rows = (content_h > 0) ? content_h / row_h : 0;
+    // +AGENDA_PADDING before dividing: row_h bakes in one AGENDA_PADDING gap
+    // *after* each row for separation from whatever follows, but the very
+    // last row in the cell has nothing after it to separate from - counting
+    // content_h/row_h straight would silently waste up to one whole
+    // row_h-1 pixels at the bottom of every cell (confirmed live: a
+    // visible blank gap above the next day's header even though its own
+    // cell still had unused height).
+    int max_rows = (content_h > 0) ? (content_h + AGENDA_PADDING) / row_h : 0;
+
+    // The event area (everything below the header, down to this cell's own
+    // bottom edge) gets one continuous shift-color fill up front, before
+    // any text - including whatever's left over past the last drawn row,
+    // so there's never a plain black/white gap inside an otherwise-colored
+    // cell. Only the header stays unfilled (see this function's own
+    // top comment for why).
+    if (has_shift_bg && content_h > 0) {
+        image_processor_fill_rect(rgb, width, height, cell.x, content_top, cell.w, content_h,
+                                  shift_r, shift_g, shift_b);
+    }
 
     int total_instances = 0;
     for (int i = 0; i < tagged_count; i++) {
@@ -1249,10 +1270,6 @@ static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cel
         if (wrapped_count > 0) {
             int y = content_top + rows_used * row_h;
             int x = cell.x + AGENDA_PADDING;
-            if (has_shift_bg) {
-                image_processor_fill_rect(rgb, width, height, cell.x, y, cell.w,
-                                          IMAGE_PROCESSOR_FONT_HEIGHT, shift_r, shift_g, shift_b);
-            }
             if (prefix_len > 0) {
                 uint8_t prefix_r, prefix_g, prefix_b;
                 agenda_safe_text_color(row_bg_r, row_bg_g, row_bg_b, &prefix_r, &prefix_g,
@@ -1286,8 +1303,10 @@ static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cel
         char more[32];
         snprintf(more, sizeof(more), "+%d more", total_instances - instances_shown);
         int y = content_top + rows_used * row_h;
-        image_processor_draw_text(rgb, width, height, cell.x + AGENDA_PADDING, y, more, body_r,
-                                  body_g, body_b);
+        uint8_t more_r, more_g, more_b;
+        agenda_safe_text_color(row_bg_r, row_bg_g, row_bg_b, &more_r, &more_g, &more_b);
+        image_processor_draw_text(rgb, width, height, cell.x + AGENDA_PADDING, y, more, more_r,
+                                  more_g, more_b);
     }
 }
 
@@ -1511,7 +1530,9 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
     int row_h = IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
     int content_top = rect.y + header_h + AGENDA_PADDING;
     int content_h = rect.h - header_h - AGENDA_PADDING;
-    int max_rows = (content_h > 0) ? content_h / row_h : 0;
+    // +AGENDA_PADDING: row_h's trailing gap isn't needed after the very
+    // last row - see draw_day_cell()'s identical fix for the full story.
+    int max_rows = (content_h > 0) ? (content_h + AGENDA_PADDING) / row_h : 0;
     int text_width = rect.w - 2 * AGENDA_PADDING;
 
     // The 7-day grid layouts only take effect Calendar-only-fullscreen
@@ -1759,7 +1780,9 @@ static void draw_todo_column(uint8_t *rgb, int width, int height, agenda_rect_t 
     int row_h = IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
     int content_top = rect.y + header_h + AGENDA_PADDING;
     int content_h = rect.h - header_h - AGENDA_PADDING;
-    int max_rows = (content_h > 0) ? content_h / row_h : 0;
+    // +AGENDA_PADDING: row_h's trailing gap isn't needed after the very
+    // last row - see draw_day_cell()'s identical fix for the full story.
+    int max_rows = (content_h > 0) ? (content_h + AGENDA_PADDING) / row_h : 0;
 
     int rows_drawn = 0;
     int text_width = rect.w - 2 * AGENDA_PADDING;
