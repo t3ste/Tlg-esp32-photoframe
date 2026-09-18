@@ -136,6 +136,15 @@
   </head>
   <body>
     <h1>Agenda ToDo Color Scheme</h1>
+    <p style="background: var(--note-bg); border: 1px solid var(--note-border); border-radius: 6px; padding: 0.75rem 1rem">
+      <strong>Calendar column coloring has since moved to an imported color-profile system</strong>
+      (see <code>agenda_color_profile.h</code>/<code>profile-editor.html</code> and <code>docs/DIFF.md</code>) -
+      the settings this page documents for the Calendar column below (<code>agenda_bg_color</code>,
+      <code>agenda_cal_a..e_color</code>, <code>agenda_shift_color1/2</code>, the C/D/E letter <em>badge</em>)
+      no longer exist in current firmware and are kept here only as a historical record of the design this
+      replaced. <strong>The ToDo column's own sections (priority/due/project/context colors) are still
+      accurate</strong> - only Calendar's coloring changed.
+    </p>
     <p>
       The full-screen Agenda ToDo/Calendar mode (see the main project plan) renders
       <a href="https://github.com/todotxt/todo.txt" target="_blank" rel="noopener">todo.txt</a>-format

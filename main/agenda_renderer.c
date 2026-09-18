@@ -6,6 +6,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "agenda_color_profile.h"
 #include "board_hal.h"
 #include "config_manager.h"
 #include "esp_heap_caps.h"
@@ -50,53 +51,13 @@ static bool agenda_board_is_grayscale(void)
     return strncmp(BOARD_HAL_DISPLAY_TYPE, "gc", 2) == 0;
 }
 
-// Resolves the shared ToDo+Calendar background setting (config_manager's
-// agenda_bg_color, a plain name like "black" or "yellow") to actual RGB for
-// the current hardware profile. An unrecognized name, or one that only
-// applies to the other profile (e.g. "yellow" stored while running on a
-// grayscale board - possible if a config was copied between boards), falls
-// back to white rather than erroring, matching this project's fail-soft
-// style for stored settings that don't quite fit the running hardware.
-static void agenda_background_color(bool grayscale, uint8_t *r, uint8_t *g, uint8_t *b)
+// The ToDo column's fixed plain page background - always black-on-white
+// (see config.h's comment on the removed agenda_bg_color setting). The
+// Calendar column no longer shares this: its own background comes from the
+// active color profile instead (see agenda_color_profile.h).
+static void agenda_background_color(uint8_t *r, uint8_t *g, uint8_t *b)
 {
-    const char *name = config_manager_get_agenda_bg_color();
-    if (grayscale) {
-        if (strcmp(name, "black") == 0) {
-            *r = *g = *b = 0;
-        } else if (strcmp(name, "gray25") == 0) {
-            *r = *g = *b = 64;
-        } else if (strcmp(name, "gray50") == 0) {
-            *r = *g = *b = 128;
-        } else if (strcmp(name, "gray75") == 0) {
-            *r = *g = *b = 191;
-        } else {
-            *r = *g = *b = 255;  // "white" or anything unrecognized
-        }
-        return;
-    }
-    if (strcmp(name, "black") == 0) {
-        *r = 0;
-        *g = 0;
-        *b = 0;
-    } else if (strcmp(name, "yellow") == 0) {
-        *r = 255;
-        *g = 255;
-        *b = 0;
-    } else if (strcmp(name, "red") == 0) {
-        *r = 255;
-        *g = 0;
-        *b = 0;
-    } else if (strcmp(name, "blue") == 0) {
-        *r = 0;
-        *g = 0;
-        *b = 255;
-    } else if (strcmp(name, "green") == 0) {
-        *r = 0;
-        *g = 255;
-        *b = 0;
-    } else {
-        *r = *g = *b = 255;  // "white" or anything unrecognized
-    }
+    *r = *g = *b = 255;
 }
 
 static bool agenda_colors_equal(uint8_t r1, uint8_t g1, uint8_t b1, uint8_t r2, uint8_t g2,
@@ -141,16 +102,79 @@ static void agenda_safe_text_color(uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, uin
 // text never disappears into the page. Deliberately only applied to plain
 // (no-own-fill) text colors - the priority/due chips already draw their
 // own local background first, so their text is guaranteed readable against
-// *that* fill regardless of the page background. The day divider and both
-// column headers are a different case: they always draw a fill, but which
-// polarity (dark-on-light vs. light-on-dark) they use is deliberately
-// derived from the page background too - see draw_day_divider() and the
-// header-drawing code in draw_todo_column()/draw_calendar_column().
+// *that* fill regardless of the page background. ToDo's own header/divider
+// deliberately derive their polarity from the page background this way too
+// (draw_todo_column()); the Calendar column no longer does - its colors
+// come from the active color profile instead, drawn literally with no
+// runtime auto-fix except where the profile genuinely has no field to
+// specify an ink from (the "mark" fill's own text - see draw_day_cell()).
 static void agenda_avoid_bg_collision(uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, uint8_t *fr,
                                       uint8_t *fg, uint8_t *fb)
 {
     if (agenda_colors_equal(*fr, *fg, *fb, bg_r, bg_g, bg_b)) {
         agenda_safe_text_color(bg_r, bg_g, bg_b, fr, fg, fb);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Calendar-view color resolution, driven entirely by the active imported
+// color profile (agenda_color_profile.h) - see that header's own comment
+// for the field-by-field schema. Verified 1:1 against profile-editor.html's
+// own computeBase()/buildStateRows()/render() logic (colors + mode + mark),
+// including its exact marking rules:
+//   - "markColorsHeader" is mutually exclusive: a marked day recolors
+//     EITHER its header OR its whole body area, never both.
+//   - Color-mode Calendar event ink NEVER changes with marked state (only
+//     its own chip background does, switching to the single "mark" color
+//     on a body-marked day) - the profile author is expected to have
+//     already verified every ink/background pairing looks right in the
+//     tool's own live preview, so this file never re-derives Calendar
+//     event ink against a marked background the way the old
+//     agenda_ensure_contrast() heuristic used to.
+//   - Mono-mode marking is always a plain page/ink polarity swap for
+//     whichever area (header or body) is being marked, regardless of the
+//     profile's specific hex colors (which mono ignores entirely) - see
+//     agenda_mono_pair() below.
+//   - Only the "+N more"/multi-day-prefix text and a header-marked day's
+//     header ink have no dedicated profile field at all (there is no
+//     "markInk" in the schema) - those two are the only remaining
+//     auto-derived colors, via agenda_safe_text_color() against whatever
+//     they're actually drawn on, exactly mirroring the tool's own
+//     contrastInk().
+// ----------------------------------------------------------------------------
+
+// A color-mode profile can't be shown in its authored hues on a grayscale
+// panel - fall back to the mono model, picking normal vs. invert from
+// whichever polarity the profile's own page background leans toward, so a
+// profile authored with a dark page (e.g. a "black on yellow" profile)
+// degrades to mono-invert automatically rather than defaulting to
+// mono-normal regardless of the author's intent. A profile that already
+// declares a mono mode is left untouched - it's already board-agnostic.
+static void agenda_color_profile_degrade_for_grayscale(agenda_color_profile_t *p)
+{
+    if (p->mono) {
+        return;
+    }
+    p->mono = true;
+    p->mono_invert = !agenda_is_light(p->text_bg.r, p->text_bg.g, p->text_bg.b);
+}
+
+// Mono page/ink pair for one area (header, or body) on one specific day -
+// `invert_area` is whether marking currently applies to THIS area on THIS
+// day (see draw_day_cell()'s mark_colors_header split); flips the
+// profile's own base polarity when true, exactly matching
+// profile-editor.html's mono() + markBg computation (mono marking is
+// always a plain black/white swap, never a specific hue).
+static void agenda_mono_pair(bool base_invert, bool invert_area, uint8_t *bg_r, uint8_t *bg_g,
+                             uint8_t *bg_b, uint8_t *fg_r, uint8_t *fg_g, uint8_t *fg_b)
+{
+    bool inv = invert_area ? !base_invert : base_invert;
+    if (inv) {
+        *bg_r = *bg_g = *bg_b = 0;
+        *fg_r = *fg_g = *fg_b = 255;
+    } else {
+        *bg_r = *bg_g = *bg_b = 255;
+        *fg_r = *fg_g = *fg_b = 0;
     }
 }
 
@@ -511,55 +535,18 @@ static void build_todo_line(const todo_item_t *item, time_t now, bool grayscale,
 
 typedef struct {
     char text[AGENDA_ROW_BUF_LEN];
-    uint8_t fr, fg, fb;
-    bool has_bg;
-    uint8_t br, bgg, bb;
+    int calendar_index;  // 0=A..4=E - which color-profile cal_ink/cal_bg
+                         // entry this line uses; resolved at DRAW time
+                         // (draw_day_cell()/draw_calendar_column()'s day
+                         // loop), not here, since a mono-mode profile's
+                         // event ink can depend on whether the specific day
+                         // it lands on is shift-marked (see
+                         // agenda_color_profile_t's mono_invert comment) -
+                         // a color-mode profile's ink never varies by day,
+                         // but resolving both cases the same way (always at
+                         // draw time) keeps this file down to one code path
+                         // instead of two.
 } agenda_event_line_t;
-
-// One event's color depends only on which of the two calendars it came
-// from (not on today/later, unlike the row-based scheme this replaced).
-// Originally this drew a full chip (white text on a source hue) on a
-// light page background and plain colored text on a dark one - live
-// testing found the chip visually noisy against the actual event rows
-// ("Die Schrift-Hintergrundfarbe ... stört bei den Termineinträgen"), so
-// both backgrounds now use the same plain-colored-text, no-fill
-// treatment, using each source's user-configurable hue
-// (config_manager_get_agenda_cal_a_color()/_cal_b_color()) with the usual
-// collision-avoidance fallback if that hue happens to match the page
-// background. Grayscale boards have no spare hue for this at all (same
-// reasoning as priority_color()'s grayscale fallback) and fall back to
-// plain body-colored text.
-// calendar_index 0/1 are the two auto-refreshing Calendar sources (A/B);
-// 2/3/4 are the three extra, never-auto-refreshed ICS sources (C/D/E - see
-// NVS_AGENDA_CAL_C_URL_KEY etc. in config.h) - same per-source-hue
-// treatment, just three more roles.
-static void calendar_source_color(int calendar_index, bool grayscale, uint8_t bg_r, uint8_t bg_g,
-                                  uint8_t bg_b, uint8_t *fr, uint8_t *fg, uint8_t *fb, bool *has_bg)
-{
-    *has_bg = false;
-    switch (calendar_index) {
-    case 0:
-        resolve_plain_color(config_manager_get_agenda_cal_a_color(), grayscale, 0, 0, 255, bg_r,
-                            bg_g, bg_b, fr, fg, fb);
-        break;
-    case 1:
-        resolve_plain_color(config_manager_get_agenda_cal_b_color(), grayscale, 0, 255, 0, bg_r,
-                            bg_g, bg_b, fr, fg, fb);
-        break;
-    case 2:
-        resolve_plain_color(config_manager_get_agenda_cal_c_color(), grayscale, 255, 0, 0, bg_r,
-                            bg_g, bg_b, fr, fg, fb);
-        break;
-    case 3:
-        resolve_plain_color(config_manager_get_agenda_cal_d_color(), grayscale, 255, 255, 0, bg_r,
-                            bg_g, bg_b, fr, fg, fb);
-        break;
-    default:
-        resolve_plain_color(config_manager_get_agenda_cal_e_color(), grayscale, 255, 0, 0, bg_r,
-                            bg_g, bg_b, fr, fg, fb);
-        break;
-    }
-}
 
 // Formats a duration in whole minutes as a compact bracket-free token:
 // under an hour "45m", an exact number of hours "1h"/"2h", otherwise
@@ -583,14 +570,15 @@ static void format_duration_compact(int total_minutes, char *out, size_t out_len
 // plain "HH:MM " (off, default), "HH:MM [duration] " (duration), or
 // "HH:MM-HH:MM " (range, only when a real end time is known - falls back to
 // plain "HH:MM " otherwise, same as duration mode already does) - then the
-// summary. Also resolves the single color (plus optional chip) the whole
-// row draws in, per calendar_source_color() above. No date/day-of-week
-// here: draw_calendar_column() shows that once per day group via
-// draw_day_divider(), not repeated on every event.
-static void build_event_line(const ics_event_t *ev, int calendar_index, bool grayscale,
-                             uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, agenda_event_line_t *out)
+// summary. Its color-profile source index is stashed for later - see
+// agenda_event_line_t's own comment for why resolution happens at draw
+// time instead of here. No date/day-of-week here: draw_calendar_column()
+// shows that once per day group via draw_day_divider(), not repeated on
+// every event.
+static void build_event_line(const ics_event_t *ev, int calendar_index, agenda_event_line_t *out)
 {
     memset(out, 0, sizeof(*out));
+    out->calendar_index = calendar_index;
     size_t pos = 0;
     size_t cap = sizeof(out->text) - 1;
 
@@ -633,20 +621,132 @@ static void build_event_line(const ics_event_t *ev, int calendar_index, bool gra
     memcpy(out->text + pos, ev->summary, slen);
     pos += slen;
     out->text[pos] = '\0';
+}
 
-    calendar_source_color(calendar_index, grayscale, bg_r, bg_g, bg_b, &out->fr, &out->fg, &out->fb,
-                          &out->has_bg);
+// Resolves the TOP shared header bar's bg/ink - never marked (there's only
+// one top bar for the whole column, not one per day, unlike the per-day
+// header below).
+static void agenda_top_header_colors(const agenda_color_profile_t *p, uint8_t *bg_r, uint8_t *bg_g,
+                                     uint8_t *bg_b, uint8_t *fg_r, uint8_t *fg_g, uint8_t *fg_b)
+{
+    if (p->mono) {
+        agenda_mono_pair(p->mono_invert, false, bg_r, bg_g, bg_b, fg_r, fg_g, fg_b);
+        return;
+    }
+    *bg_r = p->top_bg.r;
+    *bg_g = p->top_bg.g;
+    *bg_b = p->top_bg.b;
+    *fg_r = p->top_text.r;
+    *fg_g = p->top_text.g;
+    *fg_b = p->top_text.b;
+}
+
+// Resolves one day's HEADER bg/ink. `day_marked` is whether this day is in
+// the shift model's marked group; only actually recolors the header when
+// the profile's markColorsHeader is also set - marking targets EITHER the
+// header OR the body (agenda_day_body_colors() below), never both.
+static void agenda_day_header_colors(const agenda_color_profile_t *p, bool day_marked,
+                                     uint8_t *bg_r, uint8_t *bg_g, uint8_t *bg_b, uint8_t *fg_r,
+                                     uint8_t *fg_g, uint8_t *fg_b)
+{
+    bool marked_here = day_marked && p->has_mark && p->mark_colors_header;
+    if (p->mono) {
+        agenda_mono_pair(p->mono_invert, marked_here, bg_r, bg_g, bg_b, fg_r, fg_g, fg_b);
+        return;
+    }
+    if (marked_here) {
+        *bg_r = p->mark.r;
+        *bg_g = p->mark.g;
+        *bg_b = p->mark.b;
+        // No dedicated "mark ink" field in the schema - auto-derive,
+        // exactly matching profile-editor.html's own contrastInk().
+        agenda_safe_text_color(*bg_r, *bg_g, *bg_b, fg_r, fg_g, fg_b);
+        return;
+    }
+    *bg_r = p->header_bg.r;
+    *bg_g = p->header_bg.g;
+    *bg_b = p->header_bg.b;
+    *fg_r = p->header_text.r;
+    *fg_g = p->header_text.g;
+    *fg_b = p->header_text.b;
+}
+
+// Resolves one day's BODY/page bg/ink (the plain page its events sit on,
+// and the ink "+N more"/multi-day-prefix text uses) - mirrors
+// agenda_day_header_colors() above but body marking only applies when
+// markColorsHeader is false.
+static void agenda_day_body_colors(const agenda_color_profile_t *p, bool day_marked, uint8_t *bg_r,
+                                   uint8_t *bg_g, uint8_t *bg_b, uint8_t *fg_r, uint8_t *fg_g,
+                                   uint8_t *fg_b)
+{
+    bool marked_here = day_marked && p->has_mark && !p->mark_colors_header;
+    if (p->mono) {
+        agenda_mono_pair(p->mono_invert, marked_here, bg_r, bg_g, bg_b, fg_r, fg_g, fg_b);
+        return;
+    }
+    if (marked_here) {
+        *bg_r = p->mark.r;
+        *bg_g = p->mark.g;
+        *bg_b = p->mark.b;
+        agenda_safe_text_color(*bg_r, *bg_g, *bg_b, fg_r, fg_g, fg_b);
+        return;
+    }
+    *bg_r = p->text_bg.r;
+    *bg_g = p->text_bg.g;
+    *bg_b = p->text_bg.b;
+    *fg_r = p->text.r;
+    *fg_g = p->text.g;
+    *fg_b = p->text.b;
+}
+
+// Resolves one Calendar event's own ink and optional chip background for
+// `calendar_index` (0=A..4=E). Color-mode ink never itself changes with
+// marked state (only its chip does, see below) - the profile author is
+// expected to have already verified the pairing looks right in the tool's
+// own live preview, matching this section's own top comment. `body_marked`
+// mirrors agenda_day_body_colors()'s own marked_here.
+static void agenda_event_colors(const agenda_color_profile_t *p, int calendar_index,
+                                bool body_marked, uint8_t body_ink_r, uint8_t body_ink_g,
+                                uint8_t body_ink_b, bool *has_chip, uint8_t *chip_r,
+                                uint8_t *chip_g, uint8_t *chip_b, uint8_t *ink_r, uint8_t *ink_g,
+                                uint8_t *ink_b)
+{
+    if (p->mono) {
+        // No distinct per-source chip in mono - the letter/name text is
+        // the only disambiguator, matching the pre-profile grayscale
+        // behavior this replaces.
+        *has_chip = false;
+        *ink_r = body_ink_r;
+        *ink_g = body_ink_g;
+        *ink_b = body_ink_b;
+        return;
+    }
+    *ink_r = p->cal_ink[calendar_index].r;
+    *ink_g = p->cal_ink[calendar_index].g;
+    *ink_b = p->cal_ink[calendar_index].b;
+    if (body_marked) {
+        // The whole day area (including every event's own chip) already
+        // became one continuous "mark" fill - drawing another chip in the
+        // same color on top would be a no-op, so skip it and let the ink
+        // sit directly on that fill.
+        *has_chip = false;
+        return;
+    }
+    *has_chip = true;
+    *chip_r = p->cal_bg[calendar_index].r;
+    *chip_g = p->cal_bg[calendar_index].g;
+    *chip_b = p->cal_bg[calendar_index].b;
 }
 
 // Draws a day-separator row: a dashed horizontal line with a chip showing
 // the weekday + day number, plus (if `weather_mode` is on and this
-// particular day has one) a second chip with that day's forecast. Inverts
-// polarity with the page background (dark-on-light fill/dashes normally,
-// light-on-dark when the background is dark) rather than staying
-// black-fixed, so it's never invisible against a dark chosen background -
-// `fill_r/g/b` is whichever of black/white agenda_is_light() picked for
-// the CURRENT background (i.e. body_r/g/b from the caller), and the label
-// text is simply the opposite of that.
+// particular day has one) a second chip with that day's forecast.
+// `fill_r/g/b`/`text_r/g/b` are the caller's already-resolved header
+// bg/ink pair for this specific day (the active color profile's plain
+// header colors, or its "mark" color + an auto-derived contrasting ink
+// when this day is header-marked - see draw_day_cell()/draw_calendar_column()
+// for how that's picked) - this function just draws with them literally,
+// no further contrast adjustment of its own.
 //
 // `weather_mode` reflects whether the weather annotation feature is on and
 // actually returned data this cycle - it is NOT the same thing as whether
@@ -666,11 +766,8 @@ static void build_event_line(const ics_event_t *ev, int calendar_index, bool gra
 static void draw_day_divider(uint8_t *rgb, int width, int height, agenda_rect_t rect, int y,
                              const char *label, bool weather_mode, bool weather_right_aligned,
                              const char *weather_text, uint8_t fill_r, uint8_t fill_g,
-                             uint8_t fill_b)
+                             uint8_t fill_b, uint8_t text_r, uint8_t text_g, uint8_t text_b)
 {
-    uint8_t text_r, text_g, text_b;
-    agenda_safe_text_color(fill_r, fill_g, fill_b, &text_r, &text_g, &text_b);
-
     int total_w = rect.w - 2 * AGENDA_PADDING;
     int line_y = y + IMAGE_PROCESSOR_FONT_HEIGHT / 2 - 1;
     const int dash_len = 4, gap_len = 3, dash_h = 2;
@@ -835,17 +932,14 @@ typedef struct {
     const agenda_event_line_t *line;
 } agenda_tagged_event_t;
 
-// One calendar source's header display name plus the color swatch to draw
-// before it - see draw_calendar_column()'s header-drawing comment. `show`
-// and `has_swatch` are independent: a source with events always shows its
-// name, but only gets a swatch on a color-capable board (grayscale has no
-// spare hue to legend at all - calendar_source_color() already gives every
-// source the same plain black there).
+// One calendar source's header display name - see draw_calendar_column()'s
+// header-drawing comment. Drawn directly in that source's own
+// profile.cal_ink[] color (or plain top-header ink on a mono profile), no
+// separate swatch box - matches profile-editor.html's own top-header
+// legend, which colors the name text itself rather than a preceding chip.
 typedef struct {
     bool show;
-    bool has_swatch;
     const char *name;
-    uint8_t r, g, b;
 } agenda_cal_name_tag_t;
 
 static int compare_tagged_by_start(const void *a, const void *b)
@@ -1095,50 +1189,27 @@ static int agenda_shift_group_for_day(agenda_shift_model_t model, const char *st
     return group;
 }
 
-// Small "letter badge" for Calendar C/D/E: a filled box in that source's
-// resolved color with the single letter drawn on top in a contrast-safe
-// color. Unlike A/B (which have room for their full configured name plus a
-// plain color swatch - see name_a/name_b above), C/D/E only ever get a
-// 1-letter identifier here, no room for a name. Needed even on grayscale
-// (calendar_source_color() gives every source the same plain black there,
-// so color alone can't tell C/D/E apart - the letter itself is what
-// actually disambiguates them, and matters even on color boards since C
-// and E currently default to the identical color, see
-// NVS_AGENDA_CAL_C_COLOR_KEY/NVS_AGENDA_CAL_E_COLOR_KEY in config.h).
-// Returns the x the next badge (or following text) should start at.
-static int draw_calendar_letter_badge(uint8_t *rgb, int width, int height, int x, int y,
-                                      char letter, int calendar_index, bool grayscale,
-                                      uint8_t page_bg_r, uint8_t page_bg_g, uint8_t page_bg_b)
+// Draws one calendar source's header legend label (A/B's full name, or
+// C/D/E's single letter) in that source's own profile.cal_ink[] color (or
+// plain top-header ink on a mono profile) - no separate swatch/badge box,
+// matching profile-editor.html's own top-header legend. Returns the x the
+// next label (or following text) should start at.
+static int draw_calendar_label(uint8_t *rgb, int width, int height, int x, int y, const char *label,
+                               const agenda_color_profile_t *profile, int calendar_index,
+                               uint8_t top_text_r, uint8_t top_text_g, uint8_t top_text_b)
 {
-    uint8_t badge_r, badge_g, badge_b;
-    bool unused_has_bg;
-    calendar_source_color(calendar_index, grayscale, page_bg_r, page_bg_g, page_bg_b, &badge_r,
-                          &badge_g, &badge_b, &unused_has_bg);
-    int badge_w = IMAGE_PROCESSOR_FONT_WIDTH + IMAGE_PROCESSOR_FONT_WIDTH / 2;
-    image_processor_fill_rect(rgb, width, height, x, y, badge_w, IMAGE_PROCESSOR_FONT_HEIGHT,
-                              badge_r, badge_g, badge_b);
-    uint8_t text_r, text_g, text_b;
-    agenda_safe_text_color(badge_r, badge_g, badge_b, &text_r, &text_g, &text_b);
-    char label[2] = {letter, '\0'};
-    image_processor_draw_text(rgb, width, height, x + IMAGE_PROCESSOR_FONT_WIDTH / 4, y, label,
-                              text_r, text_g, text_b);
-    return x + badge_w + IMAGE_PROCESSOR_FONT_WIDTH / 2;
-}
-
-// Given the background a piece of plain (no-own-fill) text is about to sit
-// on, returns a version of `*fr/*fg/*fb` that's guaranteed visible against
-// it - a no-op if it already contrasts fine. Needed because event text
-// colors are precomputed once (build_event_line(), against the page's own
-// background) long before it's known whether this particular row will
-// actually be painted with a shift-model color instead (see
-// draw_day_cell() below) - e.g. Calendar B's green text drawn unmodified
-// over a green shift-colored day would otherwise be invisible, exactly the
-// kind of bug this project has hit before with the weather icon's own
-// neutral-color case.
-static void agenda_ensure_contrast(uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, uint8_t *fr,
-                                   uint8_t *fg, uint8_t *fb)
-{
-    agenda_avoid_bg_collision(bg_r, bg_g, bg_b, fr, fg, fb);
+    uint8_t r, g, b;
+    if (profile->mono) {
+        r = top_text_r;
+        g = top_text_g;
+        b = top_text_b;
+    } else {
+        r = profile->cal_ink[calendar_index].r;
+        g = profile->cal_ink[calendar_index].g;
+        b = profile->cal_ink[calendar_index].b;
+    }
+    image_processor_draw_text(rgb, width, height, x, y, label, r, g, b);
+    return x + (int) strlen(label) * IMAGE_PROCESSOR_FONT_WIDTH;
 }
 
 // Draws one day's divider row plus as many of its events as fit within
@@ -1150,21 +1221,19 @@ static void agenda_ensure_contrast(uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, uin
 // look the two Layout_*.jpg concept images show; a day with little content
 // just leaves blank space in its own cell rather than letting neighboring
 // cells creep up to fill it (that's the explicitly-deferred future
-// "dynamic grid", config.h's own comment). The header row itself is never
-// shift-colored (avoids the whole class of "traffic-light icon/text color
-// vs. shift color" contrast bugs at the source - see
-// docs/AGENDA_COLORS.html); the entire event area below it is, as one
-// continuous fill down to the cell's own bottom edge, when a shift model
-// is active for this day - including whatever's left over past the last
-// drawn line, so an under-booked day never shows a plain black/white gap
-// inside an otherwise-colored cell.
+// "dynamic grid", config.h's own comment). Header and body colors both come
+// from `profile`, resolved for this specific `day_marked` state via
+// agenda_day_header_colors()/agenda_day_body_colors() above - marking
+// targets EITHER the header OR the whole body area (never both). The body
+// fill is one continuous rect down to the cell's own bottom edge, including
+// whatever's left over past the last drawn line, so an under-booked day
+// never shows a plain gap inside an otherwise-colored cell.
 static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cell, int day_index,
                           time_t day, const agenda_tagged_event_t *tagged, int tagged_count,
                           const bool *is_multiday, const int *first_visible_idx, bool skip_repeats,
                           bool show_prefix, const weather_forecast_t *cal_weather,
                           bool weather_mode, bool weather_right_aligned, bool german,
-                          uint8_t body_r, uint8_t body_g, uint8_t body_b, bool has_shift_bg,
-                          uint8_t shift_r, uint8_t shift_g, uint8_t shift_b)
+                          const agenda_color_profile_t *profile, bool day_marked)
 {
     struct tm day_tm;
     localtime_r(&day, &day_tm);
@@ -1193,12 +1262,17 @@ static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cel
         }
     }
 
-    // Header always plain body_r/g/b - never the shift color (see this
-    // function's own comment) - so no avoid_bg is needed here either;
-    // draw_day_divider()'s own text-color derivation is already safe
-    // against a plain black/white background regardless.
+    uint8_t head_bg_r, head_bg_g, head_bg_b, head_fg_r, head_fg_g, head_fg_b;
+    agenda_day_header_colors(profile, day_marked, &head_bg_r, &head_bg_g, &head_bg_b, &head_fg_r,
+                             &head_fg_g, &head_fg_b);
     draw_day_divider(rgb, width, height, cell, cell.y, label, weather_mode, weather_right_aligned,
-                     weather_buf[0] ? weather_buf : NULL, body_r, body_g, body_b);
+                     weather_buf[0] ? weather_buf : NULL, head_bg_r, head_bg_g, head_bg_b,
+                     head_fg_r, head_fg_g, head_fg_b);
+
+    uint8_t body_bg_r, body_bg_g, body_bg_b, body_fg_r, body_fg_g, body_fg_b;
+    agenda_day_body_colors(profile, day_marked, &body_bg_r, &body_bg_g, &body_bg_b, &body_fg_r,
+                           &body_fg_g, &body_fg_b);
+    bool body_marked = day_marked && profile->has_mark && !profile->mark_colors_header;
 
     int row_h = IMAGE_PROCESSOR_FONT_HEIGHT + AGENDA_PADDING;
     int text_width = cell.w - 2 * AGENDA_PADDING;
@@ -1213,15 +1287,13 @@ static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cel
     // cell still had unused height).
     int max_rows = (content_h > 0) ? (content_h + AGENDA_PADDING) / row_h : 0;
 
-    // The event area (everything below the header, down to this cell's own
-    // bottom edge) gets one continuous shift-color fill up front, before
-    // any text - including whatever's left over past the last drawn row,
-    // so there's never a plain black/white gap inside an otherwise-colored
-    // cell. Only the header stays unfilled (see this function's own
-    // top comment for why).
-    if (has_shift_bg && content_h > 0) {
+    // The whole body area (everything below the header, down to this
+    // cell's own bottom edge) gets one continuous fill up front, before any
+    // text - including whatever's left over past the last drawn row, so
+    // there's never a plain gap inside an otherwise-colored cell.
+    if (content_h > 0) {
         image_processor_fill_rect(rgb, width, height, cell.x, content_top, cell.w, content_h,
-                                  shift_r, shift_g, shift_b);
+                                  body_bg_r, body_bg_g, body_bg_b);
     }
 
     int total_instances = 0;
@@ -1238,10 +1310,6 @@ static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cel
     if (budget < 0) {
         budget = 0;
     }
-
-    uint8_t row_bg_r = has_shift_bg ? shift_r : body_r;
-    uint8_t row_bg_g = has_shift_bg ? shift_g : body_g;
-    uint8_t row_bg_b = has_shift_bg ? shift_b : body_b;
 
     int rows_used = 0, instances_shown = 0;
     for (int i = 0; i < tagged_count && rows_used < budget; i++) {
@@ -1271,26 +1339,20 @@ static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cel
             int y = content_top + rows_used * row_h;
             int x = cell.x + AGENDA_PADDING;
             if (prefix_len > 0) {
-                uint8_t prefix_r, prefix_g, prefix_b;
-                agenda_safe_text_color(row_bg_r, row_bg_g, row_bg_b, &prefix_r, &prefix_g,
-                                       &prefix_b);
-                image_processor_draw_text(rgb, width, height, x, y, prefix, prefix_r, prefix_g,
-                                          prefix_b);
+                image_processor_draw_text(rgb, width, height, x, y, prefix, body_fg_r, body_fg_g,
+                                          body_fg_b);
                 x += prefix_len * IMAGE_PROCESSOR_FONT_WIDTH;
             }
             int visible_len = (int) strlen(wrapped[0]);
-            uint8_t event_r = line->fr, event_g = line->fg, event_b = line->fb;
-            if (line->has_bg) {
-                image_processor_fill_rect(
-                    rgb, width, height, x, y, visible_len * IMAGE_PROCESSOR_FONT_WIDTH,
-                    IMAGE_PROCESSOR_FONT_HEIGHT, line->br, line->bgg, line->bb);
-            } else if (has_shift_bg) {
-                // The event's own color was only ever collision-checked
-                // against the plain page background at build time -
-                // re-check against this row's actual (shift) background
-                // too, e.g. a Calendar source using the same hue as
-                // today's shift-model group.
-                agenda_ensure_contrast(row_bg_r, row_bg_g, row_bg_b, &event_r, &event_g, &event_b);
+            bool has_chip;
+            uint8_t chip_r, chip_g, chip_b, event_r, event_g, event_b;
+            agenda_event_colors(profile, line->calendar_index, body_marked, body_fg_r, body_fg_g,
+                                body_fg_b, &has_chip, &chip_r, &chip_g, &chip_b, &event_r, &event_g,
+                                &event_b);
+            if (has_chip) {
+                image_processor_fill_rect(rgb, width, height, x, y,
+                                          visible_len * IMAGE_PROCESSOR_FONT_WIDTH,
+                                          IMAGE_PROCESSOR_FONT_HEIGHT, chip_r, chip_g, chip_b);
             }
             image_processor_draw_text(rgb, width, height, x, y, wrapped[0], event_r, event_g,
                                       event_b);
@@ -1303,10 +1365,8 @@ static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cel
         char more[32];
         snprintf(more, sizeof(more), "+%d more", total_instances - instances_shown);
         int y = content_top + rows_used * row_h;
-        uint8_t more_r, more_g, more_b;
-        agenda_safe_text_color(row_bg_r, row_bg_g, row_bg_b, &more_r, &more_g, &more_b);
-        image_processor_draw_text(rgb, width, height, cell.x + AGENDA_PADDING, y, more, more_r,
-                                  more_g, more_b);
+        image_processor_draw_text(rgb, width, height, cell.x + AGENDA_PADDING, y, more, body_fg_r,
+                                  body_fg_g, body_fg_b);
     }
 }
 
@@ -1322,8 +1382,8 @@ static void draw_day_cell(uint8_t *rgb, int width, int height, agenda_rect_t cel
 static void draw_calendar_grid(uint8_t *rgb, int width, int height, agenda_rect_t rect,
                                int content_top, int content_h, const time_t *days, int day_count,
                                const agenda_tagged_event_t *tagged, int tagged_count,
-                               const weather_forecast_t *cal_weather, uint8_t body_r,
-                               uint8_t body_g, uint8_t body_b, bool template_b)
+                               const weather_forecast_t *cal_weather,
+                               const agenda_color_profile_t *profile, bool template_b)
 {
     if (day_count <= 0) {
         return;
@@ -1362,16 +1422,6 @@ static void draw_calendar_grid(uint8_t *rgb, int width, int height, agenda_rect_
 
     agenda_shift_model_t shift_model = config_manager_get_agenda_shift_model();
     const char *shift_start = config_manager_get_agenda_shift_start();
-    bool grayscale = agenda_board_is_grayscale();
-    uint8_t shift_group_r[2], shift_group_g[2], shift_group_b[2];
-    if (shift_model != AGENDA_SHIFT_MODEL_NONE) {
-        resolve_plain_color(config_manager_get_agenda_shift_color1(), grayscale, 0, 0, 255, body_r,
-                            body_g, body_b, &shift_group_r[0], &shift_group_g[0],
-                            &shift_group_b[0]);
-        resolve_plain_color(config_manager_get_agenda_shift_color2(), grayscale, 0, 255, 0, body_r,
-                            body_g, body_b, &shift_group_r[1], &shift_group_g[1],
-                            &shift_group_b[1]);
-    }
 
     int grid_row_h = content_h / 4;
     int grid_col_w = rect.w / 2;
@@ -1405,17 +1455,14 @@ static void draw_calendar_grid(uint8_t *rgb, int width, int height, agenda_rect_
     }
 
     for (int di = 0; di < day_count; di++) {
-        int group = (shift_model != AGENDA_SHIFT_MODEL_NONE)
-                        ? agenda_shift_group_for_day(shift_model, shift_start, days[di])
-                        : -1;
-        bool has_shift_bg = group >= 0;
-        uint8_t shift_r = has_shift_bg ? shift_group_r[group] : 0;
-        uint8_t shift_g = has_shift_bg ? shift_group_g[group] : 0;
-        uint8_t shift_b = has_shift_bg ? shift_group_b[group] : 0;
+        // Group 1 of the alternating fortnightly cycle is "marked" - see
+        // agenda_shift_group_for_day()'s own comment; group 0 (or no model
+        // selected) just keeps the profile's plain, unmarked colors.
+        bool day_marked = (shift_model != AGENDA_SHIFT_MODEL_NONE) &&
+                          agenda_shift_group_for_day(shift_model, shift_start, days[di]) == 1;
         draw_day_cell(rgb, width, height, cells[di], di, days[di], tagged, tagged_count,
                       is_multiday, first_visible_idx, skip_repeats, show_prefix, cal_weather,
-                      weather_mode, weather_right_aligned, german, body_r, body_g, body_b,
-                      has_shift_bg, shift_r, shift_g, shift_b);
+                      weather_mode, weather_right_aligned, german, profile, day_marked);
     }
 
     heap_caps_free(is_multiday);
@@ -1423,46 +1470,49 @@ static void draw_calendar_grid(uint8_t *rgb, int width, int height, agenda_rect_
 }
 
 static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rect_t rect,
-                                 time_t now, int lookahead_days, uint8_t body_r, uint8_t body_g,
-                                 uint8_t body_b, const agenda_tagged_event_t *tagged,
-                                 int tagged_count, const weather_forecast_t *cal_weather,
+                                 time_t now, int lookahead_days,
+                                 const agenda_color_profile_t *profile,
+                                 const agenda_tagged_event_t *tagged, int tagged_count,
+                                 const weather_forecast_t *cal_weather,
                                  agenda_cal_name_tag_t name_a, agenda_cal_name_tag_t name_b,
                                  bool show_c, bool show_d, bool show_e, bool calendar_only,
                                  const agenda_climate_t *climate)
 {
-    uint8_t header_text_r, header_text_g, header_text_b;
-    agenda_safe_text_color(body_r, body_g, body_b, &header_text_r, &header_text_g, &header_text_b);
+    // The whole Calendar area gets the profile's plain page fill first -
+    // the day cells/dividers below repaint their own areas on top of this
+    // (including a full re-fill when marked), but this is what shows
+    // through any padding/gap that never gets its own fill otherwise.
+    uint8_t page_bg_r, page_bg_g, page_bg_b, page_fg_r, page_fg_g, page_fg_b;
+    agenda_day_body_colors(profile, false, &page_bg_r, &page_bg_g, &page_bg_b, &page_fg_r,
+                           &page_fg_g, &page_fg_b);
+    image_processor_fill_rect(rgb, width, height, rect.x, rect.y, rect.w, rect.h, page_bg_r,
+                              page_bg_g, page_bg_b);
+
+    uint8_t header_bg_r, header_bg_g, header_bg_b, header_text_r, header_text_g, header_text_b;
+    agenda_top_header_colors(profile, &header_bg_r, &header_bg_g, &header_bg_b, &header_text_r,
+                             &header_text_g, &header_text_b);
 
     int header_h = IMAGE_PROCESSOR_FONT_HEIGHT + 2 * AGENDA_PADDING;
-    image_processor_fill_rect(rgb, width, height, rect.x, rect.y, rect.w, header_h, body_r, body_g,
-                              body_b);
+    image_processor_fill_rect(rgb, width, height, rect.x, rect.y, rect.w, header_h, header_bg_r,
+                              header_bg_g, header_bg_b);
 
-    // Each shown calendar's name gets a small colored "swatch" immediately
-    // before it - a single blank character cell filled with that source's
-    // actual event text color (name_a/name_b.r/g/b, already resolved by
-    // the caller including any background-collision fallback) - so the
-    // header doubles as a color legend for which name maps to which
-    // color, without any new visible glyph. Skipped on grayscale (the
-    // caller passes show=false there, since calendar_source_color()
-    // already gives every source the same plain black there - no color to
-    // legend in the first place).
+    // Each shown calendar's name/letter is drawn directly in that source's
+    // own color (draw_calendar_label() - see its own comment for why no
+    // separate swatch/badge box is used) - all five sources show whenever
+    // they contributed events this cycle; a mono profile just draws every
+    // one of them in the same plain header ink, since there's no color to
+    // legend in the first place there.
     int hx = rect.x + AGENDA_PADDING;
     int hy = rect.y + AGENDA_PADDING;
     // A "," (no surrounding space) precedes every shown source after the
-    // first, whatever kind it is (a named A/B or a lettered C/D/E badge) -
-    // `any_shown` tracks that uniformly instead of the old A-then-B-only
-    // special case, which left B/C/D/E's letter badges bunched together
-    // with no separator at all.
+    // first, whatever kind it is (a named A/B or a lettered C/D/E) -
+    // `any_shown` tracks that uniformly instead of an A-then-B-only
+    // special case, which would leave later sources bunched together with
+    // no separator at all.
     bool any_shown = false;
     if (name_a.show) {
-        if (name_a.has_swatch) {
-            image_processor_fill_rect(rgb, width, height, hx, hy, IMAGE_PROCESSOR_FONT_WIDTH,
-                                      IMAGE_PROCESSOR_FONT_HEIGHT, name_a.r, name_a.g, name_a.b);
-            hx += IMAGE_PROCESSOR_FONT_WIDTH;
-        }
-        image_processor_draw_text(rgb, width, height, hx, hy, name_a.name, header_text_r,
-                                  header_text_g, header_text_b);
-        hx += (int) strlen(name_a.name) * IMAGE_PROCESSOR_FONT_WIDTH;
+        hx = draw_calendar_label(rgb, width, height, hx, hy, name_a.name, profile, 0, header_text_r,
+                                 header_text_g, header_text_b);
         any_shown = true;
     }
     if (name_b.show) {
@@ -1471,26 +1521,18 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
                                       header_text_b);
             hx += IMAGE_PROCESSOR_FONT_WIDTH;
         }
-        if (name_b.has_swatch) {
-            image_processor_fill_rect(rgb, width, height, hx, hy, IMAGE_PROCESSOR_FONT_WIDTH,
-                                      IMAGE_PROCESSOR_FONT_HEIGHT, name_b.r, name_b.g, name_b.b);
-            hx += IMAGE_PROCESSOR_FONT_WIDTH;
-        }
-        image_processor_draw_text(rgb, width, height, hx, hy, name_b.name, header_text_r,
-                                  header_text_g, header_text_b);
-        hx += (int) strlen(name_b.name) * IMAGE_PROCESSOR_FONT_WIDTH;
+        hx = draw_calendar_label(rgb, width, height, hx, hy, name_b.name, profile, 1, header_text_r,
+                                 header_text_g, header_text_b);
         any_shown = true;
     }
-
-    bool grayscale = agenda_board_is_grayscale();
     if (show_c) {
         if (any_shown) {
             image_processor_draw_text(rgb, width, height, hx, hy, ",", header_text_r, header_text_g,
                                       header_text_b);
             hx += IMAGE_PROCESSOR_FONT_WIDTH;
         }
-        hx = draw_calendar_letter_badge(rgb, width, height, hx, hy, 'C', 2, grayscale, body_r,
-                                        body_g, body_b);
+        hx = draw_calendar_label(rgb, width, height, hx, hy, "C", profile, 2, header_text_r,
+                                 header_text_g, header_text_b);
         any_shown = true;
     }
     if (show_d) {
@@ -1499,8 +1541,8 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
                                       header_text_b);
             hx += IMAGE_PROCESSOR_FONT_WIDTH;
         }
-        hx = draw_calendar_letter_badge(rgb, width, height, hx, hy, 'D', 3, grayscale, body_r,
-                                        body_g, body_b);
+        hx = draw_calendar_label(rgb, width, height, hx, hy, "D", profile, 3, header_text_r,
+                                 header_text_g, header_text_b);
         any_shown = true;
     }
     if (show_e) {
@@ -1509,17 +1551,17 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
                                       header_text_b);
             hx += IMAGE_PROCESSOR_FONT_WIDTH;
         }
-        hx = draw_calendar_letter_badge(rgb, width, height, hx, hy, 'E', 4, grayscale, body_r,
-                                        body_g, body_b);
+        hx = draw_calendar_label(rgb, width, height, hx, hy, "E", profile, 4, header_text_r,
+                                 header_text_g, header_text_b);
         any_shown = true;
     }
 
     struct tm now_tm;
     localtime_r(&now, &now_tm);
     // No surrounding spaces (saves 2 header-width character cells) and a
-    // 2-digit year - the header is already tight once C/D/E badges and a
-    // long calendar name are all present. tm_year % 100 is always 0-99, so
-    // this is a fixed-width result unlike the old 4-digit year.
+    // 2-digit year - the header is already tight once several sources and
+    // a long calendar name are all present. tm_year % 100 is always 0-99,
+    // so this is a fixed-width result unlike the old 4-digit year.
     char datetime[40];
     snprintf(datetime, sizeof(datetime), "-%02d.%02d.%02d %02d:%02d", now_tm.tm_mday,
              now_tm.tm_mon + 1, now_tm.tm_year % 100, now_tm.tm_hour, now_tm.tm_min);
@@ -1576,7 +1618,7 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
             day_count = 7;
         }
         draw_calendar_grid(rgb, width, height, rect, content_top, content_h, days, day_count,
-                           tagged, tagged_count, cal_weather, body_r, body_g, body_b,
+                           tagged, tagged_count, cal_weather, profile,
                            layout_mode == AGENDA_CAL_LAYOUT_GRID_B);
         return;
     }
@@ -1657,6 +1699,13 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
     // regardless of it.
     bool german = (strcmp(config_manager_get_overlay_language(), "de") == 0);
 
+    // List mode never shift-marks a day (that's a grid-only concept - see
+    // draw_calendar_grid()) - header and body colors are the profile's
+    // plain, unmarked values for every day in the list.
+    uint8_t head_bg_r, head_bg_g, head_bg_b, head_fg_r, head_fg_g, head_fg_b;
+    agenda_day_header_colors(profile, false, &head_bg_r, &head_bg_g, &head_bg_b, &head_fg_r,
+                             &head_fg_g, &head_fg_b);
+
     int rows_used = 0;
     int instances_shown = 0;
     for (int di = 0; di < day_count && rows_used < budget; di++) {
@@ -1690,7 +1739,7 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         }
         draw_day_divider(rgb, width, height, rect, content_top + rows_used * row_h, label,
                          weather_mode, weather_right_aligned, weather_buf[0] ? weather_buf : NULL,
-                         body_r, body_g, body_b);
+                         head_bg_r, head_bg_g, head_bg_b, head_fg_r, head_fg_g, head_fg_b);
         rows_used++;
 
         for (int i = 0; i < tagged_count && rows_used < budget; i++) {
@@ -1720,18 +1769,23 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
                 int y = content_top + rows_used * row_h;
                 int x = rect.x + AGENDA_PADDING;
                 if (prefix_len > 0) {
-                    image_processor_draw_text(rgb, width, height, x, y, prefix, body_r, body_g,
-                                              body_b);
+                    image_processor_draw_text(rgb, width, height, x, y, prefix, page_fg_r,
+                                              page_fg_g, page_fg_b);
                     x += prefix_len * IMAGE_PROCESSOR_FONT_WIDTH;
                 }
                 int visible_len = (int) strlen(wrapped[0]);
-                if (line->has_bg) {
-                    image_processor_fill_rect(
-                        rgb, width, height, x, y, visible_len * IMAGE_PROCESSOR_FONT_WIDTH,
-                        IMAGE_PROCESSOR_FONT_HEIGHT, line->br, line->bgg, line->bb);
+                bool has_chip;
+                uint8_t chip_r, chip_g, chip_b, event_r, event_g, event_b;
+                agenda_event_colors(profile, line->calendar_index, false, page_fg_r, page_fg_g,
+                                    page_fg_b, &has_chip, &chip_r, &chip_g, &chip_b, &event_r,
+                                    &event_g, &event_b);
+                if (has_chip) {
+                    image_processor_fill_rect(rgb, width, height, x, y,
+                                              visible_len * IMAGE_PROCESSOR_FONT_WIDTH,
+                                              IMAGE_PROCESSOR_FONT_HEIGHT, chip_r, chip_g, chip_b);
                 }
-                image_processor_draw_text(rgb, width, height, x, y, wrapped[0], line->fr, line->fg,
-                                          line->fb);
+                image_processor_draw_text(rgb, width, height, x, y, wrapped[0], event_r, event_g,
+                                          event_b);
                 rows_used++;
                 instances_shown++;
             }
@@ -1742,8 +1796,8 @@ static void draw_calendar_column(uint8_t *rgb, int width, int height, agenda_rec
         char more[32];
         snprintf(more, sizeof(more), "+%d more", total_event_instances - instances_shown);
         int y = content_top + rows_used * row_h;
-        image_processor_draw_text(rgb, width, height, rect.x + AGENDA_PADDING, y, more, body_r,
-                                  body_g, body_b);
+        image_processor_draw_text(rgb, width, height, rect.x + AGENDA_PADDING, y, more, page_fg_r,
+                                  page_fg_g, page_fg_b);
     }
 
     heap_caps_free(is_multiday);
@@ -1862,15 +1916,23 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
 
     bool grayscale = agenda_board_is_grayscale();
     uint8_t bg_r, bg_g, bg_b;
-    agenda_background_color(grayscale, &bg_r, &bg_g, &bg_b);
+    agenda_background_color(&bg_r, &bg_g, &bg_b);
     image_processor_fill_rect(rgb, width, height, 0, 0, width, height, bg_r, bg_g, bg_b);
 
-    // The one color every "plain, no own fill" text element falls back to
-    // (body text, "+N more", any role whose usual color happens to collide
-    // with the chosen background) - computed once here rather than
-    // separately in each column, since it only depends on the background.
+    // The one color every ToDo "plain, no own fill" text element falls back
+    // to (body text, "+N more", any role whose usual color happens to
+    // collide with the fixed page background) - computed once here rather
+    // than separately per role, since it only depends on that background.
+    // The Calendar column no longer shares this: its own colors come from
+    // the active color profile instead (see agenda_color_profile.h).
     uint8_t body_r = 0, body_g = 0, body_b = 0;
     agenda_avoid_bg_collision(bg_r, bg_g, bg_b, &body_r, &body_g, &body_b);
+
+    agenda_color_profile_t profile;
+    agenda_color_profile_load_active(&profile);
+    if (grayscale) {
+        agenda_color_profile_degrade_for_grayscale(&profile);
+    }
 
     // Landscape only - portrait always stacks (a side-by-side split would
     // make each column too narrow to be useful there), matching
@@ -1939,35 +2001,36 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
         if (lines_a && lines_b && lines_c && lines_d && lines_e && tagged) {
             int tagged_count = 0;
             for (int i = 0; i < count_a && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
-                build_event_line(&events_a->events[i], 0, grayscale, bg_r, bg_g, bg_b, &lines_a[i]);
+                build_event_line(&events_a->events[i], 0, &lines_a[i]);
                 tagged[tagged_count].ev = &events_a->events[i];
                 tagged[tagged_count].line = &lines_a[i];
                 tagged_count++;
             }
             for (int i = 0; i < count_b && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
-                build_event_line(&events_b->events[i], 1, grayscale, bg_r, bg_g, bg_b, &lines_b[i]);
+                build_event_line(&events_b->events[i], 1, &lines_b[i]);
                 tagged[tagged_count].ev = &events_b->events[i];
                 tagged[tagged_count].line = &lines_b[i];
                 tagged_count++;
             }
             // C/D/E: same tagging shape as A/B, just a different
-            // calendar_index (2/3/4) so calendar_source_color() picks each
-            // one's own configured hue - see NVS_AGENDA_CAL_C_URL_KEY etc.
-            // in config.h for why these three never auto-refresh.
+            // calendar_index (2/3/4) so the color profile's cal_ink[]/
+            // cal_bg[] picks each one's own entry - see
+            // NVS_AGENDA_CAL_C_URL_KEY etc. in config.h for why these three
+            // never auto-refresh.
             for (int i = 0; i < count_c && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
-                build_event_line(&events_c->events[i], 2, grayscale, bg_r, bg_g, bg_b, &lines_c[i]);
+                build_event_line(&events_c->events[i], 2, &lines_c[i]);
                 tagged[tagged_count].ev = &events_c->events[i];
                 tagged[tagged_count].line = &lines_c[i];
                 tagged_count++;
             }
             for (int i = 0; i < count_d && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
-                build_event_line(&events_d->events[i], 3, grayscale, bg_r, bg_g, bg_b, &lines_d[i]);
+                build_event_line(&events_d->events[i], 3, &lines_d[i]);
                 tagged[tagged_count].ev = &events_d->events[i];
                 tagged[tagged_count].line = &lines_d[i];
                 tagged_count++;
             }
             for (int i = 0; i < count_e && tagged_count < AGENDA_MAX_TAGGED_EVENTS; i++) {
-                build_event_line(&events_e->events[i], 4, grayscale, bg_r, bg_g, bg_b, &lines_e[i]);
+                build_event_line(&events_e->events[i], 4, &lines_e[i]);
                 tagged[tagged_count].ev = &events_e->events[i];
                 tagged[tagged_count].line = &lines_e[i];
                 tagged_count++;
@@ -1982,14 +2045,7 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
             // whichever have a URL configured, since a configured-but-
             // currently-failed source contributes nothing to show a name
             // for. Falls back to "Calendar A"/"Calendar B" if the user
-            // hasn't set a custom display name for that source. Each
-            // shown name's color swatch reuses lines_a[0]/lines_b[0]'s
-            // already-resolved event text color (fr/fg/fb) rather than
-            // re-deriving the hue, so it's guaranteed to exactly match
-            // what that source's events are actually drawn in this cycle,
-            // collision-avoidance fallback included - skipped on
-            // grayscale, where that color is always plain black anyway
-            // (see calendar_source_color()) and so carries no legend value.
+            // hasn't set a custom display name for that source.
             const char *name_a = config_manager_get_agenda_cal_name();
             if (!name_a || name_a[0] == '\0') {
                 name_a = "Calendar A";
@@ -1998,23 +2054,11 @@ esp_err_t agenda_renderer_render(const todo_list_t *todo, const ics_event_list_t
             if (!name_b || name_b[0] == '\0') {
                 name_b = "Calendar B";
             }
-            agenda_cal_name_tag_t tag_a = {
-                .show = have_a, .has_swatch = have_a && !grayscale, .name = name_a};
-            if (tag_a.has_swatch) {
-                tag_a.r = lines_a[0].fr;
-                tag_a.g = lines_a[0].fg;
-                tag_a.b = lines_a[0].fb;
-            }
-            agenda_cal_name_tag_t tag_b = {
-                .show = have_b, .has_swatch = have_b && !grayscale, .name = name_b};
-            if (tag_b.has_swatch) {
-                tag_b.r = lines_b[0].fr;
-                tag_b.g = lines_b[0].fg;
-                tag_b.b = lines_b[0].fb;
-            }
-            draw_calendar_column(rgb, width, height, cal_rect, now, lookahead_days, body_r, body_g,
-                                 body_b, tagged, tagged_count, cal_weather, tag_a, tag_b, have_c,
-                                 have_d, have_e, !both, climate);
+            agenda_cal_name_tag_t tag_a = {.show = have_a, .name = name_a};
+            agenda_cal_name_tag_t tag_b = {.show = have_b, .name = name_b};
+            draw_calendar_column(rgb, width, height, cal_rect, now, lookahead_days, &profile,
+                                 tagged, tagged_count, cal_weather, tag_a, tag_b, have_c, have_d,
+                                 have_e, !both, climate);
         } else {
             ESP_LOGW(TAG, "Failed to allocate Calendar render scratch buffers - skipping column");
         }

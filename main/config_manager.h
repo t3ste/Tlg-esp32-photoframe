@@ -470,13 +470,8 @@ agenda_shift_model_t config_manager_get_agenda_shift_model(void);
 // selected above).
 void config_manager_set_agenda_shift_start(const char *start_date);
 const char *config_manager_get_agenda_shift_start(void);
-// One of "red"/"yellow"/"blue"/"green" (Spectra6/color boards only, same as
-// every other agenda role color) - unrecognized/empty falls back to the
-// original default at read time (role_hue()'s existing convention).
-void config_manager_set_agenda_shift_color1(const char *color);
-const char *config_manager_get_agenda_shift_color1(void);
-void config_manager_set_agenda_shift_color2(const char *color);
-const char *config_manager_get_agenda_shift_color2(void);
+// The rotation's marker color now comes from the active color profile's
+// "mark" field (agenda_color_profile.h) rather than a device setting.
 
 // Opt-in per-day weather annotation on the Calendar column - see
 // NVS_AGENDA_CAL_WEATHER_KEY in config.h.
@@ -520,16 +515,11 @@ int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max);
 void config_manager_set_agenda_stack_layout(bool stacked);
 bool config_manager_get_agenda_stack_layout(void);
 
-// Shared ToDo+Calendar background color name - see AGENDA_BG_DEFAULT in
-// config.h and agenda_renderer.c's agenda_background_color() for the
-// authoritative per-hardware value list.
-void config_manager_set_agenda_bg_color(const char *color);
-const char *config_manager_get_agenda_bg_color(void);
-
-// Per-role color customization (Spectra6/color boards only) - each is one
-// of "red"/"yellow"/"blue"/"green", see the NVS_AGENDA_*_DEFAULT comment in
-// config.h for why free RGB isn't offered here. agenda_renderer.c's
-// role_hue() is the sole reader.
+// Per-role color customization for the ToDo column (Spectra6/color boards
+// only) - each is one of "red"/"yellow"/"blue"/"green", see the
+// NVS_AGENDA_*_DEFAULT comment in config.h for why free RGB isn't offered
+// here. agenda_renderer.c's role_hue() is the sole reader. (The Calendar
+// column's colors come from the profile system below instead.)
 void config_manager_set_agenda_pri_a_color(const char *color);
 const char *config_manager_get_agenda_pri_a_color(void);
 void config_manager_set_agenda_pri_b_color(const char *color);
@@ -548,16 +538,12 @@ void config_manager_set_agenda_project_color(const char *color);
 const char *config_manager_get_agenda_project_color(void);
 void config_manager_set_agenda_context_color(const char *color);
 const char *config_manager_get_agenda_context_color(void);
-void config_manager_set_agenda_cal_a_color(const char *color);
-const char *config_manager_get_agenda_cal_a_color(void);
-void config_manager_set_agenda_cal_b_color(const char *color);
-const char *config_manager_get_agenda_cal_b_color(void);
-void config_manager_set_agenda_cal_c_color(const char *color);
-const char *config_manager_get_agenda_cal_c_color(void);
-void config_manager_set_agenda_cal_d_color(const char *color);
-const char *config_manager_get_agenda_cal_d_color(void);
-void config_manager_set_agenda_cal_e_color(const char *color);
-const char *config_manager_get_agenda_cal_e_color(void);
+
+// Which Calendar-view color-profile slot (1..AGENDA_COLOR_PROFILE_SLOTS) is
+// currently active; 0 = none (built-in plain default) - see
+// agenda_color_profile.h. Clamped to [0, AGENDA_COLOR_PROFILE_SLOTS].
+void config_manager_set_agenda_color_profile_active(int slot);
+int config_manager_get_agenda_color_profile_active(void);
 
 // ============================================================================
 // OTA

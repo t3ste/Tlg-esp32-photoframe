@@ -155,6 +155,7 @@ onMounted(() => {
   // Tick every second to update display
   tickInterval = setInterval(updateDisplayTime, 1000);
   loadDisplayHistoryCount();
+  loadAgendaColorProfiles();
 });
 
 onUnmounted(() => {
@@ -177,33 +178,6 @@ const orientationOptions = computed(() => {
   return [
     { title: `Landscape (${maxDim}×${minDim})`, value: "landscape" },
     { title: `Portrait (${minDim}×${maxDim})`, value: "portrait" },
-  ];
-});
-
-// Mirrors agenda_renderer.c's agenda_background_color() exactly - the value
-// list a board can actually display depends on its BOARD_HAL_DISPLAY_TYPE
-// ("gc..." = grayscale, otherwise Spectra6 6-color), so this can't be one
-// static list. An element/text color that happens to collide with whatever
-// is picked here is automatically swapped to a safe fallback on-device
-// (agenda_avoid_bg_collision()) - no need to warn about that in this UI.
-const agendaBgOptions = computed(() => {
-  const displayType = appStore.systemInfo.display_type || "";
-  if (displayType.startsWith("gc")) {
-    return [
-      { title: "White", value: "white" },
-      { title: "Light gray", value: "gray75" },
-      { title: "Mid gray", value: "gray50" },
-      { title: "Dark gray", value: "gray25" },
-      { title: "Black", value: "black" },
-    ];
-  }
-  return [
-    { title: "White", value: "white" },
-    { title: "Black", value: "black" },
-    { title: "Yellow", value: "yellow" },
-    { title: "Red", value: "red" },
-    { title: "Blue", value: "blue" },
-    { title: "Green", value: "green" },
   ];
 });
 
@@ -241,13 +215,90 @@ const agendaTodoColorFields = [
   { key: "agendaProjectColor", label: "+Project" },
   { key: "agendaContextColor", label: "@Context" },
 ];
-const agendaCalendarColorFields = [
-  { key: "agendaCalAColor", label: "Calendar A" },
-  { key: "agendaCalBColor", label: "Calendar B" },
-  { key: "agendaCalCColor", label: "Calendar C" },
-  { key: "agendaCalDColor", label: "Calendar D" },
-  { key: "agendaCalEColor", label: "Calendar E" },
-];
+// Up to AGENDA_COLOR_PROFILE_SLOTS (3) user-imported Calendar-view color
+// profiles - see agenda_color_profile.h. Fetched separately from
+// /api/agenda/color-profile (not part of GET /api/config's settings blob),
+// since it's device-file state rather than a scalar setting; only the
+// *active* slot index (agendaColorProfileActive) lives in deviceSettings.
+const agendaColorProfileSlots = ref([]);
+const agendaColorProfileUploading = ref({ 1: false, 2: false, 3: false });
+// Plain (non-reactive) DOM element bookkeeping, not state - only ever used
+// imperatively to forward an "Import" button click to its slot's hidden
+// file input, so a v-for-friendly function ref is enough (no need for the
+// $refs array-collection behavior a repeated static ref name would trigger).
+const colorProfileFileInputs = {};
+
+async function loadAgendaColorProfiles() {
+  try {
+    const response = await fetch("/api/agenda/color-profile");
+    if (response.ok) {
+      const data = await response.json();
+      agendaColorProfileSlots.value = data.slots || [];
+    }
+  } catch (error) {
+    console.error("Failed to load Calendar color profiles:", error);
+  }
+}
+
+function onAgendaColorProfileFileSelected(event, slot) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  agendaColorProfileUploading.value[slot] = true;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const response = await fetch(`/api/agenda/color-profile?slot=${slot}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: e.target.result,
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      await loadAgendaColorProfiles();
+      saveSuccess.value = true;
+      saveMessage.value = `Color profile imported into slot ${slot}`;
+      setTimeout(() => (saveSuccess.value = false), 3000);
+    } catch (error) {
+      console.error(`Failed to import color profile into slot ${slot}:`, error);
+      saveError.value = true;
+      saveMessage.value = `Failed to import profile: ${error.message || "invalid file"}`;
+      setTimeout(() => (saveError.value = false), 5000);
+    } finally {
+      agendaColorProfileUploading.value[slot] = false;
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = "";
+}
+
+async function deleteAgendaColorProfile(slot) {
+  try {
+    const response = await fetch(`/api/agenda/color-profile?slot=${slot}`, { method: "DELETE" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    await loadAgendaColorProfiles();
+    if (settingsStore.deviceSettings.agendaColorProfileActive === slot) {
+      settingsStore.deviceSettings.agendaColorProfileActive = 0;
+    }
+    saveSuccess.value = true;
+    saveMessage.value = `Color profile slot ${slot} removed`;
+    setTimeout(() => (saveSuccess.value = false), 3000);
+  } catch (error) {
+    console.error(`Failed to delete color profile slot ${slot}:`, error);
+    saveError.value = true;
+    saveMessage.value = `Failed to remove profile slot ${slot}`;
+    setTimeout(() => (saveError.value = false), 5000);
+  }
+}
+
+const agendaColorProfileActiveOptions = computed(() => [
+  { title: "None (plain black/white default)", value: 0 },
+  ...agendaColorProfileSlots.value
+    .filter((s) => s.name)
+    .map((s) => ({ title: `${s.slot}: ${s.name}`, value: s.slot })),
+]);
 
 // 90/270 would swap the panel's logical dimensions, which the streaming
 // pipeline and dimensionless .epdgz payloads can't represent; portrait
@@ -1805,12 +1856,12 @@ async function performFactoryReset() {
                 :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
               />
               <div class="text-caption text-medium-emphasis mb-2">
-                Colors each grid day's appointment lines by an alternating custody-style schedule
-                (e.g. "2-2-3": 2 days/2 days/3 days, then which side starts flips the following
-                week) - off by default. Needs a start date below to anchor which day the pattern
-                begins on. The day header itself always stays plain black/white, regardless of this
-                setting - avoids a colored icon or Calendar text ever landing on a same-colored
-                background.
+                Marks every other grid day by an alternating custody-style schedule (e.g. "2-2-3": 2
+                days/2 days/3 days, then which side starts flips the following week) - off by
+                default. Needs a start date below to anchor which day the pattern begins on. Which
+                color the marked days get, and whether it colors the day header or the appointment
+                area, comes from the active Color Profile below (its "mark" color and
+                "markColorsHeader" setting) rather than from a setting here.
               </div>
               <v-row v-if="settingsStore.deviceSettings.agendaShiftModel !== 'none'" dense>
                 <v-col cols="6" sm="4">
@@ -1824,32 +1875,6 @@ async function performFactoryReset() {
                   />
                 </v-col>
               </v-row>
-              <v-row
-                v-if="settingsStore.deviceSettings.agendaShiftModel !== 'none'"
-                dense
-                class="mt-1 mb-2"
-              >
-                <v-col cols="6" sm="4">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaShiftColor1"
-                    :items="agendaHueOptions"
-                    label="Group 1 color"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-                <v-col cols="6" sm="4">
-                  <v-select
-                    v-model="settingsStore.deviceSettings.agendaShiftColor2"
-                    :items="agendaHueOptions"
-                    label="Group 2 color"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-              </v-row>
             </template>
 
             <v-divider class="mb-4 mt-2" />
@@ -1857,14 +1882,14 @@ async function performFactoryReset() {
             <div class="text-subtitle-2 mb-2">Extra ICS Calendars</div>
             <div class="text-caption text-medium-emphasis mb-2">
               Up to three additional calendars (e.g. holidays, school holidays, or any other .ics
-              feed) shown in the same Calendar column above, each in its own color (see Appearance
-              tab) plus a colored letter badge (C/D/E) in the header when active. Unlike Calendar
-              A/B, these are <strong>never refreshed automatically</strong> - only when you save a
-              new/changed URL, click "Refresh now", or upload a replacement file directly. If a
-              source runs out of upcoming events, a permanent reminder appears in the calendar
-              identifying which one needs updating. Each source shows up to 48 events within its
-              30-day window - plenty for holidays/school-holidays, but a very densely-booked file
-              could hit that cap.
+              feed) shown in the same Calendar column above, each in its own color (set per-source
+              in the active Color Profile below) with a colored letter (C/D/E) in the header when
+              active. Unlike Calendar A/B, these are <strong>never refreshed automatically</strong>
+              - only when you save a new/changed URL, click "Refresh now", or upload a replacement
+              file directly. If a source runs out of upcoming events, a permanent reminder appears
+              in the calendar identifying which one needs updating. Each source shows up to 48
+              events within its 30-day window - plenty for holidays/school-holidays, but a very
+              densely-booked file could hit that cap.
             </div>
 
             <v-card variant="tonal" class="mb-3">
@@ -2130,26 +2155,20 @@ async function performFactoryReset() {
               <v-radio label="Stacked (ToDo above Calendar)" :value="true" />
               <v-radio label="Side by side" :value="false" />
             </v-radio-group>
-            <v-select
-              v-model="settingsStore.deviceSettings.agendaBgColor"
-              :items="agendaBgOptions"
-              label="Background color"
-              variant="outlined"
-              density="compact"
-              hint="Shared by both columns. If an element's own color happens to match this background, it's automatically swapped for a safe fallback."
-              persistent-hint
-              style="max-width: 320px"
-            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              The ToDo column always uses a plain black-on-white page. The Calendar column's entire
+              appearance - background, header colors, per-source colors, and marking - is controlled
+              by the Color Profile you import below instead.
+            </div>
 
             <template v-if="!agendaIsGrayscaleBoard">
               <v-divider class="mb-4 mt-4" />
-              <div class="text-subtitle-2 mb-2">Colors</div>
+              <div class="text-subtitle-2 mb-2">ToDo Colors</div>
               <div class="text-caption text-medium-emphasis mb-3">
                 Color panels only - grayscale boards have no spare hue to assign here. Any color
-                that happens to match the background above is automatically swapped for a safe
+                that happens to match the fixed white page is automatically swapped for a safe
                 fallback, so nothing can silently disappear.
               </div>
-              <div class="text-caption text-medium-emphasis mb-1">ToDo</div>
               <v-row dense>
                 <v-col
                   v-for="field in agendaTodoColorFields"
@@ -2168,26 +2187,83 @@ async function performFactoryReset() {
                   />
                 </v-col>
               </v-row>
-              <div class="text-caption text-medium-emphasis mb-1 mt-3">Calendar</div>
-              <v-row dense>
-                <v-col
-                  v-for="field in agendaCalendarColorFields"
-                  :key="field.key"
-                  cols="6"
-                  sm="4"
-                  md="3"
-                >
-                  <v-select
-                    v-model="settingsStore.deviceSettings[field.key]"
-                    :items="agendaHueOptions"
-                    :label="field.label"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-              </v-row>
             </template>
+
+            <v-divider class="mb-4 mt-4" />
+            <div class="text-subtitle-2 mb-2">Calendar Color Profiles</div>
+            <div class="text-caption text-medium-emphasis mb-3">
+              Import a color profile JSON exported from the standalone "profile-editor.html" visual
+              editor tool to control exactly how the Calendar view is colored - text/background,
+              per-day headers, the shared top header, each Calendar source's color, and (if a
+              rotation pattern is set above) which single color marks a day. Up to 3 profiles can be
+              stored on the device; only one is active at a time. On a grayscale/monochrome display,
+              a color-mode profile is shown as a plain black/white inversion instead of its authored
+              hues - its "mode" only matters directly on a color panel.
+            </div>
+            <v-btn
+              variant="outlined"
+              size="small"
+              class="mb-4"
+              href="/profile-editor.html"
+              target="_blank"
+              rel="noopener"
+            >
+              Open Color Profile Editor
+            </v-btn>
+            <div class="text-caption text-medium-emphasis mb-3">
+              Opens the editor tool served directly by this device (new tab) - its own "An Gerät
+              senden" (send to device) button saves straight into a slot below, no manual
+              export/import round-trip needed.
+            </div>
+            <v-select
+              v-model="settingsStore.deviceSettings.agendaColorProfileActive"
+              :items="agendaColorProfileActiveOptions"
+              item-title="title"
+              item-value="value"
+              label="Active profile"
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="mb-4"
+              style="max-width: 420px"
+            />
+            <v-row dense>
+              <v-col v-for="slot in [1, 2, 3]" :key="slot" cols="12" sm="4">
+                <v-card variant="tonal">
+                  <v-card-text>
+                    <div class="text-caption text-medium-emphasis">Slot {{ slot }}</div>
+                    <div class="text-body-2 mb-2">
+                      {{ agendaColorProfileSlots.find((s) => s.slot === slot)?.name || "(empty)" }}
+                    </div>
+                    <v-btn
+                      size="small"
+                      variant="outlined"
+                      :loading="agendaColorProfileUploading[slot]"
+                      @click="colorProfileFileInputs[slot]?.click()"
+                    >
+                      Import
+                    </v-btn>
+                    <v-btn
+                      v-if="agendaColorProfileSlots.find((s) => s.slot === slot)?.name"
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      class="ml-2"
+                      @click="deleteAgendaColorProfile(slot)"
+                    >
+                      Remove
+                    </v-btn>
+                    <input
+                      :ref="(el) => (colorProfileFileInputs[slot] = el)"
+                      type="file"
+                      accept=".json,application/json"
+                      style="display: none"
+                      @change="onAgendaColorProfileFileSelected($event, slot)"
+                    />
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
           </v-tabs-window-item>
 
           <!-- Power Tab -->

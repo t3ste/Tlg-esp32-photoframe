@@ -707,14 +707,14 @@ typedef enum {
 // can't be resolved to an actual group).
 #define NVS_AGENDA_SHIFT_START_KEY "agenda_shft_dt"
 #define AGENDA_SHIFT_START_MAX_LEN 11
-// The 2 rotation groups' colors - same 4-hue Spectra6 palette as every
-// other AGENDA_ROLE_COLOR_MAX_LEN role (see below), defaulting to blue/
-// green so they don't collide with the red/yellow already used elsewhere
-// for "warning"-style semantics (overdue, low battery, etc.).
-#define NVS_AGENDA_SHIFT_COLOR1_KEY "agenda_shft_c1"
-#define AGENDA_SHIFT_COLOR1_DEFAULT "blue"
-#define NVS_AGENDA_SHIFT_COLOR2_KEY "agenda_shft_c2"
-#define AGENDA_SHIFT_COLOR2_DEFAULT "green"
+// The rotation's single marker color (which of the 2 groups is "marked" on
+// any given day still comes from agenda_shift_group_for_day() above - only
+// the *color* used to paint that group's days is chosen here) now comes
+// from the active color profile's "mark" field instead of a device setting
+// - see agenda_color_profile.h. The unmarked group simply keeps the
+// profile's plain text/textBg colors, per the user's explicit "a switch
+// model only needs one marker color, other days keep their normal
+// background" requirement.
 // Opt-in: annotates each Calendar day divider with that day's forecast
 // (min/max temp + short condition, e.g. "Fr 11. [18/25 cloudy]"), reusing
 // the same weather_fetch_forecast() / location / provider settings as the
@@ -760,26 +760,24 @@ typedef enum {
 // original default and is kept as an option.
 #define NVS_AGENDA_STACK_KEY "agenda_stack"
 #define AGENDA_STACK_DEFAULT true
-// Shared by both the ToDo and Calendar columns (one setting, not two - a
-// mismatched split background was explicitly rejected). One of "white"
-// (default), "black", or a hardware-specific name (agenda_renderer.c's
-// agenda_background_color() has the authoritative list per display
-// profile) - an unrecognized or hardware-inapplicable value falls back to
-// white rather than erroring, matching this project's fail-soft style.
-#define NVS_AGENDA_BG_KEY "agenda_bg"
-#define AGENDA_BG_MAX_LEN 16
-#define AGENDA_BG_DEFAULT "white"
+// ToDo column background - plain, fixed black-on-white (no user setting):
+// the Calendar column's appearance is fully controlled by the imported
+// color-profile system below instead (see agenda_color_profile.h), and the
+// old shared "agenda_bg_color" setting was removed along with it rather than
+// kept as a separate ToDo-only knob.
 
-// Per-role color customization (Spectra6/color boards only - grayscale has
-// no spare hue to pick between, see agenda_renderer.c's role_hue()). Every
-// value is one of "red"/"yellow"/"blue"/"green" (the 4 chromatic Spectra6
-// hues) - never a free RGB value, since anything off this exact palette
-// dithers into visual noise on real hardware (see agenda_renderer.c's
-// priority_color() comment for the full story). Each role falls back to its
-// original hardcoded default if unset/unrecognized. A role whose chosen hue
-// exactly matches the current agenda_bg_color automatically falls back to
-// the same black/white polarity the day divider and column headers use,
-// rather than silently disappearing into the page background.
+// Per-role color customization for the ToDo column (Spectra6/color boards
+// only - grayscale has no spare hue to pick between, see agenda_renderer.c's
+// role_hue()). Every value is one of "red"/"yellow"/"blue"/"green" (the 4
+// chromatic Spectra6 hues) - never a free RGB value, since anything off this
+// exact palette dithers into visual noise on real hardware (see
+// agenda_renderer.c's priority_color() comment for the full story). Each
+// role falls back to its original hardcoded default if unset/unrecognized. A
+// role whose chosen hue exactly matches the ToDo column's fixed plain
+// background automatically falls back to the same black/white polarity the
+// day divider and column headers use, rather than silently disappearing
+// into the page background. (The Calendar column's own colors are no longer
+// part of this scheme - see agenda_color_profile.h.)
 #define AGENDA_ROLE_COLOR_MAX_LEN 8
 #define NVS_AGENDA_PRI_A_KEY "agenda_pri_a"
 #define AGENDA_PRI_A_DEFAULT "red"
@@ -799,39 +797,46 @@ typedef enum {
 #define AGENDA_PROJ_C_DEFAULT "blue"
 #define NVS_AGENDA_CTX_C_KEY "agenda_ctx_c"
 #define AGENDA_CTX_C_DEFAULT "green"
-#define NVS_AGENDA_CAL_A_C_KEY "agenda_cal_a_c"
-#define AGENDA_CAL_A_C_DEFAULT "blue"
-#define NVS_AGENDA_CAL_B_C_KEY "agenda_cal_b_c"
-#define AGENDA_CAL_B_C_DEFAULT "green"
 // Three extra, independently-named ICS sources (e.g. holidays, school
 // holidays, other special-days feeds a user finds/exports as .ics) shown in
-// the same Calendar column as A/B, each in its own hue. Unlike A/B, these
-// have NO periodic refresh (see AGENDA_CAL_CACHE_PATH_C etc. above) - only
-// (re)fetched when the URL is set/changed, "refresh now" is clicked, or a
-// file is uploaded directly. Only red and yellow are left unused by the
-// other roles above at this column's own two existing hues (blue/green,
-// cal_a/cal_b) - the third source (E) necessarily reuses "red" (same as C),
-// same as several other roles already share a hue across different
-// contexts; still visually distinct from cal_a/cal_b within this column.
+// the same Calendar column as A/B. Unlike A/B, these have NO periodic
+// refresh (see AGENDA_CAL_CACHE_PATH_C etc. above) - only (re)fetched when
+// the URL is set/changed, "refresh now" is clicked, or a file is uploaded
+// directly. Per-source color used to live here too (agenda_cal_c/d/e_color)
+// but is now controlled by the imported color-profile system instead (see
+// agenda_color_profile.h) - only the source identity/URL/name settings
+// remain per-role.
 #define NVS_AGENDA_CAL_C_ENABLED_KEY "agenda_cal_c_en"
 #define NVS_AGENDA_CAL_C_URL_KEY "agenda_cal_c_url"
 #define AGENDA_CAL_C_URL_MAX_LEN 256
 #define NVS_AGENDA_CAL_C_NAME_KEY "agenda_cal_c_nm"
-#define NVS_AGENDA_CAL_C_C_KEY "agenda_cal_c_c"
-#define AGENDA_CAL_C_C_DEFAULT "red"
 #define NVS_AGENDA_CAL_D_ENABLED_KEY "agenda_cal_d_en"
 #define NVS_AGENDA_CAL_D_URL_KEY "agenda_cal_d_url"
 #define AGENDA_CAL_D_URL_MAX_LEN 256
 #define NVS_AGENDA_CAL_D_NAME_KEY "agenda_cal_d_nm"
-#define NVS_AGENDA_CAL_D_C_KEY "agenda_cal_d_c"
-#define AGENDA_CAL_D_C_DEFAULT "yellow"
 #define NVS_AGENDA_CAL_E_ENABLED_KEY "agenda_cal_e_en"
 #define NVS_AGENDA_CAL_E_URL_KEY "agenda_cal_e_url"
 #define AGENDA_CAL_E_URL_MAX_LEN 256
 #define NVS_AGENDA_CAL_E_NAME_KEY "agenda_cal_e_nm"
-#define NVS_AGENDA_CAL_E_C_KEY "agenda_cal_e_c"
-#define AGENDA_CAL_E_C_DEFAULT "red"
 #define AGENDA_CAL_CDE_NAME_MAX_LEN 24
+
+// User-authored Calendar-view color profiles (see agenda_color_profile.h),
+// imported via the Web UI as JSON exported by the companion browser tool
+// "profile-editor.html". Up to AGENDA_COLOR_PROFILE_SLOTS profiles can be
+// stored on the device at once; at most one is "active" at a time
+// (0 = none, use the built-in plain default). Each slot is a whole JSON
+// file on the SD card rather than an NVS blob - profiles are small
+// (well under 1KB) but arbitrary/free-form, unlike every other Agenda
+// setting here which is a single scalar value.
+#define AGENDA_COLOR_PROFILE_SLOTS 3
+#define NVS_AGENDA_COLOR_PROFILE_ACTIVE_KEY "agenda_clrp_a"
+#define AGENDA_COLOR_PROFILE_PATH_1 FS_MOUNT_POINT "/.agenda_color_profile_1.json"
+#define AGENDA_COLOR_PROFILE_PATH_2 FS_MOUNT_POINT "/.agenda_color_profile_2.json"
+#define AGENDA_COLOR_PROFILE_PATH_3 FS_MOUNT_POINT "/.agenda_color_profile_3.json"
+// Generous but bounded - profile-editor.html's export is a small fixed-shape
+// JSON document (16 color fields + a handful of flags/strings), never
+// user-supplied free text.
+#define AGENDA_COLOR_PROFILE_MAX_BYTES 8192
 
 // WiFi association draws a brief high-current TX burst; whenever a battery
 // is in the loop (battery-only, or USB+battery together - see

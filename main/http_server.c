@@ -10,6 +10,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "agenda_color_profile.h"
 #include "album_manager.h"
 #include "battery_history.h"
 #include "board_hal.h"
@@ -88,6 +89,8 @@ extern const uint8_t vite_browser_external_js_end[] asm(
     "_binary___vite_browser_external_js_gz_end");
 extern const uint8_t icon_svg_start[] asm("_binary_icon_svg_gz_start");
 extern const uint8_t icon_svg_end[] asm("_binary_icon_svg_gz_end");
+extern const uint8_t profile_editor_html_start[] asm("_binary_profile_editor_html_gz_start");
+extern const uint8_t profile_editor_html_end[] asm("_binary_profile_editor_html_gz_end");
 extern const uint8_t measurement_sample_jpg_start[] asm("_binary_measurement_sample_jpg_start");
 extern const uint8_t measurement_sample_jpg_end[] asm("_binary_measurement_sample_jpg_end");
 
@@ -162,6 +165,20 @@ static esp_err_t icon_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "image/svg+xml");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_send(req, (const char *) icon_svg_start, icon_svg_size);
+    return ESP_OK;
+}
+
+// The standalone Calendar color-profile visual editor tool (profile-editor.html,
+// webapp/public/) - served by the device itself so its "An Gerät senden" button
+// (a same-origin fetch to POST /api/agenda/color-profile?slot=N) has a device to
+// talk to without the user needing to download/re-upload the exported JSON by
+// hand. Embedded the same way as index.html/icon.svg above.
+static esp_err_t profile_editor_handler(httpd_req_t *req)
+{
+    const size_t profile_editor_html_size = (profile_editor_html_end - profile_editor_html_start);
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    httpd_resp_send(req, (const char *) profile_editor_html_start, profile_editor_html_size);
     return ESP_OK;
 }
 
@@ -1810,10 +1827,6 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddStringToObject(root, "agenda_shift_model", agenda_shift_model_str);
         cJSON_AddStringToObject(root, "agenda_shift_start",
                                 config_manager_get_agenda_shift_start());
-        cJSON_AddStringToObject(root, "agenda_shift_color1",
-                                config_manager_get_agenda_shift_color1());
-        cJSON_AddStringToObject(root, "agenda_shift_color2",
-                                config_manager_get_agenda_shift_color2());
         cJSON_AddBoolToObject(root, "agenda_cal_weather_enabled",
                               config_manager_get_agenda_cal_weather_enabled());
         cJSON_AddBoolToObject(root, "agenda_cal_weather_right_aligned",
@@ -1887,7 +1900,8 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddItemToObject(root, "agenda_cron", agenda_cron_arr);
         cJSON_AddBoolToObject(root, "agenda_stack_layout",
                               config_manager_get_agenda_stack_layout());
-        cJSON_AddStringToObject(root, "agenda_bg_color", config_manager_get_agenda_bg_color());
+        cJSON_AddNumberToObject(root, "agenda_color_profile_active",
+                                config_manager_get_agenda_color_profile_active());
         cJSON_AddStringToObject(root, "agenda_pri_a_color",
                                 config_manager_get_agenda_pri_a_color());
         cJSON_AddStringToObject(root, "agenda_pri_b_color",
@@ -1906,16 +1920,6 @@ static esp_err_t config_handler(httpd_req_t *req)
                                 config_manager_get_agenda_project_color());
         cJSON_AddStringToObject(root, "agenda_context_color",
                                 config_manager_get_agenda_context_color());
-        cJSON_AddStringToObject(root, "agenda_cal_a_color",
-                                config_manager_get_agenda_cal_a_color());
-        cJSON_AddStringToObject(root, "agenda_cal_b_color",
-                                config_manager_get_agenda_cal_b_color());
-        cJSON_AddStringToObject(root, "agenda_cal_c_color",
-                                config_manager_get_agenda_cal_c_color());
-        cJSON_AddStringToObject(root, "agenda_cal_d_color",
-                                config_manager_get_agenda_cal_d_color());
-        cJSON_AddStringToObject(root, "agenda_cal_e_color",
-                                config_manager_get_agenda_cal_e_color());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -2835,6 +2839,123 @@ static esp_err_t agenda_extra_ics_upload_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// GET/POST/DELETE /api/agenda/color-profile?slot=1|2|3 - manages the up-to-
+// AGENDA_COLOR_PROFILE_SLOTS stored Calendar-view color profiles imported
+// from profile-editor.html's JSON export (see agenda_color_profile.h).
+// GET (no ?slot=) lists all slots' names + which one is active; POST
+// imports/replaces one slot's profile (raw JSON body, same non-multipart
+// convention as agenda_extra_ics_upload_handler() above); DELETE removes
+// one slot, clearing the active pointer first if it pointed there.
+// Selecting which slot is *active* is a plain scalar setting instead
+// (agenda_color_profile_active via PATCH /api/config), not part of this
+// endpoint.
+static esp_err_t agenda_color_profile_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    if (req->method == HTTP_GET) {
+        cJSON *root = cJSON_CreateObject();
+        cJSON *slots = cJSON_CreateArray();
+        for (int slot = 1; slot <= AGENDA_COLOR_PROFILE_SLOTS; slot++) {
+            cJSON *entry = cJSON_CreateObject();
+            cJSON_AddNumberToObject(entry, "slot", slot);
+            char name[AGENDA_CAL_CDE_NAME_MAX_LEN * 2];
+            if (agenda_color_profile_slot_name(slot, name, sizeof(name))) {
+                cJSON_AddStringToObject(entry, "name", name);
+            } else {
+                cJSON_AddNullToObject(entry, "name");
+            }
+            cJSON_AddItemToArray(slots, entry);
+        }
+        cJSON_AddItemToObject(root, "slots", slots);
+        cJSON_AddNumberToObject(root, "active", config_manager_get_agenda_color_profile_active());
+        char *json_str = cJSON_Print(root);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, json_str);
+        free(json_str);
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
+
+    char query[32];
+    char slot_str[4] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "slot", slot_str, sizeof(slot_str)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing ?slot=1|2|3");
+        return ESP_FAIL;
+    }
+    int slot = atoi(slot_str);
+    if (slot < 1 || slot > AGENDA_COLOR_PROFILE_SLOTS) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "slot must be 1..3");
+        return ESP_FAIL;
+    }
+    char path[64];
+    agenda_color_profile_path(slot, path, sizeof(path));
+
+    if (req->method == HTTP_DELETE) {
+        unlink(path);
+        if (config_manager_get_agenda_color_profile_active() == slot) {
+            config_manager_set_agenda_color_profile_active(0);
+        }
+        ESP_LOGI(TAG, "Color profile slot %d removed", slot);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+        return ESP_OK;
+    }
+
+    // POST: raw JSON body, same non-multipart convention as
+    // agenda_extra_ics_upload_handler() above.
+    if (req->content_len <= 0 || req->content_len > AGENDA_COLOR_PROFILE_MAX_BYTES) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Profile missing or too large");
+        return ESP_FAIL;
+    }
+
+    power_manager_reset_sleep_timer();
+
+    char *buf = heap_caps_malloc((size_t) req->content_len + 1, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+    int received = 0;
+    while (received < req->content_len) {
+        int ret = httpd_req_recv(req, buf + received, req->content_len - received);
+        if (ret <= 0) {
+            heap_caps_free(buf);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to receive data");
+            return ESP_FAIL;
+        }
+        received += ret;
+    }
+    buf[received] = '\0';
+
+    char err[96];
+    if (!agenda_color_profile_validate(buf, NULL, 0, err, sizeof(err))) {
+        heap_caps_free(buf);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, err);
+        return ESP_FAIL;
+    }
+
+    FILE *fp = fopen(path, "wb");
+    if (!fp) {
+        heap_caps_free(buf);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save profile");
+        return ESP_FAIL;
+    }
+    fwrite(buf, 1, (size_t) received, fp);
+    fclose(fp);
+    heap_caps_free(buf);
+
+    ESP_LOGI(TAG, "Color profile slot %d updated via import (%d bytes)", slot, received);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+    return ESP_OK;
+}
+
 static esp_err_t processing_settings_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET) {
@@ -3161,6 +3282,12 @@ esp_err_t http_server_init(void)
             .uri = "/icon.svg", .method = HTTP_GET, .handler = icon_handler, .user_ctx = NULL};
         httpd_register_uri_handler(server, &icon_uri);
 
+        httpd_uri_t profile_editor_uri = {.uri = "/profile-editor.html",
+                                          .method = HTTP_GET,
+                                          .handler = profile_editor_handler,
+                                          .user_ctx = NULL};
+        httpd_register_uri_handler(server, &profile_editor_uri);
+
         httpd_uri_t measurement_sample_uri = {.uri = "/measurement_sample.jpg",
                                               .method = HTTP_GET,
                                               .handler = measurement_sample_handler,
@@ -3432,6 +3559,24 @@ esp_err_t http_server_init(void)
                                             .handler = agenda_extra_ics_upload_handler,
                                             .user_ctx = NULL};
         httpd_register_uri_handler(server, &agenda_extra_ics_uri);
+
+        httpd_uri_t agenda_color_profile_get_uri = {.uri = "/api/agenda/color-profile",
+                                                    .method = HTTP_GET,
+                                                    .handler = agenda_color_profile_handler,
+                                                    .user_ctx = NULL};
+        httpd_register_uri_handler(server, &agenda_color_profile_get_uri);
+
+        httpd_uri_t agenda_color_profile_post_uri = {.uri = "/api/agenda/color-profile",
+                                                     .method = HTTP_POST,
+                                                     .handler = agenda_color_profile_handler,
+                                                     .user_ctx = NULL};
+        httpd_register_uri_handler(server, &agenda_color_profile_post_uri);
+
+        httpd_uri_t agenda_color_profile_delete_uri = {.uri = "/api/agenda/color-profile",
+                                                       .method = HTTP_DELETE,
+                                                       .handler = agenda_color_profile_handler,
+                                                       .user_ctx = NULL};
+        httpd_register_uri_handler(server, &agenda_color_profile_delete_uri);
 
         ESP_LOGI(TAG, "HTTP server started");
         return ESP_OK;

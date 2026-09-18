@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spectra6 Farbprofil-Editor (Firmware)</title>
+<style>
+:root{
+  --page:#fff; --ink:#000;
+  --header-bg:#000; --header-ink:#fff;
+  --top-bg:#000; --top-ink:#fff;
+  --mark:#fff; --mark-ink:#000; --mark-event-ink:#000;
+  --a:#00f; --b:#0f0; --c:#f00; --d:#f00; --e:#f00;
+  --a-bg:#fff; --b-bg:#fff; --c-bg:#fff; --d-bg:#fff; --e-bg:#fff;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#e8e8e8;color:#222;font:14px system-ui,sans-serif}
+main{max-width:1500px;margin:0 auto;padding:16px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;background:#fff;border:1px solid #bbb;border-radius:8px;padding:12px;margin-bottom:16px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-weight:700;font-size:12px}
+.field input,.field select,.field button{font:inherit;padding:7px;border:1px solid #999;border-radius:5px;background:#fff}
+.switch{display:flex;align-items:center;gap:6px;font-weight:700}
+.hint{font-size:12px;color:#555;flex:1;min-width:260px}
+.workspace{display:grid;grid-template-columns:800px minmax(0,1fr);gap:16px;align-items:start}
+.workspace .preview-wrap{width:800px;flex:0 0 800px}
+.workspace .editor{min-width:0;overflow:hidden}
+.preview-wrap{background:#ccc;padding:10px;border-radius:8px}
+.preview{width:min(100%,800px);aspect-ratio:5/3;background:var(--page);color:var(--ink);display:flex;flex-direction:column;overflow:hidden;font-family:Arial,sans-serif}
+.top{height:12%;flex:none;background:var(--top-bg);color:var(--top-ink);display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:0 1.4%;font-size:clamp(8px,1.65vw,16px);font-weight:700;white-space:nowrap;overflow:hidden}
+.top-left,.top-right{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.days{height:88%;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:1.3% 2.4%;padding:1.3% 0}
+.day{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0}
+.day.today{grid-row:span 2}
+.dayhead{flex:0 0 22px;height:22px;min-height:0;background:var(--dayhead-bg, var(--header-bg));color:var(--dayhead-ink, var(--header-ink));display:flex;align-items:center;justify-content:space-between;padding:0 6%;font-weight:700;font-size:clamp(8px,1.3vw,13px);white-space:nowrap;overflow:hidden}
+.dayhead span{overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}
+.dayhead .leader{flex:1 1 auto;min-width:8px;margin:0 6px;align-self:center;border-bottom:2px dashed currentColor;height:0;opacity:.85}
+.daybody{flex:1 1 auto;min-height:0;background:var(--page);color:var(--ink);padding:2% 3%;font-size:clamp(7px,1.15vw,12px);overflow:hidden;display:flex;flex-direction:column}
+.event{display:block;line-height:1.18;margin:1px 0;padding:0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}
+.event.a{color:var(--a);background:var(--a-bg)} .event.b{color:var(--b);background:var(--b-bg)}
+.event.c{color:var(--c);background:var(--c-bg)} .event.d{color:var(--d);background:var(--d-bg)}
+.event.e{color:var(--e);background:var(--e-bg)}
+.more{color:var(--ink);line-height:1.18;white-space:nowrap;flex:0 0 auto;font-weight:700}
+html:not(.header-only-mark) .day.marked .daybody{background:var(--mark)}
+html:not(.header-only-mark) .day.marked .event{background:var(--mark)}
+html.mono:not(.header-only-mark) .day.marked .event{color:var(--mark-event-ink)}
+html:not(.header-only-mark) .day.marked .more{color:var(--mark-ink)}
+.editor{background:#fff;border:1px solid #bbb;border-radius:8px;padding:14px}
+.editor h2{font-size:18px;margin:0 0 10px}
+.editor h3{font-size:14px;border-top:1px solid #ddd;padding-top:10px;margin:14px 0 8px}
+.grid{display:grid;grid-template-columns:1fr;gap:8px}
+.row{display:grid;grid-template-columns:1fr 90px;gap:6px;align-items:center;margin:5px 0;padding:6px;border:1px solid #eee;border-radius:6px}
+.row label{font-size:12px}
+.color{height:30px;width:90px;padding:2px;cursor:pointer}
+.profile-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center}
+.profile-actions button{padding:7px;border:1px solid #999;border-radius:5px;background:#f6f6f6;cursor:pointer}
+.profile-actions button.danger{border-color:#c33;color:#b00020}
+.profile-actions button.primary{border-color:#0a5ab0;color:#0a5ab0;font-weight:700}
+.profile-actions input[type=file]{display:none}
+.profile-actions select{font:inherit;padding:7px;border:1px solid #999;border-radius:5px;background:#fff}
+.note{font-size:12px;color:#555;line-height:1.35;margin-top:10px}
+.note.status-info{color:#0a5ab0}
+.entries{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.calendar-box{border:1px solid #ddd;border-radius:6px;padding:8px}
+.calendar-title{font-weight:700;margin-bottom:5px}
+.entry{display:grid;grid-template-columns:20px 78px 1fr;gap:5px;align-items:center;margin:4px 0}
+.entry label{font-size:11px}
+.entry input[type=text]{width:100%;padding:5px;border:1px solid #aaa;border-radius:4px}
+.entry input[type=checkbox]{width:16px;height:16px;cursor:pointer}
+.entry.disabled label,.entry.disabled input[type=text]{opacity:.45}
+.status-good{color:#087a22}
+.status-bad{color:#b00020}
+.overview-wrap{overflow-x:auto;margin-top:8px}
+table.overview{width:100%;border-collapse:collapse;font-size:12px;min-width:520px}
+table.overview caption{caption-side:top;text-align:left;font-weight:700;font-size:14px;margin-bottom:6px}
+table.overview th,table.overview td{border:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:middle}
+table.overview thead th{background:#f2f2f2;position:sticky;top:0}
+table.overview tbody tr:nth-child(even){background:#fafafa}
+table.overview .swatch-cell{display:flex;align-items:center;gap:6px;white-space:nowrap}
+table.overview .swatch{width:18px;height:18px;border:1px solid #999;border-radius:3px;flex:0 0 auto}
+table.overview .hexcode{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#444}
+table.overview .muted{color:#999;font-style:italic}
+table.overview .element-name{font-weight:700}
+details.editor{padding:0}
+details.editor > summary{list-style:none;cursor:pointer;padding:14px;margin:0;display:flex;align-items:center;gap:8px;user-select:none}
+details.editor > summary::-webkit-details-marker{display:none}
+details.editor > summary h2{margin:0;font-size:18px}
+details.editor > summary::before{content:"▶";font-size:12px;color:#0a5ab0;flex:0 0 auto;transition:transform .15s ease}
+details.editor[open] > summary::before{transform:rotate(90deg)}
+details.editor > summary:hover{background:#f6f9ff}
+details.editor > *:not(summary){padding:0 14px 14px 14px}
+details.editor > summary{border-radius:8px}
+details.editor[open] > summary{border-bottom:1px solid #eee;border-radius:8px 8px 0 0}
+@media (max-width:950px){.workspace{grid-template-columns:1fr}.workspace .preview-wrap{width:100%;flex:none}.preview{margin:0 auto}.editor{order:2}}
+@media (max-width:650px){main{padding:7px}.grid,.entries{grid-template-columns:1fr}.row{grid-template-columns:1fr 100px}.color{width:100px}}
+</style>
+</head>
+<body>
+<main>
+  <div class="toolbar">
+    <div class="field">
+      <label for="profile">Farbprofil</label>
+      <select id="profile">
+        <option value="Normal">Normal</option>
+        <option value="Invertiert">Invertiert</option>
+        <option value="Benutzerdefiniert">Benutzerdefiniert (unbenannt)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="mode">Zielanzeige</label>
+      <select id="mode">
+        <option value="color">Spectra6 – Farbe</option>
+        <option value="mono-normal">Monochrom</option>
+        <option value="mono-invert">Monochrom invertiert</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="mark">Wechselmodell (Markierfarbe)</label>
+      <select id="mark">
+        <option value="none">Keine Markierung</option>
+        <option value="black">Schwarz markieren</option>
+        <option value="white">Weiß markieren</option>
+        <option value="red">Rot markieren</option>
+        <option value="yellow">Gelb markieren</option>
+        <option value="blue">Blau markieren</option>
+        <option value="green">Grün markieren</option>
+      </select>
+    </div>
+    <label class="switch"><input id="headerFollowsEntries" type="checkbox"> Header folgt Eintragsfarbe (Monochrom)</label>
+    <label class="switch"><input id="headerFollowsEntriesColor" type="checkbox"> Header folgt Eintragsfarbe (Spectra6)</label>
+    <label class="switch"><input id="dayheadLeaderLine" type="checkbox"> Punktlinie zwischen Tag und Temperatur</label>
+    <label class="switch"><input id="markColorsHeader" type="checkbox"> Nur Header markierter Tage in Markierfarbe</label>
+    <div class="hint">Farbprofil-Editor für die eInk-Firmware. Farben direkt in der Zustandstabelle bearbeiten, Kalendertage markieren und Termine anpassen.</div>
+  </div>
+
+  <div class="workspace">
+    <div class="preview-wrap">
+      <div id="preview" class="preview"></div>
+    </div>
+
+    <details class="editor" id="stateTableBox" open>
+      <summary><h2>Farbprofil: Zustände normal / markiert</h2></summary>
+      <div class="hint" style="margin-bottom:8px">
+        Die Zeilen "normal" sind editierbar (Rohfarben, Farbprofil-Basis). Wenn ein Schalter wie "Header folgt Eintragsfarbe" die tatsächlich angezeigte Farbe eines normalen Tages verändert, erscheint unter dem Farbfeld zusätzlich "effektiv: …" mit dem wirklich sichtbaren Wert.
+        Die Zeilen "markiert" sind rein berechnete Vorschauwerte und daher nicht direkt editierbar.
+      </div>
+      <div class="overview-wrap">
+        <table class="overview" id="stateTable">
+          <caption>Element-Farben: "normal" editierbar (Farbprofil-Basis), "markiert" berechnete Vorschau</caption>
+          <thead>
+            <tr>
+              <th>Element</th>
+              <th>Zustand</th>
+              <th>Hintergrund</th>
+              <th>Text</th>
+            </tr>
+          </thead>
+          <tbody id="stateTableBody"></tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px">
+        "+N mehr"-Anzeige entspricht der Textfarbe der Tagesfläche (normal bzw. markiert) und wird deshalb nicht separat aufgeführt.
+      </div>
+      <div class="profile-actions">
+        <button id="save">Profil speichern …</button>
+        <button id="deleteProfile" class="danger">Profil löschen</button>
+        <button id="reset">Auswahl zurücksetzen</button>
+        <button id="exportProfile" class="primary">Profil exportieren (JSON)</button>
+        <button id="importProfileBtn" class="primary">Profil importieren (JSON)</button>
+        <input type="file" id="importProfileFile" accept="application/json,.json">
+      </div>
+      <div class="profile-actions">
+        <label for="deviceSlot" style="font-weight:700;font-size:12px">An Gerät senden, Slot:</label>
+        <select id="deviceSlot">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+        <button id="sendToDevice" class="primary">An Gerät senden</button>
+      </div>
+      <div id="profileNote" class="note"></div>
+    </details>
+  </div>
+
+  <details class="editor" id="dayMarkBox" style="margin-top:16px">
+    <summary><h2>Wechselmodell-Tage</h2></summary>
+    <div class="hint" style="margin-bottom:8px">Wählt aus, welche Tage im Vorschau-Layout als "markiert" gelten. Mindestens ein markierter Tag ist nötig, damit die "markiert"-Zustände in der Tabelle und Vorschau sichtbar werden.</div>
+    <div class="grid" id="dayChecks"></div>
+  </details>
+
+  <details class="editor" id="entriesBox" style="margin-top:16px">
+    <summary><h2>Kalender und Einträge</h2></summary>
+    <div class="hint" style="margin-bottom:8px">Vorbelegte Beispieltermine je Kalender und Tag. Text bearbeiten oder Eintrag per Checkbox aus dem Layout aus-/einblenden.</div>
+    <div class="entries" id="entries"></div>
+  </details>
+</main>
+
+<script>
+const P = { black:'#000000', white:'#ffffff', red:'#ff0000', yellow:'#ffff00', blue:'#0000ff', green:'#00ff00' };
+const MARK_VALUES = ['none','black','white','red','yellow','blue','green'];
+const MARK_HEX = { black:'#000000', white:'#ffffff', red:'#ff0000', yellow:'#ffff00', blue:'#0000ff', green:'#00ff00' };
+const MARK_LABEL = { none:'Keine Markierung', black:'Schwarz', white:'Weiß', red:'Rot', yellow:'Gelb', blue:'Blau', green:'Grün' };
+
+const builtinProfiles = {
+  Normal: {
+    text:'black', textBg:'white', headerText:'white', headerBg:'black', topText:'white', topBg:'black',
+    a:'blue', b:'green', c:'red', d:'red', e:'red',
+    aBg:'white', bBg:'white', cBg:'white', dBg:'white', eBg:'white'
+  },
+  Invertiert: {
+    text:'white', textBg:'black', headerText:'black', headerBg:'white', topText:'black', topBg:'white',
+    a:'yellow', b:'green', c:'red', d:'red', e:'red',
+    aBg:'black', bBg:'black', cBg:'black', dBg:'black', eBg:'black'
+  }
+};
+
+// The 16 raw colour values that fully define a firmware colour profile. Every rendered / computed
+// state in the tool is derived exclusively from these plus mode/mark/switch selections.
+const labels = {
+  text:'Tagesfläche – Text', textBg:'Tagesfläche – Hintergrund',
+  headerText:'Tages-Header – Text', headerBg:'Tages-Header – Hintergrund',
+  topText:'Oberster Header – Text', topBg:'Oberster Header – Hintergrund',
+  a:'Kalendereintrag A (Tino) – Text', b:'Kalendereintrag B (Liebe) – Text',
+  c:'Kalendereintrag C – Text', d:'Kalendereintrag D – Text', e:'Kalendereintrag E – Text',
+  aBg:'Kalendereintrag A (Tino) – Hintergrund', bBg:'Kalendereintrag B (Liebe) – Hintergrund',
+  cBg:'Kalendereintrag C – Hintergrund', dBg:'Kalendereintrag D – Hintergrund', eBg:'Kalendereintrag E – Hintergrund'
+};
+const COLOR_KEYS = Object.keys(labels);
+
+const TODAY_ISO = '2026-09-17';
+const days = [
+  {label:'Do 17.', date:'2026-09-17', low:10, high:19},
+  {label:'Fr 18.', date:'2026-09-18', low:13, high:19},
+  {label:'Sa 19.', date:'2026-09-19', low:12, high:20},
+  {label:'So 20.', date:'2026-09-20', low:13, high:20},
+  {label:'Mo 21.', date:'2026-09-21', low:10, high:17},
+  {label:'Di 22.', date:'2026-09-22', low:9,  high:16},
+  {label:'Mi 23.', date:'2026-09-23', low:4,  high:18}
+];
+
+const layoutPlan = [
+  {date:'2026-09-17', col:1, rowStart:1, rowSpan:2, capacity:10},
+  {date:'2026-09-18', col:1, rowStart:3, rowSpan:1, capacity:4},
+  {date:'2026-09-19', col:1, rowStart:4, rowSpan:1, capacity:4},
+  {date:'2026-09-20', col:2, rowStart:1, rowSpan:1, capacity:4},
+  {date:'2026-09-21', col:2, rowStart:2, rowSpan:1, capacity:4},
+  {date:'2026-09-22', col:2, rowStart:3, rowSpan:1, capacity:4},
+  {date:'2026-09-23', col:2, rowStart:4, rowSpan:1, capacity:4}
+];
+
+const calNames = { a:'Tino', b:'Liebe', c:'C', d:'D', e:'E' };
+
+const sample = {
+  a: [
+    ['2026-09-17','16:30 Uhr Lia Kita-Abholung'], ['2026-09-17','Das ist ein sehr langer Text der nicht vollständig passt'],
+    ['2026-09-18','Oktoberfest Matthias 19:00 Uhr'], ['2026-09-18','Zahnarzt 11:15 Uhr'],
+    ['2026-09-19','Buecheloh Schünenmusi 15:00 Uhr'], ['2026-09-19','Einkauf Drogerie 17:00 Uhr'],
+    ['2026-09-20','Frühstück mit Oma 09:30 Uhr'], ['2026-09-20','Bibliothek 15:30 Uhr'],
+    ['2026-09-21','Arzttermin Sarah 09:30 Uhr'], ['2026-09-21','Besprechung 13:00 Uhr'],
+    ['2026-09-22','Sport Lia 16:30 Uhr'], ['2026-09-22','Telefonat Schule 14:00 Uhr'],
+    ['2026-09-23','Wochenmarkt 10:00 Uhr'], ['2026-09-23','Herbstbasteln 16:00 Uhr']
+  ],
+  b: [
+    ['2026-09-17','Elterngespräch 08:30 Uhr'], ['2026-09-17','Teamrunde 10:00 Uhr'],
+    ['2026-09-18','Weltkindertag Veranstaltung'], ['2026-09-18','Elternabend 19:00 Uhr'],
+    ['2026-09-19','Geburtstag Anna Geschenk'], ['2026-09-19','Pilates 18:00 Uhr'],
+    ['2026-09-20','Projektplanung 10:00 Uhr'], ['2026-09-20','Einkauf Lebensmittel'],
+    ['2026-09-21','Sarah Arzt 09:30 Uhr'], ['2026-09-21','Rechnung überweisen'],
+    ['2026-09-22','Lauftraining 17:30 Uhr'], ['2026-09-22','Paket abholen 18:00 Uhr'],
+    ['2026-09-23','Wochenplanung'], ['2026-09-23','Bücherei 11:00 Uhr']
+  ],
+  c: [
+    ['2026-09-17','Frühdienst 06:30 Uhr'], ['2026-09-17','Übergabe dokumentieren'],
+    ['2026-09-18','Rechnung überweisen'], ['2026-09-18','Kita-Material bestellen'],
+    ['2026-09-19','Geburtstag Anna'], ['2026-09-19','Geschenk besorgen'],
+    ['2026-09-20','Bibliothek 15:30 Uhr'], ['2026-09-20','Rückgabe Bücher'],
+    ['2026-09-21','Besprechung 13:00 Uhr'], ['2026-09-21','Protokoll schreiben'],
+    ['2026-09-22','Paket abholen 18:00 Uhr'], ['2026-09-22','Apotheke'],
+    ['2026-09-23','Wäsche und Haushalt'], ['2026-09-23','Einkaufsliste']
+  ],
+  d: [
+    ['2026-09-17','Frühdienst 06:30 Uhr'], ['2026-09-17','Dienstübergabe'],
+    ['2026-09-18','Elternabend 19:00 Uhr'], ['2026-09-18','Vorbereitung'],
+    ['2026-09-19','Pilates 18:00 Uhr'], ['2026-09-19','Dehnen'],
+    ['2026-09-20','Projektplanung 10:00 Uhr'], ['2026-09-20','Material prüfen'],
+    ['2026-09-21','Einkauf Lebensmittel'], ['2026-09-21','Kassenbon ablegen'],
+    ['2026-09-22','Lauftraining 17:30 Uhr'], ['2026-09-22','Duschen'],
+    ['2026-09-23','Wochenplanung'], ['2026-09-23','Kalender aktualisieren']
+  ],
+  e: [
+    ['2026-09-17','Lia Sport 16:30 Uhr'], ['2026-09-17','Sporttasche packen'],
+    ['2026-09-18','Weltkindertag'], ['2026-09-18','Veranstaltung vorbereiten'],
+    ['2026-09-19','Herbstaequinoctium'], ['2026-09-19','Herbstspaziergang'],
+    ['2026-09-20','Kino 20:00 Uhr'], ['2026-09-20','Tickets prüfen'],
+    ['2026-09-21','Sarah Arzt 09:30 Uhr'], ['2026-09-21','Unterlagen mitnehmen'],
+    ['2026-09-22','Lia Sport 16:30 Uhr'], ['2026-09-22','Wasserflasche'],
+    ['2026-09-23','Bücherei 11:00 Uhr'], ['2026-09-23','Bücher zurückgeben']
+  ]
+};
+
+function sampleToEntries(){
+  const out = {};
+  Object.keys(calNames).forEach(k=>{
+    out[k] = {};
+    let counters = {};
+    sample[k].forEach(([date,text])=>{
+      counters[date] = counters[date] || 0;
+      const slot = counters[date];
+      if(slot < 2){
+        out[k][date] = out[k][date] || [];
+        out[k][date][slot] = {text, on: slot===0};
+      }
+      counters[date]++;
+    });
+  });
+  return out;
+}
+
+function fresh(){
+  return {
+    profile:'Normal', mode:'color', mark:'none',
+    colors:{...builtinProfiles.Normal},
+    marked:{},
+    entries: sampleToEntries(),
+    customProfiles:{},
+    activeCustomProfile:null,
+    headerFollowsEntries:false,
+    headerFollowsEntriesColor:false,
+    dayheadLeaderLine:false,
+    markColorsHeader:false
+  };
+}
+
+let state = JSON.parse(localStorage.getItem('spectra6-profile-editor') || 'null') || fresh();
+if(!state.entries) state.entries = sampleToEntries();
+if(!state.marked) state.marked = {};
+if(!state.customProfiles) state.customProfiles = {};
+if(typeof state.activeCustomProfile === 'undefined') state.activeCustomProfile = null;
+if(typeof state.headerFollowsEntries !== 'boolean') state.headerFollowsEntries = false;
+if(typeof state.headerFollowsEntriesColor !== 'boolean') state.headerFollowsEntriesColor = false;
+if(typeof state.dayheadLeaderLine !== 'boolean') state.dayheadLeaderLine = false;
+if(typeof state.markColorsHeader !== 'boolean') state.markColorsHeader = false;
+if(!MARK_VALUES.includes(state.mark)) state.mark = 'none';
+if(!state.colors) state.colors = {...builtinProfiles.Normal};
+COLOR_KEYS.forEach(k=>{ if(typeof state.colors[k] === 'undefined') state.colors[k] = builtinProfiles.Normal[k]; });
+
+Object.keys(calNames).forEach(k=>{
+  state.entries[k] = state.entries[k] || {};
+  days.forEach(d=>{
+    const dayObj = state.entries[k][d.date] = state.entries[k][d.date] || [];
+    [0,1].forEach(j=>{
+      const v = dayObj[j];
+      if(typeof v === 'string'){ dayObj[j] = {text:v, on:j===0}; }
+      else if(!v || typeof v !== 'object' || typeof v.on !== 'boolean'){ dayObj[j] = {text:(v&&v.text)||'', on:j===0}; }
+    });
+  });
+});
+
+const profileEl = document.querySelector('#profile');
+const modeEl = document.querySelector('#mode');
+const markEl = document.querySelector('#mark');
+const headerFollowsEl = document.querySelector('#headerFollowsEntries');
+const headerFollowsColorEl = document.querySelector('#headerFollowsEntriesColor');
+const leaderLineEl = document.querySelector('#dayheadLeaderLine');
+const markColorsHeaderEl = document.querySelector('#markColorsHeader');
+
+modeEl.value = state.mode;
+markEl.value = state.mark;
+headerFollowsEl.checked = state.headerFollowsEntries;
+headerFollowsColorEl.checked = state.headerFollowsEntriesColor;
+leaderLineEl.checked = state.dayheadLeaderLine;
+markColorsHeaderEl.checked = state.markColorsHeader;
+
+function hex(v){ return P[v] || v; }
+
+function lum(hexColor){
+  let n = parseInt(hexColor.slice(1), 16);
+  let r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+  [r,g,b] = [r,g,b].map(x=>{ x/=255; return x<=0.03928 ? x/12.92 : Math.pow((x+0.055)/1.055, 2.4); });
+  return 0.2126*r + 0.7152*g + 0.0722*b;
+}
+function ratio(a,b){ let x=lum(a), y=lum(b); return (Math.max(x,y)+0.05)/(Math.min(x,y)+0.05); }
+function contrastInk(bgHex){ return ratio('#000000', bgHex) >= ratio('#ffffff', bgHex) ? '#000000' : '#ffffff'; }
+
+function mono(modeVal){
+  return modeVal==='mono-invert'
+    ? {page:'#000000', ink:'#ffffff', headBg:'#ffffff', headInk:'#000000'}
+    : {page:'#ffffff', ink:'#000000', headBg:'#000000', headInk:'#ffffff'};
+}
+function isMono(){ return state.mode!=='color'; }
+
+function renderProfileOptions(){
+  profileEl.innerHTML='';
+  const addOpt=(value,text)=>{ let o=document.createElement('option'); o.value=value; o.textContent=text; profileEl.append(o); };
+  addOpt('Normal','Normal'); addOpt('Invertiert','Invertiert');
+  const customNames = Object.keys(state.customProfiles).sort((a,b)=>a.localeCompare(b,'de'));
+  if(customNames.length){
+    let group=document.createElement('optgroup'); group.label='Gespeicherte Profile';
+    customNames.forEach(name=>{ let o=document.createElement('option'); o.value='custom:'+name; o.textContent=name; group.append(o); });
+    profileEl.append(group);
+  }
+  addOpt('Benutzerdefiniert','Benutzerdefiniert (unbenannt)');
+  if(state.profile==='Benutzerdefiniert') profileEl.value='Benutzerdefiniert';
+  else if(state.activeCustomProfile && state.customProfiles[state.activeCustomProfile]) profileEl.value='custom:'+state.activeCustomProfile;
+  else if(builtinProfiles[state.profile]) profileEl.value=state.profile;
+  else profileEl.value='Benutzerdefiniert';
+}
+
+// Profile-selector <option> refresh only -- the actual colour inputs now live directly inside
+// the "normal" rows of the state table (see colorPickerCell / renderStateTable), so there is no
+// separate colour-editor grid to rebuild anymore.
+function renderColorEditor(){
+  renderProfileOptions();
+}
+
+let dc=document.querySelector('#dayChecks');
+function renderDayChecks(){
+  dc.innerHTML='';
+  days.forEach(d=>{
+    let l=document.createElement('label'); l.className='switch';
+    let cb=document.createElement('input'); cb.type='checkbox'; cb.checked=!!state.marked[d.date];
+    cb.onchange=()=>{ state.marked[d.date]=cb.checked; render(); };
+    l.append(cb, document.createTextNode(d.label));
+    dc.append(l);
+  });
+}
+
+let en=document.querySelector('#entries');
+function renderEntries(){
+  en.innerHTML='';
+  Object.keys(calNames).forEach(k=>{
+    let box2=document.createElement('div'); box2.className='calendar-box';
+    let title=document.createElement('div'); title.className='calendar-title'; title.textContent='Kalender '+k.toUpperCase()+' – '+calNames[k];
+    box2.append(title);
+    days.forEach(d=>{
+      [0,1].forEach(j=>{
+        state.entries[k][d.date] = state.entries[k][d.date] || [];
+        state.entries[k][d.date][j] = state.entries[k][d.date][j] || {text:'', on:j===0};
+        const entry = state.entries[k][d.date][j];
+        let row=document.createElement('div'); row.className='entry'; if(!entry.on) row.classList.add('disabled');
+        let cb=document.createElement('input'); cb.type='checkbox'; cb.checked=!!entry.on; cb.title='Eintrag im Layout anzeigen';
+        cb.onchange=()=>{ entry.on=cb.checked; renderEntries(); render(); };
+        let lab=document.createElement('label'); lab.textContent=d.label+' #'+(j+1);
+        let input=document.createElement('input'); input.type='text'; input.value=entry.text;
+        input.oninput=()=>{ entry.text=input.value; render(); };
+        row.append(cb, lab, input);
+        box2.append(row);
+      });
+    });
+    en.append(box2);
+  });
+}
+
+function showNote(msg, kind){
+  let note=document.querySelector('#profileNote');
+  note.innerHTML=msg; note.className='note status-'+(kind||'info');
+  clearTimeout(showNote.t);
+  showNote.t=setTimeout(()=>{ note.innerHTML=''; note.className='note'; }, 4000);
+}
+
+function swatchCell(hexValue){
+  if(hexValue === null || typeof hexValue === 'undefined'){
+    return '<span class="muted">–</span>';
+  }
+  const v = hexValue.toUpperCase();
+  return '<span class="swatch-cell"><span class="swatch" style="background:'+v+'"></span><span class="hexcode">'+v+'</span></span>';
+}
+
+function anyDayMarked(){
+  return Object.keys(state.marked).some(date => !!state.marked[date]);
+}
+
+// Computes every base value (page/ink/headBg/headInk/topBg/topInk/calendars/markBg/markInk/markEventInk)
+// from the 16 raw colours + mode + mark, mirroring the preview render exactly.
+function computeBase(){
+  const c = state.colors;
+  const monoV = isMono();
+  const m = monoV ? mono(state.mode) : null;
+  const page = monoV ? m.page : hex(c.textBg);
+  const ink = monoV ? m.ink : hex(c.text);
+  const headBg = monoV ? m.headBg : hex(c.headerBg);
+  const headInk = monoV ? m.headInk : hex(c.headerText);
+  const topBg = monoV ? m.headBg : hex(c.topBg);
+  const topInk = monoV ? m.headInk : hex(c.topText);
+
+  let calResolved = {};
+  Object.keys(calNames).forEach(k=>{
+    calResolved[k] = { ink: monoV ? ink : hex(c[k]), bg: monoV ? page : hex(c[k+'Bg']) };
+  });
+
+  let markBg;
+  if(!monoV){
+    markBg = state.mark==='none' ? page : (MARK_HEX[state.mark] || page);
+  } else {
+    markBg = state.mark!=='none' ? (state.mode==='mono-invert' ? '#ffffff' : '#000000') : page;
+  }
+  const markInk = state.mark!=='none' ? contrastInk(markBg) : ink;
+  const markEventInk = monoV && state.mark!=='none' ? contrastInk(markBg) : ink;
+
+  return {monoV, page, ink, headBg, headInk, topBg, topInk, calResolved, markBg, markInk, markEventInk};
+}
+
+// Each "normal" row is EDITABLE via a colour picker bound to its raw colour key (bgKey/textKey) --
+// the picker ALWAYS shows and writes the actual raw colour (rawBg/rawText), so editing never gets
+// confused by a switch temporarily overriding what's displayed elsewhere. Separately, "bg"/"text"
+// carry the fully computed, EFFECTIVE colour (same branching as computeBase()/render()), because
+// "Header folgt Eintragsfarbe" can make the Tages-Header show the Tagesfläche colours instead of its
+// own raw colour, even on an unmarked day. When effective != raw, renderStateTable adds a small
+// "effektiv: ..." note next to the picker so the switch's impact is never silently invisible.
+function buildStateRows(){
+  const base = computeBase();
+  const c = state.colors;
+  const rows = [];
+
+  // Oberster Header is never affected by any switch or by markColorsHeader/headerFollows, so its
+  // effective value always equals its raw colour, in both "normal" and "markiert" state.
+  rows.push({ name:'Oberster Header', stateLabel:'normal', bg: base.topBg, text: base.topInk,
+    rawBg: hex(c.topBg), rawText: hex(c.topText), bgKey:'topBg', textKey:'topText', editable:true });
+  rows.push({ name:'Oberster Header', stateLabel:'markiert', bg: base.topBg, text: base.topInk, editable:false });
+
+  // Mirrors render()'s exact if/else-if chain for the day header:
+  //   headerFollowsOn -> BOTH normal and marked days switch away from headerBg/headerText
+  //   markColorsHeader (only on the MARKED day) -> then overrides with the Wechselmodell colour
+  let headNormalBg = base.headBg, headNormalInk = base.headInk;
+  let headMarkedBg = base.headBg, headMarkedInk = base.headInk;
+  const headerFollowsOn = base.monoV ? state.headerFollowsEntries : state.headerFollowsEntriesColor;
+  if(headerFollowsOn){
+    headNormalBg = base.page; headNormalInk = base.ink;
+    headMarkedBg = base.markBg; headMarkedInk = base.monoV ? base.markEventInk : base.ink;
+  }
+  if(state.markColorsHeader){
+    headMarkedBg = base.markBg; headMarkedInk = base.monoV ? base.markEventInk : base.markInk;
+  }
+  rows.push({ name:'Tages-Header', stateLabel:'normal', bg:headNormalBg, text:headNormalInk,
+    rawBg: hex(c.headerBg), rawText: hex(c.headerText), bgKey:'headerBg', textKey:'headerText', editable:true });
+  rows.push({ name:'Tages-Header', stateLabel:'markiert', bg:headMarkedBg, text:headMarkedInk, editable:false });
+
+  const bodyMarkApplies = !state.markColorsHeader;
+  rows.push({ name:'Tagesfläche', stateLabel:'normal', bg: base.page, text: base.ink,
+    rawBg: hex(c.textBg), rawText: hex(c.text), bgKey:'textBg', textKey:'text', editable:true });
+  rows.push({ name:'Tagesfläche', stateLabel:'markiert',
+    bg: bodyMarkApplies ? base.markBg : base.page,
+    text: bodyMarkApplies ? (base.monoV ? base.markEventInk : base.ink) : base.ink, editable:false });
+
+  Object.keys(calNames).forEach(k=>{
+    const cal = base.calResolved[k];
+    rows.push({ name:'Kalendereintrag '+k.toUpperCase()+' ('+calNames[k]+')', stateLabel:'normal',
+      bg: cal.bg, text: cal.ink, rawBg: hex(c[k+'Bg']), rawText: hex(c[k]), bgKey:k+'Bg', textKey:k, editable:true });
+    rows.push({ name:'Kalendereintrag '+k.toUpperCase()+' ('+calNames[k]+')', stateLabel:'markiert',
+      bg: bodyMarkApplies ? base.markBg : cal.bg, text:cal.ink, editable:false });
+  });
+
+  return rows;
+}
+
+function colorPickerCell(currentHex, key){
+  let input=document.createElement('input');
+  input.type='color'; input.className='color'; input.style.width='90px';
+  input.value=hex(currentHex);
+  input.oninput=()=>{
+    state.profile='Benutzerdefiniert'; state.activeCustomProfile=null;
+    state.colors[key]=input.value;
+    renderProfileOptions(); render();
+  };
+  let wrap=document.createElement('span'); wrap.className='swatch-cell';
+  let code=document.createElement('span'); code.className='hexcode'; code.textContent=hex(currentHex).toUpperCase();
+  wrap.append(input, code);
+  return wrap;
+}
+
+function editableCellWithEffective(rawHex, effectiveHex, key){
+  let container=document.createElement('div');
+  container.append(colorPickerCell(rawHex, key));
+  if(hex(rawHex).toLowerCase() !== hex(effectiveHex).toLowerCase()){
+    let note=document.createElement('div');
+    note.style.fontSize='10px'; note.style.color='#0a5ab0'; note.style.marginTop='2px';
+    note.innerHTML = 'effektiv: ' + swatchCell(effectiveHex);
+    note.title = 'Ein Schalter (z. B. "Header folgt Eintragsfarbe") überschreibt hier die Rohfarbe -- die Vorschau und die Firmware zeigen diesen Wert, die Rohfarbe im Picker bleibt zum Bearbeiten trotzdem sichtbar.';
+    container.append(note);
+  }
+  return container;
+}
+
+function renderStateTable(){
+  const tbody = document.querySelector('#stateTableBody');
+  if(!tbody) return;
+  tbody.innerHTML='';
+  const rows = buildStateRows();
+  const marked = anyDayMarked();
+  rows.forEach(row=>{
+    let tr=document.createElement('tr');
+    if(row.stateLabel==='markiert' && !marked) tr.style.opacity='0.5';
+
+    let nameTd=document.createElement('td'); nameTd.className='element-name'; nameTd.textContent=row.name;
+    let stateTd=document.createElement('td');
+    stateTd.innerHTML = row.stateLabel + (row.stateLabel==='markiert' && !marked ? ' <span class="muted">(kein Tag markiert)</span>' : '');
+
+    let bgTd=document.createElement('td');
+    let textTd=document.createElement('td');
+    if(row.editable){
+      bgTd.append(editableCellWithEffective(row.rawBg, row.bg, row.bgKey));
+      textTd.append(editableCellWithEffective(row.rawText, row.text, row.textKey));
+    } else {
+      bgTd.innerHTML = swatchCell(row.bg);
+      textTd.innerHTML = swatchCell(row.text);
+    }
+
+    tr.append(nameTd, stateTd, bgTd, textTd);
+    tbody.append(tr);
+  });
+}
+
+function render(){
+  const base = computeBase();
+  const r=document.documentElement;
+  r.classList.toggle('mono', base.monoV);
+  r.classList.toggle('header-only-mark', !!state.markColorsHeader);
+
+  r.style.setProperty('--page', base.page);
+  r.style.setProperty('--ink', base.ink);
+  r.style.setProperty('--header-bg', base.headBg);
+  r.style.setProperty('--header-ink', base.headInk);
+  r.style.setProperty('--top-bg', base.topBg);
+  r.style.setProperty('--top-ink', base.topInk);
+  Object.keys(calNames).forEach(k=>{
+    r.style.setProperty('--'+k, base.calResolved[k].ink);
+    r.style.setProperty('--'+k+'-bg', base.calResolved[k].bg);
+  });
+  r.style.setProperty('--mark', base.markBg);
+  r.style.setProperty('--mark-ink', base.markInk);
+  r.style.setProperty('--mark-event-ink', base.markEventInk);
+
+  let p=document.querySelector('#preview'); p.innerHTML='';
+  let top=document.createElement('div'); top.className='top';
+  let left=document.createElement('span'); left.className='top-left';
+  const topCalendarLabels = Object.keys(calNames).map(k=>({key:k, name:calNames[k], color: base.monoV?base.topInk:hex(state.colors[k])}));
+  left.innerHTML = topCalendarLabels.map(o=>'<span style="color:'+o.color+'">'+o.name+'</span>').join(' &nbsp; ');
+  let mid=document.createElement('span'); mid.textContent='17.09.2026   09:02';
+  let right=document.createElement('span'); right.className='top-right'; right.textContent='26°C   49%';
+  top.append(left, mid, right);
+
+  let grid=document.createElement('div'); grid.className='days';
+  layoutPlan.forEach(plan=>{
+    const d = days.find(x=>x.date===plan.date);
+    const isToday = plan.date===TODAY_ISO;
+    const isMarked = !!state.marked[plan.date];
+    const markAffectsEntries = isMarked && !state.markColorsHeader;
+    let el=document.createElement('div'); el.className='day'+(isToday?' today':'')+(isMarked?' marked':'');
+    el.style.gridColumn=String(plan.col); el.style.gridRow=plan.rowStart+' / span '+plan.rowSpan;
+
+    let all=[];
+    Object.keys(calNames).forEach(k=>{
+      const dayEntries = state.entries[k]?.[d.date];
+      if(dayEntries){
+        [0,1].forEach(j=>{
+          const entry=dayEntries[j];
+          if(entry && entry.on && typeof entry.text==='string' && entry.text.trim()){
+            all.push({k, text:entry.text.trim(), slot:j});
+          }
+        });
+      }
+    });
+
+    let dayHeadBg=base.headBg, dayHeadInk=base.headInk;
+    const headerFollowsOn = base.monoV ? state.headerFollowsEntries : state.headerFollowsEntriesColor;
+    if(state.markColorsHeader && isMarked){
+      dayHeadBg=base.markBg; dayHeadInk=base.monoV?base.markEventInk:base.markInk;
+      el.style.setProperty('--dayhead-bg', dayHeadBg); el.style.setProperty('--dayhead-ink', dayHeadInk);
+    } else if(headerFollowsOn){
+      if(isMarked){ dayHeadBg=base.markBg; dayHeadInk = base.monoV?base.markEventInk:base.ink; } else { dayHeadBg=base.page; dayHeadInk=base.ink; }
+      el.style.setProperty('--dayhead-bg', dayHeadBg); el.style.setProperty('--dayhead-ink', dayHeadInk);
+    }
+
+    let hd=document.createElement('div'); hd.className='dayhead';
+    if(state.dayheadLeaderLine){ hd.innerHTML='<span>'+d.label+'</span><span class="leader"></span><span>'+d.low+'°/'+d.high+'°</span>'; }
+    else { hd.innerHTML='<span>'+d.label+'</span><span>'+d.low+'°/'+d.high+'°</span>'; }
+
+    let body=document.createElement('div'); body.className='daybody';
+    const capacity=plan.capacity;
+    const total=all.length;
+    let visibleCount, hiddenCount;
+    if(total>capacity){ visibleCount=capacity-1; hiddenCount=total-visibleCount; } else { visibleCount=total; hiddenCount=0; }
+
+    all.slice(0, visibleCount).forEach(x=>{
+      let ev=document.createElement('div'); ev.className='event '+x.k; ev.textContent=x.text; body.append(ev);
+    });
+    if(hiddenCount>0){
+      let more=document.createElement('div'); more.className='more'; more.textContent='+'+hiddenCount+' more'; body.append(more);
+    }
+
+    el.append(hd, body); grid.append(el);
+  });
+  p.append(top, grid);
+
+  localStorage.setItem('spectra6-profile-editor', JSON.stringify(state));
+  renderStateTable();
+}
+
+profileEl.onchange=()=>{
+  const v=profileEl.value;
+  if(v==='Benutzerdefiniert'){ state.profile='Benutzerdefiniert'; state.activeCustomProfile=null; }
+  else if(v.startsWith('custom:')){
+    const name=v.slice(7);
+    if(state.customProfiles[name]){
+      state.profile='Benutzerdefiniert'; state.activeCustomProfile=name;
+      const p = state.customProfiles[name];
+      state.colors={...p.colors};
+      if(p.mode) state.mode=p.mode;
+      if(MARK_VALUES.includes(p.mark)) state.mark=p.mark;
+      if(typeof p.headerFollowsEntries==='boolean') state.headerFollowsEntries=p.headerFollowsEntries;
+      if(typeof p.headerFollowsEntriesColor==='boolean') state.headerFollowsEntriesColor=p.headerFollowsEntriesColor;
+      if(typeof p.dayheadLeaderLine==='boolean') state.dayheadLeaderLine=p.dayheadLeaderLine;
+      if(typeof p.markColorsHeader==='boolean') state.markColorsHeader=p.markColorsHeader;
+      modeEl.value=state.mode; markEl.value=state.mark;
+      headerFollowsEl.checked=state.headerFollowsEntries; headerFollowsColorEl.checked=state.headerFollowsEntriesColor;
+      leaderLineEl.checked=state.dayheadLeaderLine; markColorsHeaderEl.checked=state.markColorsHeader;
+    }
+  } else if(builtinProfiles[v]){ state.profile=v; state.activeCustomProfile=null; state.colors={...builtinProfiles[v]}; }
+  renderColorEditor(); render();
+};
+
+modeEl.onchange=()=>{ state.mode=modeEl.value; render(); };
+markEl.onchange=()=>{ state.mark=markEl.value; render(); };
+headerFollowsEl.onchange=()=>{ state.headerFollowsEntries=headerFollowsEl.checked; render(); };
+headerFollowsColorEl.onchange=()=>{ state.headerFollowsEntriesColor=headerFollowsColorEl.checked; render(); };
+leaderLineEl.onchange=()=>{ state.dayheadLeaderLine=leaderLineEl.checked; render(); };
+markColorsHeaderEl.onchange=()=>{ state.markColorsHeader=markColorsHeaderEl.checked; render(); };
+
+// --- SIMPLE FIRMWARE PROFILE SCHEMA ---
+// Exactly: the 16 raw colours + the 4 switches + Zielanzeige (mode) + Wechselmodell-Farbe (mark).
+// No overrides, no entries/marked-days state -- those are editor conveniences, not part of a colour
+// profile that the firmware needs to reproduce the element/state colour table 1:1.
+function buildProfilePayload(name){
+  return {
+    type:'spectra6-firmware-profile', version:1, name,
+    mode: state.mode,
+    mark: state.mark,
+    headerFollowsEntries: state.headerFollowsEntries,
+    headerFollowsEntriesColor: state.headerFollowsEntriesColor,
+    dayheadLeaderLine: state.dayheadLeaderLine,
+    markColorsHeader: state.markColorsHeader,
+    colors: {...state.colors}
+  };
+}
+
+function applyProfilePayload(p){
+  if(!p || typeof p !== 'object' || !p.colors) throw new Error('Ungültiges Format: colors fehlt.');
+  const missing = COLOR_KEYS.filter(k=>!(k in p.colors));
+  if(missing.length) throw new Error('Farbwerte fehlen: '+missing.join(', '));
+  state.colors = {...p.colors};
+  state.mode = p.mode || 'color';
+  state.mark = MARK_VALUES.includes(p.mark) ? p.mark : 'none';
+  state.headerFollowsEntries = !!p.headerFollowsEntries;
+  state.headerFollowsEntriesColor = !!p.headerFollowsEntriesColor;
+  state.dayheadLeaderLine = !!p.dayheadLeaderLine;
+  state.markColorsHeader = !!p.markColorsHeader;
+  modeEl.value=state.mode; markEl.value=state.mark;
+  headerFollowsEl.checked=state.headerFollowsEntries; headerFollowsColorEl.checked=state.headerFollowsEntriesColor;
+  leaderLineEl.checked=state.dayheadLeaderLine; markColorsHeaderEl.checked=state.markColorsHeader;
+}
+
+document.querySelector('#save').onclick=()=>{
+  const suggested=state.activeCustomProfile||'';
+  const name=window.prompt('Name für dieses Farbprofil', suggested);
+  if(!name) return;
+  const trimmed=name.trim(); if(!trimmed) return;
+  state.customProfiles[trimmed]=buildProfilePayload(trimmed);
+  state.profile='Benutzerdefiniert'; state.activeCustomProfile=trimmed;
+  localStorage.setItem('spectra6-profile-editor', JSON.stringify(state));
+  renderColorEditor(); render();
+  showNote('Profil "'+trimmed+'" wurde gespeichert und ist jetzt in der Liste auswählbar.', 'info');
+};
+
+document.querySelector('#deleteProfile').onclick=()=>{
+  if(!state.activeCustomProfile || !state.customProfiles[state.activeCustomProfile]){
+    showNote('Kein gespeichertes Profil ausgewählt, das gelöscht werden könnte.', 'bad'); return;
+  }
+  const name=state.activeCustomProfile;
+  delete state.customProfiles[name];
+  state.activeCustomProfile=null; state.profile='Normal'; state.colors={...builtinProfiles.Normal};
+  localStorage.setItem('spectra6-profile-editor', JSON.stringify(state));
+  renderColorEditor(); render();
+  showNote('Profil "'+name+'" wurde gelöscht.', 'info');
+};
+
+document.querySelector('#reset').onclick=()=>{
+  state=fresh();
+  modeEl.value=state.mode; markEl.value=state.mark;
+  headerFollowsEl.checked=state.headerFollowsEntries; headerFollowsColorEl.checked=state.headerFollowsEntriesColor;
+  leaderLineEl.checked=state.dayheadLeaderLine; markColorsHeaderEl.checked=state.markColorsHeader;
+  renderColorEditor(); renderDayChecks(); renderEntries(); render();
+};
+
+document.querySelector('#exportProfile').onclick=()=>{
+  const exportName = state.activeCustomProfile || (state.profile!=='Benutzerdefiniert' ? state.profile : 'Benutzerdefiniert');
+  const payload = buildProfilePayload(exportName);
+  const blob=new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='spectra6-firmware-profil-'+exportName.replace(/[^a-z0-9-]/gi,'_')+'.json';
+  document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  showNote('Profil "'+exportName+'" wurde als JSON exportiert.', 'info');
+};
+
+document.querySelector('#importProfileBtn').onclick=()=>document.querySelector('#importProfileFile').click();
+document.querySelector('#importProfileFile').onchange=(ev)=>{
+  const file=ev.target.files && ev.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const data=JSON.parse(reader.result);
+      applyProfilePayload(data);
+      const importedName = data.name && String(data.name).trim() || file.name.replace(/\.json$/i,'');
+      state.customProfiles[importedName]=buildProfilePayload(importedName);
+      state.profile='Benutzerdefiniert'; state.activeCustomProfile=importedName;
+      localStorage.setItem('spectra6-profile-editor', JSON.stringify(state));
+      renderColorEditor(); render();
+      showNote('Profil "'+importedName+'" wurde importiert und gespeichert.', 'info');
+    } catch(err){ showNote('Import fehlgeschlagen: '+err.message, 'bad'); }
+    finally{ ev.target.value=''; }
+  };
+  reader.onerror=()=>{ showNote('Datei konnte nicht gelesen werden.', 'bad'); ev.target.value=''; };
+  reader.readAsText(file);
+};
+
+// Sends the current profile straight to the device's own storage (POST
+// /api/agenda/color-profile?slot=N - see agenda_color_profile.h/http_server.c) instead of
+// downloading a JSON file to import by hand. Only works when this page is actually served BY the
+// device itself (same-origin fetch) - opening this file locally (file://) or from an unrelated
+// host has no device to talk to, so a failed request is reported plainly rather than silently
+// swallowed.
+document.querySelector('#sendToDevice').onclick=async()=>{
+  const exportName = state.activeCustomProfile || (state.profile!=='Benutzerdefiniert' ? state.profile : 'Benutzerdefiniert');
+  const payload = buildProfilePayload(exportName);
+  const slot = document.querySelector('#deviceSlot').value;
+  try{
+    const res = await fetch('/api/agenda/color-profile?slot='+slot, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if(!res.ok){ throw new Error((await res.text()) || ('HTTP '+res.status)); }
+    showNote('Profil "'+exportName+'" wurde in Slot '+slot+' auf dem Gerät gespeichert.', 'info');
+  } catch(err){
+    showNote('Senden an das Gerät fehlgeschlagen: '+(err.message||err)+' - ist diese Seite vom Gerät selbst geladen?', 'bad');
+  }
+};
+
+renderColorEditor();
+renderDayChecks();
+renderEntries();
+render();
+</script>
+</body>
+</html>
