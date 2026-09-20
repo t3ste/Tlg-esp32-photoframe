@@ -1022,6 +1022,26 @@ async function performFactoryReset() {
               only for mains/USB-powered frames, not battery-only ones.
             </div>
 
+            <v-switch
+              v-model="settingsStore.deviceSettings.wifiReprovisionOnFailEnabled"
+              label="Reprovision (clear saved WiFi credentials) when connection attempts run out"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              On (default) - unchanged existing behavior: once every retry above is exhausted, the
+              frame clears its saved WiFi password and reboots into setup mode. Turn off if that
+              reprovisioning cycle keeps repeating even though your password is correct (e.g. a
+              nearby repeater the frame still can't reliably reach) - the frame then keeps the
+              saved credentials instead of wiping them: if Deep Sleep is enabled it goes to sleep
+              until its next scheduled wake and tries again fresh from there, otherwise it just
+              continues starting up without WiFi this cycle (nothing here blocks - every later
+              network step already tolerates being offline) and retries on the next cold boot. A
+              confirmed-wrong password is never affected by this switch and always reprovisions
+              immediately either way.
+            </div>
+
             <v-row>
               <v-col cols="12" md="6">
                 <v-select

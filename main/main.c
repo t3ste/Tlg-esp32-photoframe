@@ -919,6 +919,36 @@ void app_main(void)
                  total_attempts, WIFI_COLD_BOOT_EXTENDED_MAX_TOTAL_ATTEMPTS);
         vTaskDelay(pdMS_TO_TICKS(WIFI_COLD_BOOT_REBOOT_BACKOFF_MS));
         esp_restart();
+    } else if (!credential_reject && !config_manager_get_wifi_reprovision_on_fail_enabled()) {
+        // Real incident (2026-09-19): a device a few meters from a repeater
+        // kept hitting this exact exhaustion on WIFI_REASON_AUTH_EXPIRE/
+        // CONNECTION_FAIL (never a real reject reason) and cycled wipe ->
+        // reprovision -> exhaust -> wipe again indefinitely, needing a fresh
+        // manual reprovision every time despite the saved credentials being
+        // correct throughout. With this opt-out, a non-rejection exhaustion
+        // keeps the credentials instead - a genuine rejection above is
+        // completely unaffected and still wipes after a single attempt,
+        // since a wrong password can't fix itself by waiting.
+        if (extended_retry) {
+            config_manager_set_wifi_coldboot_fail_count(0);  // giving up on WiFi this cycle anyway
+        }
+        ESP_LOGW(TAG,
+                 "WiFi still unreachable after %d attempt(s) (not a credential rejection) - "
+                 "reprovisioning is disabled, keeping saved credentials",
+                 total_attempts);
+        if (config_manager_get_deep_sleep_enabled()) {
+            ESP_LOGI(TAG,
+                     "Deep sleep is enabled - sleeping until the next scheduled wake "
+                     "instead of reprovisioning");
+            power_manager_enter_sleep();  // schedules the next timer wake itself; never returns
+        }
+        ESP_LOGI(TAG,
+                 "Deep sleep is disabled - continuing this boot without WiFi. The rest of "
+                 "startup below is WiFi-optional (gated on wifi_manager_is_connected() or "
+                 "independently timeout-bounded), so this does not block; WiFi will be "
+                 "retried fresh on the next cold boot.");
+        // Deliberately falls through to the shared startup code below rather
+        // than returning or restarting - see this branch's own comment.
     } else {
         ESP_LOGW(TAG, "Failed to connect to WiFi after %d attempt(s) - clearing credentials",
                  credential_reject ? 1 : total_attempts);

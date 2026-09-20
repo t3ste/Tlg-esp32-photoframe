@@ -128,8 +128,18 @@ details.editor[open] > summary{border-bottom:1px solid #eee;border-radius:8px 8p
     </div>
     <label class="switch"><input id="headerFollowsEntries" type="checkbox"> Header folgt Eintragsfarbe (Monochrom)</label>
     <label class="switch"><input id="headerFollowsEntriesColor" type="checkbox"> Header folgt Eintragsfarbe (Spectra6)</label>
+    <label class="switch" title="Nur relevant wenn 'Header folgt Eintragsfarbe (Spectra6)' an ist und 'Nur Header markierter Tage in Markierfarbe' aus ist: der markierte Tagesheader übernimmt sonst die normale Text-Rohfarbe unverändert, was bei einer Text-/Markierfarben-Kombination wie Weiß auf Weiß unlesbar werden kann. Mit dieser Option wird stattdessen - nur für den markierten Header, der restliche Tag bleibt unverändert - automatisch Schwarz oder Weiß gewählt, je nachdem was auf der Markierfarbe besser lesbar ist."><input id="headerFollowsEntriesColorSafeInk" type="checkbox"> Markierter Header: Text automatisch kontrastsicher</label>
     <label class="switch"><input id="dayheadLeaderLine" type="checkbox"> Punktlinie zwischen Tag und Temperatur</label>
     <label class="switch"><input id="markColorsHeader" type="checkbox"> Nur Header markierter Tage in Markierfarbe</label>
+    <label class="switch" title="Ohne diese Option zeigt die gestrichelte Trennlinie im Tagesheader zwischen ihren Strichen die Seiten-Hintergrundfarbe statt der Header-Farbe - das kann wie zwei verschiedene Farben in einem Header wirken. Wirkt sich nur auf der Firmware aus, nicht in dieser Vorschau."><input id="headerDividerFilled" type="checkbox"> Trennlinie im Tagesheader ohne Lücken (Vollfarbe)</label>
+    <div class="field">
+      <label for="iconBg" title="Eigene Hintergrundfarbe für das Wetter-Icon eines UNMARKIERTEN Tages, unabhängig von der Tagesheader-Farbe - verhindert, dass ein Icon (dessen Farbe den Wetterzustand anzeigt und nicht änderbar ist) im gleichen Farbton wie der Header unsichtbar wird. Auf Monochrom-Zielanzeigen wird diese Farbe ignoriert (das Icon bekommt dort automatisch immer die zum jeweiligen Tagesheader entgegengesetzte Farbe). Wirkt sich nur auf der Firmware aus, nicht in dieser Vorschau.">Wetter-Icon Hintergrund (unmarkiert)</label>
+      <input type="color" id="iconBg" value="#ffffff">
+    </div>
+    <div class="field">
+      <label for="iconBgMarked" title="Eigene Hintergrundfarbe für das Wetter-Icon eines MARKIERTEN Tages (Wechselmodell) - unabhängig von der Hintergrundfarbe oben, die dann nur noch für unmarkierte Tage gilt. Ohne eigene Wahl gleich der unmarkierten Farbe. Auf Monochrom-Zielanzeigen ignoriert, wie oben. Wirkt sich nur auf der Firmware aus, nicht in dieser Vorschau.">Wetter-Icon Hintergrund (markiert)</label>
+      <input type="color" id="iconBgMarked" value="#ffffff">
+    </div>
     <div class="hint">Farbprofil-Editor für die eInk-Firmware. Farben direkt in der Zustandstabelle bearbeiten, Kalendertage markieren und Termine anpassen.</div>
   </div>
 
@@ -200,6 +210,11 @@ const P = { black:'#000000', white:'#ffffff', red:'#ff0000', yellow:'#ffff00', b
 const MARK_VALUES = ['none','black','white','red','yellow','blue','green'];
 const MARK_HEX = { black:'#000000', white:'#ffffff', red:'#ff0000', yellow:'#ffff00', blue:'#0000ff', green:'#00ff00' };
 const MARK_LABEL = { none:'Keine Markierung', black:'Schwarz', white:'Weiß', red:'Rot', yellow:'Gelb', blue:'Blau', green:'Grün' };
+// Not part of COLOR_KEYS/labels below - the firmware treats "iconBg" as an
+// optional colour (falls back to white if a profile predates this field),
+// unlike the 16 required ones, so it's kept out of the required-field
+// validation applyProfilePayload() runs against COLOR_KEYS.
+const ICON_BG_DEFAULT = '#ffffff';
 
 const builtinProfiles = {
   Normal: {
@@ -319,15 +334,17 @@ function sampleToEntries(){
 function fresh(){
   return {
     profile:'Normal', mode:'color', mark:'none',
-    colors:{...builtinProfiles.Normal},
+    colors:{...builtinProfiles.Normal, iconBg: ICON_BG_DEFAULT, iconBgMarked: ICON_BG_DEFAULT},
     marked:{},
     entries: sampleToEntries(),
     customProfiles:{},
     activeCustomProfile:null,
     headerFollowsEntries:false,
     headerFollowsEntriesColor:false,
+    headerFollowsEntriesColorSafeInk:false,
     dayheadLeaderLine:false,
-    markColorsHeader:false
+    markColorsHeader:false,
+    headerDividerFilled:false
   };
 }
 
@@ -338,11 +355,15 @@ if(!state.customProfiles) state.customProfiles = {};
 if(typeof state.activeCustomProfile === 'undefined') state.activeCustomProfile = null;
 if(typeof state.headerFollowsEntries !== 'boolean') state.headerFollowsEntries = false;
 if(typeof state.headerFollowsEntriesColor !== 'boolean') state.headerFollowsEntriesColor = false;
+if(typeof state.headerFollowsEntriesColorSafeInk !== 'boolean') state.headerFollowsEntriesColorSafeInk = false;
 if(typeof state.dayheadLeaderLine !== 'boolean') state.dayheadLeaderLine = false;
 if(typeof state.markColorsHeader !== 'boolean') state.markColorsHeader = false;
+if(typeof state.headerDividerFilled !== 'boolean') state.headerDividerFilled = false;
 if(!MARK_VALUES.includes(state.mark)) state.mark = 'none';
 if(!state.colors) state.colors = {...builtinProfiles.Normal};
 COLOR_KEYS.forEach(k=>{ if(typeof state.colors[k] === 'undefined') state.colors[k] = builtinProfiles.Normal[k]; });
+if(typeof state.colors.iconBg === 'undefined') state.colors.iconBg = ICON_BG_DEFAULT;
+      if(typeof state.colors.iconBgMarked === 'undefined') state.colors.iconBgMarked = ICON_BG_DEFAULT;
 
 Object.keys(calNames).forEach(k=>{
   state.entries[k] = state.entries[k] || {};
@@ -361,15 +382,23 @@ const modeEl = document.querySelector('#mode');
 const markEl = document.querySelector('#mark');
 const headerFollowsEl = document.querySelector('#headerFollowsEntries');
 const headerFollowsColorEl = document.querySelector('#headerFollowsEntriesColor');
+const headerFollowsColorSafeInkEl = document.querySelector('#headerFollowsEntriesColorSafeInk');
 const leaderLineEl = document.querySelector('#dayheadLeaderLine');
 const markColorsHeaderEl = document.querySelector('#markColorsHeader');
+const headerDividerFilledEl = document.querySelector('#headerDividerFilled');
+const iconBgEl = document.querySelector('#iconBg');
+const iconBgMarkedEl = document.querySelector('#iconBgMarked');
 
 modeEl.value = state.mode;
 markEl.value = state.mark;
 headerFollowsEl.checked = state.headerFollowsEntries;
 headerFollowsColorEl.checked = state.headerFollowsEntriesColor;
+headerFollowsColorSafeInkEl.checked = state.headerFollowsEntriesColorSafeInk;
 leaderLineEl.checked = state.dayheadLeaderLine;
 markColorsHeaderEl.checked = state.markColorsHeader;
+headerDividerFilledEl.checked = state.headerDividerFilled;
+iconBgEl.value = hex(state.colors.iconBg);
+iconBgMarkedEl.value = hex(state.colors.iconBgMarked);
 
 function hex(v){ return P[v] || v; }
 
@@ -526,7 +555,9 @@ function buildStateRows(){
   const headerFollowsOn = base.monoV ? state.headerFollowsEntries : state.headerFollowsEntriesColor;
   if(headerFollowsOn){
     headNormalBg = base.page; headNormalInk = base.ink;
-    headMarkedBg = base.markBg; headMarkedInk = base.monoV ? base.markEventInk : base.ink;
+    headMarkedBg = base.markBg;
+    headMarkedInk = base.monoV ? base.markEventInk
+      : (state.headerFollowsEntriesColorSafeInk ? contrastInk(base.markBg) : base.ink);
   }
   if(state.markColorsHeader){
     headMarkedBg = base.markBg; headMarkedInk = base.monoV ? base.markEventInk : base.markInk;
@@ -667,7 +698,11 @@ function render(){
       dayHeadBg=base.markBg; dayHeadInk=base.monoV?base.markEventInk:base.markInk;
       el.style.setProperty('--dayhead-bg', dayHeadBg); el.style.setProperty('--dayhead-ink', dayHeadInk);
     } else if(headerFollowsOn){
-      if(isMarked){ dayHeadBg=base.markBg; dayHeadInk = base.monoV?base.markEventInk:base.ink; } else { dayHeadBg=base.page; dayHeadInk=base.ink; }
+      if(isMarked){
+        dayHeadBg=base.markBg;
+        dayHeadInk = base.monoV ? base.markEventInk
+          : (state.headerFollowsEntriesColorSafeInk ? contrastInk(base.markBg) : base.ink);
+      } else { dayHeadBg=base.page; dayHeadInk=base.ink; }
       el.style.setProperty('--dayhead-bg', dayHeadBg); el.style.setProperty('--dayhead-ink', dayHeadInk);
     }
 
@@ -705,17 +740,24 @@ profileEl.onchange=()=>{
       state.profile='Benutzerdefiniert'; state.activeCustomProfile=name;
       const p = state.customProfiles[name];
       state.colors={...p.colors};
+      if(typeof state.colors.iconBg === 'undefined') state.colors.iconBg = ICON_BG_DEFAULT;
+      if(typeof state.colors.iconBgMarked === 'undefined') state.colors.iconBgMarked = ICON_BG_DEFAULT;
       if(p.mode) state.mode=p.mode;
       if(MARK_VALUES.includes(p.mark)) state.mark=p.mark;
       if(typeof p.headerFollowsEntries==='boolean') state.headerFollowsEntries=p.headerFollowsEntries;
       if(typeof p.headerFollowsEntriesColor==='boolean') state.headerFollowsEntriesColor=p.headerFollowsEntriesColor;
+      if(typeof p.headerFollowsEntriesColorSafeInk==='boolean') state.headerFollowsEntriesColorSafeInk=p.headerFollowsEntriesColorSafeInk;
       if(typeof p.dayheadLeaderLine==='boolean') state.dayheadLeaderLine=p.dayheadLeaderLine;
       if(typeof p.markColorsHeader==='boolean') state.markColorsHeader=p.markColorsHeader;
+      if(typeof p.headerDividerFilled==='boolean') state.headerDividerFilled=p.headerDividerFilled;
       modeEl.value=state.mode; markEl.value=state.mark;
       headerFollowsEl.checked=state.headerFollowsEntries; headerFollowsColorEl.checked=state.headerFollowsEntriesColor;
+      headerFollowsColorSafeInkEl.checked=state.headerFollowsEntriesColorSafeInk;
       leaderLineEl.checked=state.dayheadLeaderLine; markColorsHeaderEl.checked=state.markColorsHeader;
+      headerDividerFilledEl.checked=state.headerDividerFilled; iconBgEl.value=hex(state.colors.iconBg);
+      iconBgMarkedEl.value=hex(state.colors.iconBgMarked);
     }
-  } else if(builtinProfiles[v]){ state.profile=v; state.activeCustomProfile=null; state.colors={...builtinProfiles[v]}; }
+  } else if(builtinProfiles[v]){ state.profile=v; state.activeCustomProfile=null; state.colors={...builtinProfiles[v], iconBg: ICON_BG_DEFAULT, iconBgMarked: ICON_BG_DEFAULT}; iconBgEl.value=hex(ICON_BG_DEFAULT); iconBgMarkedEl.value=hex(ICON_BG_DEFAULT); }
   renderColorEditor(); render();
 };
 
@@ -723,8 +765,12 @@ modeEl.onchange=()=>{ state.mode=modeEl.value; render(); };
 markEl.onchange=()=>{ state.mark=markEl.value; render(); };
 headerFollowsEl.onchange=()=>{ state.headerFollowsEntries=headerFollowsEl.checked; render(); };
 headerFollowsColorEl.onchange=()=>{ state.headerFollowsEntriesColor=headerFollowsColorEl.checked; render(); };
+headerFollowsColorSafeInkEl.onchange=()=>{ state.headerFollowsEntriesColorSafeInk=headerFollowsColorSafeInkEl.checked; render(); };
 leaderLineEl.onchange=()=>{ state.dayheadLeaderLine=leaderLineEl.checked; render(); };
 markColorsHeaderEl.onchange=()=>{ state.markColorsHeader=markColorsHeaderEl.checked; render(); };
+headerDividerFilledEl.onchange=()=>{ state.headerDividerFilled=headerDividerFilledEl.checked; render(); };
+iconBgEl.oninput=()=>{ state.colors.iconBg=iconBgEl.value; localStorage.setItem('spectra6-profile-editor', JSON.stringify(state)); };
+iconBgMarkedEl.oninput=()=>{ state.colors.iconBgMarked=iconBgMarkedEl.value; localStorage.setItem('spectra6-profile-editor', JSON.stringify(state)); };
 
 // --- SIMPLE FIRMWARE PROFILE SCHEMA ---
 // Exactly: the 16 raw colours + the 4 switches + Zielanzeige (mode) + Wechselmodell-Farbe (mark).
@@ -737,8 +783,10 @@ function buildProfilePayload(name){
     mark: state.mark,
     headerFollowsEntries: state.headerFollowsEntries,
     headerFollowsEntriesColor: state.headerFollowsEntriesColor,
+    headerFollowsEntriesColorSafeInk: state.headerFollowsEntriesColorSafeInk,
     dayheadLeaderLine: state.dayheadLeaderLine,
     markColorsHeader: state.markColorsHeader,
+    headerDividerFilled: state.headerDividerFilled,
     colors: {...state.colors}
   };
 }
@@ -748,15 +796,22 @@ function applyProfilePayload(p){
   const missing = COLOR_KEYS.filter(k=>!(k in p.colors));
   if(missing.length) throw new Error('Farbwerte fehlen: '+missing.join(', '));
   state.colors = {...p.colors};
+  if(typeof state.colors.iconBg === 'undefined') state.colors.iconBg = ICON_BG_DEFAULT;
+      if(typeof state.colors.iconBgMarked === 'undefined') state.colors.iconBgMarked = ICON_BG_DEFAULT;
   state.mode = p.mode || 'color';
   state.mark = MARK_VALUES.includes(p.mark) ? p.mark : 'none';
   state.headerFollowsEntries = !!p.headerFollowsEntries;
   state.headerFollowsEntriesColor = !!p.headerFollowsEntriesColor;
+  state.headerFollowsEntriesColorSafeInk = !!p.headerFollowsEntriesColorSafeInk;
   state.dayheadLeaderLine = !!p.dayheadLeaderLine;
   state.markColorsHeader = !!p.markColorsHeader;
+  state.headerDividerFilled = !!p.headerDividerFilled;
   modeEl.value=state.mode; markEl.value=state.mark;
   headerFollowsEl.checked=state.headerFollowsEntries; headerFollowsColorEl.checked=state.headerFollowsEntriesColor;
+  headerFollowsColorSafeInkEl.checked=state.headerFollowsEntriesColorSafeInk;
   leaderLineEl.checked=state.dayheadLeaderLine; markColorsHeaderEl.checked=state.markColorsHeader;
+  headerDividerFilledEl.checked=state.headerDividerFilled; iconBgEl.value=hex(state.colors.iconBg);
+  iconBgMarkedEl.value=hex(state.colors.iconBgMarked);
 }
 
 document.querySelector('#save').onclick=()=>{
@@ -777,7 +832,8 @@ document.querySelector('#deleteProfile').onclick=()=>{
   }
   const name=state.activeCustomProfile;
   delete state.customProfiles[name];
-  state.activeCustomProfile=null; state.profile='Normal'; state.colors={...builtinProfiles.Normal};
+  state.activeCustomProfile=null; state.profile='Normal'; state.colors={...builtinProfiles.Normal, iconBg: ICON_BG_DEFAULT, iconBgMarked: ICON_BG_DEFAULT};
+  iconBgEl.value=hex(ICON_BG_DEFAULT); iconBgMarkedEl.value=hex(ICON_BG_DEFAULT);
   localStorage.setItem('spectra6-profile-editor', JSON.stringify(state));
   renderColorEditor(); render();
   showNote('Profil "'+name+'" wurde gelöscht.', 'info');
@@ -787,7 +843,10 @@ document.querySelector('#reset').onclick=()=>{
   state=fresh();
   modeEl.value=state.mode; markEl.value=state.mark;
   headerFollowsEl.checked=state.headerFollowsEntries; headerFollowsColorEl.checked=state.headerFollowsEntriesColor;
+  headerFollowsColorSafeInkEl.checked=state.headerFollowsEntriesColorSafeInk;
   leaderLineEl.checked=state.dayheadLeaderLine; markColorsHeaderEl.checked=state.markColorsHeader;
+  headerDividerFilledEl.checked=state.headerDividerFilled; iconBgEl.value=hex(state.colors.iconBg);
+  iconBgMarkedEl.value=hex(state.colors.iconBgMarked);
   renderColorEditor(); renderDayChecks(); renderEntries(); render();
 };
 

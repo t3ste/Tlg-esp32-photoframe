@@ -227,6 +227,13 @@ bool config_manager_get_wifi_extended_retry_enabled(void);
 void config_manager_set_wifi_coldboot_fail_count(int count);
 int config_manager_get_wifi_coldboot_fail_count(void);
 
+// Whether a cold-boot connect exhaustion may wipe the saved SSID/password
+// and reprovision at all - see NVS_WIFI_REPROV_ON_FAIL_KEY in config.h.
+// Defaults to true (unchanged existing behavior); a genuine credential
+// rejection always wipes regardless of this setting.
+void config_manager_set_wifi_reprovision_on_fail_enabled(bool enabled);
+bool config_manager_get_wifi_reprovision_on_fail_enabled(void);
+
 // Orientation pairing during normal (non-Telegram) auto-rotation - random
 // mode only. Defaults to false. See NVS_ROTATION_PAIRING_ENABLED_KEY in
 // config.h.

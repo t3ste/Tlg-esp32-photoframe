@@ -87,6 +87,7 @@ static bool wifi_performance_mode_enabled = true;
 static bool wifi_tx_power_cap_enabled = true;
 static bool wifi_extended_retry_enabled = false;
 static int wifi_coldboot_fail_count = 0;
+static bool wifi_reprovision_on_fail_enabled = true;
 static bool rotation_pairing_enabled = false;
 static bool variant_selection_enabled = false;
 static bool telegram_rotation_notify_enabled = false;
@@ -916,6 +917,11 @@ esp_err_t config_manager_init(void)
         if (nvs_get_i32(nvs_handle, NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY, &stored_wifi_cb_fail) ==
             ESP_OK) {
             wifi_coldboot_fail_count = (int) stored_wifi_cb_fail;
+        }
+
+        uint8_t stored_wifi_reprov = 1;  // Default to enabled - see config.h
+        if (nvs_get_u8(nvs_handle, NVS_WIFI_REPROV_ON_FAIL_KEY, &stored_wifi_reprov) == ESP_OK) {
+            wifi_reprovision_on_fail_enabled = (stored_wifi_reprov != 0);
         }
 
         uint8_t stored_rotation_pairing = 0;
@@ -2403,6 +2409,25 @@ void config_manager_set_wifi_coldboot_fail_count(int count)
 int config_manager_get_wifi_coldboot_fail_count(void)
 {
     return wifi_coldboot_fail_count;
+}
+
+void config_manager_set_wifi_reprovision_on_fail_enabled(bool enabled)
+{
+    wifi_reprovision_on_fail_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_WIFI_REPROV_ON_FAIL_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "WiFi reprovision-on-failure %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_wifi_reprovision_on_fail_enabled(void)
+{
+    return wifi_reprovision_on_fail_enabled;
 }
 
 void config_manager_set_rotation_pairing_enabled(bool enabled)

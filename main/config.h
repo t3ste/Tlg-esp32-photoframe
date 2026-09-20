@@ -421,6 +421,25 @@ typedef enum {
 // surfaced via the HTTP API (nothing for a user to usefully do with it).
 #define NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY "wifi_cb_fail"
 
+// Whether a cold-boot connect exhaustion (WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS,
+// or the extended-retry cap above if that's also on) is allowed to wipe the
+// saved SSID/password and reboot into provisioning at all. On (default):
+// unchanged existing behavior. Off: a genuine credential rejection still
+// wipes immediately either way (a wrong password can't fix itself), but a
+// non-rejection exhaustion instead keeps the credentials and, if deep sleep
+// is enabled, goes to sleep until the next scheduled wake (which retries the
+// whole connection sequence fresh) - or, if deep sleep is disabled (USB/
+// always-on/Home-Assistant-polled use), just continues the rest of the
+// normal boot flow without WiFi this cycle rather than blocking here, since
+// every network-touching step past this point either already checks
+// wifi_manager_is_connected() first or has its own bounded timeout. Real
+// incident (2026-09-19): a device a few meters from a repeater kept hitting
+// this exact exhaustion path on WIFI_REASON_AUTH_EXPIRE/CONNECTION_FAIL
+// (never a real reject reason) and cycled through repeated wipe ->
+// reprovision -> exhaust -> wipe again, needing a fresh manual reprovision
+// every time despite the saved credentials being correct the whole time.
+#define NVS_WIFI_REPROV_ON_FAIL_KEY "wifi_reprov_en"
+
 // Orientation-pairing during normal (non-Telegram) auto-rotation: when the
 // randomly-picked next image doesn't match the panel's orientation, look for
 // another mismatched image in the active album(s) and combine them instead

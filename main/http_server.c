@@ -1646,6 +1646,8 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_wifi_tx_power_cap_enabled());
         cJSON_AddBoolToObject(root, "wifi_extended_retry_enabled",
                               config_manager_get_wifi_extended_retry_enabled());
+        cJSON_AddBoolToObject(root, "wifi_reprovision_on_fail_enabled",
+                              config_manager_get_wifi_reprovision_on_fail_enabled());
         cJSON_AddBoolToObject(root, "rotation_pairing_enabled",
                               config_manager_get_rotation_pairing_enabled());
         cJSON_AddBoolToObject(root, "variant_selection_enabled",

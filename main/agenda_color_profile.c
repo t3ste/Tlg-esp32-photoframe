@@ -85,6 +85,16 @@ static void set_err(char *err_out, size_t err_out_len, const char *msg)
     }
 }
 
+// Shared by every optional boolean switch field (markColorsHeader,
+// headerDividerFilled, headerFollowsEntries/Color, dayheadLeaderLine) -
+// missing or non-boolean defaults to false, matching this project's
+// fail-soft style for a profile that predates one of these fields.
+static bool parse_optional_bool(cJSON *root, const char *key)
+{
+    cJSON *v = cJSON_GetObjectItem(root, key);
+    return (v && cJSON_IsBool(v)) ? cJSON_IsTrue(v) : false;
+}
+
 static void fill_default(agenda_color_profile_t *out)
 {
     memset(out, 0, sizeof(*out));
@@ -95,6 +105,8 @@ static void fill_default(agenda_color_profile_t *out)
     out->header_bg = black;
     out->top_text = white;
     out->top_bg = black;
+    out->icon_bg = white;
+    out->icon_bg_marked = white;
     for (int i = 0; i < 5; i++) {
         out->cal_ink[i] = black;
         out->cal_bg[i] = white;
@@ -137,8 +149,13 @@ static bool parse_payload(cJSON *root, agenda_color_profile_t *out, char *name_o
         out->has_mark = false;
     }
 
-    cJSON *mch_json = cJSON_GetObjectItem(root, "markColorsHeader");
-    out->mark_colors_header = (mch_json && cJSON_IsBool(mch_json)) ? cJSON_IsTrue(mch_json) : false;
+    out->mark_colors_header = parse_optional_bool(root, "markColorsHeader");
+    out->header_divider_filled = parse_optional_bool(root, "headerDividerFilled");
+    out->header_follows_entries = parse_optional_bool(root, "headerFollowsEntries");
+    out->header_follows_entries_color = parse_optional_bool(root, "headerFollowsEntriesColor");
+    out->header_follows_entries_color_safe_ink =
+        parse_optional_bool(root, "headerFollowsEntriesColorSafeInk");
+    out->dayhead_leader_line = parse_optional_bool(root, "dayheadLeaderLine");
 
     cJSON *colors = cJSON_GetObjectItem(root, "colors");
     if (!colors || !cJSON_IsObject(colors)) {
@@ -175,6 +192,26 @@ static bool parse_payload(cJSON *root, agenda_color_profile_t *out, char *name_o
     for (int i = 0; i < 5; i++) {
         out->cal_ink[i] = parsed[6 + i];
         out->cal_bg[i] = parsed[11 + i];
+    }
+
+    // "iconBg" is optional (not part of the required 16 above) so a profile
+    // exported before this field existed still imports cleanly - falls back
+    // to fill_default()'s white rather than failing validation.
+    cJSON *icon_bg_json = cJSON_GetObjectItem(colors, "iconBg");
+    if (icon_bg_json && cJSON_IsString(icon_bg_json)) {
+        parse_color_value(icon_bg_json->valuestring, &out->icon_bg);
+    }
+
+    // "iconBgMarked" (optional): the weather icon's background on a MARKED
+    // day, independently choosable from "iconBg" above (which becomes the
+    // unmarked-day value once this is set). Defaults to the same value as
+    // "iconBg" when absent - a profile that predates this field, or simply
+    // never set it, keeps rendering identically on both marked and unmarked
+    // days, exactly as before.
+    out->icon_bg_marked = out->icon_bg;
+    cJSON *icon_bg_marked_json = cJSON_GetObjectItem(colors, "iconBgMarked");
+    if (icon_bg_marked_json && cJSON_IsString(icon_bg_marked_json)) {
+        parse_color_value(icon_bg_marked_json->valuestring, &out->icon_bg_marked);
     }
 
     if (name_out && name_out_len > 0) {
