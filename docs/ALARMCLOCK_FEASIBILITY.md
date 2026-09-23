@@ -8,14 +8,17 @@ work reliably and was removed per the user's call rather than tuned; a crash whe
 setting UI from deep sleep, `assert failed: tcpip_send_msg_wait_sem ... Invalid mbox`, caused by an
 earlier fix skipping WiFi driver init entirely instead of just the connection attempt; and a
 press-duration measurement bug that silently required ~5.5-6s of holding instead of the intended
-3s). Live-confirmed via the user's own serial capture (`Versuch4.log`): deep-sleep KEY-wake
-correctly measuring ~3s, no crash, normal operation continuing afterward, the 10s inactivity
-timeout disarming correctly, and a full button-driven hour/minute/confirm cycle arming a rule
-correctly. **Still to verify**: the return-to-sleep-after-exiting behavior specifically, which
-needs a real battery (non-USB) test - the test device stayed USB-connected throughout testing so
-far, which correctly and deliberately skips that path rather than exercising it. Phase 6 (offline
-voice "Alarm off" detection) is still just design/research, not implemented. The rest of this
-document is the original feasibility research, kept as-is for reference.
+3s). Live-confirmed via the user's own serial captures (`Versuch4.log`/`Versuch5.log`/`Versuch6.log`):
+deep-sleep KEY-wake correctly measuring ~3s, no crash, no unwanted WiFi connection or HTTP server
+start on that path, the 10s inactivity timeout disarming correctly, a full button-driven
+hour/minute/confirm cycle arming a rule correctly, **and the device correctly returning to deep
+sleep within milliseconds of confirming, specifically when not USB-powered** (`Versuch5.log`:
+"Alarm armed via button UI" immediately followed by "Preparing to enter deep sleep mode") - the one
+previously-outstanding "can this even be observed" item, now closed. On USB power the device
+correctly stays awake instead (also confirmed live), matching the deliberate
+`!board_hal_is_usb_connected()` guard. Phases 0-3 have no known open issues at this point. Phase 6
+(offline voice "Alarm off" detection) is still just design/research, not implemented. The rest of
+this document is the original feasibility research, kept as-is for reference.
 
 ## 0. Build-time modularity (2026-09-23) — confirmed feasible, follows an existing pattern exactly
 

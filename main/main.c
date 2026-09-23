@@ -1175,8 +1175,18 @@ wifi_setup_done:
     // real numbers on this build.
     xTaskCreate(button_task, "button_task", 16384, NULL, 5, NULL);
 
-    ESP_ERROR_CHECK(http_server_init());
-    http_server_set_ready();
+    // The alarm-setting UI (docs/ALARMCLOCK_FEASIBILITY.md) is a pure
+    // button+audio interaction with no WiFi connection ever attempted on
+    // this path (see the offline-mode-style check above) - nothing could
+    // ever reach an HTTP server here, so starting one is pure overhead with
+    // no purpose, unlike the genuine offline-mode case (which keeps it
+    // running so the separate on-demand AP hotspot can still serve the web
+    // UI later). Confirmed live: the server used to start and log "ready"
+    // on this path anyway, even though nothing could ever connect to it.
+    if (!alarm_setting_ui_is_active()) {
+        ESP_ERROR_CHECK(http_server_init());
+        http_server_set_ready();
+    }
 
     if (wifi_manager_is_connected()) {
         char ip_str[16];
