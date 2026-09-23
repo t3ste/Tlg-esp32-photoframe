@@ -455,6 +455,25 @@ function flashBlockedEnable(message) {
   saveMessage.value = message;
   setTimeout(() => (saveError.value = false), 4000);
 }
+
+// Alarm Clock arm/disarm switch. There's still no separate NVS-level
+// "enabled" flag on the device (armed purely means "has at least one
+// schedule rule" - see config.h's own comment on this) - this switch is
+// just a friendlier front for that same underlying state: off clears the
+// schedule, on with nothing configured yet is blocked with a hint rather
+// than silently doing nothing.
+const alarmArmedModel = computed({
+  get: () => settingsStore.deviceSettings.alarmCron.length > 0,
+  set: (val) => {
+    if (val) {
+      if (settingsStore.deviceSettings.alarmCron.length === 0) {
+        flashBlockedEnable("Add a schedule below first");
+      }
+    } else {
+      settingsStore.deviceSettings.alarmCron = [];
+    }
+  },
+});
 const calendarAbEnabledModel = computed({
   get: () => settingsStore.deviceSettings.agendaCalEnabled,
   set: (val) => {
@@ -1009,6 +1028,9 @@ async function performFactoryReset() {
         <v-tab value="overlays"> Overlays </v-tab>
         <v-tab v-if="settingsStore.deviceSettings.chimeSpeakerAvailable" value="chimes">
           Chimes
+        </v-tab>
+        <v-tab v-if="settingsStore.deviceSettings.alarmClockAvailable" value="alarmClock">
+          Alarm Clock
         </v-tab>
         <v-tab v-if="settingsStore.deviceSettings.climateSensorAvailable" value="climate">
           Climate
@@ -2966,6 +2988,58 @@ async function performFactoryReset() {
               Fires once WiFi/internet has failed several wakes in a row (same threshold as the
               Error Overlay, Overlays tab), repeating each further failed wake, up to 5 times, then
               resets once connectivity recovers.
+            </div>
+          </v-tabs-window-item>
+
+          <!-- Alarm Clock Tab -->
+          <v-tabs-window-item
+            v-if="settingsStore.deviceSettings.alarmClockAvailable"
+            class="mt-2"
+            value="alarmClock"
+          >
+            <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+              Wakes the device with no WiFi, photo rotation, or Agenda render - just the speaker.
+              Ringing plays a repeating G4-C5-E5-C5 tone; a long (3s) press of the KEY/rotate button
+              on the device stops it early.
+            </v-alert>
+
+            <v-switch
+              v-model="alarmArmedModel"
+              :label="alarmArmedModel ? 'Alarm armed' : 'Alarm disarmed'"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              Turning this off clears the schedule below (same as removing every rule from it) -
+              there's no separate device-side flag, being armed just means having at least one
+              schedule rule. A schedule set from the device's own button UI (if available on this
+              board) shows up here too, as "Schedule 1".
+            </div>
+
+            <div class="text-subtitle-2 mb-2">Schedule</div>
+            <RotationSchedule v-model="settingsStore.deviceSettings.alarmCron" />
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Ring duration</div>
+            <v-row dense align="center">
+              <v-col cols="6" sm="3">
+                <v-text-field
+                  v-model.number="settingsStore.deviceSettings.alarmRingDurationSec"
+                  type="number"
+                  min="1"
+                  max="600"
+                  suffix="s"
+                  label="Duration"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              How long the alarm keeps ringing if never stopped early (default 60s, up to 600s).
             </div>
           </v-tabs-window-item>
 

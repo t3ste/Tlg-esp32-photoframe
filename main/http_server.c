@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "agenda_color_profile.h"
+#include "alarm_manager.h"
 #include "album_manager.h"
 #include "battery_history.h"
 #include "board_hal.h"
@@ -1939,6 +1940,26 @@ static esp_err_t config_handler(httpd_req_t *req)
             }
         }
         cJSON_AddItemToObject(root, "agenda_cron", agenda_cron_arr);
+
+        // Alarm Clock - always reported (not just on a build compiled with
+        // CONFIG_ALARM_CLOCK_ENABLED): config_manager_get_alarm_*() and
+        // alarm_manager_is_compiled_in() are harmless no-ops on every other
+        // build, so the Web UI always sees a well-formed but empty/disabled
+        // shape and can decide for itself (via alarm_clock_available)
+        // whether to show the settings tab at all.
+        cJSON_AddBoolToObject(root, "alarm_clock_available", alarm_manager_is_compiled_in());
+        cJSON *alarm_cron_arr = cJSON_CreateArray();
+        int alarm_cron_count = config_manager_get_alarm_cron_rule_count();
+        for (int i = 0; i < alarm_cron_count; i++) {
+            const char *rule = config_manager_get_alarm_cron_rule(i);
+            if (rule) {
+                cJSON_AddItemToArray(alarm_cron_arr, cJSON_CreateString(rule));
+            }
+        }
+        cJSON_AddItemToObject(root, "alarm_cron", alarm_cron_arr);
+        cJSON_AddNumberToObject(root, "alarm_ring_duration_sec",
+                                config_manager_get_alarm_ring_duration_sec());
+
         cJSON_AddBoolToObject(root, "agenda_stack_layout",
                               config_manager_get_agenda_stack_layout());
         cJSON_AddNumberToObject(root, "agenda_color_profile_active",

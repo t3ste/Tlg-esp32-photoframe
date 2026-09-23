@@ -161,6 +161,15 @@ export const useSettingsStore = defineStore("settings", () => {
     // for its own input fields.
     climateTempOffset: 0,
     climateHumOffset: 0,
+    // Alarm Clock - only present in a firmware build compiled with
+    // CONFIG_ALARM_CLOCK_ENABLED (build.py --alarmclock). alarmClockAvailable
+    // is a read-only capability flag (like chimeSpeakerAvailable above),
+    // never sent in a PATCH - the Settings page uses it to hide the whole
+    // tab on a build without the feature. No separate "enabled" toggle: the
+    // alarm is armed purely by having at least one alarmCron rule.
+    alarmClockAvailable: false,
+    alarmCron: [],
+    alarmRingDurationSec: 60,
     // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
     // overlay. agendaTodoUrl/agendaCalUrl are write-only (never returned by
     // GET /api/config, same treatment as wifiPassword above) - both start
@@ -477,6 +486,9 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.climateAgendaHeaderEnabled = data.climate_agenda_header_enabled === true;
       deviceSettings.value.climateTempOffset = data.climate_temp_offset ?? 0;
       deviceSettings.value.climateHumOffset = data.climate_hum_offset ?? 0;
+      deviceSettings.value.alarmClockAvailable = data.alarm_clock_available === true;
+      deviceSettings.value.alarmCron = Array.isArray(data.alarm_cron) ? data.alarm_cron : [];
+      deviceSettings.value.alarmRingDurationSec = data.alarm_ring_duration_sec ?? 60;
       deviceSettings.value.agendaTodoEnabled = data.agenda_todo_enabled === true;
       deviceSettings.value.agendaCalEnabled = data.agenda_cal_enabled === true;
       // agenda_todo_url/agenda_cal_url are intentionally never present in
@@ -630,6 +642,8 @@ export const useSettingsStore = defineStore("settings", () => {
       climate_agenda_header_enabled: deviceSettings.value.climateAgendaHeaderEnabled,
       climate_temp_offset: deviceSettings.value.climateTempOffset,
       climate_hum_offset: deviceSettings.value.climateHumOffset,
+      alarm_cron: deviceSettings.value.alarmCron,
+      alarm_ring_duration_sec: deviceSettings.value.alarmRingDurationSec,
       agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
       agenda_cal_c_enabled: deviceSettings.value.agendaCalCEnabled,

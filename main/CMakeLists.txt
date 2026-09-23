@@ -2,6 +2,8 @@ set(SOURCES
     "agenda_color_profile.c"
     "agenda_manager.c"
     "agenda_renderer.c"
+    "alarm_manager.c"
+    "alarm_setting_ui.c"
     "album_manager.c"
     "battery_history.c"
     "calendar_ics.c"

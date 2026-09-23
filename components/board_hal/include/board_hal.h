@@ -207,6 +207,56 @@ typedef enum {
  */
 esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volume_percent);
 
+/**
+ * @brief Play the repeating bedside-alarm tone until stopped or time runs out
+ *
+ * Fixed note sequence G4-C5-E5-C5 (392/523/659/523 Hz), 300ms each, followed
+ * by a 5s silent pause, repeating - see docs/ALARMCLOCK_FEASIBILITY.md. Unlike
+ * board_hal_play_beep_pattern() this can run for minutes, so it needs a way
+ * to stop early: @p should_stop is polled once per note and several times
+ * during each silent pause (not just once every 5s), so a stop request is
+ * noticed within roughly one polling interval, not a hard real-time
+ * deadline. Blocking; shares the same serializing mutex as
+ * board_hal_play_beep_pattern() (the two can't run at once).
+ *
+ * @param volume_percent 0-100, same DAC volume mapping as board_hal_play_beep_pattern()
+ * @param total_duration_ms Give up and stop after this long even if should_stop() never fires
+ * @param should_stop Polled periodically during playback; returning true stops the alarm early.
+ *        May be NULL to only ever stop via total_duration_ms.
+ * @return ESP_OK on success (whether it ended via timeout or should_stop()), ESP_ERR_NOT_SUPPORTED
+ *         if no speaker, or another error if the codec / I2S path failed
+ */
+esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_ms,
+                               bool (*should_stop)(void));
+
+// One note in a board_hal_play_notes() sequence: `freq_hz` 0 plays
+// `duration_ms` of silence instead of a tone (used for the gap between
+// beeps in a counted sequence).
+typedef struct {
+    float freq_hz;
+    int duration_ms;
+} board_hal_note_t;
+
+/**
+ * @brief Play an arbitrary sequence of tones/silences within one audio session
+ *
+ * General-purpose primitive behind the alarm-setting button UI's feedback
+ * sounds (hour/minute counted beeps at different pitches, the midnight/
+ * on-the-hour long tones, the armed/disarmed confirmation sequences - see
+ * docs/ALARMCLOCK_FEASIBILITY.md) - unlike calling board_hal_play_beep_pattern()
+ * once per note, the whole sequence plays inside a single opened session, so
+ * the ~250ms PA settle delay (see audio_chime.c's own comment on this) is
+ * paid once for the whole sequence, not once per note - several short beeps
+ * "hintereinander folgend" would otherwise have an audible gap before each one.
+ *
+ * @param notes Sequence to play in order
+ * @param count Number of entries in `notes`
+ * @param volume_percent 0-100, same DAC volume mapping as board_hal_play_beep_pattern()
+ * @return ESP_OK on success, ESP_ERR_NOT_SUPPORTED if no speaker, or another
+ *         error if the codec / I2S path failed
+ */
+esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t volume_percent);
+
 #ifdef __cplusplus
 }
 #endif

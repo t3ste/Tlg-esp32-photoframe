@@ -156,6 +156,21 @@ static int agenda_cron_rule_count = 0;
 // config_manager_set_agenda_cron_rules() below).
 static cron_rule_t agenda_cron_compiled[MAX_CRON_RULES];
 static int agenda_cron_compiled_count = -1;
+
+// Alarm clock schedule - only present in a CONFIG_ALARM_CLOCK_ENABLED build
+// (main/Kconfig, `build.py --alarmclock`). Every public
+// config_manager_*_alarm_* function below has a stub in the #else branch
+// (empty schedule / no-op setter / default duration) so callers in main.c,
+// power_manager.c, http_server.c, and utils.c never need their own #ifdef -
+// same convention as board_hal_has_speaker() on boards without a speaker.
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+static char alarm_cron_rules_store[MAX_CRON_RULES][CRON_RULE_MAX_LEN] = {{0}};
+static int alarm_cron_rule_count = 0;
+static cron_rule_t alarm_cron_compiled[MAX_CRON_RULES];
+static int alarm_cron_compiled_count = -1;
+static uint16_t alarm_ring_duration_sec = ALARM_RING_DURATION_DEFAULT_SEC;
+#endif
+
 static bool agenda_stack_layout = AGENDA_STACK_DEFAULT;
 static char agenda_pri_a_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PRI_A_DEFAULT;
 static char agenda_pri_b_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PRI_B_DEFAULT;
@@ -323,6 +338,20 @@ static void agenda_nvs_set_u8(const char *key, uint8_t value)
     }
 }
 
+static void agenda_nvs_set_u16(const char *key, uint16_t value)
+{
+    if (agenda_nvs_batching) {
+        nvs_set_u16(agenda_nvs_batch_handle, key, value);
+        return;
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u16(h, key, value);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
 static void agenda_nvs_set_str(const char *key, const char *value)
 {
     if (agenda_nvs_batching) {
@@ -461,6 +490,55 @@ static void agenda_cron_persist(void)
 
     agenda_nvs_set_str_or_erase(NVS_AGENDA_CRON_KEY, joined);
 }
+
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+// ----------------------------------------------------------------------------
+// Alarm clock cron schedule helpers - independent third schedule, identical
+// '\n'-joined NVS encoding to the rotate/agenda schedules above. No seeded
+// default (see config.h's own comment on NVS_ALARM_CRON_KEY) - an empty
+// schedule on a fresh device just means no alarm is set.
+// ----------------------------------------------------------------------------
+
+static void alarm_cron_load_from_joined(const char *joined)
+{
+    alarm_cron_rule_count = 0;
+    alarm_cron_compiled_count = -1;  // rule strings changed - stale compiled cache
+    if (!joined) {
+        return;
+    }
+    const char *p = joined;
+    while (*p && alarm_cron_rule_count < MAX_CRON_RULES) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t) (nl - p) : strlen(p);
+        if (len > 0 && len < CRON_RULE_MAX_LEN) {
+            memcpy(alarm_cron_rules_store[alarm_cron_rule_count], p, len);
+            alarm_cron_rules_store[alarm_cron_rule_count][len] = '\0';
+            alarm_cron_rule_count++;
+        }
+        if (!nl) {
+            break;
+        }
+        p = nl + 1;
+    }
+}
+
+static void alarm_cron_persist(void)
+{
+    char joined[MAX_CRON_RULES * CRON_RULE_MAX_LEN];
+    joined[0] = '\0';
+    size_t off = 0;
+    for (int i = 0; i < alarm_cron_rule_count; i++) {
+        int n = snprintf(joined + off, sizeof(joined) - off, "%s%s", i ? "\n" : "",
+                         alarm_cron_rules_store[i]);
+        if (n < 0 || (size_t) n >= sizeof(joined) - off) {
+            break;
+        }
+        off += n;
+    }
+
+    agenda_nvs_set_str_or_erase(NVS_ALARM_CRON_KEY, joined);
+}
+#endif  // CONFIG_ALARM_CLOCK_ENABLED
 
 // ----------------------------------------------------------------------------
 // Telegram pending-image list helpers (queue of images waiting for an
@@ -1243,6 +1321,24 @@ esp_err_t config_manager_init(void)
                 ESP_LOGI(TAG, "No agenda schedule in NVS, using default: %s", DEFAULT_AGENDA_CRON);
             }
         }
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+        {
+            static char alarm_cron_buf[MAX_CRON_RULES * CRON_RULE_MAX_LEN];
+            alarm_cron_buf[0] = '\0';
+            size_t alarm_cron_len = sizeof(alarm_cron_buf);
+            if (nvs_get_str(nvs_handle, NVS_ALARM_CRON_KEY, alarm_cron_buf, &alarm_cron_len) ==
+                ESP_OK) {
+                alarm_cron_load_from_joined(alarm_cron_buf);
+                ESP_LOGI(TAG, "Loaded %d alarm cron rule(s) from NVS", alarm_cron_rule_count);
+            }
+            // No default seeded here - see config.h's NVS_ALARM_CRON_KEY comment.
+        }
+        uint16_t stored_alarm_ring_sec = ALARM_RING_DURATION_DEFAULT_SEC;
+        if (nvs_get_u16(nvs_handle, NVS_ALARM_RING_SEC_KEY, &stored_alarm_ring_sec) == ESP_OK &&
+            stored_alarm_ring_sec > 0 && stored_alarm_ring_sec <= ALARM_RING_DURATION_MAX_SEC) {
+            alarm_ring_duration_sec = stored_alarm_ring_sec;
+        }
+#endif
         uint8_t stored_agenda_stack = AGENDA_STACK_DEFAULT ? 1 : 0;
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_STACK_KEY, &stored_agenda_stack) == ESP_OK) {
             agenda_stack_layout = (stored_agenda_stack != 0);
@@ -3619,6 +3715,103 @@ int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max)
     }
     return n;
 }
+
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+int config_manager_get_alarm_cron_rule_count(void)
+{
+    return alarm_cron_rule_count;
+}
+
+const char *config_manager_get_alarm_cron_rule(int index)
+{
+    if (index < 0 || index >= alarm_cron_rule_count) {
+        return NULL;
+    }
+    return alarm_cron_rules_store[index];
+}
+
+void config_manager_set_alarm_cron_rules(const char *const *rules, int count)
+{
+    alarm_cron_rule_count = 0;
+    alarm_cron_compiled_count = -1;  // rule strings changed - stale compiled cache
+    for (int i = 0; i < count && alarm_cron_rule_count < MAX_CRON_RULES; i++) {
+        if (!rules[i] || rules[i][0] == '\0' || strlen(rules[i]) >= CRON_RULE_MAX_LEN) {
+            continue;
+        }
+        strncpy(alarm_cron_rules_store[alarm_cron_rule_count], rules[i], CRON_RULE_MAX_LEN - 1);
+        alarm_cron_rules_store[alarm_cron_rule_count][CRON_RULE_MAX_LEN - 1] = '\0';
+        alarm_cron_rule_count++;
+    }
+    alarm_cron_persist();
+    ESP_LOGI(TAG, "Alarm schedule set to %d cron rule(s)", alarm_cron_rule_count);
+}
+
+int config_manager_get_compiled_alarm_cron_rules(cron_rule_t *out, int max)
+{
+    if (alarm_cron_compiled_count < 0) {
+        int n = 0;
+        for (int i = 0; i < alarm_cron_rule_count && n < MAX_CRON_RULES; i++) {
+            if (cron_parse(alarm_cron_rules_store[i], &alarm_cron_compiled[n])) {
+                n++;
+            }
+        }
+        alarm_cron_compiled_count = n;
+    }
+    int n = (alarm_cron_compiled_count < max) ? alarm_cron_compiled_count : max;
+    for (int i = 0; i < n; i++) {
+        out[i] = alarm_cron_compiled[i];
+    }
+    return n;
+}
+
+void config_manager_set_alarm_ring_duration_sec(uint16_t seconds)
+{
+    if (seconds == 0 || seconds > ALARM_RING_DURATION_MAX_SEC) {
+        return;
+    }
+    alarm_ring_duration_sec = seconds;
+    agenda_nvs_set_u16(NVS_ALARM_RING_SEC_KEY, alarm_ring_duration_sec);
+}
+
+uint16_t config_manager_get_alarm_ring_duration_sec(void)
+{
+    return alarm_ring_duration_sec;
+}
+#else
+int config_manager_get_alarm_cron_rule_count(void)
+{
+    return 0;
+}
+
+const char *config_manager_get_alarm_cron_rule(int index)
+{
+    (void) index;
+    return NULL;
+}
+
+void config_manager_set_alarm_cron_rules(const char *const *rules, int count)
+{
+    (void) rules;
+    (void) count;
+}
+
+int config_manager_get_compiled_alarm_cron_rules(cron_rule_t *out, int max)
+{
+    (void) out;
+    (void) max;
+    return 0;
+}
+
+void config_manager_set_alarm_ring_duration_sec(uint16_t seconds)
+{
+    (void) seconds;
+}
+
+uint16_t config_manager_get_alarm_ring_duration_sec(void)
+{
+    return ALARM_RING_DURATION_DEFAULT_SEC;
+}
+#endif  // CONFIG_ALARM_CLOCK_ENABLED
 
 void config_manager_set_agenda_stack_layout(bool stacked)
 {

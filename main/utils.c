@@ -1151,6 +1151,71 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
         config_manager_set_agenda_context_color(cJSON_GetStringValue(item));
     }
+
+    // Alarm clock schedule - same shape/validation as agenda_cron above.
+    // config_manager_set_alarm_cron_rules() is a harmless no-op on a build
+    // without CONFIG_ALARM_CLOCK_ENABLED, so this needs no #ifdef here.
+    item = cJSON_GetObjectItem(root, "alarm_cron");
+    if (item && cJSON_IsArray(item))
+        do {
+            int count = cJSON_GetArraySize(item);
+            if (count > MAX_CRON_RULES) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Too many alarm schedule rules (max %d)",
+                         MAX_CRON_RULES);
+                utils_set_config_error(msg);
+                had_error = true;
+                break;
+            }
+            const char *rules[MAX_CRON_RULES];
+            int n = 0;
+            cJSON *el;
+            bool rule_error = false;
+            cJSON_ArrayForEach(el, item)
+            {
+                if (!cJSON_IsString(el)) {
+                    utils_set_config_error("Alarm schedule rule must be a string");
+                    rule_error = true;
+                    break;
+                }
+                const char *expr = cJSON_GetStringValue(el);
+                if (strlen(expr) >= CRON_RULE_MAX_LEN) {
+                    utils_set_config_error("Cron expression too long");
+                    rule_error = true;
+                    break;
+                }
+                cron_rule_t tmp;
+                if (!cron_parse(expr, &tmp)) {
+                    char msg[96];
+                    snprintf(msg, sizeof(msg), "Invalid alarm cron expression: %s", expr);
+                    utils_set_config_error(msg);
+                    rule_error = true;
+                    break;
+                }
+                if (n < MAX_CRON_RULES) {
+                    rules[n++] = expr;
+                }
+            }
+            if (rule_error) {
+                had_error = true;
+                break;
+            }
+            config_manager_set_alarm_cron_rules(rules, n);
+        } while (0);
+
+    item = cJSON_GetObjectItem(root, "alarm_ring_duration_sec");
+    if (item && cJSON_IsNumber(item)) {
+        if (item->valueint > 0 && item->valueint <= ALARM_RING_DURATION_MAX_SEC) {
+            config_manager_set_alarm_ring_duration_sec((uint16_t) item->valueint);
+        } else {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Alarm ring duration must be 1-%d seconds",
+                     ALARM_RING_DURATION_MAX_SEC);
+            utils_set_config_error(msg);
+            had_error = true;
+        }
+    }
+
     config_manager_end_agenda_batch();
 
     return had_error ? ESP_FAIL : ESP_OK;

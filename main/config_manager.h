@@ -668,4 +668,21 @@ const char *config_manager_get_climate_hum_offset(void);
 void config_manager_set_climate_last_log_time(int64_t timestamp);
 int64_t config_manager_get_climate_last_log_time(void);
 
+// Alarm clock schedule - independent third cron rule set (see the rotate and
+// agenda schedules above), same shape as
+// config_manager_get_agenda_cron_rule_count()/_get_agenda_cron_rule()/
+// _set_agenda_cron_rules()/_get_compiled_agenda_cron_rules(). Only present in
+// a build compiled with CONFIG_ALARM_CLOCK_ENABLED; harmless no-ops (empty
+// schedule, setter silently discards) on every other build so callers never
+// need their own #ifdef.
+int config_manager_get_alarm_cron_rule_count(void);
+const char *config_manager_get_alarm_cron_rule(int index);
+void config_manager_set_alarm_cron_rules(const char *const *rules, int count);
+int config_manager_get_compiled_alarm_cron_rules(cron_rule_t *out, int max);
+
+// How long the alarm rings before giving up if never stopped by a long KEY
+// press (ALARM_RING_DURATION_DEFAULT_SEC/_MAX_SEC in config.h).
+void config_manager_set_alarm_ring_duration_sec(uint16_t seconds);
+uint16_t config_manager_get_alarm_ring_duration_sec(void);
+
 #endif

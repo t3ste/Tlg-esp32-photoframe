@@ -1003,4 +1003,20 @@ typedef enum {
 #define NVS_CLIMATE_HUM_OFFSET_KEY "climate_hoff"
 #define CLIMATE_OFFSET_MAX_LEN 16
 
+// ----------------------------------------------------------------------------
+// Alarm Clock (only present in a build compiled with CONFIG_ALARM_CLOCK_ENABLED
+// - see main/Kconfig, `build.py --alarmclock`, docs/ALARMCLOCK_FEASIBILITY.md).
+// Same simplified 3-field cron grammar/limits as the rotate/agenda schedules
+// above (MAX_CRON_RULES/CRON_RULE_MAX_LEN, reused as-is) - an alarm is
+// "armed" purely by having at least one rule, "permanently disabled" purely
+// by having none, no separate enabled flag. No seeded default: unlike the
+// agenda schedule, there's no "enabled but no schedule" state to unstick -
+// an empty schedule just means no alarm is set, which is the correct
+// starting state for a fresh device.
+// ----------------------------------------------------------------------------
+#define NVS_ALARM_CRON_KEY "alarm_cron"
+#define NVS_ALARM_RING_SEC_KEY "alarm_ring_sec"
+#define ALARM_RING_DURATION_DEFAULT_SEC 60
+#define ALARM_RING_DURATION_MAX_SEC 600  // 10 minutes - generous upper bound, not a hard spec limit
+
 #endif

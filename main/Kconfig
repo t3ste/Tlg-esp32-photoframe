@@ -1,0 +1,18 @@
+menu "Alarm Clock (bedside alarm)"
+
+    config ALARM_CLOCK_ENABLED
+        bool "Enable bedside alarm clock feature"
+        default n
+        help
+            Adds a configurable alarm schedule (Web UI / Telegram) that wakes
+            the device with no WiFi, photo rotation, or Agenda render, plays
+            a repeating tone through the Chimes speaker, and can be stopped
+            with a long KEY press - see docs/ALARMCLOCK_FEASIBILITY.md.
+
+            Off by default and excluded from the build entirely rather than
+            just hidden, since not every supported board can usefully act as
+            a bedside alarm clock (no speaker, no buttons in the required
+            shape, etc.) - enable via `build.py --alarmclock` rather than
+            selecting this directly unless you know what you're doing.
+
+endmenu

@@ -1,0 +1,383 @@
+# Bedside Alarm Clock feature — feasibility & effort assessment
+
+**Status (2026-09-24): Phases 0-3 implemented and real-hardware-confirmed working**, including a
+long KEY press straight from actual deep sleep - see `docs/DIFF.md`'s "Alarm Clock" entry for
+shipped behavior and the project runbook's own section on this feature for the full incident
+history (three rounds of live testing found and fixed: a fast-burst batch-press mode that didn't
+work reliably and was removed per the user's call rather than tuned; a crash when entering the
+setting UI from deep sleep, `assert failed: tcpip_send_msg_wait_sem ... Invalid mbox`, caused by an
+earlier fix skipping WiFi driver init entirely instead of just the connection attempt; and a
+press-duration measurement bug that silently required ~5.5-6s of holding instead of the intended
+3s). Live-confirmed via the user's own serial capture (`Versuch4.log`): deep-sleep KEY-wake
+correctly measuring ~3s, no crash, normal operation continuing afterward, the 10s inactivity
+timeout disarming correctly, and a full button-driven hour/minute/confirm cycle arming a rule
+correctly. **Still to verify**: the return-to-sleep-after-exiting behavior specifically, which
+needs a real battery (non-USB) test - the test device stayed USB-connected throughout testing so
+far, which correctly and deliberately skips that path rather than exercising it. Phase 6 (offline
+voice "Alarm off" detection) is still just design/research, not implemented. The rest of this
+document is the original feasibility research, kept as-is for reference.
+
+## 0. Build-time modularity (2026-09-23) — confirmed feasible, follows an existing pattern exactly
+
+Since not every supported board has a speaker, buttons in the required shape, or (for voice) a
+mic, the whole feature should only enter the firmware image when a new build parameter requests
+it — this project already does exactly this for the Chimes feature, at two levels:
+- **File-level exclusion**: `components/board_hal/CMakeLists.txt:22-36` conditionally
+  `list(APPEND SRCS ...)`s each board's driver file based on a Kconfig `choice` — a board not
+  selected gets none of that file's code at all.
+- **Stub-on-`#ifdef`**: `components/board_hal/src/audio_chime.c:6-18` is compiled for every board,
+  but without `CONFIG_BOARD_DRIVER_WAVESHARE_PHOTOPAINTER_73` defined it collapses to a two-line
+  stub (`return false;` / `ESP_ERR_NOT_SUPPORTED`) — the real ES8311 driver and tone synthesis are
+  fully dead-code-eliminated, not just hidden.
+- **Build-flag plumbing already exists as a template**: `build.py`'s `build_firmware()`
+  (`build.py:103-116`) joins `sdkconfig.defaults;boards/sdkconfig.defaults.<board>` and, only when
+  `--debug` is passed, appends a further `sdkconfig.defaults.debug` overlay — the exact mechanism
+  a new `--alarmclock` flag would reuse verbatim (append `sdkconfig.defaults.alarmclock`, which
+  sets a new `CONFIG_ALARM_CLOCK_ENABLED=y`).
+
+**Recommended shape**:
+1. New Kconfig bool `ALARM_CLOCK_ENABLED` (default off), plus a new `build.py --alarmclock` flag
+   appending a matching sdkconfig-defaults overlay — mirrors `--debug` exactly.
+2. The feature's own new source files (`alarm_manager.c`, and later `voice_recognition.c`/
+   `mfcc_dtw.c`/an ES7210 driver) are excluded at the `main/CMakeLists.txt` SOURCES-list level via
+   `if(CONFIG_ALARM_CLOCK_ENABLED) ... endif()` — the board_hal driver-file pattern, not the
+   single-file stub pattern, since this feature spans multiple new files and the stub approach
+   would mean compiling real MFCC tables/DSP code just to discard it.
+3. The handful of integration points in existing files (`main.c`'s wake dispatch, `http_server.c`'s
+   route registration, `config_manager.c`'s getters/setters) call unconditional thin wrapper
+   functions declared in the alarm module's own header — exactly how `chime.c` already calls
+   `board_hal_has_speaker()`/`board_hal_play_beep_pattern()` unconditionally today regardless of
+   board, with the `#ifdef` living inside the callee, not at every call site.
+4. New `alarm_clock_available` boolean on `GET /api/config`, mirroring the existing
+   `chime_speaker_available`/`climate_sensor_available` fields, so the webapp can hide the entire
+   Alarm settings tab on a build without the feature compiled in at all (not just individual
+   controls within it).
+
+**One real limitation to flag**: the webapp's JS bundle is built identically for every board today
+— there is no existing mechanism to exclude part of the Vue bundle per feature/board (Chimes and
+Climate both solve "not every board has this" by shipping their tab's code in every build and
+hiding it at runtime via `v-if`, not by shrinking the bundle). Recommend following that same
+established convention for the Alarm UI rather than introducing new webapp build-variant tooling —
+the actual flash/RAM/compute savings this modularity is meant to protect live entirely on the
+firmware (C) side, which the Kconfig approach above already fully addresses.
+
+## Summary verdict
+
+| Sub-feature | Feasible? | Effort | Notes |
+|---|---|---|---|
+| Alarm schedule(s), Web UI + Telegram config | Yes, straightforward | **Small** (~1 day) | Directly reuses the existing cron-rule pattern (`agenda_cron`) end to end |
+| Alarm ringing (G4-C5-E5-C5 loop, adjustable duration, minimal wake) | Yes | **Small–Medium** (~1-2 days) | Reuses `audio_chime.c`'s tone/silence primitives almost as-is; the "no WiFi/rotation" wake path needs new, careful wiring |
+| Button-based time-setting UI (long-press KEY enter/exit, BOOT=hours/KEY=minutes roll+batch, tone feedback) | Yes | **Medium** (~3-4 days incl. on-device tuning) | Finalized 2026-09-23: enter/exit/confirm/stop-ringing all use long-press KEY (genuinely free today), hours on short-press BOOT, minutes on short-press KEY, voice-enrollment entry on long-press BOOT while already in setting mode — **every gesture in the whole feature is now "one button, meaning depends on current state," no PMIC work and no simultaneous-chord detection needed anywhere** |
+| Offline voice "Alarm off" detection (MFCC + DTW) | Feasible, but the biggest unknown | **Large** (1.5–3 weeks, open-ended) | The mic hardware (ES7210 ADC) exists on this board per the schematic, but **this firmware has zero driver code for it today** — this is a full new bring-up project, not a feature bolted onto existing code. Recommend treating as an optional, separate, later phase gated on a hardware-verification spike |
+| Extension: show next alarm time as a display overlay | Yes | **Small** | Direct fit for `overlay_manager.c`'s existing badge-composition pattern (same convention as the climate temperature/humidity badges) |
+| Build-time opt-in (whole feature only in firmware when requested) | Yes | **Small** (~half a day of scaffolding) | Directly reuses the exact Kconfig + `build.py`-flag + conditional-SOURCES pattern this project already ships for Chimes/per-board drivers — no new tooling concept needed |
+
+Nothing here is a hard blocker. The scheduling and ringing pieces are cheap because they reuse two
+already-mature subsystems (cron rules, tone synthesis). The button UI's remaining risk is now
+purely in new state-machine logic (no hardware/PMIC gap left after the 2026-09-23 button
+reassignment); the voice recognition is the one piece needing genuinely new hardware bring-up plus
+a DSP pipeline this codebase has never had any equivalent of.
+
+## 1. Alarm scheduling — reuse the existing cron infrastructure directly
+
+`main/cron.c`'s `cron_rule_t` (minute/hour/day-of-week bitmasks, parsed from a 3-field string like
+`"0 7 1-5"` = 07:00 Mon–Fri) already expresses exactly "one or more repeating times, on an
+adjustable subset of weekdays" — the default-workdays requirement falls straight out of this
+without any change to `cron.c` itself.
+
+`config_manager.c` has this storage pattern implemented **twice already** (`rotate_cron` and
+`agenda_cron` — matching fixed-size string arrays, NVS persistence, a memoized `cron_parse()`
+cache invalidated on change, `config_manager_set_*_cron_rules()`/`get_compiled_*_cron_rules()`
+pairs). A third `alarm_cron` set is a close-to-mechanical copy of that block: new NVS key(s), same
+load/persist/get/set/compile functions, a new options array + cron-rule UI in
+`SettingsPanel.vue` mirroring the existing Agenda schedule editor, and a new `PATCH /api/config`
+field following the same pattern the config-import robustness fix (see `docs/DIFF.md`) just made
+safe for. A Telegram command (`/alarm 07:00 Mon-Fri`, or similar) is a thin wrapper around the same
+setter, following `telegram_bot.c`'s existing command-dispatch pattern (it already calls into
+`album_manager_set_album_enabled()` etc. from a bot command handler today).
+
+**Effort: small.** This is the lowest-risk piece of the whole feature and can be built and tested
+independently of everything else (including the physical-button UI — the cron rule(s) can be fully
+useful via Web UI/Telegram alone, with the button UI as an enhancement layered on top later).
+
+## 2. Alarm ringing — mostly reuses `audio_chime.c`, needs a new "minimal wake" path
+
+**Tone synthesis is already fully general.** `board_hal/src/audio_chime.c`'s `play_tone(freq_hz,
+duration_ms, amplitude)` synthesizes an arbitrary-frequency sine wave on the fly (not fixed
+melodies), and `i2s_write_silence()` writes an exact silent gap. G4 (392 Hz) – C5 (523 Hz) – E5
+(659 Hz) – C5 (523 Hz), 300 ms each, then a 5 s gap, is a straightforward new orchestration
+function sitting next to the existing `play_beep_pattern_tones()` (which only knows 3 fixed
+severity patterns today) — **no new low-level audio code needed**, only a new sequencing loop.
+- The project's own hard-won 250 ms PA-settle-delay fix (`audio_session_open()`) must be preserved
+  — don't shorten it "to make the first alarm beep punchier."
+- `audio_session_open()`/`_close()` currently opens/closes I2S+ES8311 per call; a minute-long
+  repeating alarm should keep one session open for its whole duration (loop tones+silence inside
+  it) rather than reopening every phrase.
+- **Abort-on-long-KEY-press is new**: today's `board_hal_play_beep_pattern()` always runs to
+  completion with no early-exit hook. The alarm loop needs to poll for (or be signaled by) a long
+  KEY-press mid-playback — a small but real addition to the button task's existing responsibilities.
+- Web-UI-adjustable duration (default 60 s) is a plain new config field, same shape as
+  `chime_volume` (which is also directly reusable as the alarm's own volume, if desired).
+
+**Minimal-wake (no WiFi/rotation/etc.) is an already-proven pattern, not a new concept** — WiFi
+bring-up on wake is already conditional in `main.c` (skipped for a plain rotation-only wake in
+several existing configurations). An `alarm_wake` boolean, threaded through `main.c` the same way
+`agenda_wake` is today, needs to explicitly **not** set any of the flags that currently bring up
+WiFi — this is the one place needing care, since `agenda_wake`'s existing behavior is the opposite
+(it always wants WiFi for Calendar/ToDo/weather fetches) and is not a template to copy verbatim
+here, only structurally similar.
+
+**RTC wake precision**: the wake-time architecture (internal timer computed from
+`cron_seconds_until_next()`, wall clock corrected from the external RTC every wake, an existing
+5-second "woke up too early, go back to sleep" safety margin, and an existing >30s-drift-triggers-
+resync policy) is already built for "fire close to a wall-clock target," and should comfortably
+deliver "rings within about a minute of 07:00" without new timing infrastructure.
+
+**Effort: small–medium.** Most of the audio work is reuse; the wake-path wiring is the part that
+needs a careful read-through of `main.c`'s existing wake-reason branches to avoid regressing
+rotation/agenda wakes while adding a third kind that deliberately skips network bring-up.
+
+## 3. Button-based alarm-setting UI — finalized button assignment (2026-09-23)
+
+**Buttons that exist today** (`board_waveshare_photopainter_73.h`):
+- **BOOT** (`GPIO_NUM_0`) — 50–3000 ms press resets the auto-sleep timer (unchanged);
+  ≥3000 ms press is already claimed by this session's own offline-hotspot toggle
+  (`main.c:207-215`).
+- **KEY**/rotate (`GPIO_NUM_4`) — 50–3000 ms press triggers rotation (unchanged); **≥3000 ms is
+  completely unclaimed today** (confirmed by reading `main.c:227-235` — there is no `else if
+  (duration >= 3000)` branch for KEY at all, unlike BOOT).
+- **CLEAR** — not wired on this board at all (`GPIO_NUM_NC`).
+- **PWR** — no board_hal GPIO exists for it at all; only reachable via unused AXP2101 PMIC IRQ
+  plumbing (see below — no longer needed after the design decision below).
+
+**Finalized design** (resolves every open question from the first draft of this document):
+- **Enter / exit+confirm alarm-setting mode: long-press (3s) KEY**, context-dependent on whether
+  the device is already in setting mode — mirrors exactly how BOOT's own long-press already means
+  different things depending on state (nothing new architecturally, same pattern applied to a
+  second button). This reuses KEY's genuinely free ≥3000 ms slot, so **there is no collision with
+  the existing BOOT-hold hotspot toggle at all** — the original conflict is gone, not worked around.
+- **Stop a ringing alarm: long-press (3s) KEY** (from the original spec) — a third meaning for the
+  same gesture, disambiguated by device state (ringing vs. idle-normal vs. idle-in-setting-mode).
+  These three states are mutually exclusive, so the single physical gesture never needs to guess.
+- **This removes the PWR-button PMIC-IRQ work item entirely** — the original design's "confirm via
+  PWR" would have needed new AXP2101 IRQ enable/handling that doesn't exist today; using KEY for
+  confirm instead means this feature needs **zero PMIC driver changes**. This is a genuine
+  reduction in scope/risk, not just a renamed button.
+- **Hour increment: short-press BOOT** (rolling single-step or rapid multi-press batch-count, per
+  the original spec). **Minute increment: short-press KEY** (same rolling/batch behavior, in
+  10-minute steps). Two independent counters, one per physical button, incremented in whatever
+  order/interleaving the user taps them — this avoids needing any separate "confirm this field,
+  advance to the next" gesture that a single shared increment-button would have required, which
+  makes the overall state machine *simpler*, not just differently assigned.
+- **Consequence needing an explicit guard**: while alarm-setting mode is active, BOOT's own
+  existing ≥3000 ms hotspot-toggle action must be suppressed (checked against "is setting mode
+  active" before dispatching that branch) — otherwise a rapid string of BOOT taps for hour-counting
+  could occasionally be misread as a 3s hold and toggle the offline hotspot by accident. Small,
+  contained fix at the same `main.c:207` branch point.
+- **Rapid-vs-slow press counting** (needed independently on *both* BOOT-for-hours and KEY-for-
+  minutes now) does not exist anywhere today and needs a genuinely new state machine — tracking
+  inter-press intervals against a threshold that will need empirical, on-device tuning (as the
+  original request itself anticipated) rather than a value guessable in advance. The existing
+  50ms-poll/edge-detect button task already timestamps press/release, so this is additive logic,
+  not a rewrite — just needed twice (once per button) instead of once.
+- **The confirmation-beep-while-still-held requirement is unchanged by any of the above**: today's
+  button task measures duration only **on release** (`main.c:201-202`, `227-228`), but the spec
+  wants an audible cue at the moment the 3s threshold is *crossed*, while the button is still down,
+  so the user knows exactly when to let go. This needs the poll loop to check elapsed hold time on
+  every tick while a button is down (not just once on release) — a real, if small, change to the
+  current measurement approach, independent of which button ends up using it.
+- **AUFNAHME-MODUS entry — changed again (2026-09-23): long-press (3-5s) BOOT while already inside
+  alarm-setting mode**, replacing the original two-button simultaneous KEY+BOOT chord. This reuses
+  the exact slot the BOOT-hotspot-suppression guard above already frees up while inside setting
+  mode — instead of that long BOOT hold being suppressed into doing nothing, it's given a real
+  meaning specific to that context. Net effect: **the simultaneous-chord detection capability is no
+  longer needed at all** — every gesture in the whole feature (KEY-long for enter/exit/stop-
+  ringing, BOOT-long for hotspot-vs-enrollment) is now "one button, meaning dependent on current
+  state," a pattern the existing BOOT-hotspot code already established, applied consistently
+  everywhere instead of needing one special two-button case.
+- **Follow-up detail worth deciding together with this**: the alarm-setting mode's own ~10s
+  inactivity timeout (discard if no action) and the 3-5s hold plus 5s listening window for
+  enrollment together consume nearly all of that budget — entering/returning from enrollment should
+  reset the parent setting-mode's inactivity timer, or there may be too little time left to then
+  also confirm the alarm. This applies equally regardless of which gesture triggers enrollment, so
+  it isn't a consequence of today's change specifically, just newly worth deciding alongside it.
+- **LED (ACT/green) conflict — resolved**: confirmed via a repo-wide grep that `BOARD_HAL_
+  LED_ACTIVITY` (green) has exactly one consumer on this board, `power_manager.c`'s 200ms/10s
+  auto-sleep countdown blink (`power_manager.c:219-221`) — no other file touches it. The decision
+  to simply suppress that blink while voice-enrollment mode owns the LED is a single added
+  condition at that one call site, fully resolving the conflict with no remaining unknowns.
+
+**Effort: medium**, now entirely software (no PMIC/hardware IRQ work), dominated by (a) the new
+multi-mode button state machine (setting-mode entry/exit, independent hour/minute roll-or-batch
+counters, per-step tone feedback, timeout/discard), (b) the switch from release-measured to
+live-during-hold duration tracking for the "beep at 3s while still held" cue, and (c) the new
+simultaneous-chord (KEY+BOOT together) detection for voice enrollment — all of which will need real
+on-device iteration (the press-speed threshold especially) rather than being purely a desk exercise.
+
+## 4. Offline voice "Alarm off" detection — feasible, but a genuinely separate, large project
+
+**Hardware**: the schematic shows a dedicated ES7210 4-channel mic-ADC chip (separate from the
+ES8311 DAC used for chimes today) with mic bias/differential-pair wiring, and Waveshare's own
+reference Arduino sketch (`01_Audio_Test.ino`, fetched earlier this project for the chime bring-up)
+demonstrates a **working record path on this exact board** (`CodecPort_SetInfo("es8311 & es7210",
+...)`, `CodecPort_SetMicGain()`, triggered by a double-press of BOOT in their example). The
+schematic's own trace annotations suggest only one of the four ES7210 channels may actually be
+populated with a physical mic element (the other three show "NC" on their coupling caps) — worth a
+quick real-hardware confirmation (a multimeter continuity check or just trying a record + playback
+round-trip) before committing engineering time, the same "verify against real hardware before
+trusting a schematic/register-level assumption" lesson this project already learned once during the
+ES8311 speaker bring-up.
+
+**Software**: this firmware's `board_hal` has **zero ES7210 driver code today** — the I2S RX line
+(`din`, wired in hardware per the pin table) is explicitly left `I2S_GPIO_UNUSED` in the current
+I2S config. Implementing voice detection means:
+1. A **new ES7210 I2C bring-up driver** (register sequence, mic gain, sample-rate/format config) —
+   symmetric, comparable-sized new work to what `audio_chime.c` already did for the ES8311 speaker
+   side, likely with the same "chip ACKs everything but produces nothing useful until the exact
+   right register sequence is found" risk this project hit once already, i.e. cross-check against
+   Waveshare's own working reference rather than a generic ES7210 datasheet sequence.
+2. Enabling I2S RX (currently disabled) — the DMA-buffer-flush requirement the spec itself calls
+   out (clearing residual chime audio from the buffer right before the 5 s listening window starts)
+   is a real, correct concern for a shared I2S peripheral doing both TX (chime) and RX (mic) — needs
+   explicit handling, not just enabling both directions and hoping.
+3. A **new MFCC feature-extraction + DTW matching pipeline** — nothing like this exists in the
+   codebase today (no audio/DSP dependency is currently vendored — `idf_component.yml` pulls in
+   only `esp_jpeg`/`mdns`/`cjson`/`libpng`/`qrcode`/`littlefs`). Two realistic paths:
+   - **Hand-rolled MFCC+DTW** exactly as specified: for a single ~1-2s utterance at 16kHz
+     (~100-200 frames, 13-20 MFCCs/frame), this is comfortably within this board's compute/memory
+     budget (dual-core 240MHz Xtensa LX7, 8MB PSRAM) — a few KB per stored template, tens of
+     thousands of operations per DTW comparison, real-time with headroom. Espressif's `esp-dsp`
+     component (optimized FFT/filter primitives for Xtensa) would meaningfully speed up the FFT/mel
+     step and is a much smaller new dependency than the alternative below.
+   - **`esp-sr`** (Espressif's speech-recognition framework: AFE front-end with noise
+     reduction/VAD, WakeNet/MultiNet DNN models) is heavier, brings in a large new dependency, and
+     is arguably overkill for a single fixed enrolled phrase — but its AFE/VAD could reduce false
+     triggers from ambient noise more robustly than a from-scratch DTW threshold, at the cost of
+     substantially more integration effort and flash footprint. Not recommended as a first attempt.
+4. **Enrollment-mode UX**: the spec's "hold KEY+BOOT together for 2s to arm a 5s recording window,
+   green LED solid during it" is buildable on the same button/audio infrastructure being built for
+   items 2-3 above, but is additional new state-machine surface on top of the alarm-setting mode's
+   own state machine — worth scoping as its own small deliverable once the underlying record/DTW
+   pipeline works standalone (e.g. testable via a debug HTTP endpoint before any button wiring
+   exists for it).
+
+**Timing constraint check**: the spec's "listen only in the 5 s pauses between 4×300ms notes" is
+compatible with a single-template DTW match (a 1-2s recognition pass fits inside a 5s window with
+room to spare, even before optimizing), so the core timing idea is sound — the risk here is entirely
+in getting reliable low-noise mic capture and enrollment quality, not in fitting the compute into
+the time budget.
+
+**Effort: large, and the least predictable estimate in this document** — realistically 1.5-3 weeks
+of focused work including hardware bring-up, plus non-trivial risk that recognition accuracy in a
+real bedside/night environment (fabric-muffled mic proximity, room echo, the enrolled speaker's
+voice varying with grogginess right after waking up) needs iteration beyond the first working
+version. Recommend scoping this as an explicitly optional, separately-shippable phase — the alarm
+clock is fully useful (schedule + button/Web UI arm + ring + physical-button stop) without it.
+
+## 5. Extension idea: show the next alarm time as a display overlay
+
+New idea (2026-09-23): optionally show the armed alarm's time on the display whenever content
+changes, e.g. right-aligned just left of the existing climate sensor badges.
+
+`overlay_manager.c` already composes several independent optional elements this way — a
+weather/headlines bar, a low-battery badge, and (most similar to this idea) the climate
+temperature/humidity badges, which already reserve their own space and truncate whatever precedes
+them rather than overlapping (`docs/DIFF.md`'s climate-overlay entries document this exact
+"reserves space ahead of the badges" convention). A "next alarm: 07:00" text element is a direct
+fit for this same composition pattern — no new overlay mechanism needed, just one more optional
+element alongside the existing ones, shown only when an alarm is currently armed.
+
+**Scope note**: this composition path (`overlay_manager.c`) draws onto normal photo renders. Agenda
+mode has its own separate header-drawing code (`agenda_renderer.c`) with its own climate chip
+convention — showing the alarm time there too (if wanted) would be a second, separate integration
+point, not automatically covered by adding it to `overlay_manager.c`. Worth deciding explicitly
+later whether this should appear in both places or just the photo-overlay path to start.
+
+**Effort: small**, reuses existing text-measurement/positioning primitives and the established
+badge-composition convention; independent of every other phase and can be built any time after the
+alarm-cron storage (phase 1) exists to read a time from.
+
+## Energy budget
+
+- **Arming/checking the alarm each wake**: identical cost class to the existing rotate/agenda wake
+  cron check already running today — negligible additional energy over the status quo, since it's
+  the same "wake, check cron table, decide to sleep or act" cycle, just with a third cron table
+  consulted.
+- **Ringing**: continuous ES8311+speaker playback for up to the configured duration (default 60s)
+  is the same order of magnitude per second as an existing Chime event, just run continuously
+  instead of once — a full duty-cycle draw for that duration, unavoidable for an audible alarm.
+  Comparable to (roughly 60s ÷ a single chime's fraction-of-a-second duration) an existing chime
+  firing continuously rather than once — worth an on-device current-draw measurement once
+  implemented (this project already has the tooling/precedent for that from the original Chimes
+  bring-up), but not expected to be a battery-life-defining feature on its own for an
+  occasional/daily alarm.
+- **Voice listening** (if implemented): I2S RX + MFCC/DTW compute only runs inside the alarm's own
+  active-ringing window (mic is never listening while the device is otherwise asleep), so its
+  energy cost is bounded to "however long the alarm rings for," not an always-on background drain.
+
+## Compute/memory budget
+
+- **Scheduling**: negligible — a few more bytes of NVS/RAM for one more small cron-rule array,
+  reusing already-compiled cron-matching code.
+- **Ringing**: negligible beyond what `audio_chime.c` already costs today (same I2S/ES8311 path,
+  just a longer/looping sequence).
+- **Button state machine**: negligible — a few more bytes of state, same 50ms poll loop.
+- **Voice recognition** (if implemented): a few KB PSRAM per enrolled template, tens of KB flash
+  for a hand-rolled MFCC+DTW implementation (more if `esp-sr` is used instead), real-time on one
+  CPU core with the second core free for I2S/other work — comfortably within this board's 8MB
+  PSRAM/240MHz-dual-core budget, not a limiting factor either way.
+
+## Open design questions
+
+1. ~~BOOT 3s-hold collision~~ — **resolved 2026-09-23**: enter/exit+confirm moved to long-press KEY
+   (genuinely free today), leaving BOOT's hotspot toggle untouched outside setting mode.
+2. ~~PWR button semantics~~ — **resolved 2026-09-23, and simplified further**: confirm/exit also
+   moved to long-press KEY, so PWR/PMIC-IRQ work is no longer needed for this feature at all.
+3. ~~Fast-vs-slow press threshold~~ — **resolved 2026-09-24, by removal**: real on-device testing
+   showed the batch mode didn't work reliably, and the user asked for it to be dropped rather than
+   tuned further. Every press now confirms immediately with its own beep(s), matching only the
+   original spec's slow-press behavior.
+4. ~~LED arbitration~~ — **resolved 2026-09-23**: confirmed the green LED has exactly one existing
+   consumer (the auto-sleep countdown blink); suppressing it during voice-enrollment mode is a
+   single added condition with no other interactions to consider.
+5. **Mic hardware confirmation**: still open — verify a physical mic element actually responds on
+   this specific board/batch before investing in the ES7210 driver + MFCC/DTW pipeline. The
+   user's own proposed mic-loopback-and-level-meter test spike (record → play back through the
+   speaker, and/or a live level meter on the serial console) is exactly the right-sized way to
+   answer this — and doubles as the first working milestone of the larger ES7210 driver effort
+   rather than being throwaway test code.
+6. **New: BOOT-hotspot suppression while in alarm-setting mode** — needs a shared "is alarm-setting
+   mode currently active" check consulted from `main.c`'s BOOT long-press branch, so a rapid string
+   of hour-count taps can never be misread as the unrelated hotspot-toggle hold.
+7. ~~Simultaneous KEY+BOOT chord detection~~ — **resolved 2026-09-23**: enrollment entry moved to a
+   long-press BOOT while already inside alarm-setting mode (reusing the slot BOOT-hotspot-
+   suppression already frees up there), so no cross-button simultaneous-press detection is needed
+   anywhere in this feature at all.
+8. **New: enrollment sub-mode should reset the parent alarm-setting mode's ~10s inactivity
+   timeout** — the 3-5s hold plus 5s listening window otherwise consumes nearly the whole budget,
+   leaving little time to confirm afterward.
+
+## Recommended phasing
+
+0. **Build-time scaffolding**: `ALARM_CLOCK_ENABLED` Kconfig option + `build.py --alarmclock` flag
+   + empty `alarm_manager.c`/`.h` wired into `main/CMakeLists.txt`'s conditional SOURCES and one
+   `alarm_clock_available` capability field — a thin skeleton with no real behavior yet, so every
+   later phase is built *inside* the already-modular structure from day one instead of retrofitting
+   it in afterward.
+1. **Alarm schedule storage + Web UI + Telegram command** (reuses cron infra) — ships value alone.
+2. **Alarm ringing + minimal-wake path**, armed/disarmed purely via Web UI/Telegram for now — the
+   alarm clock is fully functional end-to-end at this point without touching button UI at all.
+   Includes the long-press-KEY-stops-ringing gesture.
+3. **Physical-button time-setting UI** (long-press KEY enter/exit, short-press BOOT=hours/
+   KEY=minutes, BOOT-hotspot suppression guard, live-during-hold duration tracking for the
+   confirmation beep, tone feedback) — the on-device physical convenience layer, now pure software.
+   Include the long-press-BOOT-while-in-setting-mode hook point for enrollment here even if
+   phase 6 hasn't landed yet, so the gesture has somewhere to attach later without revisiting this
+   phase's state machine.
+4. *(optional, small, independent of 3-5)* **Display overlay showing the next armed alarm time**
+   — can land any time after phase 1's alarm-cron storage exists.
+5. **Mic hardware verification spike** (record-and-playback loopback and/or a live serial level
+   meter) — cheap, de-risks the decision to invest further before starting the full pipeline below.
+6. **Offline voice "Alarm off" detection** (ES7210 driver, MFCC+DTW, enrollment mode, KEY+BOOT
+   chord detection, LED arbitration) — optional, separate, gated on phase 5's result; can slip
+   independently without blocking a shippable alarm clock.

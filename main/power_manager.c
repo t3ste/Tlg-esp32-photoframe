@@ -19,6 +19,7 @@
 #endif
 
 #include "agenda_manager.h"
+#include "alarm_manager.h"
 #include "board_hal.h"
 #include "climate_history.h"
 #include "config.h"
@@ -49,6 +50,7 @@ static wakeup_source_t wakeup_source = WAKEUP_SOURCE_NONE;
 static int64_t next_rotation_time = 0;  // Use absolute time for rotation
 static int64_t next_agenda_time = 0;    // Same convention, for the Agenda schedule below
 static int64_t next_climate_time = 0;   // Same convention, for the climate log below
+static int64_t next_alarm_time = 0;     // Same convention, for the Alarm Clock schedule below
 static uint64_t ext1_wakeup_pin_mask = 0;
 
 static void rotation_timer_task(void *arg)
@@ -84,6 +86,35 @@ static void rotation_timer_task(void *arg)
                 climate_history_record();
                 next_climate_time = now + ((int64_t) CLIMATE_ACTIVE_LOG_INTERVAL_SEC * 1000000LL);
             }
+        }
+
+        // Alarm Clock: an independent schedule, same "device stays awake"
+        // gating as rotation/agenda - mirrors deep_sleep_wake_main()'s
+        // alarm_wake decision for the case a deep-sleep board never actually
+        // sleeps (USB-powered) or has deep sleep disabled outright, which a
+        // bedside alarm clock use case can't just ignore (many such devices
+        // stay plugged in overnight). Checked and rung before agenda/
+        // rotation below - alarm_manager_run() blocks for the ring duration,
+        // so a same-tick agenda/rotation due-ness is still evaluated against
+        // this tick's "now" but its actual action lands after the alarm
+        // finishes, same "no makeup logic, just delayed" spirit as agenda
+        // pre-empting rotation below. alarm_manager_is_enabled()/_run() are
+        // harmless no-ops on a build without CONFIG_ALARM_CLOCK_ENABLED.
+        if (alarm_manager_is_enabled()) {
+            if (next_alarm_time == 0) {
+                int seconds_until_next = alarm_manager_seconds_until_next_wake();
+                next_alarm_time = now + (seconds_until_next * 1000000LL);
+                ESP_LOGI(TAG, "Active alarm check scheduled in %d seconds", seconds_until_next);
+            } else if (now >= next_alarm_time) {
+                ESP_LOGI(TAG, "Active alarm triggered");
+                alarm_manager_run();
+
+                int seconds_until_next = alarm_manager_seconds_until_next_wake();
+                next_alarm_time = esp_timer_get_time() + (seconds_until_next * 1000000LL);
+                ESP_LOGI(TAG, "Next alarm check scheduled in %d seconds", seconds_until_next);
+            }
+        } else {
+            next_alarm_time = 0;  // Reset if the alarm got disabled
         }
 
         // Agenda: an independent schedule, same "device stays awake" gating
@@ -426,23 +457,35 @@ void power_manager_enter_sleep(void)
     board_hal_led_set(BOARD_HAL_LED_POWER, false);
     board_hal_led_set(BOARD_HAL_LED_ACTIVITY, false);
 
-    // Timer-based sleep if either the normal photo rotation schedule or the
-    // independent agenda (ToDo + Calendar) schedule is enabled - whichever
-    // fires sooner. The two are otherwise unrelated: deep_sleep_wake_main()
-    // re-checks which one(s) actually matched at the moment the device
-    // wakes (a coarse timer wake can't itself carry that information), and
-    // renders the photo or the agenda screen accordingly - see
-    // agenda_manager_wake_matches_now().
+    // Timer-based sleep if any of the normal photo rotation schedule, the
+    // independent agenda (ToDo + Calendar) schedule, or the independent
+    // alarm clock schedule is enabled - whichever fires soonest. All three
+    // are otherwise unrelated: deep_sleep_wake_main() re-checks which one(s)
+    // actually matched at the moment the device wakes (a coarse timer wake
+    // can't itself carry that information), and renders the photo, the
+    // agenda screen, or rings the alarm accordingly - see
+    // agenda_manager_wake_matches_now()/alarm_manager_wake_matches_now().
+    // alarm_manager_is_enabled() is a harmless no-op (always false) on a
+    // build without CONFIG_ALARM_CLOCK_ENABLED.
     bool rotate_on = config_manager_get_auto_rotate();
     bool agenda_on = agenda_manager_is_enabled();
-    if (rotate_on || agenda_on) {
+    bool alarm_on = alarm_manager_is_enabled();
+    if (rotate_on || agenda_on || alarm_on) {
         int rotate_wake = rotate_on ? get_seconds_until_next_wakeup() : INT_MAX;
         int agenda_wake = agenda_on ? agenda_manager_seconds_until_next_wake() : INT_MAX;
-        int wake_seconds = (rotate_wake < agenda_wake) ? rotate_wake : agenda_wake;
-        bool via_agenda = (agenda_wake < rotate_wake);
+        int alarm_wake = alarm_on ? alarm_manager_seconds_until_next_wake() : INT_MAX;
+        int wake_seconds = rotate_wake;
+        const char *wake_reason = "rotate cron";
+        if (agenda_wake < wake_seconds) {
+            wake_seconds = agenda_wake;
+            wake_reason = "agenda cron";
+        }
+        if (alarm_wake < wake_seconds) {
+            wake_seconds = alarm_wake;
+            wake_reason = "alarm cron";
+        }
 
-        ESP_LOGI(TAG, "Setting timer wake-up for %d seconds (%s)", wake_seconds,
-                 via_agenda ? "agenda cron" : "rotate cron");
+        ESP_LOGI(TAG, "Setting timer wake-up for %d seconds (%s)", wake_seconds, wake_reason);
         esp_sleep_enable_timer_wakeup(wake_seconds * 1000000ULL);
 
         // Store expected wakeup time in RTC memory for drift detection -
