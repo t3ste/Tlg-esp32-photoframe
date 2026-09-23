@@ -146,6 +146,35 @@ static bool connect_to_wifi_with_timeout(int timeout_seconds)
     }
 }
 
+// On-demand offline hotspot toggle (github.com/aitjcize/esp32-photoframe#90),
+// triggered by a >=3s BOOT hold (button_task below) or POST
+// /api/wifi/hotspot/{start,stop} (http_server.c, for a Settings-page button
+// when there's no physical access). Entering it shows the same WiFi QR code
+// the first-time-setup splash uses (splash_screen_display() - the SSID
+// scheme is identical, see get_setup_ap_ssid()) so a phone can join without
+// typing anything, and extends the auto-sleep timeout the same way OOBE
+// does so an upload session isn't cut short mid-way. The web UI itself needs
+// no changes at all - main/http_server.c is netif-agnostic and already
+// running; only the underlying WiFi mode switches (wifi_manager.c).
+static void toggle_ap_hotspot_mode(void)
+{
+    if (wifi_manager_is_ap_hotspot_active()) {
+        ESP_LOGI(TAG, "Boot button held - exiting offline hotspot mode");
+        wifi_manager_stop_ap_hotspot();
+        power_manager_set_auto_sleep_timeout(AUTO_SLEEP_TIMEOUT_SEC);
+        return;
+    }
+    ESP_LOGI(TAG,
+             "Boot button held - entering offline hotspot mode (full web UI, no WiFi network)");
+    char ssid[33] = {0};
+    if (wifi_manager_start_ap_hotspot(ssid, sizeof(ssid)) == ESP_OK) {
+        power_manager_set_auto_sleep_timeout(OOBE_AUTO_SLEEP_TIMEOUT_SEC);
+        splash_screen_display();
+    } else {
+        ESP_LOGE(TAG, "Failed to start offline hotspot");
+    }
+}
+
 static void button_task(void *arg)
 {
     bool last_boot_state = 1;  // Default distinct from current to avoid triggers if NC
@@ -175,6 +204,15 @@ static void button_task(void *arg)
                 if (duration > 50 && duration < 3000) {
                     ESP_LOGI(TAG, "Boot button pressed, resetting sleep timer");
                     power_manager_reset_sleep_timer();
+                } else if (duration >= 3000) {
+                    // Long-hold BOOT toggles the on-demand offline hotspot
+                    // (github.com/aitjcize/esp32-photoframe#90) - no existing
+                    // BOOT behavior used >=3s before this, and it's a
+                    // different GPIO from ROTATE, so this can't collide with
+                    // rotation-on-wake. Also reachable by holding BOOT
+                    // through a BOOT-button wake from deep sleep, since
+                    // button_task starts fresh on that wake path too.
+                    toggle_ap_hotspot_mode();
                 }
             }
             last_boot_state = current_boot_state;
@@ -386,7 +424,7 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
         ESP_LOGI(TAG,
                  "Agenda wake matched - rendering ToDo/Calendar screen, skipping photo rotation");
         power_manager_reset_sleep_timer();
-        agenda_manager_run();
+        agenda_manager_run(wifi_connected);
         utils_finalize_internet_health();
         ESP_LOGI(TAG, "Agenda render complete, going back to sleep");
         power_manager_enter_sleep();
@@ -843,6 +881,21 @@ void app_main(void)
         }
     }
 
+    // Offline mode (github.com/aitjcize/esp32-photoframe#90): the user
+    // deliberately configured this device with no WiFi network at all, so
+    // skip the entire cold-boot connect/retry/reprovision state machine
+    // below - there is nothing to connect to, and none of its branches
+    // (extended retry, wipe-and-reprovision) make sense for a device that
+    // was never meant to have credentials in the first place. Falls through
+    // to the same shared, WiFi-optional startup code every other branch
+    // here already relies on. The on-demand hotspot (long BOOT hold,
+    // wifi_manager_start_ap_hotspot()) remains available regardless of this
+    // setting for offline photo management.
+    if (config_manager_get_offline_mode_enabled()) {
+        ESP_LOGI(TAG, "Offline mode enabled - skipping WiFi entirely this boot");
+        goto wifi_setup_done;
+    }
+
     // A single failed attempt isn't enough to conclude the saved credentials
     // are actually wrong - transient conditions (router mid-reboot, brief
     // congestion, a DHCP server slow to respond) produce exactly the same
@@ -971,6 +1024,7 @@ void app_main(void)
         esp_restart();
     }
 
+wifi_setup_done:
     // 16384: the KEY button calls trigger_image_rotation() directly on this
     // task - the same heavy rotation pipeline (Telegram fetch/JPEG decode/
     // processing/overlay compositing) also run from deep_sleep_wake_task()

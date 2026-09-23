@@ -11,6 +11,17 @@
 
 static const char *TAG = "agenda_color_profile";
 
+// Compiled-in default color profile (main/resources/default_agenda_color_profile.json,
+// main/CMakeLists.txt EMBED_FILES) - a real, fully-styled profile (originally
+// "s2_BETA") used whenever no slot is active or the active slot can't be
+// loaded, instead of fill_default()'s bare black/white/no-switches struct.
+// A firmware update needed to change this default is an accepted tradeoff
+// for shipping something that actually looks considered out of the box.
+extern const uint8_t default_agenda_color_profile_json_start[] asm(
+    "_binary_default_agenda_color_profile_json_start");
+extern const uint8_t default_agenda_color_profile_json_end[] asm(
+    "_binary_default_agenda_color_profile_json_end");
+
 void agenda_color_profile_path(int slot, char *buf, size_t buf_len)
 {
     const char *path;
@@ -297,9 +308,35 @@ bool agenda_color_profile_slot_name(int slot, char *name_out, size_t name_out_le
     return ok;
 }
 
-void agenda_color_profile_load_active(agenda_color_profile_t *out)
+// Loads the compiled-in default profile (see this file's own top-of-file
+// comment on default_agenda_color_profile_json_start) into `out`. Falls
+// back to fill_default()'s bare struct only if the embedded JSON somehow
+// fails to parse/validate - shouldn't happen for a fixed, compile-time file,
+// but a broken default must never crash or leave `out` half-initialized.
+static void load_compiled_default(agenda_color_profile_t *out)
 {
     fill_default(out);
+    size_t len =
+        (size_t) (default_agenda_color_profile_json_end - default_agenda_color_profile_json_start);
+    cJSON *root =
+        cJSON_ParseWithLength((const char *) default_agenda_color_profile_json_start, len);
+    if (!root) {
+        ESP_LOGE(TAG, "Compiled-in default color profile has invalid JSON - using bare fallback");
+        return;
+    }
+    char err[96];
+    if (!parse_payload(root, out, NULL, 0, err, sizeof(err))) {
+        ESP_LOGE(TAG,
+                 "Compiled-in default color profile failed validation (%s) - using bare fallback",
+                 err);
+        fill_default(out);
+    }
+    cJSON_Delete(root);
+}
+
+void agenda_color_profile_load_active(agenda_color_profile_t *out)
+{
+    load_compiled_default(out);
     int slot = config_manager_get_agenda_color_profile_active();
     if (slot <= 0) {
         return;
@@ -324,7 +361,7 @@ void agenda_color_profile_load_active(agenda_color_profile_t *out)
     if (!parse_payload(root, out, NULL, 0, err, sizeof(err))) {
         ESP_LOGW(TAG, "Active color profile slot %d failed validation (%s), using default", slot,
                  err);
-        fill_default(out);
+        load_compiled_default(out);
     }
     cJSON_Delete(root);
 }

@@ -440,6 +440,25 @@ typedef enum {
 // every time despite the saved credentials being correct the whole time.
 #define NVS_WIFI_REPROV_ON_FAIL_KEY "wifi_reprov_en"
 
+// Set during first-time setup (github.com/aitjcize/esp32-photoframe#90) when
+// the user picks "use offline, no WiFi network" instead of entering real
+// credentials. OR'd into wifi_provisioning_is_provisioned()'s gate so the
+// device boots normally instead of looping back into the OOBE AP forever,
+// and skips the cold-boot WiFi connect attempts entirely (main.c) since
+// there's deliberately nothing to connect to. Does not affect the separate
+// on-demand hotspot (wifi_manager_start_ap_hotspot()), which any configured
+// device - offline or not - can enter any time via a long BOOT hold.
+#define NVS_OFFLINE_MODE_KEY "offline_mode"
+
+// Opt-in second HTTPS listener alongside the always-on plain HTTP one
+// (github.com/aitjcize/esp32-photoframe#130) - off by default since it uses
+// a per-device self-signed certificate (main/https_cert.c), which every
+// browser flags with a click-through warning (no CA can vouch for a device
+// with no public hostname). Protects against passive LAN sniffing of the
+// session, not an active on-path attacker who ignores that warning. Takes
+// effect on the next http_server_init() (boot/reconnect), not live.
+#define NVS_HTTPS_ENABLED_KEY "https_enabled"
+
 // Orientation-pairing during normal (non-Telegram) auto-rotation: when the
 // randomly-picked next image doesn't match the panel's orientation, look for
 // another mismatched image in the active album(s) and combine them instead

@@ -48,4 +48,16 @@ esp_err_t wifi_manager_load_credentials_from_sdcard(char *ssid, char *password);
 EventGroupHandle_t wifi_manager_get_event_group(void);
 int wifi_manager_scan(wifi_ap_record_t *results, int max_results);
 
+// On-demand offline hotspot (github.com/aitjcize/esp32-photoframe#90):
+// switches to AP-only mode with the same open/no-password SSID scheme as
+// first-time-setup provisioning, making the ALREADY-RUNNING main web UI
+// (main/http_server.c - netif-agnostic, no changes needed) reachable at
+// http://192.168.4.1 with no real WiFi network involved. Drops any existing
+// STA connection. `ssid_out` (may be NULL) receives the chosen SSID, e.g.
+// for a splash-screen QR code. wifi_manager_stop_ap_hotspot() reconnects to
+// the saved network (if any) and returns to normal operation.
+esp_err_t wifi_manager_start_ap_hotspot(char *ssid_out, size_t ssid_out_len);
+esp_err_t wifi_manager_stop_ap_hotspot(void);
+bool wifi_manager_is_ap_hotspot_active(void);
+
 #endif

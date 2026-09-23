@@ -84,6 +84,11 @@ export const useSettingsStore = defineStore("settings", () => {
     wifiTxPowerCapEnabled: true,
     wifiExtendedRetryEnabled: false,
     wifiReprovisionOnFailEnabled: true,
+    // Read-only status (set during first-time setup / by the hotspot itself,
+    // not a settable field here - see the offline-hotspot section below).
+    offlineModeEnabled: false,
+    apHotspotActive: false,
+    httpsEnabled: false,
     rotationPairingEnabled: false,
     variantSelectionEnabled: false,
     telegramRotationNotifyEnabled: false,
@@ -404,6 +409,9 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.wifiExtendedRetryEnabled = data.wifi_extended_retry_enabled === true;
       deviceSettings.value.wifiReprovisionOnFailEnabled =
         data.wifi_reprovision_on_fail_enabled !== false;
+      deviceSettings.value.offlineModeEnabled = data.offline_mode_enabled === true;
+      deviceSettings.value.apHotspotActive = data.ap_hotspot_active === true;
+      deviceSettings.value.httpsEnabled = data.https_enabled === true;
       deviceSettings.value.rotationPairingEnabled = data.rotation_pairing_enabled === true;
       deviceSettings.value.variantSelectionEnabled = data.variant_selection_enabled === true;
       deviceSettings.value.telegramRotationNotifyEnabled =
@@ -571,6 +579,7 @@ export const useSettingsStore = defineStore("settings", () => {
       wifi_tx_power_cap_enabled: deviceSettings.value.wifiTxPowerCapEnabled,
       wifi_extended_retry_enabled: deviceSettings.value.wifiExtendedRetryEnabled,
       wifi_reprovision_on_fail_enabled: deviceSettings.value.wifiReprovisionOnFailEnabled,
+      https_enabled: deviceSettings.value.httpsEnabled,
       rotation_pairing_enabled: deviceSettings.value.rotationPairingEnabled,
       variant_selection_enabled: deviceSettings.value.variantSelectionEnabled,
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,
@@ -900,6 +909,35 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  // On-demand offline hotspot (github.com/aitjcize/esp32-photoframe#90) -
+  // mirrors the long-BOOT-hold trigger. Switching WiFi mode drops the very
+  // connection this request travels over, so the response may never arrive
+  // even on success - the server sends it before actually switching, but
+  // that race is best-effort by nature; the caller should tell the user to
+  // reconnect via the returned SSID regardless of whether this resolves.
+  async function startApHotspot() {
+    try {
+      const response = await fetch(`${API_BASE}/api/wifi/hotspot/start`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      deviceSettings.value.apHotspotActive = true;
+      return { success: true, ssid: data.ssid || "", url: data.url || "http://192.168.4.1" };
+    } catch {
+      // Expected on success too (see comment above) - still report it as
+      // started so the UI shows the "reconnect to the hotspot" guidance.
+      deviceSettings.value.apHotspotActive = true;
+      return { success: true, ssid: "", url: "http://192.168.4.1" };
+    }
+  }
+
+  async function stopApHotspot() {
+    try {
+      await fetch(`${API_BASE}/api/wifi/hotspot/stop`, { method: "POST" });
+    } catch {
+      // Same best-effort caveat as startApHotspot() above.
+    }
+    deviceSettings.value.apHotspotActive = false;
+  }
+
   return {
     activeSettingsTab,
     params,
@@ -909,6 +947,8 @@ export const useSettingsStore = defineStore("settings", () => {
     palette,
     preset,
     presetNames,
+    startApHotspot,
+    stopApHotspot,
     applyPreset,
     applyGrayscaleDefaultIfUntouched,
     loadSettings,

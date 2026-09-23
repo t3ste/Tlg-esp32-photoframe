@@ -225,8 +225,14 @@ int agenda_manager_seconds_until_next_wake(void)
     return cron_seconds_until_next(&timeinfo, rules, n);
 }
 
-esp_err_t agenda_manager_run(void)
+esp_err_t agenda_manager_run(bool wifi_connected)
 {
+    if (!wifi_connected) {
+        ESP_LOGW(TAG,
+                 "WiFi not connected this wake - skipping Calendar A/B, ToDo, and weather "
+                 "fetches (would only retry a connection already known to be down); rendering "
+                 "with local sources only");
+    }
     bool want_todo = config_manager_get_agenda_todo_enabled();
     bool want_cal = config_manager_get_agenda_cal_enabled();
 
@@ -287,7 +293,7 @@ esp_err_t agenda_manager_run(void)
         }
         time_t now = time(NULL);
         time_t window_end = now + (time_t) cal_days * 86400;
-        if (url[0] != '\0') {
+        if (url[0] != '\0' && wifi_connected) {
             ESP_LOGI(TAG, "Free internal heap before Calendar fetch: %u bytes",
                      (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             char etag_out[HTTP_ETAG_MAX_LEN];
@@ -302,7 +308,7 @@ esp_err_t agenda_manager_run(void)
                 ESP_LOGW(TAG, "Calendar fetch failed, that column will be omitted this cycle");
             }
         }
-        if (url2[0] != '\0') {
+        if (url2[0] != '\0' && wifi_connected) {
             ESP_LOGI(TAG, "Free internal heap before Calendar 2 fetch: %u bytes",
                      (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             char etag_out[HTTP_ETAG_MAX_LEN];
@@ -360,7 +366,7 @@ esp_err_t agenda_manager_run(void)
     memset(&cal_weather, 0, sizeof(cal_weather));
     bool have_cal_weather = false;
     if ((have_events_a || have_events_b || have_events_c || have_events_d || have_events_e) &&
-        config_manager_get_agenda_cal_weather_enabled()) {
+        config_manager_get_agenda_cal_weather_enabled() && wifi_connected) {
         bool ok = (weather_fetch_forecast(&cal_weather, cal_days) == ESP_OK);
         utils_record_internet_attempt(ok);
         have_cal_weather = ok && cal_weather.valid;
@@ -371,7 +377,7 @@ esp_err_t agenda_manager_run(void)
         const char *url = config_manager_get_agenda_todo_url();
         if (url[0] == '\0') {
             ESP_LOGW(TAG, "ToDo enabled but no URL configured");
-        } else {
+        } else if (wifi_connected) {
             ESP_LOGI(TAG, "Free internal heap before ToDo fetch: %u bytes",
                      (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             char etag_out[HTTP_ETAG_MAX_LEN];

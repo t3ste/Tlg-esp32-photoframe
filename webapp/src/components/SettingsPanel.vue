@@ -15,6 +15,27 @@ const appStore = useAppStore();
 const snackbar = ref(false);
 const snackbarText = ref("");
 const snackbarColor = ref("success");
+
+const hotspotBusy = ref(false);
+const hotspotMessage = ref("");
+
+async function handleStartHotspot() {
+  hotspotBusy.value = true;
+  hotspotMessage.value = "";
+  const result = await settingsStore.startApHotspot();
+  hotspotBusy.value = false;
+  hotspotMessage.value = result.ssid
+    ? `Hotspot starting - reconnect your phone/laptop to "${result.ssid}", then open ${result.url}`
+    : `Hotspot starting - reconnect to the device's hotspot, then open ${result.url}`;
+}
+
+async function handleStopHotspot() {
+  hotspotBusy.value = true;
+  hotspotMessage.value = "";
+  await settingsStore.stopApHotspot();
+  hotspotBusy.value = false;
+  hotspotMessage.value = "Hotspot stopping - the device is reconnecting to its saved WiFi network.";
+}
 function showSnackbar(text, color) {
   snackbarText.value = text;
   snackbarColor.value = color;
@@ -808,6 +829,28 @@ function onImportFileSelected(event) {
   event.target.value = "";
 }
 
+// `fetch()` only rejects on a genuine network error - an HTTP error status
+// (e.g. the device's own "request body too large" 400) resolves normally,
+// so Promise.all() alone can't tell a rejected request from a successful
+// one. Confirmed live (2026-09-20): a full config export re-imported onto
+// a factory-reset device got entirely rejected by the device's own body-size
+// check, yet the UI still reported "imported successfully" - nothing here
+// ever looked at response.ok. Each request is now labelled and checked
+// individually so a failure actually surfaces.
+async function namedFetch(label, url, options) {
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (error) {
+    return { label, ok: false, detail: error.message };
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    return { label, ok: false, detail: `HTTP ${response.status}${detail ? ": " + detail : ""}` };
+  }
+  return { label, ok: true };
+}
+
 async function performImport() {
   if (!importData.value) return;
 
@@ -815,11 +858,11 @@ async function performImport() {
   saving.value = true;
 
   try {
-    const promises = [];
+    const requests = [];
 
     if (importData.value.config) {
-      promises.push(
-        fetch("/api/config", {
+      requests.push(
+        namedFetch("Device settings", "/api/config", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(importData.value.config),
@@ -827,8 +870,8 @@ async function performImport() {
       );
     }
     if (importData.value.processing) {
-      promises.push(
-        fetch("/api/settings/processing", {
+      requests.push(
+        namedFetch("Processing settings", "/api/settings/processing", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(importData.value.processing),
@@ -836,8 +879,8 @@ async function performImport() {
       );
     }
     if (importData.value.palette) {
-      promises.push(
-        fetch("/api/settings/palette", {
+      requests.push(
+        namedFetch("Color palette", "/api/settings/palette", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(importData.value.palette),
@@ -847,20 +890,26 @@ async function performImport() {
     if (Array.isArray(importData.value.albums)) {
       for (const album of importData.value.albums) {
         if (album && typeof album.name === "string" && typeof album.enabled === "boolean") {
-          promises.push(
-            fetch(`/api/albums/enabled?name=${encodeURIComponent(album.name)}`, {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ enabled: album.enabled }),
-            })
+          requests.push(
+            namedFetch(
+              `Album "${album.name}"`,
+              `/api/albums/enabled?name=${encodeURIComponent(album.name)}`,
+              {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled: album.enabled }),
+              }
+            )
           );
         }
       }
     }
 
-    await Promise.all(promises);
+    const results = await Promise.all(requests);
+    const failures = results.filter((r) => !r.ok);
 
-    // Reload all settings from device
+    // Reload all settings from device regardless - whatever DID apply
+    // should still be reflected, even if something else failed.
     await Promise.all([
       settingsStore.loadDeviceSettings(),
       settingsStore.loadSettings(),
@@ -868,10 +917,19 @@ async function performImport() {
       appStore.loadAlbums(),
     ]);
 
-    saveSuccess.value = true;
-    saveError.value = false;
-    saveMessage.value = "Config imported successfully!";
-    setTimeout(() => (saveSuccess.value = false), 3000);
+    if (failures.length === 0) {
+      saveSuccess.value = true;
+      saveError.value = false;
+      saveMessage.value = "Config imported successfully!";
+      setTimeout(() => (saveSuccess.value = false), 3000);
+    } else {
+      saveSuccess.value = false;
+      saveError.value = true;
+      saveMessage.value =
+        `Import partially failed - ${failures.length} of ${results.length} part(s) not applied: ` +
+        failures.map((f) => `${f.label} (${f.detail})`).join("; ");
+      console.error("Config import failures:", failures);
+    }
   } catch (error) {
     console.error("Failed to import config:", error);
     saveError.value = true;
@@ -1033,13 +1091,72 @@ async function performFactoryReset() {
               On (default) - unchanged existing behavior: once every retry above is exhausted, the
               frame clears its saved WiFi password and reboots into setup mode. Turn off if that
               reprovisioning cycle keeps repeating even though your password is correct (e.g. a
-              nearby repeater the frame still can't reliably reach) - the frame then keeps the
-              saved credentials instead of wiping them: if Deep Sleep is enabled it goes to sleep
-              until its next scheduled wake and tries again fresh from there, otherwise it just
-              continues starting up without WiFi this cycle (nothing here blocks - every later
-              network step already tolerates being offline) and retries on the next cold boot. A
-              confirmed-wrong password is never affected by this switch and always reprovisions
-              immediately either way.
+              nearby repeater the frame still can't reliably reach) - the frame then keeps the saved
+              credentials instead of wiping them: if Deep Sleep is enabled it goes to sleep until
+              its next scheduled wake and tries again fresh from there, otherwise it just continues
+              starting up without WiFi this cycle (nothing here blocks - every later network step
+              already tolerates being offline) and retries on the next cold boot. A confirmed-wrong
+              password is never affected by this switch and always reprovisions immediately either
+              way.
+            </div>
+
+            <v-alert
+              v-if="settingsStore.deviceSettings.offlineModeEnabled"
+              type="info"
+              variant="tonal"
+              density="compact"
+              class="mb-4"
+            >
+              This device is configured for offline use (no WiFi network) - it was set up that way
+              on the setup form. Use the hotspot below to manage photos/settings any time.
+            </v-alert>
+
+            <v-card variant="outlined" class="pa-4 mb-4">
+              <div class="text-subtitle-2 mb-1">Offline hotspot</div>
+              <div class="text-caption text-medium-emphasis mb-3">
+                Starts the device's own WiFi hotspot (same as first-time setup) with the full web UI
+                reachable at http://192.168.4.1 - no WiFi network needed. Useful anywhere without
+                WiFi, or as a manual alternative to holding the BOOT button for 3 seconds on the
+                device itself. Starting it drops this device's current WiFi connection, so this page
+                will disconnect too - reconnect your phone/laptop to the hotspot SSID shown, then
+                reopen the same address.
+              </div>
+              <v-btn
+                v-if="!settingsStore.deviceSettings.apHotspotActive"
+                color="primary"
+                variant="tonal"
+                :loading="hotspotBusy"
+                @click="handleStartHotspot"
+              >
+                Start offline hotspot
+              </v-btn>
+              <v-btn
+                v-else
+                color="warning"
+                variant="tonal"
+                :loading="hotspotBusy"
+                @click="handleStopHotspot"
+              >
+                Stop hotspot (reconnect to WiFi)
+              </v-btn>
+              <div v-if="hotspotMessage" class="text-caption mt-2">{{ hotspotMessage }}</div>
+            </v-card>
+
+            <v-switch
+              v-model="settingsStore.deviceSettings.httpsEnabled"
+              label="Enable HTTPS (self-signed certificate)"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              Off by default. Adds a second, encrypted web UI on port 443 alongside the existing one
+              on port 80 (which keeps working unchanged - nothing that already talks to this device
+              over plain HTTP, like Home Assistant, breaks). Each device generates its own
+              self-signed certificate on first use, so browsers will show a one-time "not secure"
+              warning to click through - this protects your session from passive snooping on the
+              local network, not from an attacker willing to ignore that warning. Takes effect after
+              the device restarts or reconnects to WiFi.
             </div>
 
             <v-row>
@@ -1686,13 +1803,14 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              An iCalendar/ICS feed - e.g. a Google Calendar "Secret address in iCal format"
-              (Calendar Settings → Integrate calendar). Google's own docs warn that only you should
-              know this address - treat it like a password, never share it. A second calendar is
-              optional (e.g. work alongside personal) - events from both are merged into one list,
-              sorted by time, and colored by origin: Calendar A is blue, Calendar B is green (shown
-              as a filled background on a light agenda background, plain colored text on a dark one
-              - see Appearance below).
+              On a device with no calendar configured yet, enter a URL below first, then turn this
+              on - it can't be enabled with no source behind it. An iCalendar/ICS feed - e.g. a
+              Google Calendar "Secret address in iCal format" (Calendar Settings → Integrate
+              calendar). Google's own docs warn that only you should know this address - treat it
+              like a password, never share it. A second calendar is optional (e.g. work alongside
+              personal) - events from both are merged into one list, sorted by time, and colored by
+              origin: Calendar A is blue, Calendar B is green (shown as a filled background on a
+              light agenda background, plain colored text on a dark one - see Appearance below).
             </div>
             <v-row dense>
               <v-col cols="12" sm="6">
@@ -1705,7 +1823,6 @@ async function performFactoryReset() {
                   hint="Leave empty to keep the current URL"
                   persistent-hint
                   placeholder="••••••••"
-                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 >
                   <template #append-inner>
                     <v-icon
@@ -1728,7 +1845,6 @@ async function performFactoryReset() {
                   placeholder="Calendar A"
                   hint='Shown in the Calendar header instead of "Calendar A"'
                   persistent-hint
-                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 />
               </v-col>
               <v-col cols="4" sm="3">
@@ -1738,7 +1854,6 @@ async function performFactoryReset() {
                   label="Days ahead"
                   variant="outlined"
                   density="compact"
-                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 />
               </v-col>
             </v-row>
@@ -1753,7 +1868,6 @@ async function performFactoryReset() {
                   hint="Leave empty to keep the current URL, or to use only one calendar"
                   persistent-hint
                   placeholder="••••••••"
-                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 >
                   <template #append-inner>
                     <v-icon
@@ -1776,7 +1890,6 @@ async function performFactoryReset() {
                   placeholder="Calendar B"
                   hint='Shown in the Calendar header instead of "Calendar B"'
                   persistent-hint
-                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 />
               </v-col>
             </v-row>

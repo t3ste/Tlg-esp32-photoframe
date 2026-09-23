@@ -107,7 +107,7 @@ static void rotation_timer_task(void *arg)
 
         if (agenda_due) {
             ESP_LOGI(TAG, "Active agenda render triggered");
-            agenda_manager_run();
+            agenda_manager_run(wifi_manager_is_connected());
 
             int seconds_until_next = agenda_manager_seconds_until_next_wake();
             next_agenda_time = now + (seconds_until_next * 1000000LL);

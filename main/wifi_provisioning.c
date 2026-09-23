@@ -342,6 +342,35 @@ static esp_err_t provision_save_handler(httpd_req_t *req)
     char password[WIFI_PASS_MAX_LEN] = {0};
     char device_name[DEVICE_NAME_MAX_LEN] = {0};
 
+    // Offline mode (github.com/aitjcize/esp32-photoframe#90): the user
+    // explicitly chose "use offline, no WiFi network" on the setup form
+    // instead of entering credentials - skip the SSID requirement, the
+    // network-settings parsing, and the whole connection test below
+    // entirely, and just mark the device as configured. Checked before the
+    // "Missing SSID" requirement further down since offline mode is
+    // precisely the case with no SSID at all.
+    char offline_mode_str[8] = {0};
+    get_form_field(buf, "offlineMode", offline_mode_str, sizeof(offline_mode_str));
+    if (strcmp(offline_mode_str, "true") == 0) {
+        get_form_field(buf, "deviceName", device_name, sizeof(device_name));
+        if (strlen(device_name) == 0) {
+            strncpy(device_name, DEFAULT_DEVICE_NAME, DEVICE_NAME_MAX_LEN - 1);
+            device_name[DEVICE_NAME_MAX_LEN - 1] = '\0';
+        }
+        config_manager_set_device_name(device_name);
+        config_manager_set_offline_mode_enabled(true);
+        ESP_LOGI(TAG, "Offline mode selected during setup - no WiFi network will be configured");
+
+        const char *response =
+            "<html><body><h1>Offline-Modus eingerichtet</h1>"
+            "<p>Das Ger&auml;t arbeitet ab jetzt ohne WLAN-Verbindung. Fotos und Einstellungen "
+            "lassen sich jederzeit &uuml;ber den Hotspot-Modus verwalten (BOOT-Taste 3 Sekunden "
+            "gedr&uuml;ckt halten, dann mit diesem WLAN-Hotspot verbinden).</p>"
+            "<p>Ger&auml;t startet in 3 Sekunden neu...</p></body></html>";
+        httpd_resp_send(req, response, strlen(response));
+        return ESP_OK;
+    }
+
     // Order-independent, URL-decoding field extraction. The previous
     // positional parser sliced deviceName from "&deviceName=" to the END of
     // the body, so any field appended after it (the #43 network settings) got
@@ -674,6 +703,14 @@ esp_err_t wifi_provisioning_stop_ap(void)
 
 bool wifi_provisioning_is_provisioned(void)
 {
+    // Offline mode (github.com/aitjcize/esp32-photoframe#90) counts as
+    // "configured" too - without this, a device with no saved SSID (by
+    // design, since it deliberately has no WiFi network) would loop back
+    // into the OOBE AP forever instead of booting normally.
+    if (config_manager_get_offline_mode_enabled()) {
+        return true;
+    }
+
     char ssid[WIFI_SSID_MAX_LEN];
     char password[WIFI_PASS_MAX_LEN];
 

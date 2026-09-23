@@ -88,6 +88,8 @@ static bool wifi_tx_power_cap_enabled = true;
 static bool wifi_extended_retry_enabled = false;
 static int wifi_coldboot_fail_count = 0;
 static bool wifi_reprovision_on_fail_enabled = true;
+static bool offline_mode_enabled = false;
+static bool https_enabled = false;
 static bool rotation_pairing_enabled = false;
 static bool variant_selection_enabled = false;
 static bool telegram_rotation_notify_enabled = false;
@@ -922,6 +924,16 @@ esp_err_t config_manager_init(void)
         uint8_t stored_wifi_reprov = 1;  // Default to enabled - see config.h
         if (nvs_get_u8(nvs_handle, NVS_WIFI_REPROV_ON_FAIL_KEY, &stored_wifi_reprov) == ESP_OK) {
             wifi_reprovision_on_fail_enabled = (stored_wifi_reprov != 0);
+        }
+
+        uint8_t stored_offline_mode = 0;
+        if (nvs_get_u8(nvs_handle, NVS_OFFLINE_MODE_KEY, &stored_offline_mode) == ESP_OK) {
+            offline_mode_enabled = (stored_offline_mode != 0);
+        }
+
+        uint8_t stored_https = 0;
+        if (nvs_get_u8(nvs_handle, NVS_HTTPS_ENABLED_KEY, &stored_https) == ESP_OK) {
+            https_enabled = (stored_https != 0);
         }
 
         uint8_t stored_rotation_pairing = 0;
@@ -2428,6 +2440,45 @@ void config_manager_set_wifi_reprovision_on_fail_enabled(bool enabled)
 bool config_manager_get_wifi_reprovision_on_fail_enabled(void)
 {
     return wifi_reprovision_on_fail_enabled;
+}
+
+void config_manager_set_offline_mode_enabled(bool enabled)
+{
+    offline_mode_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_OFFLINE_MODE_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Offline mode (no WiFi network) %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_offline_mode_enabled(void)
+{
+    return offline_mode_enabled;
+}
+
+void config_manager_set_https_enabled(bool enabled)
+{
+    https_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_HTTPS_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "HTTPS web UI %s (takes effect on next restart)",
+             enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_https_enabled(void)
+{
+    return https_enabled;
 }
 
 void config_manager_set_rotation_pairing_enabled(bool enabled)

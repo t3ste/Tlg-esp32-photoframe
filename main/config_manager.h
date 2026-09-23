@@ -234,6 +234,16 @@ int config_manager_get_wifi_coldboot_fail_count(void);
 void config_manager_set_wifi_reprovision_on_fail_enabled(bool enabled);
 bool config_manager_get_wifi_reprovision_on_fail_enabled(void);
 
+// Set during first-time setup when the user picks offline/no-WiFi use - see
+// NVS_OFFLINE_MODE_KEY in config.h. Defaults to false.
+void config_manager_set_offline_mode_enabled(bool enabled);
+bool config_manager_get_offline_mode_enabled(void);
+
+// Opt-in second HTTPS listener - see NVS_HTTPS_ENABLED_KEY in config.h.
+// Defaults to false. Takes effect on the next http_server_init().
+void config_manager_set_https_enabled(bool enabled);
+bool config_manager_get_https_enabled(void);
+
 // Orientation pairing during normal (non-Telegram) auto-rotation - random
 // mode only. Defaults to false. See NVS_ROTATION_PAIRING_ENABLED_KEY in
 // config.h.

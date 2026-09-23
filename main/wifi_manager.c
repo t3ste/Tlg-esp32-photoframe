@@ -14,6 +14,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "lwip/err.h"
+#include "lwip/ip4_addr.h"
 #include "lwip/sys.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -326,6 +327,104 @@ esp_err_t wifi_manager_disconnect(void)
 void wifi_manager_set_max_retries(int max_retries)
 {
     s_max_retries = max_retries;
+}
+
+static bool s_ap_hotspot_active = false;
+
+// On-demand offline hotspot: reconfigures the already-created AP netif
+// (s_ap_hotspot_active) exactly like wifi_provisioning_start_ap() does for
+// first-time setup - same open/no-password auth, same channel, same static
+// 192.168.4.1 - but deliberately does NOT start a second httpd like that
+// function does. main/http_server.c's server is netif-agnostic (binds
+// INADDR_ANY, no STA-specific code anywhere in it - verified 2026-09-20)
+// and is already running in every normal operating mode, so switching the
+// underlying WiFi mode to AP is enough on its own to make the exact same
+// full web UI (gallery, upload, settings, Agenda config - everything)
+// reachable at http://192.168.4.1 with no server restart and no new
+// handlers. Drops any existing STA connection, matching this feature's
+// "step away from the real network into a standalone hotspot" framing
+// (github.com/aitjcize/esp32-photoframe#90) - call
+// wifi_manager_stop_ap_hotspot() to return to normal STA operation.
+esp_err_t wifi_manager_start_ap_hotspot(char *ssid_out, size_t ssid_out_len)
+{
+    ESP_LOGI(TAG, "Starting on-demand AP hotspot (full web UI, no WiFi network)");
+    s_is_connected = false;
+    esp_wifi_stop();
+
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_AP);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    const char *ap_ssid = get_setup_ap_ssid();
+    wifi_config_t wifi_config = {
+        .ap = {.channel = 1, .password = "", .max_connection = 4, .authmode = WIFI_AUTH_OPEN},
+    };
+    strncpy((char *) wifi_config.ap.ssid, ap_ssid, sizeof(wifi_config.ap.ssid));
+    wifi_config.ap.ssid_len = strlen(ap_ssid);
+
+    err = esp_wifi_set_config(WIFI_IF_AP, &wifi_config);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = esp_wifi_start();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(100));  // let the netif come up before reconfiguring it
+
+    esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    if (!ap_netif) {
+        ESP_LOGE(TAG, "Failed to get AP netif handle");
+        return ESP_FAIL;
+    }
+    esp_netif_dhcps_stop(ap_netif);
+    esp_netif_ip_info_t ip_info;
+    IP4_ADDR(&ip_info.ip, 192, 168, 4, 1);
+    IP4_ADDR(&ip_info.gw, 192, 168, 4, 1);
+    IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
+    esp_err_t ip_err = esp_netif_set_ip_info(ap_netif, &ip_info);
+    esp_netif_dhcps_start(ap_netif);
+    if (ip_err != ESP_OK) {
+        return ip_err;
+    }
+
+    s_ap_hotspot_active = true;
+    if (ssid_out && ssid_out_len > 0) {
+        strncpy(ssid_out, ap_ssid, ssid_out_len - 1);
+        ssid_out[ssid_out_len - 1] = '\0';
+    }
+    ESP_LOGI(TAG, "AP hotspot active - SSID: %s, web UI at http://192.168.4.1", ap_ssid);
+    return ESP_OK;
+}
+
+bool wifi_manager_is_ap_hotspot_active(void)
+{
+    return s_ap_hotspot_active;
+}
+
+// Returns to normal STA operation: reconnects with saved credentials if any
+// exist (best-effort, bounded timeout - a failure here just leaves the
+// device with WiFi off, exactly as if this had been a cold boot with a
+// flaky network, not a new failure mode). Safe to call even if the hotspot
+// was never started.
+esp_err_t wifi_manager_stop_ap_hotspot(void)
+{
+    if (!s_ap_hotspot_active) {
+        return ESP_OK;
+    }
+    ESP_LOGI(TAG, "Stopping AP hotspot, returning to normal WiFi operation");
+    s_ap_hotspot_active = false;
+    esp_wifi_stop();
+    esp_wifi_set_mode(WIFI_MODE_STA);
+
+    char ssid[WIFI_SSID_MAX_LEN] = {0};
+    char password[WIFI_PASS_MAX_LEN] = {0};
+    if (wifi_manager_load_credentials(ssid, password) == ESP_OK && ssid[0] != '\0') {
+        return wifi_manager_connect(ssid, password, 30000);
+    }
+    return ESP_OK;  // offline mode or no saved credentials - staying WiFi-off is correct
 }
 
 bool wifi_manager_is_connected(void)
