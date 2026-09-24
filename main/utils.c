@@ -25,6 +25,7 @@
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "http_auth.h"
 #include "image_processor.h"
 #include "mdns_service.h"
 #include "nvs.h"
@@ -594,6 +595,8 @@ esp_err_t apply_config_from_json(cJSON *root)
             utils_set_config_error("Failed to save the device password");
             had_error = true;
         }
+        // Lockouts earned against the old password shouldn't outlive it.
+        http_auth_limiter_reset();
     }
 
     item = cJSON_GetObjectItem(root, "http_header_key");
