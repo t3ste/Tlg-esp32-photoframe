@@ -10,6 +10,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "agenda_color_profile.h"
+#include "alarm_manager.h"
 #include "album_manager.h"
 #include "battery_history.h"
 #include "board_hal.h"
@@ -24,6 +26,7 @@
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
+#include "esp_https_server.h"
 #include "esp_littlefs.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -33,6 +36,7 @@
 #include "ha_integration.h"
 #include "history_manager.h"
 #include "http_auth.h"
+#include "https_cert.h"
 #include "image_processor.h"
 #include "lwip/sockets.h"
 #include "nvs_flash.h"
@@ -44,6 +48,7 @@
 #include "sdcard.h"
 #include "storage.h"
 #include "utils.h"
+#include "wifi_manager.h"
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -51,6 +56,7 @@
 
 static const char *TAG = "http_server";
 static httpd_handle_t server = NULL;
+static httpd_handle_t https_server = NULL;  // NULL unless config_manager_get_https_enabled()
 static bool system_ready = false;
 
 #define HTTPD_503 "503 Service Unavailable"
@@ -91,6 +97,8 @@ extern const uint8_t vite_browser_external_js_end[] asm(
     "_binary___vite_browser_external_js_gz_end");
 extern const uint8_t icon_svg_start[] asm("_binary_icon_svg_gz_start");
 extern const uint8_t icon_svg_end[] asm("_binary_icon_svg_gz_end");
+extern const uint8_t profile_editor_html_start[] asm("_binary_profile_editor_html_gz_start");
+extern const uint8_t profile_editor_html_end[] asm("_binary_profile_editor_html_gz_end");
 extern const uint8_t measurement_sample_jpg_start[] asm("_binary_measurement_sample_jpg_start");
 extern const uint8_t measurement_sample_jpg_end[] asm("_binary_measurement_sample_jpg_end");
 
@@ -202,12 +210,15 @@ static esp_err_t auth_gate(httpd_req_t *req)
 
 // Register a route behind the optional auth gate. The real handler rides in
 // user_ctx; every route goes through here so authentication cannot be
-// forgotten when a new endpoint is added.
-static void register_uri(const char *uri, httpd_method_t method, http_handler_fn handler)
+// forgotten when a new endpoint is added. Takes an explicit handle so the
+// same registration list can be replayed onto both the plain-HTTP server and
+// the optional HTTPS one (see register_all_handlers()).
+static void register_uri(httpd_handle_t handle, const char *uri, httpd_method_t method,
+                         http_handler_fn handler)
 {
     httpd_uri_t u = {
         .uri = uri, .method = method, .handler = auth_gate, .user_ctx = (void *) handler};
-    httpd_register_uri_handler(server, &u);
+    httpd_register_uri_handler(handle, &u);
 }
 
 static esp_err_t index_handler(httpd_req_t *req)
@@ -281,6 +292,20 @@ static esp_err_t icon_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "image/svg+xml");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_send(req, (const char *) icon_svg_start, icon_svg_size);
+    return ESP_OK;
+}
+
+// The standalone Calendar color-profile visual editor tool (profile-editor.html,
+// webapp/public/) - served by the device itself so its "An Gerät senden" button
+// (a same-origin fetch to POST /api/agenda/color-profile?slot=N) has a device to
+// talk to without the user needing to download/re-upload the exported JSON by
+// hand. Embedded the same way as index.html/icon.svg above.
+static esp_err_t profile_editor_handler(httpd_req_t *req)
+{
+    const size_t profile_editor_html_size = (profile_editor_html_end - profile_editor_html_start);
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    httpd_resp_send(req, (const char *) profile_editor_html_start, profile_editor_html_size);
     return ESP_OK;
 }
 
@@ -1645,6 +1670,33 @@ static esp_err_t debug_log_clear_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// On-demand offline hotspot (github.com/aitjcize/esp32-photoframe#90) -
+// mirrors the long-BOOT-hold trigger in main.c, for a user without physical
+// access to the device. The response is sent BEFORE actually switching WiFi
+// modes, since a request that arrived over the STA network the device is
+// about to drop can't be answered afterward - the client needs the SSID in
+// hand to reconnect via the new hotspot regardless of whether this exact
+// request round-trip completes cleanly on their end.
+static esp_err_t wifi_hotspot_start_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    char resp[96];
+    snprintf(resp, sizeof(resp),
+             "{\"status\":\"starting\",\"ssid\":\"%s\",\"url\":\"http://192.168.4.1\"}",
+             get_setup_ap_ssid());
+    httpd_resp_sendstr(req, resp);
+    wifi_manager_start_ap_hotspot(NULL, 0);
+    return ESP_OK;
+}
+
+static esp_err_t wifi_hotspot_stop_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"stopping\"}");
+    wifi_manager_stop_ap_hotspot();
+    return ESP_OK;
+}
+
 static esp_err_t config_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -1779,6 +1831,16 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_wifi_tx_power_cap_enabled());
         cJSON_AddBoolToObject(root, "wifi_extended_retry_enabled",
                               config_manager_get_wifi_extended_retry_enabled());
+        cJSON_AddBoolToObject(root, "wifi_reprovision_on_fail_enabled",
+                              config_manager_get_wifi_reprovision_on_fail_enabled());
+        // Read-only here - only ever set during initial setup (offline
+        // checkbox, wifi_provisioning.c) or by leaving the on-demand hotspot
+        // running is unrelated. Turning it back off needs real credentials,
+        // i.e. re-provisioning, not a PATCH.
+        cJSON_AddBoolToObject(root, "offline_mode_enabled",
+                              config_manager_get_offline_mode_enabled());
+        cJSON_AddBoolToObject(root, "ap_hotspot_active", wifi_manager_is_ap_hotspot_active());
+        cJSON_AddBoolToObject(root, "https_enabled", config_manager_get_https_enabled());
         cJSON_AddBoolToObject(root, "rotation_pairing_enabled",
                               config_manager_get_rotation_pairing_enabled());
         cJSON_AddBoolToObject(root, "variant_selection_enabled",
@@ -1931,6 +1993,35 @@ static esp_err_t config_handler(httpd_req_t *req)
                               config_manager_get_agenda_todo_enabled());
         cJSON_AddBoolToObject(root, "agenda_cal_enabled", config_manager_get_agenda_cal_enabled());
         cJSON_AddNumberToObject(root, "agenda_cal_days", config_manager_get_agenda_cal_days());
+        const char *agenda_cal_layout_str = "list";
+        switch (config_manager_get_agenda_cal_layout_mode()) {
+        case AGENDA_CAL_LAYOUT_GRID_A:
+            agenda_cal_layout_str = "grid_a";
+            break;
+        case AGENDA_CAL_LAYOUT_GRID_B:
+            agenda_cal_layout_str = "grid_b";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "agenda_cal_layout_mode", agenda_cal_layout_str);
+        const char *agenda_shift_model_str = "none";
+        switch (config_manager_get_agenda_shift_model()) {
+        case AGENDA_SHIFT_MODEL_2_2_3:
+            agenda_shift_model_str = "2-2-3";
+            break;
+        case AGENDA_SHIFT_MODEL_WEEK_WEEK:
+            agenda_shift_model_str = "week_week";
+            break;
+        case AGENDA_SHIFT_MODEL_3_4:
+            agenda_shift_model_str = "3-4";
+            break;
+        default:
+            break;
+        }
+        cJSON_AddStringToObject(root, "agenda_shift_model", agenda_shift_model_str);
+        cJSON_AddStringToObject(root, "agenda_shift_start",
+                                config_manager_get_agenda_shift_start());
         cJSON_AddBoolToObject(root, "agenda_cal_weather_enabled",
                               config_manager_get_agenda_cal_weather_enabled());
         cJSON_AddBoolToObject(root, "agenda_cal_weather_right_aligned",
@@ -2002,9 +2093,30 @@ static esp_err_t config_handler(httpd_req_t *req)
             }
         }
         cJSON_AddItemToObject(root, "agenda_cron", agenda_cron_arr);
+
+        // Alarm Clock - always reported (not just on a build compiled with
+        // CONFIG_ALARM_CLOCK_ENABLED): config_manager_get_alarm_*() and
+        // alarm_manager_is_compiled_in() are harmless no-ops on every other
+        // build, so the Web UI always sees a well-formed but empty/disabled
+        // shape and can decide for itself (via alarm_clock_available)
+        // whether to show the settings tab at all.
+        cJSON_AddBoolToObject(root, "alarm_clock_available", alarm_manager_is_compiled_in());
+        cJSON *alarm_cron_arr = cJSON_CreateArray();
+        int alarm_cron_count = config_manager_get_alarm_cron_rule_count();
+        for (int i = 0; i < alarm_cron_count; i++) {
+            const char *rule = config_manager_get_alarm_cron_rule(i);
+            if (rule) {
+                cJSON_AddItemToArray(alarm_cron_arr, cJSON_CreateString(rule));
+            }
+        }
+        cJSON_AddItemToObject(root, "alarm_cron", alarm_cron_arr);
+        cJSON_AddNumberToObject(root, "alarm_ring_duration_sec",
+                                config_manager_get_alarm_ring_duration_sec());
+
         cJSON_AddBoolToObject(root, "agenda_stack_layout",
                               config_manager_get_agenda_stack_layout());
-        cJSON_AddStringToObject(root, "agenda_bg_color", config_manager_get_agenda_bg_color());
+        cJSON_AddNumberToObject(root, "agenda_color_profile_active",
+                                config_manager_get_agenda_color_profile_active());
         cJSON_AddStringToObject(root, "agenda_pri_a_color",
                                 config_manager_get_agenda_pri_a_color());
         cJSON_AddStringToObject(root, "agenda_pri_b_color",
@@ -2023,16 +2135,6 @@ static esp_err_t config_handler(httpd_req_t *req)
                                 config_manager_get_agenda_project_color());
         cJSON_AddStringToObject(root, "agenda_context_color",
                                 config_manager_get_agenda_context_color());
-        cJSON_AddStringToObject(root, "agenda_cal_a_color",
-                                config_manager_get_agenda_cal_a_color());
-        cJSON_AddStringToObject(root, "agenda_cal_b_color",
-                                config_manager_get_agenda_cal_b_color());
-        cJSON_AddStringToObject(root, "agenda_cal_c_color",
-                                config_manager_get_agenda_cal_c_color());
-        cJSON_AddStringToObject(root, "agenda_cal_d_color",
-                                config_manager_get_agenda_cal_d_color());
-        cJSON_AddStringToObject(root, "agenda_cal_e_color",
-                                config_manager_get_agenda_cal_e_color());
 
         char *json_str = cJSON_Print(root);
         httpd_resp_set_type(req, "application/json");
@@ -2044,11 +2146,22 @@ static esp_err_t config_handler(httpd_req_t *req)
         return ESP_OK;
     } else if (req->method == HTTP_POST || req->method == HTTP_PATCH) {
         size_t buf_size = req->content_len + 1;
-        if (buf_size > 4096) {
+        // 32768: this endpoint's own settings surface has grown well past
+        // what the original 4096-byte cap here allowed for - confirmed live
+        // (2026-09-20) that a full Settings-page "Export Config" JSON (with
+        // "Include credentials and URLs" on: 3 Agenda Calendar URLs + a ToDo
+        // URL + Telegram token/chat ID pushing it past 4.7KB) got REJECTED
+        // outright by this check on re-import, silently dropping every
+        // field in one shot - the Vue side's Promise.all() doesn't check
+        // response.ok, so the UI reported "imported successfully" anyway
+        // (see webapp's performImport() fix, same incident). PSRAM-backed
+        // since this buffer can now be meaningfully large; freed well before
+        // the eventual e-paper render pipeline would need that RAM back.
+        if (buf_size > 32768) {
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request body too large");
             return ESP_FAIL;
         }
-        char *buf = malloc(buf_size);
+        char *buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
         if (!buf) {
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
             return ESP_FAIL;
@@ -2972,6 +3085,123 @@ static esp_err_t agenda_extra_ics_upload_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// GET/POST/DELETE /api/agenda/color-profile?slot=1|2|3 - manages the up-to-
+// AGENDA_COLOR_PROFILE_SLOTS stored Calendar-view color profiles imported
+// from profile-editor.html's JSON export (see agenda_color_profile.h).
+// GET (no ?slot=) lists all slots' names + which one is active; POST
+// imports/replaces one slot's profile (raw JSON body, same non-multipart
+// convention as agenda_extra_ics_upload_handler() above); DELETE removes
+// one slot, clearing the active pointer first if it pointed there.
+// Selecting which slot is *active* is a plain scalar setting instead
+// (agenda_color_profile_active via PATCH /api/config), not part of this
+// endpoint.
+static esp_err_t agenda_color_profile_handler(httpd_req_t *req)
+{
+    if (!system_ready) {
+        httpd_resp_set_status(req, HTTPD_503);
+        httpd_resp_sendstr(req, "System is still initializing");
+        return ESP_FAIL;
+    }
+
+    if (req->method == HTTP_GET) {
+        cJSON *root = cJSON_CreateObject();
+        cJSON *slots = cJSON_CreateArray();
+        for (int slot = 1; slot <= AGENDA_COLOR_PROFILE_SLOTS; slot++) {
+            cJSON *entry = cJSON_CreateObject();
+            cJSON_AddNumberToObject(entry, "slot", slot);
+            char name[AGENDA_CAL_CDE_NAME_MAX_LEN * 2];
+            if (agenda_color_profile_slot_name(slot, name, sizeof(name))) {
+                cJSON_AddStringToObject(entry, "name", name);
+            } else {
+                cJSON_AddNullToObject(entry, "name");
+            }
+            cJSON_AddItemToArray(slots, entry);
+        }
+        cJSON_AddItemToObject(root, "slots", slots);
+        cJSON_AddNumberToObject(root, "active", config_manager_get_agenda_color_profile_active());
+        char *json_str = cJSON_Print(root);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, json_str);
+        free(json_str);
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
+
+    char query[32];
+    char slot_str[4] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "slot", slot_str, sizeof(slot_str)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing ?slot=1|2|3");
+        return ESP_FAIL;
+    }
+    int slot = atoi(slot_str);
+    if (slot < 1 || slot > AGENDA_COLOR_PROFILE_SLOTS) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "slot must be 1..3");
+        return ESP_FAIL;
+    }
+    char path[64];
+    agenda_color_profile_path(slot, path, sizeof(path));
+
+    if (req->method == HTTP_DELETE) {
+        unlink(path);
+        if (config_manager_get_agenda_color_profile_active() == slot) {
+            config_manager_set_agenda_color_profile_active(0);
+        }
+        ESP_LOGI(TAG, "Color profile slot %d removed", slot);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+        return ESP_OK;
+    }
+
+    // POST: raw JSON body, same non-multipart convention as
+    // agenda_extra_ics_upload_handler() above.
+    if (req->content_len <= 0 || req->content_len > AGENDA_COLOR_PROFILE_MAX_BYTES) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Profile missing or too large");
+        return ESP_FAIL;
+    }
+
+    power_manager_reset_sleep_timer();
+
+    char *buf = heap_caps_malloc((size_t) req->content_len + 1, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+    int received = 0;
+    while (received < req->content_len) {
+        int ret = httpd_req_recv(req, buf + received, req->content_len - received);
+        if (ret <= 0) {
+            heap_caps_free(buf);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to receive data");
+            return ESP_FAIL;
+        }
+        received += ret;
+    }
+    buf[received] = '\0';
+
+    char err[96];
+    if (!agenda_color_profile_validate(buf, NULL, 0, err, sizeof(err))) {
+        heap_caps_free(buf);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, err);
+        return ESP_FAIL;
+    }
+
+    FILE *fp = fopen(path, "wb");
+    if (!fp) {
+        heap_caps_free(buf);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save profile");
+        return ESP_FAIL;
+    }
+    fwrite(buf, 1, (size_t) received, fp);
+    fclose(fp);
+    heap_caps_free(buf);
+
+    ESP_LOGI(TAG, "Color profile slot %d updated via import (%d bytes)", slot, received);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"success\"}");
+    return ESP_OK;
+}
+
 static esp_err_t processing_settings_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET) {
@@ -3232,19 +3462,98 @@ static esp_err_t color_palette_handler(httpd_req_t *req)
     return ESP_FAIL;
 }
 
+// Registers every route this device serves onto whichever handle is passed
+// in - the plain-HTTP `server` (always) and, if HTTPS is enabled, a second
+// TLS-wrapped instance too (see http_server_init() below). Extracted so both
+// instances share one definition instead of two copies drifting apart -
+// httpd_ssl_start() (esp_https_server) is a thin wrapper that still hands
+// back an ordinary httpd_handle_t, so register_uri() works unchanged on
+// either kind of handle. Every route goes through register_uri() so the
+// optional HTTP-auth gate (see above) cannot be forgotten when a new
+// endpoint is added.
+static void register_all_handlers(httpd_handle_t handle)
+{
+    register_uri(handle, "/", HTTP_GET, index_handler);
+    register_uri(handle, "/assets/index.css", HTTP_GET, index_css_handler);
+    register_uri(handle, "/assets/index.js", HTTP_GET, index_js_handler);
+    register_uri(handle, "/assets/index2.js", HTTP_GET, index2_js_handler);
+    register_uri(handle, "/assets/exif-reader.js", HTTP_GET, exif_reader_js_handler);
+    register_uri(handle, "/assets/browser.js", HTTP_GET, browser_js_handler);
+    register_uri(handle, "/assets/__vite-browser-external.js", HTTP_GET,
+                 vite_browser_external_js_handler);
+    register_uri(handle, "/icon.svg", HTTP_GET, icon_handler);
+    register_uri(handle, "/profile-editor.html", HTTP_GET, profile_editor_handler);
+    register_uri(handle, "/measurement_sample.jpg", HTTP_GET, measurement_sample_handler);
+    register_uri(handle, "/api/rotate", HTTP_POST, rotate_handler);
+    register_uri(handle, "/api/current_image", HTTP_GET, current_image_handler);
+    register_uri(handle, "/api/config", HTTP_GET, config_handler);
+    register_uri(handle, "/api/config", HTTP_POST, config_handler);
+    register_uri(handle, "/api/config", HTTP_PATCH, config_handler);
+    register_uri(handle, "/api/config/urls", HTTP_GET, config_urls_handler);
+    register_uri(handle, "/api/debug/log", HTTP_GET, debug_log_download_handler);
+    register_uri(handle, "/api/debug/log", HTTP_DELETE, debug_log_clear_handler);
+    register_uri(handle, "/api/battery", HTTP_GET, battery_handler);
+    register_uri(handle, "/api/battery-history", HTTP_GET, battery_history_handler);
+    register_uri(handle, "/api/battery-history", HTTP_DELETE, battery_history_handler);
+    register_uri(handle, "/api/history", HTTP_GET, display_history_handler);
+    register_uri(handle, "/api/history", HTTP_DELETE, display_history_handler);
+    register_uri(handle, "/api/albums/organize-crop", HTTP_POST, organize_crop_variants_handler);
+    register_uri(handle, "/api/sensor", HTTP_GET, sensor_handler);
+    register_uri(handle, "/api/climate-history", HTTP_GET, climate_history_handler);
+    register_uri(handle, "/api/climate-history", HTTP_DELETE, climate_history_handler);
+    register_uri(handle, "/api/sleep", HTTP_POST, sleep_handler);
+    register_uri(handle, "/api/system-info", HTTP_GET, system_info_handler);
+    register_uri(handle, "/api/time", HTTP_GET, time_handler);
+    register_uri(handle, "/api/time/sync", HTTP_POST, time_sync_handler);
+    register_uri(handle, "/api/ota/status", HTTP_GET, ota_status_handler);
+    register_uri(handle, "/api/ota/check", HTTP_POST, ota_check_handler);
+    register_uri(handle, "/api/ota/update", HTTP_POST, ota_update_handler);
+    register_uri(handle, "/api/keep_alive", HTTP_POST, keep_alive_handler);
+    register_uri(handle, "/api/format-storage", HTTP_POST, format_storage_handler);
+    register_uri(handle, "/api/display-image", HTTP_POST, display_image_direct_handler);
+    register_uri(handle, "/api/albums", HTTP_GET, albums_handler);
+    register_uri(handle, "/api/albums", HTTP_POST, albums_handler);
+    register_uri(handle, "/api/albums", HTTP_DELETE, album_delete_handler);
+    register_uri(handle, "/api/albums/enabled", HTTP_PUT, album_enabled_handler);
+    register_uri(handle, "/api/images", HTTP_GET, album_images_handler);
+    register_uri(handle, "/api/upload", HTTP_POST, upload_image_handler);
+    register_uri(handle, "/api/display", HTTP_POST, display_image_handler);
+    register_uri(handle, "/api/delete", HTTP_POST, delete_image_handler);
+    register_uri(handle, "/api/image", HTTP_GET, serve_image_handler);
+    register_uri(handle, "/api/settings/processing", HTTP_GET, processing_settings_handler);
+    register_uri(handle, "/api/settings/processing", HTTP_POST, processing_settings_handler);
+    register_uri(handle, "/api/settings/processing", HTTP_DELETE, processing_settings_handler);
+    register_uri(handle, "/api/settings/palette", HTTP_GET, color_palette_handler);
+    register_uri(handle, "/api/settings/palette", HTTP_POST, color_palette_handler);
+    register_uri(handle, "/api/settings/palette", HTTP_DELETE, color_palette_handler);
+    register_uri(handle, "/api/factory-reset", HTTP_POST, factory_reset_handler);
+    register_uri(handle, "/api/calibration/display", HTTP_POST, display_calibration_handler);
+    register_uri(handle, "/api/error-overlay/test", HTTP_POST, error_overlay_test_handler);
+    register_uri(handle, "/api/chimes/test", HTTP_POST, chime_test_handler);
+    register_uri(handle, "/api/agenda/extra-ics", HTTP_POST, agenda_extra_ics_upload_handler);
+    register_uri(handle, "/api/agenda/color-profile", HTTP_GET, agenda_color_profile_handler);
+    register_uri(handle, "/api/agenda/color-profile", HTTP_POST, agenda_color_profile_handler);
+    register_uri(handle, "/api/agenda/color-profile", HTTP_DELETE,
+                 agenda_color_profile_handler);
+    register_uri(handle, "/api/wifi/hotspot/start", HTTP_POST, wifi_hotspot_start_handler);
+    register_uri(handle, "/api/wifi/hotspot/stop", HTTP_POST, wifi_hotspot_stop_handler);
+}
+
 esp_err_t http_server_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    // 64: 56 handlers are registered below as of this comment (the Climate
-    // feature's endpoints pushed the previous 55-handler margin - meant to
-    // cover exactly this - over by one, the same way /api/albums/organize-crop
-    // once pushed an even older limit of 50 over). Keep real margin above the
-    // exact count so the next handler added here doesn't silently fail to
-    // register (httpd_register_uri_handler() only logs a warning on overflow,
-    // never a hard error, and every following handler in the same init
-    // function still gets registered fine - only the ones actually over the
-    // limit silently vanish, which is what made this so easy to miss twice).
-    config.max_uri_handlers = 64;
+    // 72: 62 handlers are registered below as of this comment (the offline
+    // hotspot start/stop endpoints pushed the previous 64-handler margin -
+    // itself already raised twice before, from 50 then 55 - down to 2 free
+    // slots). Keep real margin above the exact count so the next handler
+    // added here doesn't silently fail to register
+    // (httpd_register_uri_handler() only logs a warning on overflow, never a
+    // hard error, and every following handler in the same init function
+    // still gets registered fine - only the ones actually over the limit
+    // silently vanish, which is what made this so easy to miss before -
+    // run `grep -c "register_uri(handle," main/http_server.c` and compare
+    // against this number whenever you add a new endpoint).
+    config.max_uri_handlers = 72;
     // 16384: rotate_handler() (/api/rotate) calls trigger_image_rotation()
     // synchronously on this worker task - the same heavy pipeline that's
     // needed the same bump on button_task/deep_sleep_wake_task (12288 wasn't
@@ -3253,130 +3562,57 @@ esp_err_t http_server_init(void)
     config.max_open_sockets = 10;    // Limit concurrent connections to prevent memory exhaustion
     config.lru_purge_enable = true;  // Enable LRU purging of connections
 
-    if (httpd_start(&server, &config) == ESP_OK) {
-        register_uri("/", HTTP_GET, index_handler);
+    if (httpd_start(&server, &config) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start HTTP server");
+        return ESP_FAIL;
+    }
+    register_all_handlers(server);
+    ESP_LOGI(TAG, "HTTP server started");
 
-        register_uri("/assets/index.css", HTTP_GET, index_css_handler);
+    // Optional second HTTPS instance (github.com/aitjcize/esp32-photoframe#130)
+    // on the same routes, port 443 - off by default (self-signed cert, so
+    // every client sees a browser warning to click through) via
+    // config_manager_get_https_enabled(). Purely additive: the plain HTTP
+    // instance above is never disabled by this, so existing bookmarks,
+    // Home Assistant, and any other scripted client keep working
+    // unchanged either way.
+    if (config_manager_get_https_enabled()) {
+        const uint8_t *cert_der, *key_der;
+        size_t cert_len, key_len;
+        if (https_cert_get(&cert_der, &cert_len, &key_der, &key_len) == ESP_OK) {
+            httpd_ssl_config_t https_config = HTTPD_SSL_CONFIG_DEFAULT();
+            https_config.httpd.max_uri_handlers = 72;
+            https_config.httpd.stack_size = 16384;
+            https_config.httpd.max_open_sockets =
+                4;  // TLS sockets cost real RAM - see esp_https_server.h
+            https_config.httpd.lru_purge_enable = true;
+            https_config.servercert = cert_der;
+            https_config.servercert_len = cert_len;
+            https_config.prvtkey_pem = key_der;
+            https_config.prvtkey_len = key_len;
 
-        register_uri("/assets/index.js", HTTP_GET, index_js_handler);
-
-        register_uri("/assets/index2.js", HTTP_GET, index2_js_handler);
-
-        register_uri("/assets/exif-reader.js", HTTP_GET, exif_reader_js_handler);
-
-        register_uri("/assets/browser.js", HTTP_GET, browser_js_handler);
-
-        register_uri("/assets/__vite-browser-external.js", HTTP_GET,
-                     vite_browser_external_js_handler);
-
-        register_uri("/icon.svg", HTTP_GET, icon_handler);
-
-        register_uri("/measurement_sample.jpg", HTTP_GET, measurement_sample_handler);
-
-        register_uri("/api/rotate", HTTP_POST, rotate_handler);
-
-        register_uri("/api/current_image", HTTP_GET, current_image_handler);
-
-        register_uri("/api/config", HTTP_GET, config_handler);
-
-        register_uri("/api/config", HTTP_POST, config_handler);
-
-        register_uri("/api/config", HTTP_PATCH, config_handler);
-
-        register_uri("/api/config/urls", HTTP_GET, config_urls_handler);
-
-        register_uri("/api/debug/log", HTTP_GET, debug_log_download_handler);
-
-        register_uri("/api/debug/log", HTTP_DELETE, debug_log_clear_handler);
-
-        register_uri("/api/battery", HTTP_GET, battery_handler);
-
-        register_uri("/api/battery-history", HTTP_GET, battery_history_handler);
-
-        register_uri("/api/battery-history", HTTP_DELETE, battery_history_handler);
-
-        register_uri("/api/history", HTTP_GET, display_history_handler);
-
-        register_uri("/api/history", HTTP_DELETE, display_history_handler);
-
-        register_uri("/api/albums/organize-crop", HTTP_POST, organize_crop_variants_handler);
-
-        register_uri("/api/sensor", HTTP_GET, sensor_handler);
-
-        register_uri("/api/climate-history", HTTP_GET, climate_history_handler);
-
-        register_uri("/api/climate-history", HTTP_DELETE, climate_history_handler);
-
-        register_uri("/api/sleep", HTTP_POST, sleep_handler);
-
-        register_uri("/api/system-info", HTTP_GET, system_info_handler);
-
-        register_uri("/api/time", HTTP_GET, time_handler);
-
-        register_uri("/api/time/sync", HTTP_POST, time_sync_handler);
-
-        register_uri("/api/ota/status", HTTP_GET, ota_status_handler);
-
-        register_uri("/api/ota/check", HTTP_POST, ota_check_handler);
-
-        register_uri("/api/ota/update", HTTP_POST, ota_update_handler);
-
-        register_uri("/api/keep_alive", HTTP_POST, keep_alive_handler);
-
-        register_uri("/api/format-storage", HTTP_POST, format_storage_handler);
-
-        register_uri("/api/display-image", HTTP_POST, display_image_direct_handler);
-
-        register_uri("/api/albums", HTTP_GET, albums_handler);
-
-        register_uri("/api/albums", HTTP_POST, albums_handler);
-
-        register_uri("/api/albums", HTTP_DELETE, album_delete_handler);
-
-        register_uri("/api/albums/enabled", HTTP_PUT, album_enabled_handler);
-
-        register_uri("/api/images", HTTP_GET, album_images_handler);
-
-        register_uri("/api/upload", HTTP_POST, upload_image_handler);
-
-        register_uri("/api/display", HTTP_POST, display_image_handler);
-
-        register_uri("/api/delete", HTTP_POST, delete_image_handler);
-
-        register_uri("/api/image", HTTP_GET, serve_image_handler);
-
-        register_uri("/api/settings/processing", HTTP_GET, processing_settings_handler);
-
-        register_uri("/api/settings/processing", HTTP_POST, processing_settings_handler);
-
-        register_uri("/api/settings/processing", HTTP_DELETE, processing_settings_handler);
-
-        register_uri("/api/settings/palette", HTTP_GET, color_palette_handler);
-
-        register_uri("/api/settings/palette", HTTP_POST, color_palette_handler);
-
-        register_uri("/api/settings/palette", HTTP_DELETE, color_palette_handler);
-
-        register_uri("/api/factory-reset", HTTP_POST, factory_reset_handler);
-
-        register_uri("/api/calibration/display", HTTP_POST, display_calibration_handler);
-
-        register_uri("/api/error-overlay/test", HTTP_POST, error_overlay_test_handler);
-
-        register_uri("/api/chimes/test", HTTP_POST, chime_test_handler);
-
-        register_uri("/api/agenda/extra-ics", HTTP_POST, agenda_extra_ics_upload_handler);
-
-        ESP_LOGI(TAG, "HTTP server started");
-        return ESP_OK;
+            if (httpd_ssl_start(&https_server, &https_config) == ESP_OK) {
+                register_all_handlers(https_server);
+                ESP_LOGI(TAG, "HTTPS server started on port %d (self-signed certificate)",
+                         https_config.port_secure);
+            } else {
+                ESP_LOGE(TAG, "Failed to start HTTPS server - continuing with HTTP only");
+            }
+        } else {
+            ESP_LOGE(TAG, "Failed to obtain HTTPS certificate - continuing with HTTP only");
+        }
     }
 
-    ESP_LOGE(TAG, "Failed to start HTTP server");
-    return ESP_FAIL;
+    return ESP_OK;
 }
 
 esp_err_t http_server_stop(void)
 {
+    if (https_server) {
+        httpd_ssl_stop(https_server);
+        https_server = NULL;
+        ESP_LOGI(TAG, "HTTPS server stopped");
+    }
     if (server) {
         httpd_stop(server);
         server = NULL;

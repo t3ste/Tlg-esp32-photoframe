@@ -1,0 +1,3 @@
+# Overlay enabled via `build.py --alarmclock` - see main/Kconfig's
+# ALARM_CLOCK_ENABLED help text and docs/ALARMCLOCK_FEASIBILITY.md.
+CONFIG_ALARM_CLOCK_ENABLED=y

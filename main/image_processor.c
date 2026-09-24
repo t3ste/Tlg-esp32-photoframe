@@ -103,6 +103,25 @@ static bool board_is_grayscale(void)
     return strncmp(BOARD_HAL_DISPLAY_TYPE, "gc", 2) == 0;
 }
 
+// Set by agenda_renderer.c around a render using a mono/mono-invert color
+// profile - a profile-level choice to render everything in two colors,
+// independent of board_is_grayscale() (the panel's own hardware capability,
+// e.g. still a full-color Spectra6). Without this, draw_weather_icon()'s
+// "colored" mode only ever checked the board, so a mono profile on a color
+// panel still showed weather icons in their full traffic-light hues (a blue
+// cloud, a yellow sun) even though every other element correctly rendered
+// in plain black/white - reported live (2026-09-20) via a mono-invert
+// profile whose day-header weather chips stayed fully colored on-device.
+// Reset to false by the caller once rendering finishes so it never leaks
+// into an unrelated render (e.g. the plain photo-overlay weather line,
+// which has no color-profile concept at all).
+static bool s_agenda_mono_icon_mode = false;
+
+void image_processor_set_mono_icon_mode(bool mono)
+{
+    s_agenda_mono_icon_mode = mono;
+}
+
 // CIE L* (0..100) of a relative luminance Y (0..1)
 static float lstar_from_y(float y)
 {
@@ -3479,9 +3498,16 @@ static bool weather_icon_color_for_id(int icon_id, rgb_t *out)
 // 0-based (the caller has already subtracted WEATHER_ICON_MARKER_BASE from
 // the marker byte). `default_color` is used as-is unless colored-icon mode
 // is on and the board can show color, in which case
-// weather_icon_color_for_id() overrides it.
+// weather_icon_color_for_id() overrides it - UNLESS that override would be
+// invisible against `avoid_bg` (non-NULL only for a caller whose actual
+// background isn't guaranteed plain black/white, e.g. agenda_renderer.c's
+// shift-model-colored day header - every other caller passes NULL, since a
+// fixed traffic-light hue can never collide with a plain black/white
+// background by construction). Falls back to `default_color` in that case,
+// same as the neutral-category fallback already does - it's already
+// guaranteed contrast-safe against this exact background by the caller.
 static void draw_weather_icon(uint8_t *rgb, int width, int height, int x, int y, int icon_id,
-                              rgb_t default_color)
+                              rgb_t default_color, const rgb_t *avoid_bg)
 {
     if (icon_id < 0 || icon_id >= WEATHER_ICON_COUNT) {
         return;
@@ -3491,8 +3517,13 @@ static void draw_weather_icon(uint8_t *rgb, int width, int height, int x, int y,
         (strcmp(icon_set, "metno") == 0) ? weather_icon_table_metno : weather_icon_table_flaticon;
     const uint8_t *bitmap = table[icon_id];
     rgb_t color = default_color;
-    if (config_manager_get_weather_icon_colored() && !board_is_grayscale()) {
+    if (!s_agenda_mono_icon_mode && config_manager_get_weather_icon_colored() &&
+        !board_is_grayscale()) {
         weather_icon_color_for_id(icon_id, &color);  // no-op (color stays default_color) if neutral
+        if (avoid_bg && color.r == avoid_bg->r && color.g == avoid_bg->g &&
+            color.b == avoid_bg->b) {
+            color = default_color;
+        }
     }
 
     uint32_t bytes_per_row = WEATHER_ICON_WIDTH / 8 + (WEATHER_ICON_WIDTH % 8 ? 1 : 0);
@@ -3534,24 +3565,40 @@ void image_processor_fill_rect(uint8_t *rgb_buffer, int width, int height, int x
     }
 }
 
-void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x, int y,
-                               const char *ascii_text, uint8_t r, uint8_t g, uint8_t b)
+// Shared by both public entry points below - `avoid_bg` is only non-NULL
+// via image_processor_draw_text_on_bg(), see draw_weather_icon()'s comment
+// for why most callers don't need it.
+static void draw_text_impl(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                           const char *ascii_text, rgb_t color, const rgb_t *avoid_bg)
 {
     if (!ascii_text) {
         return;
     }
-    rgb_t color = {r, g, b};
     int cx = x;
     for (const char *p = ascii_text; *p != '\0'; p++) {
         if (is_weather_icon_marker(*p)) {
             draw_weather_icon(rgb_buffer, width, height, cx, y,
-                              (unsigned char) *p - WEATHER_ICON_MARKER_BASE, color);
+                              (unsigned char) *p - WEATHER_ICON_MARKER_BASE, color, avoid_bg);
             cx += WEATHER_ICON_WIDTH;
             continue;
         }
         draw_glyph(rgb_buffer, width, height, cx, y, *p, color);
         cx += Font24.Width;
     }
+}
+
+void image_processor_draw_text(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                               const char *ascii_text, uint8_t r, uint8_t g, uint8_t b)
+{
+    draw_text_impl(rgb_buffer, width, height, x, y, ascii_text, (rgb_t){r, g, b}, NULL);
+}
+
+void image_processor_draw_text_on_bg(uint8_t *rgb_buffer, int width, int height, int x, int y,
+                                     const char *ascii_text, uint8_t r, uint8_t g, uint8_t b,
+                                     uint8_t bg_r, uint8_t bg_g, uint8_t bg_b)
+{
+    rgb_t bg = {bg_r, bg_g, bg_b};
+    draw_text_impl(rgb_buffer, width, height, x, y, ascii_text, (rgb_t){r, g, b}, &bg);
 }
 
 int image_processor_measure_text_width(const char *ascii_text)
@@ -3711,8 +3758,11 @@ static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
         int y = bar_top + CAPTION_LINE_PADDING + i * (Font24.Height + CAPTION_LINE_PADDING);
         for (const char *p = lines[i]; *p != '\0'; p++) {
             if (is_weather_icon_marker(*p)) {
+                // NULL avoid_bg: this bar's own background is always plain
+                // black/white (overlay_invert_colors), never one of the
+                // traffic-light hues - no collision possible here.
                 draw_weather_icon(rgb_buffer, width, height, x, y,
-                                  (unsigned char) *p - WEATHER_ICON_MARKER_BASE, fg);
+                                  (unsigned char) *p - WEATHER_ICON_MARKER_BASE, fg, NULL);
                 x += WEATHER_ICON_WIDTH;
                 continue;
             }
@@ -3723,9 +3773,9 @@ static void render_text_bar(uint8_t *rgb_buffer, int width, int height,
 }
 
 // Greedy word-wraps already-ASCII-sanitized `text` into up to `max_lines`
-// lines that fit within `width` pixels, truncating the last line with "..."
-// if there's leftover text. Returns the number of lines produced (0 if
-// nothing renderable, e.g. `width` too narrow for even one character).
+// lines that fit within `width` pixels, truncating the last line with a
+// single "~" if there's leftover text. Returns the number of lines produced
+// (0 if nothing renderable, e.g. `width` too narrow for even one character).
 // Shared by image_processor_draw_caption() and the public
 // image_processor_wrap_text().
 static int wrap_ascii_text(const char *text, int width, int max_lines,
@@ -3783,16 +3833,44 @@ static int wrap_ascii_text(const char *text, int width, int max_lines,
         return 0;
     }
 
-    // Mark truncation with an ellipsis if there's leftover text.
+    // Mark truncation with a single "~" (not "..." - costs 3 characters
+    // where a tilde costs 1, freeing 2 more characters for real content on
+    // space-constrained callers like agenda_renderer.c's Calendar event
+    // rows) if there's leftover text. Font24 covers printable ASCII up to
+    // 0x7E ('~') exactly, so this is the widest single "more text follows"
+    // glyph actually available - a real ellipsis character (U+2026) has no
+    // bitmap glyph in this font at all.
     if (*word_start != '\0') {
         char *last = out_lines[line_count - 1];
         size_t len = strlen(last);
         size_t max_len = (size_t) chars_per_line;
-        if (len + 3 > max_len) {
-            len = (max_len > 3) ? max_len - 3 : 0;
+
+        if (len + 1 <= max_len) {
+            // The whole-word pass above left this line short of chars_per_line
+            // (the next word didn't fit whole, so it was dropped entirely) -
+            // rather than leaving that room blank, fill it with as many
+            // leading characters of the next word as fit before the marker.
+            // Whole-word wrapping is the right choice for a normal wrapped
+            // line, but this is already known to be the truncated tail, so a
+            // partial word beats no word at all for helping the user
+            // identify the entry (e.g. "10:00 [1h] Fahrradw~" instead of
+            // "10:00 [1h]..." with the entire summary silently dropped).
+            size_t avail = max_len - len - 1;  // -1 reserves room for "~"
+            if (len > 0 && avail > 0) {
+                last[len++] = ' ';
+                avail--;
+            }
+            size_t take = 0;
+            while (take < avail && word_start[take] != '\0' && word_start[take] != ' ') {
+                take++;
+            }
+            memcpy(last + len, word_start, take);
+            len += take;
+        } else {
+            len = (max_len > 1) ? max_len - 1 : 0;
         }
         last[len] = '\0';
-        strcat(last, "...");
+        strcat(last, "~");
     }
 
     return line_count;

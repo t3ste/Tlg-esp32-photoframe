@@ -1,9 +1,34 @@
 #include "chime.h"
 
+#include "board_hal.h"
+
+// No speaker on this board at all (components/board_hal's own per-board
+// Kconfig `select`s never set BOARD_HAL_HAS_SPEAKER here) - every policy
+// check/state this file would otherwise carry (quiet hours, per-event fire
+// caps, the severity mapping) is dead weight with nothing to ever call
+// board_hal_play_beep_pattern() for, so it's compiled out entirely rather
+// than just short-circuiting at runtime - same convention as
+// audio_chime.c's own #ifndef CONFIG_BOARD_DRIVER_WAVESHARE_PHOTOPAINTER_73
+// stub one layer down.
+#if !BOARD_HAL_HAS_SPEAKER
+
+void chime_play_if_enabled(chime_event_t event)
+{
+    (void) event;
+}
+
+bool chime_repeat_gate(chime_event_t event, bool condition_active)
+{
+    (void) event;
+    (void) condition_active;
+    return false;
+}
+
+#else
+
 #include <string.h>
 #include <time.h>
 
-#include "board_hal.h"
 #include "config_manager.h"
 
 // Per-event, per-boot fire cap - a generic backstop against any future bug
@@ -119,3 +144,5 @@ bool chime_repeat_gate(chime_event_t event, bool condition_active)
     config_manager_set_chime_repeat_count(event, count + 1);
     return true;
 }
+
+#endif  // BOARD_HAL_HAS_SPEAKER

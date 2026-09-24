@@ -723,6 +723,17 @@ esp_err_t apply_config_from_json(cJSON *root, bool from_remote)
         config_manager_set_wifi_extended_retry_enabled(cJSON_IsTrue(item));
     }
 
+    item = cJSON_GetObjectItem(root, "wifi_reprovision_on_fail_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_wifi_reprovision_on_fail_enabled(cJSON_IsTrue(item));
+    }
+
+    // Takes effect on the next http_server_init() (boot/reconnect), not live.
+    item = cJSON_GetObjectItem(root, "https_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_https_enabled(cJSON_IsTrue(item));
+    }
+
     // Auto-rotate orientation pairing (random mode only)
     item = cJSON_GetObjectItem(root, "rotation_pairing_enabled");
     if (item && cJSON_IsBool(item)) {
@@ -891,6 +902,34 @@ esp_err_t apply_config_from_json(cJSON *root, bool from_remote)
     item = cJSON_GetObjectItem(root, "agenda_cal_days");
     if (item && cJSON_IsNumber(item)) {
         config_manager_set_agenda_cal_days(item->valueint);
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_layout_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *layout_str = cJSON_GetStringValue(item);
+        agenda_cal_layout_mode_t layout_mode = AGENDA_CAL_LAYOUT_LIST;
+        if (strcmp(layout_str, "grid_a") == 0) {
+            layout_mode = AGENDA_CAL_LAYOUT_GRID_A;
+        } else if (strcmp(layout_str, "grid_b") == 0) {
+            layout_mode = AGENDA_CAL_LAYOUT_GRID_B;
+        }
+        config_manager_set_agenda_cal_layout_mode(layout_mode);
+    }
+    item = cJSON_GetObjectItem(root, "agenda_shift_model");
+    if (item && cJSON_IsString(item)) {
+        const char *model_str = cJSON_GetStringValue(item);
+        agenda_shift_model_t shift_model = AGENDA_SHIFT_MODEL_NONE;
+        if (strcmp(model_str, "2-2-3") == 0) {
+            shift_model = AGENDA_SHIFT_MODEL_2_2_3;
+        } else if (strcmp(model_str, "week_week") == 0) {
+            shift_model = AGENDA_SHIFT_MODEL_WEEK_WEEK;
+        } else if (strcmp(model_str, "3-4") == 0) {
+            shift_model = AGENDA_SHIFT_MODEL_3_4;
+        }
+        config_manager_set_agenda_shift_model(shift_model);
+    }
+    item = cJSON_GetObjectItem(root, "agenda_shift_start");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_shift_start(cJSON_GetStringValue(item));
     }
     item = cJSON_GetObjectItem(root, "agenda_cal_weather_enabled");
     if (item && cJSON_IsBool(item)) {
@@ -1128,6 +1167,10 @@ esp_err_t apply_config_from_json(cJSON *root, bool from_remote)
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_stack_layout(cJSON_IsTrue(item));
     }
+    item = cJSON_GetObjectItem(root, "agenda_color_profile_active");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_agenda_color_profile_active(item->valueint);
+    }
     // Per-role color pickers - all optional, non-secret, plain strings (one
     // of "red"/"yellow"/"blue"/"green"); an invalid/unrecognized value is
     // handled fail-soft by agenda_renderer.c's role_hue(), not rejected here.
@@ -1166,6 +1209,70 @@ esp_err_t apply_config_from_json(cJSON *root, bool from_remote)
     item = cJSON_GetObjectItem(root, "agenda_context_color");
     if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
         config_manager_set_agenda_context_color(cJSON_GetStringValue(item));
+    }
+
+    // Alarm clock schedule - same shape/validation as agenda_cron above.
+    // config_manager_set_alarm_cron_rules() is a harmless no-op on a build
+    // without CONFIG_ALARM_CLOCK_ENABLED, so this needs no #ifdef here.
+    item = cJSON_GetObjectItem(root, "alarm_cron");
+    if (item && cJSON_IsArray(item))
+        do {
+            int count = cJSON_GetArraySize(item);
+            if (count > MAX_CRON_RULES) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Too many alarm schedule rules (max %d)",
+                         MAX_CRON_RULES);
+                utils_set_config_error(msg);
+                had_error = true;
+                break;
+            }
+            const char *rules[MAX_CRON_RULES];
+            int n = 0;
+            cJSON *el;
+            bool rule_error = false;
+            cJSON_ArrayForEach(el, item)
+            {
+                if (!cJSON_IsString(el)) {
+                    utils_set_config_error("Alarm schedule rule must be a string");
+                    rule_error = true;
+                    break;
+                }
+                const char *expr = cJSON_GetStringValue(el);
+                if (strlen(expr) >= CRON_RULE_MAX_LEN) {
+                    utils_set_config_error("Cron expression too long");
+                    rule_error = true;
+                    break;
+                }
+                cron_rule_t tmp;
+                if (!cron_parse(expr, &tmp)) {
+                    char msg[96];
+                    snprintf(msg, sizeof(msg), "Invalid alarm cron expression: %s", expr);
+                    utils_set_config_error(msg);
+                    rule_error = true;
+                    break;
+                }
+                if (n < MAX_CRON_RULES) {
+                    rules[n++] = expr;
+                }
+            }
+            if (rule_error) {
+                had_error = true;
+                break;
+            }
+            config_manager_set_alarm_cron_rules(rules, n);
+        } while (0);
+
+    item = cJSON_GetObjectItem(root, "alarm_ring_duration_sec");
+    if (item && cJSON_IsNumber(item)) {
+        if (item->valueint > 0 && item->valueint <= ALARM_RING_DURATION_MAX_SEC) {
+            config_manager_set_alarm_ring_duration_sec((uint16_t) item->valueint);
+        } else {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Alarm ring duration must be 1-%d seconds",
+                     ALARM_RING_DURATION_MAX_SEC);
+            utils_set_config_error(msg);
+            had_error = true;
+        }
     }
 
     config_manager_end_agenda_batch();

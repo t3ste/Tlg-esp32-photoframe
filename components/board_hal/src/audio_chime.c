@@ -17,6 +17,23 @@ esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volum
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_ms,
+                               bool (*should_stop)(void))
+{
+    (void) volume_percent;
+    (void) total_duration_ms;
+    (void) should_stop;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t volume_percent)
+{
+    (void) notes;
+    (void) count;
+    (void) volume_percent;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 #else
 
 #include <math.h>
@@ -475,6 +492,85 @@ esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volum
     esp_err_t err = audio_session_open(&session, volume_percent);
     if (err == ESP_OK) {
         play_beep_pattern_tones(session.tx, kind);
+        i2s_write_silence(session.tx, 128);
+        audio_session_close(&session);
+    }
+
+    xSemaphoreGive(s_chime_mutex);
+    return err;
+}
+
+// Alarm-clock tone sequence (docs/ALARMCLOCK_FEASIBILITY.md): G4-C5-E5-C5,
+// 300ms each, then a 5s pause, repeating until total_duration_ms elapses or
+// should_stop() reports true. The pause is written in small chunks (not one
+// 5s i2s_write_silence() call) purely so should_stop() gets checked several
+// times per pause instead of only once every 5 seconds.
+esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_ms,
+                               bool (*should_stop)(void))
+{
+    chime_mutex_init();
+    if (!s_chime_mutex || xSemaphoreTake(s_chime_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    static const float ALARM_NOTES_HZ[4] = {392.0f, 523.0f, 659.0f, 523.0f};  // G4 C5 E5 C5
+    const int NOTE_MS = 300;
+    const int PAUSE_MS = 5000;
+    const int PAUSE_CHUNK_MS = 200;
+
+    audio_session_t session;
+    esp_err_t err = audio_session_open(&session, volume_percent);
+    if (err == ESP_OK) {
+        uint32_t elapsed_ms = 0;
+        bool stop = false;
+        while (elapsed_ms < total_duration_ms && !stop) {
+            for (int i = 0; i < 4 && !stop; i++) {
+                play_tone(session.tx, ALARM_NOTES_HZ[i], NOTE_MS, CHIME_AMPLITUDE);
+                elapsed_ms += NOTE_MS;
+                if (should_stop && should_stop()) {
+                    stop = true;
+                }
+            }
+            int pause_remaining_ms = PAUSE_MS;
+            while (pause_remaining_ms > 0 && !stop) {
+                int chunk_ms =
+                    pause_remaining_ms < PAUSE_CHUNK_MS ? pause_remaining_ms : PAUSE_CHUNK_MS;
+                i2s_write_silence(session.tx, CHIME_SAMPLE_RATE * chunk_ms / 1000);
+                pause_remaining_ms -= chunk_ms;
+                elapsed_ms += (uint32_t) chunk_ms;
+                if (should_stop && should_stop()) {
+                    stop = true;
+                }
+            }
+        }
+        i2s_write_silence(session.tx, 128);
+        audio_session_close(&session);
+    }
+
+    xSemaphoreGive(s_chime_mutex);
+    return err;
+}
+
+// General-purpose note-sequence player behind the alarm-setting button UI's
+// feedback sounds - see board_hal.h's own doc comment on why this plays the
+// whole sequence inside one session rather than one open/close per note.
+esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t volume_percent)
+{
+    chime_mutex_init();
+    if (!s_chime_mutex || xSemaphoreTake(s_chime_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    audio_session_t session;
+    esp_err_t err = audio_session_open(&session, volume_percent);
+    if (err == ESP_OK) {
+        for (int i = 0; i < count; i++) {
+            if (notes[i].freq_hz > 0.0f) {
+                play_tone(session.tx, notes[i].freq_hz, notes[i].duration_ms, CHIME_AMPLITUDE);
+            } else {
+                i2s_write_silence(session.tx, CHIME_SAMPLE_RATE * notes[i].duration_ms / 1000);
+            }
+        }
         i2s_write_silence(session.tx, 128);
         audio_session_close(&session);
     }

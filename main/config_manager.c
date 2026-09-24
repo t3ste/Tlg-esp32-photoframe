@@ -88,6 +88,9 @@ static bool wifi_performance_mode_enabled = true;
 static bool wifi_tx_power_cap_enabled = true;
 static bool wifi_extended_retry_enabled = false;
 static int wifi_coldboot_fail_count = 0;
+static bool wifi_reprovision_on_fail_enabled = true;
+static bool offline_mode_enabled = false;
+static bool https_enabled = false;
 static bool rotation_pairing_enabled = false;
 static bool variant_selection_enabled = false;
 static bool telegram_rotation_notify_enabled = false;
@@ -139,6 +142,10 @@ static char agenda_todo_etag[HTTP_ETAG_MAX_LEN] = {0};
 static char agenda_cal_etag[HTTP_ETAG_MAX_LEN] = {0};
 static char agenda_cal_etag2[HTTP_ETAG_MAX_LEN] = {0};
 static uint8_t agenda_cal_days = AGENDA_CAL_DAYS_DEFAULT;
+static agenda_cal_layout_mode_t agenda_cal_layout_mode = AGENDA_CAL_LAYOUT_LIST;
+static agenda_shift_model_t agenda_shift_model = AGENDA_SHIFT_MODEL_NONE;
+static char agenda_shift_start[AGENDA_SHIFT_START_MAX_LEN] = {0};
+static uint8_t agenda_color_profile_active = 0;
 static char agenda_cron_rules_store[MAX_CRON_RULES][CRON_RULE_MAX_LEN] = {{0}};
 static int agenda_cron_rule_count = 0;
 // Memoizes config_manager_get_compiled_agenda_cron_rules()'s cron_parse()
@@ -150,8 +157,22 @@ static int agenda_cron_rule_count = 0;
 // config_manager_set_agenda_cron_rules() below).
 static cron_rule_t agenda_cron_compiled[MAX_CRON_RULES];
 static int agenda_cron_compiled_count = -1;
+
+// Alarm clock schedule - only present in a CONFIG_ALARM_CLOCK_ENABLED build
+// (main/Kconfig, `build.py --alarmclock`). Every public
+// config_manager_*_alarm_* function below has a stub in the #else branch
+// (empty schedule / no-op setter / default duration) so callers in main.c,
+// power_manager.c, http_server.c, and utils.c never need their own #ifdef -
+// same convention as board_hal_has_speaker() on boards without a speaker.
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+static char alarm_cron_rules_store[MAX_CRON_RULES][CRON_RULE_MAX_LEN] = {{0}};
+static int alarm_cron_rule_count = 0;
+static cron_rule_t alarm_cron_compiled[MAX_CRON_RULES];
+static int alarm_cron_compiled_count = -1;
+static uint16_t alarm_ring_duration_sec = ALARM_RING_DURATION_DEFAULT_SEC;
+#endif
+
 static bool agenda_stack_layout = AGENDA_STACK_DEFAULT;
-static char agenda_bg_color[AGENDA_BG_MAX_LEN] = AGENDA_BG_DEFAULT;
 static char agenda_pri_a_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PRI_A_DEFAULT;
 static char agenda_pri_b_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PRI_B_DEFAULT;
 static char agenda_pri_c_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PRI_C_DEFAULT;
@@ -161,8 +182,6 @@ static char agenda_due_today_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_DUE_TDY_D
 static char agenda_due_later_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_DUE_LTR_DEFAULT;
 static char agenda_project_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_PROJ_C_DEFAULT;
 static char agenda_context_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CTX_C_DEFAULT;
-static char agenda_cal_a_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_A_C_DEFAULT;
-static char agenda_cal_b_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_B_C_DEFAULT;
 // Three extra ICS sources, no auto-refresh - see NVS_AGENDA_CAL_C_URL_KEY
 // etc. in config.h.
 static bool agenda_cal_c_enabled = false;
@@ -174,9 +193,6 @@ static char agenda_cal_e_url[AGENDA_CAL_E_URL_MAX_LEN] = {0};
 static char agenda_cal_c_name[AGENDA_CAL_CDE_NAME_MAX_LEN] = {0};
 static char agenda_cal_d_name[AGENDA_CAL_CDE_NAME_MAX_LEN] = {0};
 static char agenda_cal_e_name[AGENDA_CAL_CDE_NAME_MAX_LEN] = {0};
-static char agenda_cal_c_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_C_C_DEFAULT;
-static char agenda_cal_d_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_D_C_DEFAULT;
-static char agenda_cal_e_color[AGENDA_ROLE_COLOR_MAX_LEN] = AGENDA_CAL_E_C_DEFAULT;
 
 // OTA
 static bool ota_check_enabled = true;
@@ -323,6 +339,20 @@ static void agenda_nvs_set_u8(const char *key, uint8_t value)
     }
 }
 
+static void agenda_nvs_set_u16(const char *key, uint16_t value)
+{
+    if (agenda_nvs_batching) {
+        nvs_set_u16(agenda_nvs_batch_handle, key, value);
+        return;
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u16(h, key, value);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
 static void agenda_nvs_set_str(const char *key, const char *value)
 {
     if (agenda_nvs_batching) {
@@ -461,6 +491,55 @@ static void agenda_cron_persist(void)
 
     agenda_nvs_set_str_or_erase(NVS_AGENDA_CRON_KEY, joined);
 }
+
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+// ----------------------------------------------------------------------------
+// Alarm clock cron schedule helpers - independent third schedule, identical
+// '\n'-joined NVS encoding to the rotate/agenda schedules above. No seeded
+// default (see config.h's own comment on NVS_ALARM_CRON_KEY) - an empty
+// schedule on a fresh device just means no alarm is set.
+// ----------------------------------------------------------------------------
+
+static void alarm_cron_load_from_joined(const char *joined)
+{
+    alarm_cron_rule_count = 0;
+    alarm_cron_compiled_count = -1;  // rule strings changed - stale compiled cache
+    if (!joined) {
+        return;
+    }
+    const char *p = joined;
+    while (*p && alarm_cron_rule_count < MAX_CRON_RULES) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t) (nl - p) : strlen(p);
+        if (len > 0 && len < CRON_RULE_MAX_LEN) {
+            memcpy(alarm_cron_rules_store[alarm_cron_rule_count], p, len);
+            alarm_cron_rules_store[alarm_cron_rule_count][len] = '\0';
+            alarm_cron_rule_count++;
+        }
+        if (!nl) {
+            break;
+        }
+        p = nl + 1;
+    }
+}
+
+static void alarm_cron_persist(void)
+{
+    char joined[MAX_CRON_RULES * CRON_RULE_MAX_LEN];
+    joined[0] = '\0';
+    size_t off = 0;
+    for (int i = 0; i < alarm_cron_rule_count; i++) {
+        int n = snprintf(joined + off, sizeof(joined) - off, "%s%s", i ? "\n" : "",
+                         alarm_cron_rules_store[i]);
+        if (n < 0 || (size_t) n >= sizeof(joined) - off) {
+            break;
+        }
+        off += n;
+    }
+
+    agenda_nvs_set_str_or_erase(NVS_ALARM_CRON_KEY, joined);
+}
+#endif  // CONFIG_ALARM_CLOCK_ENABLED
 
 // ----------------------------------------------------------------------------
 // Telegram pending-image list helpers (queue of images waiting for an
@@ -936,6 +1015,21 @@ esp_err_t config_manager_init(void)
             wifi_coldboot_fail_count = (int) stored_wifi_cb_fail;
         }
 
+        uint8_t stored_wifi_reprov = 1;  // Default to enabled - see config.h
+        if (nvs_get_u8(nvs_handle, NVS_WIFI_REPROV_ON_FAIL_KEY, &stored_wifi_reprov) == ESP_OK) {
+            wifi_reprovision_on_fail_enabled = (stored_wifi_reprov != 0);
+        }
+
+        uint8_t stored_offline_mode = 0;
+        if (nvs_get_u8(nvs_handle, NVS_OFFLINE_MODE_KEY, &stored_offline_mode) == ESP_OK) {
+            offline_mode_enabled = (stored_offline_mode != 0);
+        }
+
+        uint8_t stored_https = 0;
+        if (nvs_get_u8(nvs_handle, NVS_HTTPS_ENABLED_KEY, &stored_https) == ESP_OK) {
+            https_enabled = (stored_https != 0);
+        }
+
         uint8_t stored_rotation_pairing = 0;
         if (nvs_get_u8(nvs_handle, NVS_ROTATION_PAIRING_ENABLED_KEY, &stored_rotation_pairing) ==
             ESP_OK) {
@@ -1193,6 +1287,27 @@ esp_err_t config_manager_init(void)
             stored_agenda_cal_days <= AGENDA_CAL_DAYS_MAX) {
             agenda_cal_days = stored_agenda_cal_days;
         }
+        uint8_t stored_agenda_cal_layout = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_CAL_LAYOUT_KEY, &stored_agenda_cal_layout) ==
+                ESP_OK &&
+            stored_agenda_cal_layout <= AGENDA_CAL_LAYOUT_GRID_B) {
+            agenda_cal_layout_mode = (agenda_cal_layout_mode_t) stored_agenda_cal_layout;
+        }
+        uint8_t stored_agenda_shift_model = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_SHIFT_MODEL_KEY, &stored_agenda_shift_model) ==
+                ESP_OK &&
+            stored_agenda_shift_model <= AGENDA_SHIFT_MODEL_3_4) {
+            agenda_shift_model = (agenda_shift_model_t) stored_agenda_shift_model;
+        }
+        size_t agenda_shift_start_len = sizeof(agenda_shift_start);
+        nvs_get_str(nvs_handle, NVS_AGENDA_SHIFT_START_KEY, agenda_shift_start,
+                    &agenda_shift_start_len);
+        uint8_t stored_agenda_color_profile_active = 0;
+        if (nvs_get_u8(nvs_handle, NVS_AGENDA_COLOR_PROFILE_ACTIVE_KEY,
+                       &stored_agenda_color_profile_active) == ESP_OK &&
+            stored_agenda_color_profile_active <= AGENDA_COLOR_PROFILE_SLOTS) {
+            agenda_color_profile_active = stored_agenda_color_profile_active;
+        }
         {
             // static: this large a buffer on the main task's stack
             // (CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144) is unnecessary stack
@@ -1222,14 +1337,27 @@ esp_err_t config_manager_init(void)
                 ESP_LOGI(TAG, "No agenda schedule in NVS, using default: %s", DEFAULT_AGENDA_CRON);
             }
         }
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+        {
+            static char alarm_cron_buf[MAX_CRON_RULES * CRON_RULE_MAX_LEN];
+            alarm_cron_buf[0] = '\0';
+            size_t alarm_cron_len = sizeof(alarm_cron_buf);
+            if (nvs_get_str(nvs_handle, NVS_ALARM_CRON_KEY, alarm_cron_buf, &alarm_cron_len) ==
+                ESP_OK) {
+                alarm_cron_load_from_joined(alarm_cron_buf);
+                ESP_LOGI(TAG, "Loaded %d alarm cron rule(s) from NVS", alarm_cron_rule_count);
+            }
+            // No default seeded here - see config.h's NVS_ALARM_CRON_KEY comment.
+        }
+        uint16_t stored_alarm_ring_sec = ALARM_RING_DURATION_DEFAULT_SEC;
+        if (nvs_get_u16(nvs_handle, NVS_ALARM_RING_SEC_KEY, &stored_alarm_ring_sec) == ESP_OK &&
+            stored_alarm_ring_sec > 0 && stored_alarm_ring_sec <= ALARM_RING_DURATION_MAX_SEC) {
+            alarm_ring_duration_sec = stored_alarm_ring_sec;
+        }
+#endif
         uint8_t stored_agenda_stack = AGENDA_STACK_DEFAULT ? 1 : 0;
         if (nvs_get_u8(nvs_handle, NVS_AGENDA_STACK_KEY, &stored_agenda_stack) == ESP_OK) {
             agenda_stack_layout = (stored_agenda_stack != 0);
-        }
-        size_t agenda_bg_len = sizeof(agenda_bg_color);
-        if (nvs_get_str(nvs_handle, NVS_AGENDA_BG_KEY, agenda_bg_color, &agenda_bg_len) != ESP_OK) {
-            strncpy(agenda_bg_color, AGENDA_BG_DEFAULT, sizeof(agenda_bg_color) - 1);
-            agenda_bg_color[sizeof(agenda_bg_color) - 1] = '\0';
         }
         agenda_role_color_load(nvs_handle, NVS_AGENDA_PRI_A_KEY, agenda_pri_a_color,
                                sizeof(agenda_pri_a_color), AGENDA_PRI_A_DEFAULT);
@@ -1249,16 +1377,6 @@ esp_err_t config_manager_init(void)
                                sizeof(agenda_project_color), AGENDA_PROJ_C_DEFAULT);
         agenda_role_color_load(nvs_handle, NVS_AGENDA_CTX_C_KEY, agenda_context_color,
                                sizeof(agenda_context_color), AGENDA_CTX_C_DEFAULT);
-        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_A_C_KEY, agenda_cal_a_color,
-                               sizeof(agenda_cal_a_color), AGENDA_CAL_A_C_DEFAULT);
-        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_B_C_KEY, agenda_cal_b_color,
-                               sizeof(agenda_cal_b_color), AGENDA_CAL_B_C_DEFAULT);
-        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_C_C_KEY, agenda_cal_c_color,
-                               sizeof(agenda_cal_c_color), AGENDA_CAL_C_C_DEFAULT);
-        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_D_C_KEY, agenda_cal_d_color,
-                               sizeof(agenda_cal_d_color), AGENDA_CAL_D_C_DEFAULT);
-        agenda_role_color_load(nvs_handle, NVS_AGENDA_CAL_E_C_KEY, agenda_cal_e_color,
-                               sizeof(agenda_cal_e_color), AGENDA_CAL_E_C_DEFAULT);
 
         {
             static char pending_buf[TELEGRAM_PENDING_JOINED_MAX];
@@ -2460,6 +2578,64 @@ int config_manager_get_wifi_coldboot_fail_count(void)
     return wifi_coldboot_fail_count;
 }
 
+void config_manager_set_wifi_reprovision_on_fail_enabled(bool enabled)
+{
+    wifi_reprovision_on_fail_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_WIFI_REPROV_ON_FAIL_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "WiFi reprovision-on-failure %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_wifi_reprovision_on_fail_enabled(void)
+{
+    return wifi_reprovision_on_fail_enabled;
+}
+
+void config_manager_set_offline_mode_enabled(bool enabled)
+{
+    offline_mode_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_OFFLINE_MODE_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "Offline mode (no WiFi network) %s", enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_offline_mode_enabled(void)
+{
+    return offline_mode_enabled;
+}
+
+void config_manager_set_https_enabled(bool enabled)
+{
+    https_enabled = enabled;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle) == ESP_OK) {
+        nvs_set_u8(nvs_handle, NVS_HTTPS_ENABLED_KEY, enabled ? 1 : 0);
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+    }
+
+    ESP_LOGI(TAG, "HTTPS web UI %s (takes effect on next restart)",
+             enabled ? "enabled" : "disabled");
+}
+
+bool config_manager_get_https_enabled(void)
+{
+    return https_enabled;
+}
+
 void config_manager_set_rotation_pairing_enabled(bool enabled)
 {
     rotation_pairing_enabled = enabled;
@@ -3503,6 +3679,46 @@ int config_manager_get_agenda_cal_days(void)
     return agenda_cal_days;
 }
 
+void config_manager_set_agenda_cal_layout_mode(agenda_cal_layout_mode_t mode)
+{
+    if (mode < AGENDA_CAL_LAYOUT_LIST || mode > AGENDA_CAL_LAYOUT_GRID_B) {
+        mode = AGENDA_CAL_LAYOUT_LIST;
+    }
+    agenda_cal_layout_mode = mode;
+    agenda_nvs_set_u8(NVS_AGENDA_CAL_LAYOUT_KEY, (uint8_t) mode);
+}
+
+agenda_cal_layout_mode_t config_manager_get_agenda_cal_layout_mode(void)
+{
+    return agenda_cal_layout_mode;
+}
+
+void config_manager_set_agenda_shift_model(agenda_shift_model_t model)
+{
+    if (model < AGENDA_SHIFT_MODEL_NONE || model > AGENDA_SHIFT_MODEL_3_4) {
+        model = AGENDA_SHIFT_MODEL_NONE;
+    }
+    agenda_shift_model = model;
+    agenda_nvs_set_u8(NVS_AGENDA_SHIFT_MODEL_KEY, (uint8_t) model);
+}
+
+agenda_shift_model_t config_manager_get_agenda_shift_model(void)
+{
+    return agenda_shift_model;
+}
+
+void config_manager_set_agenda_shift_start(const char *start_date)
+{
+    strncpy(agenda_shift_start, start_date ? start_date : "", sizeof(agenda_shift_start) - 1);
+    agenda_shift_start[sizeof(agenda_shift_start) - 1] = '\0';
+    agenda_nvs_set_str_or_erase(NVS_AGENDA_SHIFT_START_KEY, agenda_shift_start);
+}
+
+const char *config_manager_get_agenda_shift_start(void)
+{
+    return agenda_shift_start;
+}
+
 int config_manager_get_agenda_cron_rule_count(void)
 {
     return agenda_cron_rule_count;
@@ -3559,6 +3775,103 @@ int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max)
     return n;
 }
 
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+int config_manager_get_alarm_cron_rule_count(void)
+{
+    return alarm_cron_rule_count;
+}
+
+const char *config_manager_get_alarm_cron_rule(int index)
+{
+    if (index < 0 || index >= alarm_cron_rule_count) {
+        return NULL;
+    }
+    return alarm_cron_rules_store[index];
+}
+
+void config_manager_set_alarm_cron_rules(const char *const *rules, int count)
+{
+    alarm_cron_rule_count = 0;
+    alarm_cron_compiled_count = -1;  // rule strings changed - stale compiled cache
+    for (int i = 0; i < count && alarm_cron_rule_count < MAX_CRON_RULES; i++) {
+        if (!rules[i] || rules[i][0] == '\0' || strlen(rules[i]) >= CRON_RULE_MAX_LEN) {
+            continue;
+        }
+        strncpy(alarm_cron_rules_store[alarm_cron_rule_count], rules[i], CRON_RULE_MAX_LEN - 1);
+        alarm_cron_rules_store[alarm_cron_rule_count][CRON_RULE_MAX_LEN - 1] = '\0';
+        alarm_cron_rule_count++;
+    }
+    alarm_cron_persist();
+    ESP_LOGI(TAG, "Alarm schedule set to %d cron rule(s)", alarm_cron_rule_count);
+}
+
+int config_manager_get_compiled_alarm_cron_rules(cron_rule_t *out, int max)
+{
+    if (alarm_cron_compiled_count < 0) {
+        int n = 0;
+        for (int i = 0; i < alarm_cron_rule_count && n < MAX_CRON_RULES; i++) {
+            if (cron_parse(alarm_cron_rules_store[i], &alarm_cron_compiled[n])) {
+                n++;
+            }
+        }
+        alarm_cron_compiled_count = n;
+    }
+    int n = (alarm_cron_compiled_count < max) ? alarm_cron_compiled_count : max;
+    for (int i = 0; i < n; i++) {
+        out[i] = alarm_cron_compiled[i];
+    }
+    return n;
+}
+
+void config_manager_set_alarm_ring_duration_sec(uint16_t seconds)
+{
+    if (seconds == 0 || seconds > ALARM_RING_DURATION_MAX_SEC) {
+        return;
+    }
+    alarm_ring_duration_sec = seconds;
+    agenda_nvs_set_u16(NVS_ALARM_RING_SEC_KEY, alarm_ring_duration_sec);
+}
+
+uint16_t config_manager_get_alarm_ring_duration_sec(void)
+{
+    return alarm_ring_duration_sec;
+}
+#else
+int config_manager_get_alarm_cron_rule_count(void)
+{
+    return 0;
+}
+
+const char *config_manager_get_alarm_cron_rule(int index)
+{
+    (void) index;
+    return NULL;
+}
+
+void config_manager_set_alarm_cron_rules(const char *const *rules, int count)
+{
+    (void) rules;
+    (void) count;
+}
+
+int config_manager_get_compiled_alarm_cron_rules(cron_rule_t *out, int max)
+{
+    (void) out;
+    (void) max;
+    return 0;
+}
+
+void config_manager_set_alarm_ring_duration_sec(uint16_t seconds)
+{
+    (void) seconds;
+}
+
+uint16_t config_manager_get_alarm_ring_duration_sec(void)
+{
+    return ALARM_RING_DURATION_DEFAULT_SEC;
+}
+#endif  // CONFIG_ALARM_CLOCK_ENABLED
+
 void config_manager_set_agenda_stack_layout(bool stacked)
 {
     agenda_stack_layout = stacked;
@@ -3570,22 +3883,7 @@ bool config_manager_get_agenda_stack_layout(void)
     return agenda_stack_layout;
 }
 
-void config_manager_set_agenda_bg_color(const char *color)
-{
-    if (!color || color[0] == '\0') {
-        return;
-    }
-    strncpy(agenda_bg_color, color, sizeof(agenda_bg_color) - 1);
-    agenda_bg_color[sizeof(agenda_bg_color) - 1] = '\0';
-    agenda_nvs_set_str(NVS_AGENDA_BG_KEY, agenda_bg_color);
-}
-
-const char *config_manager_get_agenda_bg_color(void)
-{
-    return agenda_bg_color;
-}
-
-// Shared by the 11 agenda per-role color setters below - identical
+// Shared by the agenda per-role color setters below - identical
 // "copy into this role's static buffer, then persist" shape.
 static void agenda_role_color_set(char *buf, size_t buf_size, const char *nvs_key,
                                   const char *color)
@@ -3697,59 +3995,20 @@ const char *config_manager_get_agenda_context_color(void)
     return agenda_context_color;
 }
 
-void config_manager_set_agenda_cal_a_color(const char *color)
+void config_manager_set_agenda_color_profile_active(int slot)
 {
-    agenda_role_color_set(agenda_cal_a_color, sizeof(agenda_cal_a_color), NVS_AGENDA_CAL_A_C_KEY,
-                          color);
+    if (slot < 0) {
+        slot = 0;
+    } else if (slot > AGENDA_COLOR_PROFILE_SLOTS) {
+        slot = AGENDA_COLOR_PROFILE_SLOTS;
+    }
+    agenda_color_profile_active = (uint8_t) slot;
+    agenda_nvs_set_u8(NVS_AGENDA_COLOR_PROFILE_ACTIVE_KEY, agenda_color_profile_active);
 }
 
-const char *config_manager_get_agenda_cal_a_color(void)
+int config_manager_get_agenda_color_profile_active(void)
 {
-    return agenda_cal_a_color;
-}
-
-void config_manager_set_agenda_cal_b_color(const char *color)
-{
-    agenda_role_color_set(agenda_cal_b_color, sizeof(agenda_cal_b_color), NVS_AGENDA_CAL_B_C_KEY,
-                          color);
-}
-
-const char *config_manager_get_agenda_cal_b_color(void)
-{
-    return agenda_cal_b_color;
-}
-
-void config_manager_set_agenda_cal_c_color(const char *color)
-{
-    agenda_role_color_set(agenda_cal_c_color, sizeof(agenda_cal_c_color), NVS_AGENDA_CAL_C_C_KEY,
-                          color);
-}
-
-const char *config_manager_get_agenda_cal_c_color(void)
-{
-    return agenda_cal_c_color;
-}
-
-void config_manager_set_agenda_cal_d_color(const char *color)
-{
-    agenda_role_color_set(agenda_cal_d_color, sizeof(agenda_cal_d_color), NVS_AGENDA_CAL_D_C_KEY,
-                          color);
-}
-
-const char *config_manager_get_agenda_cal_d_color(void)
-{
-    return agenda_cal_d_color;
-}
-
-void config_manager_set_agenda_cal_e_color(const char *color)
-{
-    agenda_role_color_set(agenda_cal_e_color, sizeof(agenda_cal_e_color), NVS_AGENDA_CAL_E_C_KEY,
-                          color);
-}
-
-const char *config_manager_get_agenda_cal_e_color(void)
-{
-    return agenda_cal_e_color;
+    return agenda_color_profile_active;
 }
 
 // ============================================================================

@@ -86,6 +86,12 @@ export const useSettingsStore = defineStore("settings", () => {
     wifiPerformanceModeEnabled: true,
     wifiTxPowerCapEnabled: true,
     wifiExtendedRetryEnabled: false,
+    wifiReprovisionOnFailEnabled: true,
+    // Read-only status (set during first-time setup / by the hotspot itself,
+    // not a settable field here - see the offline-hotspot section below).
+    offlineModeEnabled: false,
+    apHotspotActive: false,
+    httpsEnabled: false,
     rotationPairingEnabled: false,
     variantSelectionEnabled: false,
     telegramRotationNotifyEnabled: false,
@@ -158,6 +164,15 @@ export const useSettingsStore = defineStore("settings", () => {
     // for its own input fields.
     climateTempOffset: 0,
     climateHumOffset: 0,
+    // Alarm Clock - only present in a firmware build compiled with
+    // CONFIG_ALARM_CLOCK_ENABLED (build.py --alarmclock). alarmClockAvailable
+    // is a read-only capability flag (like chimeSpeakerAvailable above),
+    // never sent in a PATCH - the Settings page uses it to hide the whole
+    // tab on a build without the feature. No separate "enabled" toggle: the
+    // alarm is armed purely by having at least one alarmCron rule.
+    alarmClockAvailable: false,
+    alarmCron: [],
+    alarmRingDurationSec: 60,
     // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
     // overlay. agendaTodoUrl/agendaCalUrl are write-only (never returned by
     // GET /api/config, same treatment as wifiPassword above) - both start
@@ -201,9 +216,6 @@ export const useSettingsStore = defineStore("settings", () => {
     agendaCalCName: "",
     agendaCalDName: "",
     agendaCalEName: "",
-    agendaCalCColor: "red",
-    agendaCalDColor: "yellow",
-    agendaCalEColor: "red",
     // Optional display names shown in the Calendar header instead of the
     // generic "Calendar A"/"Calendar B" fallback - not secrets, always
     // returned/saved plainly (unlike the URL fields above).
@@ -227,17 +239,30 @@ export const useSettingsStore = defineStore("settings", () => {
     // appends a compact "[Xm]"/"[Xh]" suffix. "range": shows the full
     // "HH:MM-HH:MM" span instead. Never affects all-day events.
     agendaCalTimeDisplayMode: "off",
+    // Calendar-only-fullscreen layout - "list" (default, today's 1-3 day
+    // list) or a 7-day grid template ("grid_a"/"grid_b"). Only takes
+    // effect when the ToDo column is off - see agenda_renderer.c.
+    agendaCalLayoutMode: "list",
+    // Optional 2-group rotation/"shift" coloring for the 7-day grid - see
+    // agenda_shift_model_t (config.h). "none" (default) = no coloring.
+    agendaShiftModel: "none",
+    // "YYYY-MM-DD", empty = unset (no coloring even if a model is chosen).
+    agendaShiftStart: "",
     agendaCron: ["0 6-18 *"],
     // true = ToDo above Calendar (default), false = side by side. Portrait
     // boards always stack regardless of this setting - see agenda_renderer.c.
     agendaStackLayout: true,
-    // Shared by both columns - one of "white" (default), "black", or a
-    // hardware-specific name (see SettingsPanel.vue's per-display-type
-    // option list). An unrecognized/inapplicable value falls back to white.
-    agendaBgColor: "white",
-    // Per-role color pickers (Spectra6/color boards only - grayscale has no
-    // spare hue to choose between). Each is one of "red"/"yellow"/"blue"/
-    // "green"; defaults match this feature's original hardcoded colors.
+    // Which imported Calendar-view color-profile slot is active (0 = none,
+    // built-in plain default; 1..3 = a stored slot) - see
+    // agenda_color_profile.h. The profiles themselves (name/slot list) are
+    // fetched separately via agendaColorProfileSlots, not saved as part of
+    // this settings blob.
+    agendaColorProfileActive: 0,
+    // Per-role color pickers for the ToDo column only (Spectra6/color
+    // boards only - grayscale has no spare hue to choose between). Each is
+    // one of "red"/"yellow"/"blue"/"green"; defaults match this feature's
+    // original hardcoded colors. The Calendar column's own colors come
+    // from the imported profile above instead.
     agendaPriAColor: "red",
     agendaPriBColor: "yellow",
     agendaPriCColor: "green",
@@ -247,8 +272,6 @@ export const useSettingsStore = defineStore("settings", () => {
     agendaDueLaterColor: "blue",
     agendaProjectColor: "blue",
     agendaContextColor: "green",
-    agendaCalAColor: "blue",
-    agendaCalBColor: "green",
     // Debugging
     debugLogEnabled: false,
     errorOverlayEnabled: false,
@@ -400,6 +423,11 @@ export const useSettingsStore = defineStore("settings", () => {
         data.wifi_performance_mode_enabled !== false;
       deviceSettings.value.wifiTxPowerCapEnabled = data.wifi_tx_power_cap_enabled !== false;
       deviceSettings.value.wifiExtendedRetryEnabled = data.wifi_extended_retry_enabled === true;
+      deviceSettings.value.wifiReprovisionOnFailEnabled =
+        data.wifi_reprovision_on_fail_enabled !== false;
+      deviceSettings.value.offlineModeEnabled = data.offline_mode_enabled === true;
+      deviceSettings.value.apHotspotActive = data.ap_hotspot_active === true;
+      deviceSettings.value.httpsEnabled = data.https_enabled === true;
       deviceSettings.value.rotationPairingEnabled = data.rotation_pairing_enabled === true;
       deviceSettings.value.variantSelectionEnabled = data.variant_selection_enabled === true;
       deviceSettings.value.telegramRotationNotifyEnabled =
@@ -465,6 +493,9 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.climateAgendaHeaderEnabled = data.climate_agenda_header_enabled === true;
       deviceSettings.value.climateTempOffset = data.climate_temp_offset ?? 0;
       deviceSettings.value.climateHumOffset = data.climate_hum_offset ?? 0;
+      deviceSettings.value.alarmClockAvailable = data.alarm_clock_available === true;
+      deviceSettings.value.alarmCron = Array.isArray(data.alarm_cron) ? data.alarm_cron : [];
+      deviceSettings.value.alarmRingDurationSec = data.alarm_ring_duration_sec ?? 60;
       deviceSettings.value.agendaTodoEnabled = data.agenda_todo_enabled === true;
       deviceSettings.value.agendaCalEnabled = data.agenda_cal_enabled === true;
       // agenda_todo_url/agenda_cal_url are intentionally never present in
@@ -476,9 +507,6 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.agendaCalCName = data.agenda_cal_c_name || "";
       deviceSettings.value.agendaCalDName = data.agenda_cal_d_name || "";
       deviceSettings.value.agendaCalEName = data.agenda_cal_e_name || "";
-      deviceSettings.value.agendaCalCColor = data.agenda_cal_c_color || "red";
-      deviceSettings.value.agendaCalDColor = data.agenda_cal_d_color || "yellow";
-      deviceSettings.value.agendaCalEColor = data.agenda_cal_e_color || "red";
       deviceSettings.value.agendaCalName = data.agenda_cal_name || "";
       deviceSettings.value.agendaCalName2 = data.agenda_cal_name2 || "";
       deviceSettings.value.agendaCalDays = data.agenda_cal_days ?? 2;
@@ -487,6 +515,9 @@ export const useSettingsStore = defineStore("settings", () => {
         data.agenda_cal_weather_right_aligned === true;
       deviceSettings.value.agendaCalMultidayMode = data.agenda_cal_multiday_mode || "repeat";
       deviceSettings.value.agendaCalTimeDisplayMode = data.agenda_cal_time_display_mode || "off";
+      deviceSettings.value.agendaCalLayoutMode = data.agenda_cal_layout_mode || "list";
+      deviceSettings.value.agendaShiftModel = data.agenda_shift_model || "none";
+      deviceSettings.value.agendaShiftStart = data.agenda_shift_start || "";
       deviceSettings.value.agendaCalUrlConfigured = data.agenda_cal_url_configured === true;
       deviceSettings.value.agendaCalUrl2Configured = data.agenda_cal_url2_configured === true;
       deviceSettings.value.agendaCalCConfigured = data.agenda_cal_c_configured === true;
@@ -497,7 +528,7 @@ export const useSettingsStore = defineStore("settings", () => {
           ? data.agenda_cron
           : ["0 6-18 *"];
       deviceSettings.value.agendaStackLayout = data.agenda_stack_layout !== false;
-      deviceSettings.value.agendaBgColor = data.agenda_bg_color || "white";
+      deviceSettings.value.agendaColorProfileActive = data.agenda_color_profile_active ?? 0;
       deviceSettings.value.agendaPriAColor = data.agenda_pri_a_color || "red";
       deviceSettings.value.agendaPriBColor = data.agenda_pri_b_color || "yellow";
       deviceSettings.value.agendaPriCColor = data.agenda_pri_c_color || "green";
@@ -507,8 +538,6 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.agendaDueLaterColor = data.agenda_due_later_color || "blue";
       deviceSettings.value.agendaProjectColor = data.agenda_project_color || "blue";
       deviceSettings.value.agendaContextColor = data.agenda_context_color || "green";
-      deviceSettings.value.agendaCalAColor = data.agenda_cal_a_color || "blue";
-      deviceSettings.value.agendaCalBColor = data.agenda_cal_b_color || "green";
       deviceSettings.value.debugLogEnabled = data.debug_log_enabled === true;
       deviceSettings.value.errorOverlayEnabled = data.error_overlay_enabled === true;
       deviceSettings.value.haUrl = data.ha_url || "";
@@ -599,6 +628,8 @@ export const useSettingsStore = defineStore("settings", () => {
       wifi_performance_mode_enabled: deviceSettings.value.wifiPerformanceModeEnabled,
       wifi_tx_power_cap_enabled: deviceSettings.value.wifiTxPowerCapEnabled,
       wifi_extended_retry_enabled: deviceSettings.value.wifiExtendedRetryEnabled,
+      wifi_reprovision_on_fail_enabled: deviceSettings.value.wifiReprovisionOnFailEnabled,
+      https_enabled: deviceSettings.value.httpsEnabled,
       rotation_pairing_enabled: deviceSettings.value.rotationPairingEnabled,
       variant_selection_enabled: deviceSettings.value.variantSelectionEnabled,
       telegram_rotation_notify_enabled: deviceSettings.value.telegramRotationNotifyEnabled,
@@ -649,6 +680,8 @@ export const useSettingsStore = defineStore("settings", () => {
       climate_agenda_header_enabled: deviceSettings.value.climateAgendaHeaderEnabled,
       climate_temp_offset: deviceSettings.value.climateTempOffset,
       climate_hum_offset: deviceSettings.value.climateHumOffset,
+      alarm_cron: deviceSettings.value.alarmCron,
+      alarm_ring_duration_sec: deviceSettings.value.alarmRingDurationSec,
       agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
       agenda_cal_c_enabled: deviceSettings.value.agendaCalCEnabled,
@@ -657,9 +690,6 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_cal_c_name: deviceSettings.value.agendaCalCName,
       agenda_cal_d_name: deviceSettings.value.agendaCalDName,
       agenda_cal_e_name: deviceSettings.value.agendaCalEName,
-      agenda_cal_c_color: deviceSettings.value.agendaCalCColor,
-      agenda_cal_d_color: deviceSettings.value.agendaCalDColor,
-      agenda_cal_e_color: deviceSettings.value.agendaCalEColor,
       agenda_cal_name: deviceSettings.value.agendaCalName,
       agenda_cal_name2: deviceSettings.value.agendaCalName2,
       agenda_cal_days: deviceSettings.value.agendaCalDays,
@@ -667,9 +697,12 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_cal_weather_right_aligned: deviceSettings.value.agendaCalWeatherRightAligned,
       agenda_cal_multiday_mode: deviceSettings.value.agendaCalMultidayMode,
       agenda_cal_time_display_mode: deviceSettings.value.agendaCalTimeDisplayMode,
+      agenda_cal_layout_mode: deviceSettings.value.agendaCalLayoutMode,
+      agenda_shift_model: deviceSettings.value.agendaShiftModel,
+      agenda_shift_start: deviceSettings.value.agendaShiftStart,
       agenda_cron: deviceSettings.value.agendaCron,
       agenda_stack_layout: deviceSettings.value.agendaStackLayout,
-      agenda_bg_color: deviceSettings.value.agendaBgColor,
+      agenda_color_profile_active: deviceSettings.value.agendaColorProfileActive,
       agenda_pri_a_color: deviceSettings.value.agendaPriAColor,
       agenda_pri_b_color: deviceSettings.value.agendaPriBColor,
       agenda_pri_c_color: deviceSettings.value.agendaPriCColor,
@@ -679,8 +712,6 @@ export const useSettingsStore = defineStore("settings", () => {
       agenda_due_later_color: deviceSettings.value.agendaDueLaterColor,
       agenda_project_color: deviceSettings.value.agendaProjectColor,
       agenda_context_color: deviceSettings.value.agendaContextColor,
-      agenda_cal_a_color: deviceSettings.value.agendaCalAColor,
-      agenda_cal_b_color: deviceSettings.value.agendaCalBColor,
       debug_log_enabled: deviceSettings.value.debugLogEnabled,
       error_overlay_enabled: deviceSettings.value.errorOverlayEnabled,
       save_downloaded_images: deviceSettings.value.saveDownloadedImages,
@@ -966,6 +997,35 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  // On-demand offline hotspot (github.com/aitjcize/esp32-photoframe#90) -
+  // mirrors the long-BOOT-hold trigger. Switching WiFi mode drops the very
+  // connection this request travels over, so the response may never arrive
+  // even on success - the server sends it before actually switching, but
+  // that race is best-effort by nature; the caller should tell the user to
+  // reconnect via the returned SSID regardless of whether this resolves.
+  async function startApHotspot() {
+    try {
+      const response = await fetch(`${API_BASE}/api/wifi/hotspot/start`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      deviceSettings.value.apHotspotActive = true;
+      return { success: true, ssid: data.ssid || "", url: data.url || "http://192.168.4.1" };
+    } catch {
+      // Expected on success too (see comment above) - still report it as
+      // started so the UI shows the "reconnect to the hotspot" guidance.
+      deviceSettings.value.apHotspotActive = true;
+      return { success: true, ssid: "", url: "http://192.168.4.1" };
+    }
+  }
+
+  async function stopApHotspot() {
+    try {
+      await fetch(`${API_BASE}/api/wifi/hotspot/stop`, { method: "POST" });
+    } catch {
+      // Same best-effort caveat as startApHotspot() above.
+    }
+    deviceSettings.value.apHotspotActive = false;
+  }
+
   return {
     activeSettingsTab,
     params,
@@ -976,6 +1036,8 @@ export const useSettingsStore = defineStore("settings", () => {
     palette,
     preset,
     presetNames,
+    startApHotspot,
+    stopApHotspot,
     applyPreset,
     applyGrayscaleDefaultIfUntouched,
     loadSettings,

@@ -239,6 +239,23 @@ bool config_manager_get_wifi_extended_retry_enabled(void);
 void config_manager_set_wifi_coldboot_fail_count(int count);
 int config_manager_get_wifi_coldboot_fail_count(void);
 
+// Whether a cold-boot connect exhaustion may wipe the saved SSID/password
+// and reprovision at all - see NVS_WIFI_REPROV_ON_FAIL_KEY in config.h.
+// Defaults to true (unchanged existing behavior); a genuine credential
+// rejection always wipes regardless of this setting.
+void config_manager_set_wifi_reprovision_on_fail_enabled(bool enabled);
+bool config_manager_get_wifi_reprovision_on_fail_enabled(void);
+
+// Set during first-time setup when the user picks offline/no-WiFi use - see
+// NVS_OFFLINE_MODE_KEY in config.h. Defaults to false.
+void config_manager_set_offline_mode_enabled(bool enabled);
+bool config_manager_get_offline_mode_enabled(void);
+
+// Opt-in second HTTPS listener - see NVS_HTTPS_ENABLED_KEY in config.h.
+// Defaults to false. Takes effect on the next http_server_init().
+void config_manager_set_https_enabled(bool enabled);
+bool config_manager_get_https_enabled(void);
+
 // Orientation pairing during normal (non-Telegram) auto-rotation - random
 // mode only. Defaults to false. See NVS_ROTATION_PAIRING_ENABLED_KEY in
 // config.h.
@@ -468,6 +485,23 @@ const char *config_manager_get_agenda_cal_etag2(void);
 void config_manager_set_agenda_cal_days(int days);
 int config_manager_get_agenda_cal_days(void);
 
+// Calendar-only-fullscreen layout - see agenda_cal_layout_mode_t (config.h).
+// GRID_A/GRID_B only take effect when the Calendar column is shown alone.
+void config_manager_set_agenda_cal_layout_mode(agenda_cal_layout_mode_t mode);
+agenda_cal_layout_mode_t config_manager_get_agenda_cal_layout_mode(void);
+
+// 2-group rotation/"shift" coloring for the 7-day grid layouts - see
+// agenda_shift_model_t (config.h). NONE (default) means no coloring at all,
+// regardless of the start date/colors below.
+void config_manager_set_agenda_shift_model(agenda_shift_model_t model);
+agenda_shift_model_t config_manager_get_agenda_shift_model(void);
+// "YYYY-MM-DD", empty = unset (treated as "no coloring" even if a model is
+// selected above).
+void config_manager_set_agenda_shift_start(const char *start_date);
+const char *config_manager_get_agenda_shift_start(void);
+// The rotation's marker color now comes from the active color profile's
+// "mark" field (agenda_color_profile.h) rather than a device setting.
+
 // Opt-in per-day weather annotation on the Calendar column - see
 // NVS_AGENDA_CAL_WEATHER_KEY in config.h.
 void config_manager_set_agenda_cal_weather_enabled(bool enabled);
@@ -510,16 +544,11 @@ int config_manager_get_compiled_agenda_cron_rules(cron_rule_t *out, int max);
 void config_manager_set_agenda_stack_layout(bool stacked);
 bool config_manager_get_agenda_stack_layout(void);
 
-// Shared ToDo+Calendar background color name - see AGENDA_BG_DEFAULT in
-// config.h and agenda_renderer.c's agenda_background_color() for the
-// authoritative per-hardware value list.
-void config_manager_set_agenda_bg_color(const char *color);
-const char *config_manager_get_agenda_bg_color(void);
-
-// Per-role color customization (Spectra6/color boards only) - each is one
-// of "red"/"yellow"/"blue"/"green", see the NVS_AGENDA_*_DEFAULT comment in
-// config.h for why free RGB isn't offered here. agenda_renderer.c's
-// role_hue() is the sole reader.
+// Per-role color customization for the ToDo column (Spectra6/color boards
+// only) - each is one of "red"/"yellow"/"blue"/"green", see the
+// NVS_AGENDA_*_DEFAULT comment in config.h for why free RGB isn't offered
+// here. agenda_renderer.c's role_hue() is the sole reader. (The Calendar
+// column's colors come from the profile system below instead.)
 void config_manager_set_agenda_pri_a_color(const char *color);
 const char *config_manager_get_agenda_pri_a_color(void);
 void config_manager_set_agenda_pri_b_color(const char *color);
@@ -538,16 +567,12 @@ void config_manager_set_agenda_project_color(const char *color);
 const char *config_manager_get_agenda_project_color(void);
 void config_manager_set_agenda_context_color(const char *color);
 const char *config_manager_get_agenda_context_color(void);
-void config_manager_set_agenda_cal_a_color(const char *color);
-const char *config_manager_get_agenda_cal_a_color(void);
-void config_manager_set_agenda_cal_b_color(const char *color);
-const char *config_manager_get_agenda_cal_b_color(void);
-void config_manager_set_agenda_cal_c_color(const char *color);
-const char *config_manager_get_agenda_cal_c_color(void);
-void config_manager_set_agenda_cal_d_color(const char *color);
-const char *config_manager_get_agenda_cal_d_color(void);
-void config_manager_set_agenda_cal_e_color(const char *color);
-const char *config_manager_get_agenda_cal_e_color(void);
+
+// Which Calendar-view color-profile slot (1..AGENDA_COLOR_PROFILE_SLOTS) is
+// currently active; 0 = none (built-in plain default) - see
+// agenda_color_profile.h. Clamped to [0, AGENDA_COLOR_PROFILE_SLOTS].
+void config_manager_set_agenda_color_profile_active(int slot);
+int config_manager_get_agenda_color_profile_active(void);
 
 // ============================================================================
 // OTA
@@ -654,5 +679,22 @@ const char *config_manager_get_climate_hum_offset(void);
 // config_manager_get/set_config_last_updated().
 void config_manager_set_climate_last_log_time(int64_t timestamp);
 int64_t config_manager_get_climate_last_log_time(void);
+
+// Alarm clock schedule - independent third cron rule set (see the rotate and
+// agenda schedules above), same shape as
+// config_manager_get_agenda_cron_rule_count()/_get_agenda_cron_rule()/
+// _set_agenda_cron_rules()/_get_compiled_agenda_cron_rules(). Only present in
+// a build compiled with CONFIG_ALARM_CLOCK_ENABLED; harmless no-ops (empty
+// schedule, setter silently discards) on every other build so callers never
+// need their own #ifdef.
+int config_manager_get_alarm_cron_rule_count(void);
+const char *config_manager_get_alarm_cron_rule(int index);
+void config_manager_set_alarm_cron_rules(const char *const *rules, int count);
+int config_manager_get_compiled_alarm_cron_rules(cron_rule_t *out, int max);
+
+// How long the alarm rings before giving up if never stopped by a long KEY
+// press (ALARM_RING_DURATION_DEFAULT_SEC/_MAX_SEC in config.h).
+void config_manager_set_alarm_ring_duration_sec(uint16_t seconds);
+uint16_t config_manager_get_alarm_ring_duration_sec(void);
 
 #endif

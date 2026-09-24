@@ -21,6 +21,11 @@ const ICON_PATHS = {
 const ssid = ref("");
 const password = ref("");
 const deviceName = ref("PhotoFrame");
+// Offline mode (github.com/aitjcize/esp32-photoframe#90): configure the
+// device for use with no WiFi network at all, ever. Skips the SSID/password
+// requirement entirely - photos/settings are managed later via the
+// on-demand hotspot (long BOOT hold, or a Settings-page button once set up).
+const offlineMode = ref(false);
 const showPassword = ref(false);
 const loading = ref(false);
 const status = ref(null); // 'success' | 'error' | 'info' | null
@@ -106,17 +111,20 @@ async function submitForm() {
   statusMessage.value = "Testing WiFi connection...";
 
   const formData = new URLSearchParams();
-  formData.append("ssid", ssid.value);
-  formData.append("password", password.value);
   formData.append("deviceName", deviceName.value);
-  formData.append("ipMode", ipMode.value);
-  if (ipMode.value === "static") {
-    formData.append("staticIp", staticIp.value.trim());
-    formData.append("staticNetmask", staticNetmask.value.trim());
-    formData.append("staticGateway", staticGateway.value.trim());
-  }
-  if (dnsServer.value.trim()) {
-    formData.append("dnsServer", dnsServer.value.trim());
+  formData.append("offlineMode", offlineMode.value ? "true" : "false");
+  if (!offlineMode.value) {
+    formData.append("ssid", ssid.value);
+    formData.append("password", password.value);
+    formData.append("ipMode", ipMode.value);
+    if (ipMode.value === "static") {
+      formData.append("staticIp", staticIp.value.trim());
+      formData.append("staticNetmask", staticNetmask.value.trim());
+      formData.append("staticGateway", staticGateway.value.trim());
+    }
+    if (dnsServer.value.trim()) {
+      formData.append("dnsServer", dnsServer.value.trim());
+    }
   }
 
   try {
@@ -130,13 +138,19 @@ async function submitForm() {
 
     if (response.ok) {
       status.value = "success";
-      // Generate mDNS hostname from device name (lowercase, spaces to hyphens)
-      const hostname = deviceName.value.toLowerCase().replace(/\s+/g, "-");
-      statusMessage.value = `Credentials saved! Device will restart in 3 seconds and attempt to connect to "${ssid.value}".`;
+      if (offlineMode.value) {
+        statusMessage.value =
+          "Offline mode configured! The device will restart in 3 seconds and run without any WiFi network. " +
+          "Hold the BOOT button for 3 seconds any time to manage photos via its own hotspot.";
+      } else {
+        // Generate mDNS hostname from device name (lowercase, spaces to hyphens)
+        const hostname = deviceName.value.toLowerCase().replace(/\s+/g, "-");
+        statusMessage.value = `Credentials saved! Device will restart in 3 seconds and attempt to connect to "${ssid.value}".`;
 
-      setTimeout(() => {
-        statusMessage.value += `\n\nRestarting now... Close this page and reconnect to your WiFi network, then visit http://${hostname}.local`;
-      }, 3000);
+        setTimeout(() => {
+          statusMessage.value += `\n\nRestarting now... Close this page and reconnect to your WiFi network, then visit http://${hostname}.local`;
+        }, 3000);
+      }
     } else {
       loading.value = false;
       status.value = "error";
@@ -166,71 +180,83 @@ async function submitForm() {
         <v-card-subtitle class="mb-2"> Connect your PhotoFrame to WiFi </v-card-subtitle>
 
         <v-form @submit.prevent="submitForm">
-          <v-combobox
-            v-model="ssid"
-            :items="networks"
-            item-title="title"
-            item-value="value"
-            label="WiFi Network Name (SSID)"
-            variant="outlined"
-            required
+          <v-checkbox
+            v-model="offlineMode"
+            label="Use offline - no WiFi network"
+            hint="Manage photos later via the device's own hotspot (hold BOOT for 3s)"
+            persistent-hint
+            density="compact"
             :disabled="loading"
-            :loading="scanning"
             class="mb-2"
-            placeholder="Select or type a network name"
-            @update:model-value="
-              (val) => {
-                if (val && typeof val === 'object') ssid = val.value;
-              }
-            "
-          >
-            <template #item="{ item, props: itemProps }">
-              <v-list-item v-bind="itemProps">
-                <template #prepend>
-                  <svg viewBox="0 0 24 24" class="wifi-icon mr-2">
-                    <path :d="item.raw.iconPath" fill="currentColor" />
-                  </svg>
-                </template>
-                <template #append>
-                  <span class="text-caption text-medium-emphasis">{{ item.raw.subtitle }}</span>
-                </template>
-              </v-list-item>
-            </template>
-            <template #append>
-              <v-btn
-                variant="text"
-                size="small"
-                :loading="scanning"
-                :disabled="loading"
-                @click.stop="scanNetworks"
-              >
-                <svg viewBox="0 0 24 24" class="btn-icon">
-                  <path :d="ICON_PATHS.refresh" fill="currentColor" />
-                </svg>
-              </v-btn>
-            </template>
-          </v-combobox>
+          />
 
-          <v-text-field
-            v-model="password"
-            label="WiFi Password"
-            :type="showPassword ? 'text' : 'password'"
-            variant="outlined"
-            :disabled="loading"
-            hint="Leave blank for open networks"
-            class="mb-2"
-          >
-            <template #append-inner>
-              <span class="password-toggle" @click="showPassword = !showPassword">
-                <svg viewBox="0 0 24 24" class="btn-icon">
-                  <path
-                    :d="showPassword ? ICON_PATHS.eyeOff : ICON_PATHS.eye"
-                    fill="currentColor"
-                  />
-                </svg>
-              </span>
-            </template>
-          </v-text-field>
+          <template v-if="!offlineMode">
+            <v-combobox
+              v-model="ssid"
+              :items="networks"
+              item-title="title"
+              item-value="value"
+              label="WiFi Network Name (SSID)"
+              variant="outlined"
+              required
+              :disabled="loading"
+              :loading="scanning"
+              class="mb-2"
+              placeholder="Select or type a network name"
+              @update:model-value="
+                (val) => {
+                  if (val && typeof val === 'object') ssid = val.value;
+                }
+              "
+            >
+              <template #item="{ item, props: itemProps }">
+                <v-list-item v-bind="itemProps">
+                  <template #prepend>
+                    <svg viewBox="0 0 24 24" class="wifi-icon mr-2">
+                      <path :d="item.raw.iconPath" fill="currentColor" />
+                    </svg>
+                  </template>
+                  <template #append>
+                    <span class="text-caption text-medium-emphasis">{{ item.raw.subtitle }}</span>
+                  </template>
+                </v-list-item>
+              </template>
+              <template #append>
+                <v-btn
+                  variant="text"
+                  size="small"
+                  :loading="scanning"
+                  :disabled="loading"
+                  @click.stop="scanNetworks"
+                >
+                  <svg viewBox="0 0 24 24" class="btn-icon">
+                    <path :d="ICON_PATHS.refresh" fill="currentColor" />
+                  </svg>
+                </v-btn>
+              </template>
+            </v-combobox>
+
+            <v-text-field
+              v-model="password"
+              label="WiFi Password"
+              :type="showPassword ? 'text' : 'password'"
+              variant="outlined"
+              :disabled="loading"
+              hint="Leave blank for open networks"
+              class="mb-2"
+            >
+              <template #append-inner>
+                <span class="password-toggle" @click="showPassword = !showPassword">
+                  <svg viewBox="0 0 24 24" class="btn-icon">
+                    <path
+                      :d="showPassword ? ICON_PATHS.eyeOff : ICON_PATHS.eye"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </span>
+              </template>
+            </v-text-field>
+          </template>
 
           <v-text-field
             v-model="deviceName"
@@ -241,7 +267,7 @@ async function submitForm() {
             class="mb-2"
           />
 
-          <div class="mb-4">
+          <div v-if="!offlineMode" class="mb-4">
             <button
               type="button"
               class="advanced-toggle"
@@ -312,7 +338,7 @@ async function submitForm() {
           </div>
 
           <v-btn type="submit" color="primary" size="large" block :loading="loading">
-            Connect to WiFi
+            {{ offlineMode ? "Use Offline" : "Connect to WiFi" }}
           </v-btn>
         </v-form>
 

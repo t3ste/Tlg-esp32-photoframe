@@ -136,6 +136,15 @@
   </head>
   <body>
     <h1>Agenda ToDo Color Scheme</h1>
+    <p style="background: var(--note-bg); border: 1px solid var(--note-border); border-radius: 6px; padding: 0.75rem 1rem">
+      <strong>Calendar column coloring has since moved to an imported color-profile system</strong>
+      (see <code>agenda_color_profile.h</code>/<code>profile-editor.html</code> and <code>docs/DIFF.md</code>) -
+      the settings this page documents for the Calendar column below (<code>agenda_bg_color</code>,
+      <code>agenda_cal_a..e_color</code>, <code>agenda_shift_color1/2</code>, the C/D/E letter <em>badge</em>)
+      no longer exist in current firmware and are kept here only as a historical record of the design this
+      replaced. <strong>The ToDo column's own sections (priority/due/project/context colors) are still
+      accurate</strong> - only Calendar's coloring changed.
+    </p>
     <p>
       The full-screen Agenda ToDo/Calendar mode (see the main project plan) renders
       <a href="https://github.com/todotxt/todo.txt" target="_blank" rel="noopener">todo.txt</a>-format
@@ -635,7 +644,39 @@
       this feature's own development.
     </p>
 
-    <h2>7. Open items</h2>
+    <h2>8. 7-Day Grid &mdash; shift-model background interaction</h2>
+    <p>The 7-day grid's optional rotation/&ldquo;shift&rdquo; coloring (<code>agenda_shift_model_t</code>) paints only a day's appointment lines with one of 2 configurable group colors - the day header itself is always left plain (see below), specifically to avoid this class of bug at the source rather than patching around it. Calendar event text color is resolved once, at <code>build_event_line()</code> time, against the page's own background - <strong>a day whose shift color happens to match that event's own Calendar source color would still draw invisible text without a further fix</strong> (reported live: green Calendar text on a green shift-colored day). <code>draw_day_cell()</code> re-checks a plain event's text color against whatever background the row actually ends up on (<code>agenda_ensure_contrast()</code>) before drawing it - the tables below are generated directly from that same logic (see <code>scripts/generate_agenda_grid_colors_doc.py</code>), so they reflect real behavior, not a hand-drawn approximation.</p>
+    <h3>Appointment line color, White agenda background</h3>
+    <table><caption>Event text color actually drawn, by Calendar source color (rows) and the day's shift-model background (columns) - '&larr; auto-corrected' marks a cell where the source's own color exactly matched the shift background and <code>agenda_ensure_contrast()</code> substituted a safe fallback instead.</caption>
+      <tr><th>Calendar text color \ Shift day background</th><th>None (page bg)</th><th>Red</th><th>Yellow</th><th>Green</th><th>Blue</th></tr>
+      <tr><td><code>Red</code></td><td class="swatch-cell"><span class="chip" style="background:#ffffff;color:#ff0000;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ff0000;color:#ffffff;">16:30 Termin</span> &larr; auto-corrected</td><td class="swatch-cell"><span class="chip" style="background:#ffff00;color:#ff0000;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#00ff00;color:#ff0000;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#0000ff;color:#ff0000;">16:30 Termin</span></td></tr>
+      <tr><td><code>Yellow</code></td><td class="swatch-cell"><span class="chip" style="background:#ffffff;color:#ffff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ff0000;color:#ffff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ffff00;color:#000000;">16:30 Termin</span> &larr; auto-corrected</td><td class="swatch-cell"><span class="chip" style="background:#00ff00;color:#ffff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#0000ff;color:#ffff00;">16:30 Termin</span></td></tr>
+      <tr><td><code>Green</code></td><td class="swatch-cell"><span class="chip" style="background:#ffffff;color:#00ff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ff0000;color:#00ff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ffff00;color:#00ff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#00ff00;color:#000000;">16:30 Termin</span> &larr; auto-corrected</td><td class="swatch-cell"><span class="chip" style="background:#0000ff;color:#00ff00;">16:30 Termin</span></td></tr>
+      <tr><td><code>Blue</code></td><td class="swatch-cell"><span class="chip" style="background:#ffffff;color:#0000ff;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ff0000;color:#0000ff;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ffff00;color:#0000ff;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#00ff00;color:#0000ff;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#0000ff;color:#ffffff;">16:30 Termin</span> &larr; auto-corrected</td></tr>
+    </table>
+
+    <h3>Appointment line color, Black agenda background</h3>
+    <table><caption>Event text color actually drawn, by Calendar source color (rows) and the day's shift-model background (columns) - '&larr; auto-corrected' marks a cell where the source's own color exactly matched the shift background and <code>agenda_ensure_contrast()</code> substituted a safe fallback instead.</caption>
+      <tr><th>Calendar text color \ Shift day background</th><th>None (page bg)</th><th>Red</th><th>Yellow</th><th>Green</th><th>Blue</th></tr>
+      <tr><td><code>Red</code></td><td class="swatch-cell"><span class="chip" style="background:#000000;color:#ff0000;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ff0000;color:#ffffff;">16:30 Termin</span> &larr; auto-corrected</td><td class="swatch-cell"><span class="chip" style="background:#ffff00;color:#ff0000;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#00ff00;color:#ff0000;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#0000ff;color:#ff0000;">16:30 Termin</span></td></tr>
+      <tr><td><code>Yellow</code></td><td class="swatch-cell"><span class="chip" style="background:#000000;color:#ffff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ff0000;color:#ffff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ffff00;color:#000000;">16:30 Termin</span> &larr; auto-corrected</td><td class="swatch-cell"><span class="chip" style="background:#00ff00;color:#ffff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#0000ff;color:#ffff00;">16:30 Termin</span></td></tr>
+      <tr><td><code>Green</code></td><td class="swatch-cell"><span class="chip" style="background:#000000;color:#00ff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ff0000;color:#00ff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ffff00;color:#00ff00;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#00ff00;color:#000000;">16:30 Termin</span> &larr; auto-corrected</td><td class="swatch-cell"><span class="chip" style="background:#0000ff;color:#00ff00;">16:30 Termin</span></td></tr>
+      <tr><td><code>Blue</code></td><td class="swatch-cell"><span class="chip" style="background:#000000;color:#0000ff;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ff0000;color:#0000ff;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#ffff00;color:#0000ff;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#00ff00;color:#0000ff;">16:30 Termin</span></td><td class="swatch-cell"><span class="chip" style="background:#0000ff;color:#ffffff;">16:30 Termin</span> &larr; auto-corrected</td></tr>
+    </table>
+
+    <h3>Day header, White agenda background</h3>
+    <table><caption>The day header (and any weather-icon marker byte drawn inside it) is never shift-colored - always the plain page background, with <code>agenda_safe_text_color()</code> picking the matching contrast color. This is what structurally rules out a same-colored weather icon or day label, rather than checking for it case by case.</caption>
+      <tr><td class="swatch-cell"><span class="chip" style="background:#ffffff;color:#000000;">Fr 18.</span></td></tr>
+    </table>
+
+    <h3>Day header, Black agenda background</h3>
+    <table><caption>The day header (and any weather-icon marker byte drawn inside it) is never shift-colored - always the plain page background, with <code>agenda_safe_text_color()</code> picking the matching contrast color. This is what structurally rules out a same-colored weather icon or day label, rather than checking for it case by case.</caption>
+      <tr><td class="swatch-cell"><span class="chip" style="background:#000000;color:#ffffff;">Fr 18.</span></td></tr>
+    </table>
+
+    <p><strong>Grayscale-only boards are unaffected</strong> - <code>resolve_plain_color()</code> always renders every Calendar source as plain black there (no spare hue to assign), and the shift-model colors resolve to plain black/white the same way (<code>resolve_plain_color()</code>'s own grayscale branch), so no collision is possible in the first place.</p>
+
+    <h2>9. Open items</h2>
     <ul>
       <li>
         Multi-line notes/calendar entries with word-wrap and a leading bullet character, as a selectable
