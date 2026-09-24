@@ -129,7 +129,9 @@ def download_stable_firmware(demo_dir, project_root):
         )
         remote_url = remote_result.stdout.strip()
         if remote_result.returncode != 0 or "github.com" not in remote_url:
-            print("  ⚠ Warning: Could not determine GitHub repo from git remote, skipping")
+            print(
+                "  ⚠ Warning: Could not determine GitHub repo from git remote, skipping"
+            )
             return False
         if remote_url.startswith("git@"):
             repo_path = remote_url.split("github.com:")[1].replace(".git", "")

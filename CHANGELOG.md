@@ -2,6 +2,22 @@
 
 All notable changes to this fork are documented here. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full running list of everything this fork adds on top of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe); this file covers per-release deltas only.
 
+## [v218.3.0] - 2026-09-24
+
+### Fixed
+
+- GitHub Pages was never enabled for this fork's repository, so the README's "Try the Interactive Demo"/Web Flasher link was dead even though CI had been correctly building and pushing the site to the `gh-pages` branch all along — enabled
+- The demo/web-flasher site itself would have failed to load once Pages was enabled: its Vite build had upstream's repo name (`esp32-photoframe`) hardcoded as the asset base path instead of this fork's (`Tlg-esp32-photoframe`), which would 404 every asset and firmware manifest
+- Several links across the demo page, README, and `process-cli`'s README still pointed at the upstream repository instead of this fork (GitHub/License/Firmware links, the release-version fallback fetch, the interactive-demo link, the algorithm-comparison sample images, clone instructions) — corrected; a stale, unreferenced `docs/index.html` left over from before this fork's own demo build existed was removed
+- `scripts/launch_demo.py` downloaded "stable" firmware from upstream's releases unconditionally instead of whichever repo the local `git remote` actually points at
+- Removed `.github/FUNDING.yml` (pointed sponsorship at the upstream author)
+
+### Added
+
+- [docs/CHIMES_CLIMATE_OVERHEAD.md](docs/CHIMES_CLIMATE_OVERHEAD.md): measured flash-size cost of the Chimes/Climate features and how much of it this fork's build-modularity gating actually saves vs. pre-existing hardware-driver gating
+
+---
+
 ## [v218.2.0] - 2026-09-16
 
 ### Added
