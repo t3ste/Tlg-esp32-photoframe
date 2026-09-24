@@ -1000,7 +1000,9 @@ async function performImport() {
     if (failures.length === 0) {
       saveSuccess.value = true;
       saveError.value = false;
-      saveMessage.value = authNote ? `Config imported.${authNote}` : "Config imported successfully!";
+      saveMessage.value = authNote
+        ? `Config imported.${authNote}`
+        : "Config imported successfully!";
       setTimeout(() => (saveSuccess.value = false), authNote ? 10000 : 3000);
     } else {
       saveSuccess.value = false;
