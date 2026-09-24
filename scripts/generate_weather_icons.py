@@ -82,8 +82,23 @@ ICON_SETS = {
     "flaticon": {
         "src_dir": os.path.join(REPO_ROOT, "_icons", "src_png"),
         "files": [
-            "01d", "022d", "02d", "04d", "50d", "48d", "51d", "53d", "09d",
-            "56d", "57d", "71d", "73d", "13d", "77d", "11d", "11d",
+            "01d",
+            "022d",
+            "02d",
+            "04d",
+            "50d",
+            "48d",
+            "51d",
+            "53d",
+            "09d",
+            "56d",
+            "57d",
+            "71d",
+            "73d",
+            "13d",
+            "77d",
+            "11d",
+            "11d",
         ],
     },
     "metno": {
@@ -92,9 +107,23 @@ ICON_SETS = {
         # closest match (fog / snow), same fallback approach as flaticon's
         # 48d/77d choices.
         "files": [
-            "clearsky_day", "fair_day", "partlycloudy_day", "cloudy", "fog", "fog",
-            "lightrain", "rain", "heavyrain", "lightsleet", "sleet",
-            "lightsnow", "snow", "heavysnow", "snow", "rainandthunder", "rainandthunder",
+            "clearsky_day",
+            "fair_day",
+            "partlycloudy_day",
+            "cloudy",
+            "fog",
+            "fog",
+            "lightrain",
+            "rain",
+            "heavyrain",
+            "lightsleet",
+            "sleet",
+            "lightsnow",
+            "snow",
+            "heavysnow",
+            "snow",
+            "rainandthunder",
+            "rainandthunder",
         ],
     },
 }
@@ -104,7 +133,10 @@ def load_and_threshold(src_path):
     img = Image.open(src_path).convert("RGBA")
     resized = img.resize((ICON_WIDTH, ICON_HEIGHT), Image.LANCZOS)
     return [
-        [1 if resized.getpixel((x, y))[3] >= ALPHA_THRESHOLD else 0 for x in range(ICON_WIDTH)]
+        [
+            1 if resized.getpixel((x, y))[3] >= ALPHA_THRESHOLD else 0
+            for x in range(ICON_WIDTH)
+        ]
         for y in range(ICON_HEIGHT)
     ]
 
@@ -132,8 +164,12 @@ def write_preview(set_name, bitmaps):
             for x in range(ICON_WIDTH):
                 if bitmap[y][x]:
                     icon_img.putpixel((x, y), 0)
-        icon_img = icon_img.resize((ICON_WIDTH * UPSCALE, ICON_HEIGHT * UPSCALE), Image.NEAREST)
-        gx, gy = (idx % cols) * cell + 4, (idx // cols) * (ICON_HEIGHT * UPSCALE + 8) + 4
+        icon_img = icon_img.resize(
+            (ICON_WIDTH * UPSCALE, ICON_HEIGHT * UPSCALE), Image.NEAREST
+        )
+        gx, gy = (idx % cols) * cell + 4, (idx // cols) * (
+            ICON_HEIGHT * UPSCALE + 8
+        ) + 4
         grid.paste(icon_img, (gx, gy))
     preview_path = os.path.join(REPO_ROOT, "_icons", f"preview_{set_name}.png")
     grid.save(preview_path)
@@ -165,7 +201,9 @@ def main():
 
         for (ident, meaning), packed in zip(ICON_CATEGORIES, packed_icons):
             header_lines.append(f"// {meaning}")
-            header_lines.append(f"static const uint8_t weather_icon_{set_name}_{ident}[] = {{")
+            header_lines.append(
+                f"static const uint8_t weather_icon_{set_name}_{ident}[] = {{"
+            )
             row_strs = []
             for i in range(0, len(packed), 12):
                 chunk = packed[i : i + 12]
@@ -184,7 +222,9 @@ def main():
 
         preview_path = write_preview(set_name, bitmaps)
         total_bytes = sum(len(p) for p in packed_icons)
-        print(f"{set_name}: {len(ICON_CATEGORIES)} icons, {total_bytes} bytes, preview at {preview_path}")
+        print(
+            f"{set_name}: {len(ICON_CATEGORIES)} icons, {total_bytes} bytes, preview at {preview_path}"
+        )
 
     with open(OUTPUT_HEADER, "w", encoding="utf-8") as f:
         f.write("\n".join(header_lines) + "\n")

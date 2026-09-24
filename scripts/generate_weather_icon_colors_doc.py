@@ -39,7 +39,13 @@ from PIL import Image
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, SCRIPT_DIR)
-from generate_weather_icons import ICON_CATEGORIES, ICON_SETS, ICON_WIDTH, ICON_HEIGHT, load_and_threshold
+from generate_weather_icons import (  # isort:skip
+    ICON_CATEGORIES,
+    ICON_HEIGHT,
+    ICON_SETS,
+    ICON_WIDTH,
+    load_and_threshold,
+)
 
 OUTPUT_HTML = os.path.join(REPO_ROOT, "docs", "WEATHER_ICON_COLORS.html")
 
@@ -54,7 +60,11 @@ COLORS_BY_ICON_ID = [
     (None, None, "Neutral - no warning implied, so no fixed color of its own"),
     ("Yellow", "#ffff00", "Caution - reduced visibility"),
     ("Red", "#ff0000", "Hazard - icy + reduced visibility"),
-    ("Blue", "#0000ff", "Light - harmless, distinguished from clear/sunny green by shape not color"),
+    (
+        "Blue",
+        "#0000ff",
+        "Light - harmless, distinguished from clear/sunny green by shape not color",
+    ),
     ("Yellow", "#ffff00", "Moderate - umbrella recommended"),
     ("Red", "#ff0000", "Heavy - storm risk"),
     ("Yellow", "#ffff00", "Light icing forming - drive carefully"),
@@ -62,7 +72,11 @@ COLORS_BY_ICON_ID = [
     ("Blue", "#0000ff", "Classic snow color - minor impact"),
     ("Yellow", "#ffff00", "Increased snow - slip risk"),
     ("Red", "#ff0000", "Snowstorm - major impact"),
-    (None, None, "Distinct from soft snow-blue, but still just neutral - no fixed color"),
+    (
+        None,
+        None,
+        "Distinct from soft snow-blue, but still just neutral - no fixed color",
+    ),
     ("Yellow", "#ffff00", "Lightning risk - increased attention"),
     ("Red", "#ff0000", "Hail damage potential"),
 ]
@@ -138,11 +152,11 @@ def main():
             cells.append(f'<td class="icon-cell">{mono_html}{colored_html}</td>')
 
         if is_neutral:
-            swatch_cell = '<td class="swatch-cell"><em>neutral - no fixed color</em></td>'
-        else:
             swatch_cell = (
-                f'<td class="swatch-cell"><span class="swatch" style="background:{color_hex}"></span>{color_name}</td>'
+                '<td class="swatch-cell"><em>neutral - no fixed color</em></td>'
             )
+        else:
+            swatch_cell = f'<td class="swatch-cell"><span class="swatch" style="background:{color_hex}"></span>{color_name}</td>'
 
         rows_html.append(
             f"<tr>"
