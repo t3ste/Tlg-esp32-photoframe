@@ -24,6 +24,7 @@ set(SOURCES
     "image_processor.c"
     "main.c"
     "mdns_service.c"
+    "network_backoff.c"
     "ota_manager.c"
     "overlay_manager.c"
     "periodic_tasks.c"

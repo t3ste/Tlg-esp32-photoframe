@@ -719,7 +719,6 @@ export const useSettingsStore = defineStore("settings", () => {
       }
     }
 
-
     // If nothing changed, return success
     if (Object.keys(changedFields).length === 0) {
       return { success: true, message: "No changes to save" };
