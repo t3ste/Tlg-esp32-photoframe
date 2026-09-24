@@ -12,3 +12,13 @@ bool config_manager_get_caption_invert_colors_enabled(void)
 {
     return false;
 }
+
+const char *config_manager_get_weather_icon_set(void)
+{
+    return "none";
+}
+
+bool config_manager_get_weather_icon_colored(void)
+{
+    return false;
+}

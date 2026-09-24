@@ -428,8 +428,7 @@ TEST_F(CalendarIcs, RruleUntilInPastYieldsNoOccurrencesButStaysSupported)
         "RRULE:FREQ=WEEKLY;UNTIL=20200201T100000Z\n"
         "END:VEVENT\n";
 
-    ics_event_list_t out =
-        parse(ics, make_utc(2024, 1, 1, 0, 0, 0), make_utc(2024, 1, 8, 0, 0, 0));
+    ics_event_list_t out = parse(ics, make_utc(2024, 1, 1, 0, 0, 0), make_utc(2024, 1, 8, 0, 0, 0));
     EXPECT_EQ(out.count, 0);
 }
 
