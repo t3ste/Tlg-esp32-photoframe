@@ -58,6 +58,22 @@ typedef enum {
 #define BOARD_HAL_HAS_SPEAKER 0
 #endif
 
+// True if this board's Kconfig entry selects any climate sensor driver
+// component at all (components/board_hal/Kconfig - SENSOR_DRIVER_SHTC3 for
+// waveshare_photopainter_73, SENSOR_DRIVER_SHT40 for the xiao_ee03/
+// reterminal_e100x boards; xiao_ee02 selects neither). Unlike
+// BOARD_HAL_HAS_SPEAKER this doesn't need a per-board header to set it -
+// the Kconfig `select` already says whether the driver layer exists at all.
+// Whether the sensor actually responds on a given physical unit is still a
+// separate runtime question (board_hal_get_temperature()/get_humidity()) -
+// this only lets main/climate.c's dead weight compile out entirely on a
+// board where the answer can never be anything but "no sensor".
+#if defined(CONFIG_SENSOR_DRIVER_SHTC3) || defined(CONFIG_SENSOR_DRIVER_SHT40)
+#define BOARD_HAL_HAS_CLIMATE_SENSOR 1
+#else
+#define BOARD_HAL_HAS_CLIMATE_SENSOR 0
+#endif
+
 /**
  * @brief Initialize the Board HAL
  *

@@ -1,5 +1,29 @@
 #include "climate_history.h"
 
+#include "board_hal.h"
+
+// No climate sensor driver at all selected for this board - see climate.c's
+// own identical guard. climate_history_record() would only ever no-op via
+// climate_read_temperature()'s own failure anyway, but the file-parsing/
+// backup/JSON-building logic behind it (dead weight on such a board) is
+// compiled out entirely rather than just never firing at runtime.
+#if !BOARD_HAL_HAS_CLIMATE_SENSOR
+
+void climate_history_record(void) {}
+
+cJSON *climate_history_build_json(void)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (root) {
+        cJSON_AddArrayToObject(root, "entries");
+    }
+    return root;
+}
+
+void climate_history_reset(void) {}
+
+#else
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <time.h>
@@ -185,3 +209,5 @@ void climate_history_reset(void)
         ESP_LOGI(TAG, "Climate history reset (user-requested)");
     }
 }
+
+#endif  // BOARD_HAL_HAS_CLIMATE_SENSOR

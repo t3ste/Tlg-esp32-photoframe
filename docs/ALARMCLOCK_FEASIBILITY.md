@@ -277,28 +277,100 @@ voice varying with grogginess right after waking up) needs iteration beyond the 
 version. Recommend scoping this as an explicitly optional, separately-shippable phase — the alarm
 clock is fully useful (schedule + button/Web UI arm + ring + physical-button stop) without it.
 
-## 5. Extension idea: show the next alarm time as a display overlay
+## 5. Phase 4 design: show the next alarm time as a display overlay (researched 2026-09-24)
 
-New idea (2026-09-23): optionally show the armed alarm's time on the display whenever content
-changes, e.g. right-aligned just left of the existing climate sensor badges.
+Idea: optionally show the armed alarm's time on the display, toggled from the Web UI, shown only
+when an alarm is actually armed. The user specifically flagged that on their hardware, a photo
+render with weather + climate badges already fills the entire top row — so this needs a real survey
+of what's free in every render mode, not just "put it near the other badges." That survey (an
+Explore-agent pass over `overlay_manager.c`/`image_processor.c`/`agenda_renderer.c`, exact
+citations kept below) found two very different situations depending on render mode, so this needs
+**two separate integration points**, not one shared element.
 
-`overlay_manager.c` already composes several independent optional elements this way — a
-weather/headlines bar, a low-battery badge, and (most similar to this idea) the climate
-temperature/humidity badges, which already reserve their own space and truncate whatever precedes
-them rather than overlapping (`docs/DIFF.md`'s climate-overlay entries document this exact
-"reserves space ahead of the badges" convention). A "next alarm: 07:00" text element is a direct
-fit for this same composition pattern — no new overlay mechanism needed, just one more optional
-element alongside the existing ones, shown only when an alarm is currently armed.
+### Photo/rotation mode (`overlay_manager.c` + drawing code in `image_processor.c`)
 
-**Scope note**: this composition path (`overlay_manager.c`) draws onto normal photo renders. Agenda
-mode has its own separate header-drawing code (`agenda_renderer.c`) with its own climate chip
-convention — showing the alarm time there too (if wanted) would be a second, separate integration
-point, not automatically covered by adding it to `overlay_manager.c`. Worth deciding explicitly
-later whether this should appear in both places or just the photo-overlay path to start.
+Confirmed corner-by-corner (every draw call in `image_processor_add_overlay_to_file()` read):
+- **Top-left**: low-battery badge (`image_processor_draw_battery_badge()`, boxed at `x=0,y=0`).
+- **Top-right**: climate temp/humidity badges (`draw_one_climate_badge()`, right edge pinned to the
+  display's right edge).
+- **Top edge, full width**: weather/headlines bar (`image_processor_draw_overlay_bar()`,
+  `anchor_top=true`) - already narrows its own `usable_width` by a `right_margin_px` reserved for
+  whichever climate badges are about to draw, truncating its own text ahead of them
+  (`image_processor.c` ~4286-4300) - this is the exact existing precedent for "reserve room, shift/
+  truncate what's already there," and confirms the user's own observation: with both weather/
+  headlines and climate enabled, the *entire* top edge is already claimed.
+- **Bottom, full width, but only the drawn text is centered, not corner-anchored**: the EXIF/
+  capture-date caption and the "no internet" error banner both go through the same bottom-anchored,
+  centered `render_text_bar()` call.
+- **Bottom-left and bottom-right are never touched by anything today, in any configuration** -
+  confirmed by reading every draw call in this file, not inferred.
 
-**Effort: small**, reuses existing text-measurement/positioning primitives and the established
-badge-composition convention; independent of every other phase and can be built any time after the
-alarm-cron storage (phase 1) exists to read a time from.
+**Recommendation**: a new bottom-left badge, visually mirroring the existing top-left battery badge
+(same box/font/padding shape, just the opposite bottom corner) - "next alarm 16:40" (or similar).
+Since the caption/error-banner text is *centered across the full width* rather than corner-anchored,
+a sufficiently long caption could still visually reach into the bottom-left corner even though
+nothing is nominally drawn there - so this needs the same "reserve a margin, narrow the other
+element's usable width" treatment the top edge already has, just mirrored to the left: the caption's
+`render_text_bar()` call would need a `left_margin_px` alongside its existing right-margin support
+(today `render_text_bar()`/`image_processor_draw_overlay_bar()`'s margin narrowing is only
+implemented for the right side, for the top bar's own climate-badge accommodation - extending it to
+also narrow from the left, and re-centering the caption's text within that narrower window rather
+than the full width, is the one piece of that primitive that doesn't already exist and would need
+building, not just reusing).
+
+### Agenda mode (`agenda_renderer.c`)
+
+This is the harder case, and the survey's most important finding: **unlike photo-overlay mode,
+Agenda mode has no corner that is unconditionally free in every configuration.**
+- **List mode** (Calendar-only or ToDo-only) and both **dual layouts** (stacked/side-by-side): the
+  header (32px, full column width) already chains climate chip (top-right of that header) and
+  timestamp (immediately left of it, omitted entirely if there's no room - `docs/DIFF.md` already
+  documents this exact fallback). Below the header, the day/event list fills downward row by row -
+  bottom corners are only free when the list happens to be *shorter* than its row budget, which is
+  data-dependent, not something the layout guarantees.
+- **7-day Grid mode** (Calendar-only, full screen): the content area below the header is tiled
+  edge-to-edge by day-cells regardless of how much data each day has - confirmed **zero free space
+  anywhere in the content area, ever**, independent of data. The grid's own header strip (same 32px
+  bar as List mode) is unaffected by this and still exists identically above the grid.
+
+**Recommendation**: don't try to find a spare corner in Agenda mode at all - extend the **existing
+header chain** instead, the same one climate/timestamp already use
+(`agenda_renderer.c`'s `draw_header_climate()` already returns its own left edge specifically so
+"callers use the return value to place their own right-aligned header content... immediately to its
+left" - a new alarm-time element is one more link in that same chain, e.g. climate chip → alarm time
+→ timestamp, reusing the identical measure-width-then-subtract pattern every element there already
+uses). This works uniformly across List, Grid, ToDo-only, and both dual layouts, because it only
+ever touches the header strip (which exists in all five combinations) and never the content area
+(which has no guaranteed free space in several of them, and none at all in Grid mode). Apply the
+same two rules the climate chip/timestamp already use: shown in only one header at a time (the one
+that already shows climate - top when stacked, Calendar's own header when side-by-side, matching
+the existing de-duplication logic exactly), and omitted entirely (not truncated/overlapped) if
+there's no room left once the other header content is placed.
+
+### Cross-cutting notes
+
+- **Board size**: `BOARD_HAL_DISPLAY_WIDTH`/`HEIGHT` are runtime values (`epaper_get_width/height()`),
+  not a fixed 800x480 - confirmed other supported boards use 1200x1600 and ~1872x1404. Any new
+  element must position itself from these, exactly like every existing overlay/header element
+  already does - no board-specific hardcoding needed or present today.
+- **Time format**: every existing on-device timestamp (Agenda header, config/log timestamps) uses
+  24-hour format exclusively - there is no 12-hour/AM-PM rendering anywhere in the firmware today
+  (only a client-side `hour12()` helper in the webapp's own cron-schedule *description* text, which
+  never reaches the device's display). Recommend 24-hour ("16:40") for consistency with everything
+  else already on screen, rather than introducing the device's first-ever AM/PM text rendering for
+  just this one small element - happy to do 12-hour instead if preferred, but flagging that it would
+  be a new, one-off convention.
+- **Both toggles gate on the same conditions**: only visible when `alarm_clock_available` (the build
+  actually has the feature) AND a new, separate Web UI switch (e.g. "Show next alarm on display,"
+  meaningful only when the Alarm Clock tab itself is visible) is on AND at least one alarm is
+  currently armed (`alarm_cron` non-empty) - showing nothing at all otherwise, matching the "nur
+  falls eingestellt" framing of the request.
+
+**Effort: small-medium** - reuses established primitives/conventions almost entirely; the one
+genuinely new piece of plumbing is the caption's left-margin support for the photo-overlay case
+(the Agenda-mode case needs no new plumbing at all, just one more chained header element). Two
+separate, independent integration points (photo-overlay vs. Agenda header) rather than one shared
+implementation, but both follow patterns this codebase already has working examples of.
 
 ## Energy budget
 
@@ -349,9 +421,10 @@ alarm-cron storage (phase 1) exists to read a time from.
    speaker, and/or a live level meter on the serial console) is exactly the right-sized way to
    answer this — and doubles as the first working milestone of the larger ES7210 driver effort
    rather than being throwaway test code.
-6. **New: BOOT-hotspot suppression while in alarm-setting mode** — needs a shared "is alarm-setting
-   mode currently active" check consulted from `main.c`'s BOOT long-press branch, so a rapid string
-   of hour-count taps can never be misread as the unrelated hotspot-toggle hold.
+6. ~~BOOT-hotspot suppression while in alarm-setting mode~~ — **resolved** (Phase 3 implementation):
+   `main.c`'s BOOT long-press branch checks `alarm_setting_ui_is_active()` before calling
+   `toggle_ap_hotspot_mode()`, so a rapid string of hour-count taps can never be misread as the
+   unrelated hotspot-toggle hold.
 7. ~~Simultaneous KEY+BOOT chord detection~~ — **resolved 2026-09-23**: enrollment entry moved to a
    long-press BOOT while already inside alarm-setting mode (reusing the slot BOOT-hotspot-
    suppression already frees up there), so no cross-button simultaneous-press detection is needed
