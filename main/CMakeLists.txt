@@ -19,6 +19,7 @@ set(SOURCES
     "ha_integration.c"
     "headlines.c"
     "history_manager.c"
+    "http_auth.c"
     "http_fetch.c"
     "http_server.c"
     "image_processor.c"

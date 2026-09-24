@@ -203,6 +203,21 @@ static void apply_extra_ics_url(cJSON *root, const char *url_field, const char *
 esp_err_t apply_config_from_json(cJSON *root)
 {
     cJSON *item;
+    // Every field below is independent - one field failing validation must
+    // never discard every field after it in the same request. Confirmed
+    // live (2026-09-20): a single non-numeric telegram_chat_id (or, in the
+    // separate incident that surfaced this, a WiFi SSID unreachable from
+    // this network) made this function `return ESP_FAIL` partway through,
+    // silently dropping every remaining field in a large Settings-page
+    // config import - Agenda, Chimes, Climate, Overlays, all of it - even
+    // though the request otherwise had nothing wrong with those fields.
+    // `had_error` now just records that *something* failed so the HTTP
+    // handler can still report it, without stopping unrelated fields from
+    // applying. utils_consume_config_error() only ever holds the most
+    // recent message if more than one field fails in the same request -
+    // still a strict improvement over previously reporting exactly one
+    // failure and hiding how much else silently never happened.
+    bool had_error = false;
 
     // General
     item = cJSON_GetObjectItem(root, "device_name");
@@ -224,29 +239,39 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "timezone");
     if (item && cJSON_IsString(item)) {
         const char *tz = cJSON_GetStringValue(item);
+        bool tz_ok = true;
         if (tz[0] == '\0') {
             utils_set_config_error("Time zone must not be empty");
-            return ESP_FAIL;
+            tz_ok = false;
         }
-        for (const unsigned char *p = (const unsigned char *) tz; *p != '\0'; p++) {
-            if (*p < 0x20 || *p > 0x7e) {
-                utils_set_config_error("Time zone must be printable ASCII");
-                return ESP_FAIL;
+        if (tz_ok) {
+            for (const unsigned char *p = (const unsigned char *) tz; *p != '\0'; p++) {
+                if (*p < 0x20 || *p > 0x7e) {
+                    utils_set_config_error("Time zone must be printable ASCII");
+                    tz_ok = false;
+                    break;
+                }
             }
         }
-        esp_err_t tz_err = config_manager_set_timezone(tz);
-        if (tz_err == ESP_ERR_INVALID_SIZE) {
-            char msg[64];
-            snprintf(msg, sizeof(msg), "Time zone is too long (max %d characters)",
-                     TIMEZONE_MAX_LEN - 1);
-            utils_set_config_error(msg);
-            return ESP_FAIL;
-        } else if (tz_err != ESP_OK) {
-            utils_set_config_error("Failed to save the time zone");
-            return ESP_FAIL;
+        if (tz_ok) {
+            esp_err_t tz_err = config_manager_set_timezone(tz);
+            if (tz_err == ESP_ERR_INVALID_SIZE) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Time zone is too long (max %d characters)",
+                         TIMEZONE_MAX_LEN - 1);
+                utils_set_config_error(msg);
+                tz_ok = false;
+            } else if (tz_err != ESP_OK) {
+                utils_set_config_error("Failed to save the time zone");
+                tz_ok = false;
+            } else {
+                setenv("TZ", tz, 1);
+                tzset();
+            }
         }
-        setenv("TZ", tz, 1);
-        tzset();
+        if (!tz_ok) {
+            had_error = true;
+        }
     }
 
     // Advanced network settings (#43): custom NTP server, static IP and DNS
@@ -273,9 +298,10 @@ esp_err_t apply_config_from_json(cJSON *root)
         const char *addr = cJSON_GetStringValue(item);
         if (addr[0] != '\0' && esp_netif_str_to_ip4(addr, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid static IP address");
-            return ESP_FAIL;
+            had_error = true;
+        } else {
+            config_manager_set_static_ip(addr);
         }
-        config_manager_set_static_ip(addr);
     }
 
     item = cJSON_GetObjectItem(root, "static_netmask");
@@ -283,9 +309,10 @@ esp_err_t apply_config_from_json(cJSON *root)
         const char *addr = cJSON_GetStringValue(item);
         if (addr[0] != '\0' && esp_netif_str_to_ip4(addr, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid static netmask");
-            return ESP_FAIL;
+            had_error = true;
+        } else {
+            config_manager_set_static_netmask(addr);
         }
-        config_manager_set_static_netmask(addr);
     }
 
     item = cJSON_GetObjectItem(root, "static_gateway");
@@ -293,28 +320,39 @@ esp_err_t apply_config_from_json(cJSON *root)
         const char *addr = cJSON_GetStringValue(item);
         if (addr[0] != '\0' && esp_netif_str_to_ip4(addr, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid static gateway");
-            return ESP_FAIL;
+            had_error = true;
+        } else {
+            config_manager_set_static_gateway(addr);
         }
-        config_manager_set_static_gateway(addr);
     }
 
     item = cJSON_GetObjectItem(root, "ip_mode");
     if (item && cJSON_IsString(item)) {
         bool want_static = (strcmp(cJSON_GetStringValue(item), "static") == 0);
         if (want_static) {
+            bool static_ok = true;
             if (esp_netif_str_to_ip4(config_manager_get_static_ip(), &parsed) != ESP_OK) {
                 utils_set_config_error("Invalid static IP address");
-                return ESP_FAIL;
+                had_error = true;
+                static_ok = false;
             }
             if (esp_netif_str_to_ip4(config_manager_get_static_netmask(), &parsed) != ESP_OK) {
                 utils_set_config_error("Invalid static netmask");
-                return ESP_FAIL;
+                had_error = true;
+                static_ok = false;
             }
             if (esp_netif_str_to_ip4(config_manager_get_static_gateway(), &parsed) != ESP_OK) {
                 utils_set_config_error("Invalid static gateway");
-                return ESP_FAIL;
+                had_error = true;
+                static_ok = false;
             }
-            config_manager_set_ip_mode(IP_MODE_STATIC);
+            // Only actually switch to static mode if all three fields it
+            // depends on are valid - leaving ip_mode alone (not forcing back
+            // to DHCP) otherwise, same "don't touch what wasn't asked for"
+            // spirit as every other skipped field in this function.
+            if (static_ok) {
+                config_manager_set_ip_mode(IP_MODE_STATIC);
+            }
         } else {
             config_manager_set_ip_mode(IP_MODE_DHCP);
         }
@@ -325,9 +363,10 @@ esp_err_t apply_config_from_json(cJSON *root)
         const char *dns = cJSON_GetStringValue(item);
         if (dns[0] != '\0' && esp_netif_str_to_ip4(dns, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid DNS server address");
-            return ESP_FAIL;
+            had_error = true;
+        } else {
+            config_manager_set_dns_server(dns);
         }
-        config_manager_set_dns_server(dns);
     }
 
     // WiFi
@@ -359,10 +398,20 @@ esp_err_t apply_config_from_json(cJSON *root)
                 }
                 ESP_LOGI(TAG, "Successfully connected and saved WiFi credentials");
             } else {
+                // Deliberately falls through instead of returning - every
+                // other field in this function is independent and applies
+                // on its own merits; a bad SSID (e.g. importing another
+                // device's config export onto one that isn't on the same
+                // network) shouldn't silently discard every field still to
+                // come below just because it happened to be processed
+                // first. Confirmed live (2026-09-20) this WAS the one
+                // early-return in an otherwise skip-and-continue function -
+                // not what actually caused that incident (a request-body
+                // size limit rejected the whole PATCH before this code
+                // ever ran), but a real latent bug in its own right.
                 ESP_LOGW(TAG, "Failed to connect to new WiFi, reverting to previous credentials");
                 wifi_manager_connect(current_ssid, config_manager_get_wifi_password(),
                                      WIFI_CONNECT_DEFAULT_TIMEOUT_MS);
-                return ESP_FAIL;
             }
         }
     }
@@ -389,7 +438,7 @@ esp_err_t apply_config_from_json(cJSON *root)
             display_manager_initialize_paint();
         } else {
             utils_set_config_error("Display rotation must be 0 or 180 degrees");
-            return ESP_FAIL;
+            had_error = true;
         }
     }
 
@@ -401,51 +450,67 @@ esp_err_t apply_config_from_json(cJSON *root)
     }
 
     // Rotation schedule: an array of cron expressions. Validate every rule
-    // before applying any; reject the whole request on the first bad one.
+    // before applying any; reject just THIS field (not the rest of the
+    // request - see this function's own top-of-function comment) on the
+    // first bad one. The do/while(0)+break wrapper exists purely so a
+    // validation failure partway through the array can skip straight to
+    // "leave the existing schedule alone" without an early function return.
     item = cJSON_GetObjectItem(root, "rotate_cron");
-    if (item && cJSON_IsArray(item)) {
-        int count = cJSON_GetArraySize(item);
-        if (count > MAX_CRON_RULES) {
-            char msg[64];
-            snprintf(msg, sizeof(msg), "Too many schedule rules (max %d)", MAX_CRON_RULES);
-            utils_set_config_error(msg);
-            return ESP_FAIL;
-        }
-        // An empty schedule is ambiguous (it would silently fall back to
-        // hourly rotation, and the empty set can't be restored after a
-        // reboot). Turning auto_rotate off is the way to stop rotating.
-        if (count == 0) {
-            utils_set_config_error("Schedule must contain at least one rule");
-            return ESP_FAIL;
-        }
-        const char *rules[MAX_CRON_RULES];
-        int n = 0;
-        cJSON *el;
-        cJSON_ArrayForEach(el, item)
-        {
-            if (!cJSON_IsString(el)) {
-                utils_set_config_error("Schedule rule must be a string");
-                return ESP_FAIL;
-            }
-            const char *expr = cJSON_GetStringValue(el);
-            if (strlen(expr) >= CRON_RULE_MAX_LEN) {
-                utils_set_config_error("Cron expression too long");
-                return ESP_FAIL;
-            }
-            cron_rule_t tmp;
-            if (!cron_parse(expr, &tmp)) {
-                char msg[96];
-                snprintf(msg, sizeof(msg), "Invalid cron expression: %s", expr);
+    if (item && cJSON_IsArray(item))
+        do {
+            int count = cJSON_GetArraySize(item);
+            if (count > MAX_CRON_RULES) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Too many schedule rules (max %d)", MAX_CRON_RULES);
                 utils_set_config_error(msg);
-                return ESP_FAIL;
+                had_error = true;
+                break;
             }
-            if (n < MAX_CRON_RULES) {
-                rules[n++] = expr;
+            // An empty schedule is ambiguous (it would silently fall back to
+            // hourly rotation, and the empty set can't be restored after a
+            // reboot). Turning auto_rotate off is the way to stop rotating.
+            if (count == 0) {
+                utils_set_config_error("Schedule must contain at least one rule");
+                had_error = true;
+                break;
             }
-        }
-        config_manager_set_cron_rules(rules, n);
-        power_manager_reset_rotate_timer();
-    } else {
+            const char *rules[MAX_CRON_RULES];
+            int n = 0;
+            cJSON *el;
+            bool rule_error = false;
+            cJSON_ArrayForEach(el, item)
+            {
+                if (!cJSON_IsString(el)) {
+                    utils_set_config_error("Schedule rule must be a string");
+                    rule_error = true;
+                    break;
+                }
+                const char *expr = cJSON_GetStringValue(el);
+                if (strlen(expr) >= CRON_RULE_MAX_LEN) {
+                    utils_set_config_error("Cron expression too long");
+                    rule_error = true;
+                    break;
+                }
+                cron_rule_t tmp;
+                if (!cron_parse(expr, &tmp)) {
+                    char msg[96];
+                    snprintf(msg, sizeof(msg), "Invalid cron expression: %s", expr);
+                    utils_set_config_error(msg);
+                    rule_error = true;
+                    break;
+                }
+                if (n < MAX_CRON_RULES) {
+                    rules[n++] = expr;
+                }
+            }
+            if (rule_error) {
+                had_error = true;
+                break;
+            }
+            config_manager_set_cron_rules(rules, n);
+            power_manager_reset_rotate_timer();
+        } while (0);
+    else {
         // Backward compatibility: convert a legacy interval to a cron rule.
         item = cJSON_GetObjectItem(root, "rotate_interval");
         if (item && cJSON_IsNumber(item)) {
@@ -496,19 +561,39 @@ esp_err_t apply_config_from_json(cJSON *root)
                 if (pin_ret != ESP_OK) {
                     ESP_LOGE(TAG, "Cert pin failed, rejecting config: %s", err_buf);
                     utils_set_cert_pin_error(err_buf);
-                    return ESP_FAIL;
+                    had_error = true;
+                } else {
+                    config_manager_set_image_url(new_url);
                 }
-            } else if (cur_is_https) {
-                // Downgrading to HTTP/empty: clear the pinned cert
-                cert_pin_clear();
+            } else {
+                if (cur_is_https) {
+                    // Downgrading to HTTP/empty: clear the pinned cert
+                    cert_pin_clear();
+                }
+                config_manager_set_image_url(new_url);
             }
-            config_manager_set_image_url(new_url);
         }
     }
 
     item = cJSON_GetObjectItem(root, "access_token");
     if (item && cJSON_IsString(item)) {
         config_manager_set_access_token(cJSON_GetStringValue(item));
+    }
+
+    // Optional password for the device's own HTTP API (#130). Send "" to
+    // disable it again. Never echoed back by GET /api/config.
+    // Refuse an over-long one rather than store a truncated prefix: the owner
+    // would then be locked out by the very password they typed.
+    item = cJSON_GetObjectItem(root, "http_password");
+    if (item && cJSON_IsString(item)) {
+        esp_err_t pw_err = config_manager_set_http_password(cJSON_GetStringValue(item));
+        if (pw_err == ESP_ERR_INVALID_SIZE) {
+            utils_set_config_error("Device password is too long (max 63 bytes)");
+            had_error = true;
+        } else if (pw_err != ESP_OK) {
+            utils_set_config_error("Failed to save the device password");
+            had_error = true;
+        }
     }
 
     item = cJSON_GetObjectItem(root, "http_header_key");
@@ -559,9 +644,10 @@ esp_err_t apply_config_from_json(cJSON *root)
         }
         if (!valid) {
             utils_set_config_error("Telegram chat ID must be a numeric ID");
-            return ESP_FAIL;
+            had_error = true;
+        } else {
+            config_manager_set_telegram_chat_id(chat_id);
         }
-        config_manager_set_telegram_chat_id(chat_id);
     }
 
     item = cJSON_GetObjectItem(root, "telegram_pairing_enabled");
@@ -983,53 +1069,56 @@ esp_err_t apply_config_from_json(cJSON *root)
     // requires a non-empty schedule before agenda mode can ever fire, so
     // an empty schedule is just "not configured yet," not an error).
     item = cJSON_GetObjectItem(root, "agenda_cron");
-    if (item && cJSON_IsArray(item)) {
-        int count = cJSON_GetArraySize(item);
-        if (count > MAX_CRON_RULES) {
-            char msg[64];
-            snprintf(msg, sizeof(msg), "Too many agenda schedule rules (max %d)", MAX_CRON_RULES);
-            utils_set_config_error(msg);
-            config_manager_end_agenda_batch();
-            return ESP_FAIL;
-        }
-        const char *rules[MAX_CRON_RULES];
-        int n = 0;
-        cJSON *el;
-        cJSON_ArrayForEach(el, item)
-        {
-            if (!cJSON_IsString(el)) {
-                utils_set_config_error("Agenda schedule rule must be a string");
-                config_manager_end_agenda_batch();
-                return ESP_FAIL;
-            }
-            const char *expr = cJSON_GetStringValue(el);
-            if (strlen(expr) >= CRON_RULE_MAX_LEN) {
-                utils_set_config_error("Cron expression too long");
-                config_manager_end_agenda_batch();
-                return ESP_FAIL;
-            }
-            cron_rule_t tmp;
-            if (!cron_parse(expr, &tmp)) {
-                char msg[96];
-                snprintf(msg, sizeof(msg), "Invalid agenda cron expression: %s", expr);
+    if (item && cJSON_IsArray(item))
+        do {
+            int count = cJSON_GetArraySize(item);
+            if (count > MAX_CRON_RULES) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Too many agenda schedule rules (max %d)",
+                         MAX_CRON_RULES);
                 utils_set_config_error(msg);
-                config_manager_end_agenda_batch();
-                return ESP_FAIL;
+                had_error = true;
+                break;
             }
-            if (n < MAX_CRON_RULES) {
-                rules[n++] = expr;
+            const char *rules[MAX_CRON_RULES];
+            int n = 0;
+            cJSON *el;
+            bool rule_error = false;
+            cJSON_ArrayForEach(el, item)
+            {
+                if (!cJSON_IsString(el)) {
+                    utils_set_config_error("Agenda schedule rule must be a string");
+                    rule_error = true;
+                    break;
+                }
+                const char *expr = cJSON_GetStringValue(el);
+                if (strlen(expr) >= CRON_RULE_MAX_LEN) {
+                    utils_set_config_error("Cron expression too long");
+                    rule_error = true;
+                    break;
+                }
+                cron_rule_t tmp;
+                if (!cron_parse(expr, &tmp)) {
+                    char msg[96];
+                    snprintf(msg, sizeof(msg), "Invalid agenda cron expression: %s", expr);
+                    utils_set_config_error(msg);
+                    rule_error = true;
+                    break;
+                }
+                if (n < MAX_CRON_RULES) {
+                    rules[n++] = expr;
+                }
             }
-        }
-        config_manager_set_agenda_cron_rules(rules, n);
-        power_manager_reset_agenda_timer();
-    }
+            if (rule_error) {
+                had_error = true;
+                break;
+            }
+            config_manager_set_agenda_cron_rules(rules, n);
+            power_manager_reset_agenda_timer();
+        } while (0);
     item = cJSON_GetObjectItem(root, "agenda_stack_layout");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_stack_layout(cJSON_IsTrue(item));
-    }
-    item = cJSON_GetObjectItem(root, "agenda_bg_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_bg_color(cJSON_GetStringValue(item));
     }
     // Per-role color pickers - all optional, non-secret, plain strings (one
     // of "red"/"yellow"/"blue"/"green"); an invalid/unrecognized value is
@@ -1070,29 +1159,10 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
         config_manager_set_agenda_context_color(cJSON_GetStringValue(item));
     }
-    item = cJSON_GetObjectItem(root, "agenda_cal_a_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_cal_a_color(cJSON_GetStringValue(item));
-    }
-    item = cJSON_GetObjectItem(root, "agenda_cal_b_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_cal_b_color(cJSON_GetStringValue(item));
-    }
-    item = cJSON_GetObjectItem(root, "agenda_cal_c_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_cal_c_color(cJSON_GetStringValue(item));
-    }
-    item = cJSON_GetObjectItem(root, "agenda_cal_d_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_cal_d_color(cJSON_GetStringValue(item));
-    }
-    item = cJSON_GetObjectItem(root, "agenda_cal_e_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_cal_e_color(cJSON_GetStringValue(item));
-    }
+
     config_manager_end_agenda_batch();
 
-    return ESP_OK;
+    return had_error ? ESP_FAIL : ESP_OK;
 }
 
 // Context for HTTP event handler
