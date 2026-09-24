@@ -276,6 +276,19 @@ typedef enum {
 // late config push can land. A server-requested post-rotate wait can extend it.
 #define HA_CONFIG_WINDOW_SEC 10
 
+// Image fetch timing (#121). FETCH_IO_TIMEOUT_MS bounds each socket operation
+// (connect, time to first byte, and every wait for more data), so a dead link
+// fails fast while a slow one still finishes. Retries only start while the
+// fetch has used less than FETCH_RETRY_BUDGET_MS in total: quick failures
+// (refused, DNS, HTTP error) get retried, but an attempt that already ran into
+// the I/O timeout is not repeated. A frame on weak WiFi can legitimately need
+// 30-80 s for one image, so this is not a cap on a single transfer; the
+// auto-sleep timer remains the backstop for that.
+#define FETCH_IO_TIMEOUT_MS 30000
+#define FETCH_RETRY_BUDGET_MS 20000
+// Pause between fetch attempts; counted against FETCH_RETRY_BUDGET_MS.
+#define FETCH_RETRY_DELAY_MS 3000
+
 // Default rotation schedule for fresh / factory-reset devices: every 12 hours.
 // Simplified 3-field cron: "minute hour day-of-week".
 #define DEFAULT_ROTATE_CRON "0 */12 *"
@@ -468,12 +481,13 @@ typedef enum {
 // command-only update is never itself discarded by this - see telegram_bot.c.
 // Opt-in, off by default.
 #define NVS_TELEGRAM_POWER_SAVE_LATEST_ONLY_KEY "tg_ps_latest"
-// WiFi connect timeout used on an automatic Telegram-mode wake while power
-// save is on, in place of the normal 60s budget - a manual button wake is
-// never affected (see NVS_TELEGRAM_POWER_SAVE_ENABLED_KEY above).
-#define TELEGRAM_POWER_SAVE_WIFI_TIMEOUT_SEC 15
 // Reconnect-attempt budget used in place of the normal 5 (see
-// wifi_manager_set_max_retries()) under the same conditions.
+// wifi_manager_set_max_retries()) on an automatic Telegram-mode wake while
+// power save is on - a manual button wake is never affected (see
+// NVS_TELEGRAM_POWER_SAVE_ENABLED_KEY above). wifi_manager_connect() no
+// longer takes a per-call timeout of its own (bounded internally by
+// WIFI_CONNECT_TIMEOUT_MS in wifi_manager.c); fewer retries alone still gives
+// up faster in practice.
 #define TELEGRAM_POWER_SAVE_WIFI_MAX_RETRIES 1
 
 // On-device output format for Telegram-ingested photos. EPDGZ is the
@@ -806,12 +820,6 @@ typedef enum {
 // without a marginal battery rail, or users who'd rather trade the small
 // brownout-risk reduction back for full WiFi range, can turn it off.
 #define NVS_WIFI_TX_POWER_CAP_ENABLED_KEY "tx_pwr_cap_en"
-
-// Default bound for wifi_manager_connect()'s wait - matches the ~60s budget
-// callers effectively relied on before that wait was made explicitly bounded
-// (see wifi_manager.c: it used to block forever via portMAX_DELAY, which
-// could hang indefinitely on a DHCP stall after a successful association).
-#define WIFI_CONNECT_DEFAULT_TIMEOUT_MS 60000
 
 // AI API Keys (for webapp client use)
 #define AI_API_KEY_MAX_LEN 256

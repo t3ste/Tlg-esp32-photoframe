@@ -431,6 +431,23 @@ void power_manager_enter_sleep(void)
 {
     power_manager_disable_auto_light_sleep();
 
+    // Report how close this wake came to exhausting its stack. Every sleep
+    // path goes through here, so the worst case across the whole wake --
+    // including the rotation work -- shows up in the debug log. Nothing else
+    // in the firmware measures this, which is why the "is 6144 bytes enough?"
+    // question has only ever been answered by guesswork (see #121 / PR #133).
+    // Scheduled wakes reach this from the main task; interactive ones from
+    // sleep_timer or httpd, hence the task name. StackType_t is uint8_t on
+    // ESP-IDF, so the multiply is a no-op there and only keeps this correct
+    // for word-sized ports.
+    ESP_LOGI(TAG, "Stack headroom at sleep: task '%s' had %u bytes free (min)", pcTaskGetName(NULL),
+             (unsigned) (uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)));
+
+    // How long this wake kept the chip up: the number that battery life
+    // actually depends on, and the first thing to compare between a frame
+    // that drains fast and one that doesn't (#121).
+    ESP_LOGI(TAG, "Awake for %lld ms this wake", (long long) (esp_timer_get_time() / 1000));
+
     ESP_LOGI(TAG, "Preparing to enter deep sleep mode");
 
     // Only notify HA offline when the network is actually up. The early-wake

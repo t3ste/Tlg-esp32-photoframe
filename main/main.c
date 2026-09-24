@@ -23,6 +23,7 @@
 #include "esp_log.h"
 #include "esp_sntp.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_vfs_dev.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -121,29 +122,27 @@ static esp_err_t sntp_sync_periodic_callback(void)
     return ESP_OK;
 }
 
-// Helper function to connect to WiFi with timeout. wifi_manager_connect()
-// itself now blocks for at most timeout_seconds and returns a definitive
-// result, so there's no need for a separate busy-poll loop here anymore (the
-// old version discarded that return value and polled is_connected() on its
-// own, which - on a total connection failure - wasted time up to the full
-// timeout even though the failure was already known immediately).
-static bool connect_to_wifi_with_timeout(int timeout_seconds)
+// Connect to the saved network. wifi_manager_connect() itself is bounded (it
+// gives up after its retries or WIFI_CONNECT_TIMEOUT_MS), so there is nothing
+// left to wait for once it returns. On ESP_ERR_TIMEOUT the link is still up and
+// trying; callers that won't wait for it must call wifi_manager_stop_connecting().
+static esp_err_t connect_to_wifi(void)
 {
     char wifi_ssid[WIFI_SSID_MAX_LEN] = {0};
     char wifi_password[WIFI_PASS_MAX_LEN] = {0};
 
     ESP_ERROR_CHECK(wifi_manager_load_credentials(wifi_ssid, wifi_password));
     ESP_LOGI(TAG, "Connecting to WiFi SSID: %s", wifi_ssid);
-    esp_err_t err = wifi_manager_connect(wifi_ssid, wifi_password, timeout_seconds * 1000);
+    int64_t start_us = esp_timer_get_time();
+    esp_err_t err = wifi_manager_connect(wifi_ssid, wifi_password);
+    int elapsed_ms = (int) ((esp_timer_get_time() - start_us) / 1000);
 
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "WiFi connected");
-        return true;
+        ESP_LOGI(TAG, "WiFi connected after %d ms", elapsed_ms);
     } else {
-        ESP_LOGE(TAG, "WiFi connection failed after up to %d seconds: %s", timeout_seconds,
-                 esp_err_to_name(err));
-        return false;
+        ESP_LOGE(TAG, "WiFi connection failed after %d ms (%s)", elapsed_ms, esp_err_to_name(err));
     }
+    return err;
 }
 
 static void button_task(void *arg)
@@ -325,17 +324,24 @@ void deep_sleep_wake_main(wakeup_source_t wakeup_src)
         ESP_ERROR_CHECK(wifi_manager_init());
 
         if (telegram_power_save_active) {
+            // wifi_manager_connect() no longer takes a per-call timeout (it's
+            // bounded internally by WIFI_CONNECT_TIMEOUT_MS) - power save's
+            // "give up faster" intent is now expressed purely through fewer
+            // retries, which also shortens the effective wait in practice
+            // (the event handler sets WIFI_FAIL_BIT sooner).
             wifi_manager_set_max_retries(TELEGRAM_POWER_SAVE_WIFI_MAX_RETRIES);
         }
-        bool connected_now = connect_to_wifi_with_timeout(
-            telegram_power_save_active ? TELEGRAM_POWER_SAVE_WIFI_TIMEOUT_SEC : 60);
-        utils_handle_wifi_connect_result(connected_now);
+        esp_err_t connect_err = connect_to_wifi();
+        utils_handle_wifi_connect_result(connect_err == ESP_OK);
 
-        if (connected_now) {
+        if (connect_err == ESP_OK) {
             wifi_connected = true;
             ESP_LOGI(TAG, "WiFi connected");
         } else {
-            ESP_LOGW(TAG, "WiFi connection timeout");
+            // This wake only needs the network up front; don't leave the radio
+            // retrying through the rotation and until sleep (#121).
+            wifi_manager_stop_connecting();
+            ESP_LOGW(TAG, "WiFi unavailable");
         }
     }
 
@@ -900,7 +906,7 @@ void app_main(void)
     bool wifi_ok = false;
     bool credential_reject = false;
     for (int attempt = 1; attempt <= WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS; attempt++) {
-        wifi_ok = connect_to_wifi_with_timeout(30);
+        wifi_ok = (connect_to_wifi() == ESP_OK);
         if (wifi_ok) {
             break;
         }

@@ -12,6 +12,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
@@ -25,12 +26,50 @@ static const char *TAG = "wifi_manager";
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT BIT1
 
+// Reconnect attempts after the first one before giving up.
+#define WIFI_MAX_RETRY 5
+// Hard cap on one wifi_manager_connect(). Association plus DHCP normally takes
+// a few seconds; this only matters when the AP is out of range or DHCP never
+// answers, where waiting longer just burns battery (#121).
+#define WIFI_CONNECT_TIMEOUT_MS 30000
+
 static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
 static int s_max_retries = 5;
 static bool s_is_connected = false;
+// Reconnect policy, shared between wifi_manager_connect()'s caller and the
+// event handler (which runs on the event-loop task), so guarded by
+// s_policy_lock. A mutex rather than a spinlock: the handler must decide to
+// stop retrying and publish WIFI_FAIL_BIT as one step, and event-group calls
+// are not allowed inside a critical section.
+//  - s_give_up: wifi_manager_stop_connecting() was called; never reconnect.
+//  - s_keep_trying: wifi_manager_keep_reconnecting() was called; reconnect
+//    without the WIFI_MAX_RETRY limit.
+//  - s_retries_exhausted: the handler stopped reconnecting and set
+//    WIFI_FAIL_BIT, so nothing is in progress any more.
+static SemaphoreHandle_t s_policy_lock = NULL;
+static bool s_give_up = false;
+static bool s_keep_trying = false;
+static bool s_retries_exhausted = false;
+// Consecutive attempts the AP rejected in a way that points at the password
+// (see is_auth_rejection()). Reset whenever the AP accepts us or an attempt
+// fails for some other reason, so only an unbroken run of rejections counts.
+static int s_auth_rejects = 0;  // guarded by s_policy_lock too
+
+// Disconnect reasons that mean the AP turned the credentials down, as opposed
+// to it being absent or out of range (NO_AP_FOUND, BEACON_TIMEOUT, ...). A
+// wrong WPA2 passphrase surfaces as a 4-way handshake timeout or a MIC
+// failure; MIC_FAILURE and 802_1X_AUTH_FAILED are kept alongside upstream's
+// original 3-reason set (see wifi_manager_last_failure_is_credential_reject()'s
+// own history) so this fork's cold-boot credential-wipe decision in main.c
+// doesn't narrow which disconnect reasons it treats as a genuine rejection.
+static bool is_auth_rejection(uint8_t reason)
+{
+    return reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT || reason == WIFI_REASON_AUTH_FAIL ||
+           reason == WIFI_REASON_HANDSHAKE_TIMEOUT || reason == WIFI_REASON_MIC_FAILURE ||
+           reason == WIFI_REASON_802_1X_AUTH_FAILED;
+}
 static esp_netif_t *s_sta_netif = NULL;
-static wifi_err_reason_t s_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;
 
 static void apply_dns_override(void);
 
@@ -45,18 +84,41 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
         // <name>.local wait out their full resolver timeout (~5s per request)
         // before falling back to the A record.
         esp_netif_create_ip6_linklocal(s_sta_netif);
+        xSemaphoreTake(s_policy_lock, portMAX_DELAY);
+        s_auth_rejects = 0;  // the AP accepted the credentials
+        xSemaphoreGive(s_policy_lock);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        wifi_event_sta_disconnected_t *disconnected = (wifi_event_sta_disconnected_t *) event_data;
-        s_last_disconnect_reason = (wifi_err_reason_t) disconnected->reason;
-        if (s_retry_num < s_max_retries) {
-            esp_wifi_connect();
-            s_retry_num++;
-            ESP_LOGI(TAG, "retry to connect to the AP (reason %d)", disconnected->reason);
+        const wifi_event_sta_disconnected_t *disc =
+            (const wifi_event_sta_disconnected_t *) event_data;
+        xSemaphoreTake(s_policy_lock, portMAX_DELAY);
+        if (disc && is_auth_rejection(disc->reason)) {
+            s_auth_rejects++;
         } else {
+            s_auth_rejects = 0;
+        }
+        // Background reconnects (s_keep_trying) wait out an absent AP or a
+        // silent DHCP server indefinitely, but not an AP that keeps refusing
+        // the password: that gets the same number of attempts as a normal
+        // connect, then WIFI_FAIL_BIT so the owner of the retry can react.
+        // The non-keep_trying budget is s_max_retries (default WIFI_MAX_RETRY,
+        // overridable via wifi_manager_set_max_retries() - e.g. Telegram power
+        // save uses a lower budget to give up faster on a bad link).
+        bool retry = !s_give_up && (s_keep_trying ? s_auth_rejects <= WIFI_MAX_RETRY
+                                                  : s_retry_num < s_max_retries);
+        if (retry) {
+            s_retry_num++;
+            esp_wifi_connect();
+        } else {
+            s_retries_exhausted = true;
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
+        xSemaphoreGive(s_policy_lock);
+        ESP_LOGI(TAG, "%s", retry ? "retry to connect to the AP" : "giving up on the AP");
         s_is_connected = false;
-        ESP_LOGI(TAG, "connect to the AP fail (reason %d)", disconnected->reason);
+        // Waiters on WIFI_CONNECTED_BIT (e.g. main.c's late_wifi_task) must
+        // see the link as down again, not a stale bit from an earlier IP.
+        xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        ESP_LOGI(TAG, "connect to the AP fail (reason %d)", disc ? disc->reason : -1);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
@@ -118,6 +180,10 @@ esp_err_t wifi_manager_update_hostname(void)
 esp_err_t wifi_manager_init(void)
 {
     s_wifi_event_group = xEventGroupCreate();
+    s_policy_lock = xSemaphoreCreateMutex();
+    if (!s_wifi_event_group || !s_policy_lock) {
+        return ESP_ERR_NO_MEM;
+    }
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -220,7 +286,7 @@ static void apply_dns_override(void)
     set_dns_server_slot(ESP_NETIF_DNS_FALLBACK, "8.8.8.8");  // Google
 }
 
-esp_err_t wifi_manager_connect(const char *ssid, const char *password, int timeout_ms)
+esp_err_t wifi_manager_connect(const char *ssid, const char *password)
 {
     if (!ssid || strlen(ssid) == 0) {
         ESP_LOGE(TAG, "SSID is empty");
@@ -270,51 +336,105 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password, int timeo
 
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));  // Enable power save at boot/connect
 
+    xSemaphoreTake(s_policy_lock, portMAX_DELAY);
     s_retry_num = 0;
-    s_last_disconnect_reason = WIFI_REASON_UNSPECIFIED;  // stale value from a previous
-                                                         // attempt must not leak into this one
-    xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    s_give_up = false;
+    s_keep_trying = false;
+    s_retries_exhausted = false;
+    s_auth_rejects = 0;
     // Bounded wait - previously portMAX_DELAY, which could hang forever if
     // association succeeded but DHCP never completed (no further
     // WIFI_EVENT_STA_DISCONNECTED to ever set WIFI_FAIL_BIT). Every caller now
-    // gets a definitive answer within timeout_ms either way.
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                                           pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
+    // gets a definitive answer within WIFI_CONNECT_TIMEOUT_MS either way.
+    xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    xSemaphoreGive(s_policy_lock);
+    EventBits_t bits =
+        xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE,
+                            pdFALSE, pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
 
     if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "connected to ap SSID:%s", ssid);
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            ESP_LOGI(TAG, "connected to ap SSID:%s (RSSI %d dBm, channel %d)", ssid, ap.rssi,
+                     ap.primary);
+        } else {
+            ESP_LOGI(TAG, "connected to ap SSID:%s", ssid);
+        }
         return ESP_OK;
     } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "Failed to connect to SSID:%s", ssid);
+        ESP_LOGW(TAG, "Failed to connect to SSID:%s after %d attempts", ssid, s_max_retries + 1);
         return ESP_FAIL;
-    } else {
-        ESP_LOGE(TAG, "Timed out waiting to connect to SSID:%s (%d ms)", ssid, timeout_ms);
-        return ESP_ERR_TIMEOUT;
     }
+
+    xSemaphoreTake(s_policy_lock, portMAX_DELAY);
+    bool rejected = s_auth_rejects > 0;
+    xSemaphoreGive(s_policy_lock);
+    if (rejected) {
+        // Out of time while the AP was still rejecting the password: that is
+        // a credential failure that merely ran slow (a wrong passphrase costs
+        // a multi-second handshake timeout per attempt), not a slow network.
+        // Report it as ESP_FAIL so an interactive boot still falls back to
+        // provisioning rather than retrying a wrong password forever.
+        ESP_LOGW(TAG, "SSID:%s rejected the credentials; giving up after %d ms", ssid,
+                 WIFI_CONNECT_TIMEOUT_MS);
+        wifi_manager_stop_connecting();
+        return ESP_FAIL;
+    }
+
+    // Timed out otherwise: associated but no IP yet (DHCP not answering), or
+    // the AP not answering at all (still booting, out of range). Neither says
+    // the credentials are wrong, so this is not ESP_FAIL. The attempt is still
+    // running; the caller decides whether to stop it or keep it going.
+    ESP_LOGW(TAG, "Timed out connecting to SSID:%s after %d ms", ssid, WIFI_CONNECT_TIMEOUT_MS);
+    return ESP_ERR_TIMEOUT;
 }
 
 bool wifi_manager_last_failure_is_credential_reject(void)
 {
-    // These are the reason codes the AP/STA driver uses specifically when a
-    // WPA2-PSK handshake can't complete because the two sides derived
-    // different keys (i.e. the password is wrong) - or, for
-    // WIFI_REASON_AUTH_FAIL/802_1X_AUTH_FAILED, an explicit authentication
-    // rejection. Retrying with the exact same (wrong) password would only
-    // ever reproduce the same result, so a caller can treat this as final
-    // after a single attempt. Every other reason (AP not currently found,
-    // beacon timeout, general association/connection failure, or plain
-    // ESP_ERR_TIMEOUT with no disconnect event at all - e.g. DHCP stalling)
-    // is at least plausibly transient and worth retrying before giving up.
-    switch (s_last_disconnect_reason) {
-    case WIFI_REASON_MIC_FAILURE:
-    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
-    case WIFI_REASON_HANDSHAKE_TIMEOUT:
-    case WIFI_REASON_AUTH_FAIL:
-    case WIFI_REASON_802_1X_AUTH_FAILED:
-        return true;
-    default:
-        return false;
+    // Mirrors the `rejected` check wifi_manager_connect() itself uses to
+    // decide its own ESP_FAIL-vs-ESP_ERR_TIMEOUT return - exposed separately
+    // for callers (this fork's cold-boot connect loop in main.c) that need to
+    // tell "credentials rejected" apart from "retries exhausted for some
+    // other reason" even though both currently return ESP_FAIL from
+    // wifi_manager_connect() itself. Meaningless if the last attempt
+    // succeeded (s_auth_rejects is reset to 0 on WIFI_EVENT_STA_CONNECTED).
+    xSemaphoreTake(s_policy_lock, portMAX_DELAY);
+    bool rejected = s_auth_rejects > 0;
+    xSemaphoreGive(s_policy_lock);
+    return rejected;
+}
+
+void wifi_manager_stop_connecting(void)
+{
+    // Stop the event handler from reconnecting on its own and power the radio
+    // down, so it isn't left churning while the caller moves on (#121).
+    // esp_wifi_stop() rather than a disconnect: the handler may already have
+    // decided to retry and be about to call esp_wifi_connect(), which a
+    // disconnect issued first would not cancel; once WiFi is stopped that
+    // call simply fails.
+    xSemaphoreTake(s_policy_lock, portMAX_DELAY);
+    s_give_up = true;
+    s_keep_trying = false;
+    xSemaphoreGive(s_policy_lock);
+    esp_wifi_stop();
+    s_is_connected = false;
+}
+
+void wifi_manager_keep_reconnecting(void)
+{
+    // Lift the retry limit. If the handler already ran out of retries in the
+    // meantime nothing is in progress, so start a fresh attempt ourselves.
+    // Under the lock, so the handler can't publish WIFI_FAIL_BIT for the old
+    // attempt after we have cleared it and started a new one.
+    xSemaphoreTake(s_policy_lock, portMAX_DELAY);
+    s_give_up = false;
+    s_keep_trying = true;
+    if (s_retries_exhausted) {
+        s_retries_exhausted = false;
+        xEventGroupClearBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        esp_wifi_connect();
     }
+    xSemaphoreGive(s_policy_lock);
 }
 
 esp_err_t wifi_manager_disconnect(void)
