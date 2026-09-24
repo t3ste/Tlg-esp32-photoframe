@@ -209,7 +209,9 @@ def main():
         generate_splash(args.board)
 
     if "firmware" in steps:
-        build_firmware(args.board, extra_args, debug=args.debug, alarmclock=args.alarmclock)
+        build_firmware(
+            args.board, extra_args, debug=args.debug, alarmclock=args.alarmclock
+        )
 
 
 if __name__ == "__main__":

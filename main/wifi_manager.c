@@ -542,7 +542,7 @@ esp_err_t wifi_manager_stop_ap_hotspot(void)
     char ssid[WIFI_SSID_MAX_LEN] = {0};
     char password[WIFI_PASS_MAX_LEN] = {0};
     if (wifi_manager_load_credentials(ssid, password) == ESP_OK && ssid[0] != '\0') {
-        return wifi_manager_connect(ssid, password, 30000);
+        return wifi_manager_connect(ssid, password);
     }
     return ESP_OK;  // offline mode or no saved credentials - staying WiFi-off is correct
 }

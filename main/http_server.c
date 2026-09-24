@@ -3533,8 +3533,7 @@ static void register_all_handlers(httpd_handle_t handle)
     register_uri(handle, "/api/agenda/extra-ics", HTTP_POST, agenda_extra_ics_upload_handler);
     register_uri(handle, "/api/agenda/color-profile", HTTP_GET, agenda_color_profile_handler);
     register_uri(handle, "/api/agenda/color-profile", HTTP_POST, agenda_color_profile_handler);
-    register_uri(handle, "/api/agenda/color-profile", HTTP_DELETE,
-                 agenda_color_profile_handler);
+    register_uri(handle, "/api/agenda/color-profile", HTTP_DELETE, agenda_color_profile_handler);
     register_uri(handle, "/api/wifi/hotspot/start", HTTP_POST, wifi_hotspot_start_handler);
     register_uri(handle, "/api/wifi/hotspot/stop", HTTP_POST, wifi_hotspot_stop_handler);
 }
