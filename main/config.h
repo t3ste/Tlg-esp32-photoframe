@@ -139,6 +139,9 @@ typedef enum {
 #define TELEGRAM_ORIGINALS_DIRECTORY TELEGRAM_DOWNLOAD_DIRECTORY "/Originals"
 
 #define CURRENT_UPLOAD_PATH FS_MOUNT_POINT "/.current.tmp"
+// A downloaded thumbnail waits here until its image is on the panel; the
+// direct-display upload stages its thumbnail under the same name.
+#define CURRENT_THUMB_UPLOAD_PATH FS_MOUNT_POINT "/.current_thumb.tmp"
 #define CURRENT_JPG_PATH FS_MOUNT_POINT "/.current.jpg"
 #define CURRENT_BMP_PATH FS_MOUNT_POINT "/.current.bmp"
 #define CURRENT_PNG_PATH FS_MOUNT_POINT "/.current.png"
