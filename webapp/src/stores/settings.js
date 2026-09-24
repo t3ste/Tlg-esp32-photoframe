@@ -6,6 +6,7 @@ import {
   SPECTRA6,
   getDefaultParams,
 } from "@aitjcize/epaper-image-convert";
+import { validateTimezone } from "../utils/timezone";
 
 export const useSettingsStore = defineStore("settings", () => {
   const API_BASE = "";
@@ -36,12 +37,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const deviceSettings = ref({
     // General
     deviceName: "PhotoFrame",
-    // Raw POSIX TZ string (e.g. "UTC-2" or a full DST rule like
-    // "CET-1CEST,M3.5.0/2,M10.5.0/3") - the device's own canonical value
-    // (main/config_manager.c passes it to setenv("TZ", ...) as-is). Never
-    // round-tripped through a numeric UTC-offset field - that lossy
-    // conversion silently discarded DST-aware strings and could overwrite
-    // them with "UTC0" on save (see webapp/src/utils/timezone.js).
+    // The POSIX TZ rule exactly as the device applies it (tzset). Kept
+    // verbatim: a DST rule such as CET-1CEST,M3.5.0,M10.5.0/3 has no
+    // numeric form, and reducing it to an offset would clobber it on save.
     timezone: "UTC0",
     ntpServer: "pool.ntp.org",
     // Network: static IP / DNS override (#43)
@@ -260,6 +258,10 @@ export const useSettingsStore = defineStore("settings", () => {
 
   // Original config from server (for change detection)
   let originalConfig = {};
+
+  // The time zone rule as the device last reported or accepted it, so the UI
+  // can tell a rule the user edited from one it merely loaded.
+  const savedTimezone = ref("UTC0");
 
   // Orientation as currently saved/applied on the device. The image preview uses
   // this (not the live dropdown) so it only re-lays-out when the user saves.
@@ -537,6 +539,7 @@ export const useSettingsStore = defineStore("settings", () => {
       // Kept as the raw POSIX string - see the `timezone` field's own
       // comment above for why this is never parsed into a numeric offset.
       deviceSettings.value.timezone = data.timezone || "UTC0";
+      savedTimezone.value = deviceSettings.value.timezone;
     } catch (_error) {
       console.log("Device settings API not available (standalone mode)");
     }
@@ -707,6 +710,16 @@ export const useSettingsStore = defineStore("settings", () => {
       }
     }
 
+    // Only a rule that is about to be sent is checked, so an odd value that
+    // an older firmware let through can't block unrelated saves.
+    if (changedFields.timezone !== undefined) {
+      const tzError = validateTimezone(changedFields.timezone);
+      if (tzError) {
+        return { success: false, message: tzError };
+      }
+    }
+
+
     // If nothing changed, return success
     if (Object.keys(changedFields).length === 0) {
       return { success: true, message: "No changes to save" };
@@ -796,6 +809,9 @@ export const useSettingsStore = defineStore("settings", () => {
       if (data.status === "success") {
         // Update original config with new values
         Object.assign(originalConfig, changedFields);
+        if (changedFields.timezone !== undefined) {
+          savedTimezone.value = changedFields.timezone;
+        }
         appliedOrientation.value = deviceSettings.value.displayOrientation;
         return { success: true, message: "Settings saved successfully" };
       } else {
@@ -897,6 +913,7 @@ export const useSettingsStore = defineStore("settings", () => {
     params,
     uploadImageFormat,
     deviceSettings,
+    savedTimezone,
     appliedOrientation,
     palette,
     preset,

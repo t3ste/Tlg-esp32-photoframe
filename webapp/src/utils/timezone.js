@@ -1,44 +1,84 @@
-// POSIX TZ helpers for Settings. The device stores/accepts the raw string
-// (setenv("TZ", ...) in main/config_manager.c - a plain "UTC±H[:MM]" or a
-// full DST rule such as "CET-1CEST,M3.5.0/2,M10.5.0/3"). The old UI instead
-// round-tripped the value through a numeric UTC-offset field: parsing a
-// DST-aware string against a "UTC±H" regex silently left the offset at 0,
-// and saving with that 0 rewrote the device's real timezone to "UTC0" - not
-// just on a deliberate edit, but on ANY Settings save. Keeping the raw
-// string as the only source of truth (a v-combobox in SettingsPanel.vue,
-// not a number field) removes the lossy round-trip entirely.
+import { TIMEZONES } from "../data/timezones";
 
-export const TIMEZONE_PRESETS = [
-  { title: "UTC", value: "UTC0" },
-  { title: "Amsterdam/Berlin (CET/CEST, DST-aware)", value: "CET-1CEST,M3.5.0/2,M10.5.0/3" },
-  { title: "London (GMT/BST, DST-aware)", value: "GMT0BST,M3.5.0/1,M10.5.0" },
-  { title: "US Eastern (EST/EDT, DST-aware)", value: "EST5EDT,M3.2.0/2,M11.1.0/2" },
-  { title: "US Pacific (PST/PDT, DST-aware)", value: "PST8PDT,M3.2.0/2,M11.1.0/2" },
-  { title: "UTC+1 (fixed, no DST)", value: "UTC-1" },
-  { title: "UTC+2 (fixed, no DST)", value: "UTC-2" },
-  { title: "UTC-5 (fixed, no DST)", value: "UTC5" },
-  { title: "UTC-8 (fixed, no DST)", value: "UTC8" },
-  { title: "UTC+8 (China)", value: "UTC-8" },
-  { title: "UTC+5:30 (India)", value: "UTC-5:30" },
-];
+// The device stores at most this many bytes (TIMEZONE_MAX_LEN - 1).
+export const TIMEZONE_MAX_BYTES = 63;
 
-// Parses `/api/time`'s "time" field - the device's own already-localized
-// wall-clock string ("YYYY-MM-DD HH:MM:SS", from localtime_r() against
-// whatever TZ is actually set, DST included). Treated as a NAIVE local
-// Date (the numbers as-is, no further timezone conversion) purely so the
-// Settings page can tick it forward client-side between fetches - never
-// used to derive an offset. Returns null if the string doesn't match.
-export function parseDeviceWallClock(timeStr) {
-  if (!timeStr) return null;
-  const match = String(timeStr).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/);
-  if (!match) return null;
-  const [, year, month, day, hour, minute, second] = match.map(Number);
-  return new Date(year, month - 1, day, hour, minute, second);
+// Picker entries for rules the IANA table doesn't contain. They stand for
+// whatever rule is already stored, so selecting one changes nothing.
+export const FIXED_OFFSET_ZONE = "__fixed_offset__";
+export const CUSTOM_ZONE = "__custom__";
+
+// Mirrors the firmware's checks (main/utils.c). Neither side parses POSIX
+// rules: newlib's tzset() has no error return, so only the shape is checked.
+export function validateTimezone(rule) {
+  if (typeof rule !== "string" || rule.length === 0) {
+    return "Enter a time zone rule";
+  }
+  if (!/^[\x20-\x7e]+$/.test(rule)) {
+    return "Time zone rule must be printable ASCII";
+  }
+  if (rule.length > TIMEZONE_MAX_BYTES) {
+    return `Time zone rule is too long (max ${TIMEZONE_MAX_BYTES} characters)`;
+  }
+  return "";
 }
 
-// Inverse of parseDeviceWallClock() - formats a naive local Date back into
-// the same "YYYY-MM-DD HH:MM:SS" shape for display.
-export function formatDeviceWallClock(date) {
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+export function ruleForZone(name) {
+  const rule = TIMEZONES[name];
+  return typeof rule === "string" ? rule : null;
+}
+
+// Zones the frame will not follow exactly, with how far off it gets; the
+// picker says so under the zone. Everything else in the table is what tzdata
+// itself predicts for the years ahead.
+const GREENLAND_NOTE =
+  "On the frame, summer time here starts one hour late (Sunday 00:00 rather than Saturday 23:00): its tzset() cannot read the exact rule.";
+const PALESTINE_NOTE =
+  "Palestine announces its clock changes year by year; this rule is the tz database's prediction and may miss a change.";
+export const APPROXIMATE_ZONES = {
+  "America/Godthab": GREENLAND_NOTE,
+  "America/Nuuk": GREENLAND_NOTE,
+  "America/Scoresbysund": GREENLAND_NOTE,
+  "Asia/Gaza": PALESTINE_NOTE,
+  "Asia/Hebron": PALESTINE_NOTE,
+};
+
+// UTC±H[:MM] is what the webapp wrote before it had a zone picker. The POSIX
+// sign is inverted from the everyday one: UTC-8 is eight hours ahead of UTC.
+const FIXED_OFFSET_RE = /^UTC([+-]?)(\d{1,2})(?::(\d{2}))?$/;
+
+// Everyday-notation label ("UTC+8", "UTC-5:30") for a fixed-offset rule, or
+// null when the rule has any other shape.
+export function fixedOffsetLabel(rule) {
+  const m = FIXED_OFFSET_RE.exec(rule ?? "");
+  if (!m) return null;
+  const hours = Number(m[2]);
+  const minutes = m[3] ? Number(m[3]) : 0;
+  if (hours === 0 && minutes === 0) return "UTC+0";
+  const sign = m[1] === "-" ? "+" : "-";
+  const mm = minutes ? `:${String(minutes).padStart(2, "0")}` : "";
+  return `UTC${sign}${hours}${mm}`;
+}
+
+// The factory default is UTC0, and "Etc/UCT" sorts ahead of "Etc/UTC".
+const PREFERRED_ZONE = { UTC0: "Etc/UTC" };
+
+// The picker entry to show for a stored rule. Many zones share one rule
+// (CST-8 is Shanghai, Taipei, Macau, ...), so prefer the browser's own zone
+// when it fits, else the first in the table.
+export function zoneForRule(rule, browserZone) {
+  if (browserZone && ruleForZone(browserZone) === rule) return browserZone;
+  if (PREFERRED_ZONE[rule]) return PREFERRED_ZONE[rule];
+  for (const [name, zoneRule] of Object.entries(TIMEZONES)) {
+    if (zoneRule === rule) return name;
+  }
+  return fixedOffsetLabel(rule) ? FIXED_OFFSET_ZONE : CUSTOM_ZONE;
+}
+
+export function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
 }
