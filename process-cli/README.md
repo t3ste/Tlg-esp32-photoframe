@@ -14,8 +14,8 @@ Node.js CLI tool for processing images for ESP32 PhotoFrame. Uses the [epaper-im
 ### From source (recommended)
 
 ```bash
-git clone https://github.com/aitjcize/esp32-photoframe.git
-cd esp32-photoframe/esp32-photoframe/process-cli
+git clone https://github.com/t3ste/Tlg-esp32-photoframe.git
+cd Tlg-esp32-photoframe/process-cli
 npm install
 npm link  # Makes photoframe-process command available globally
 ```

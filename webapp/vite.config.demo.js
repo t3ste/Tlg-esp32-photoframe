@@ -22,7 +22,7 @@ function renameHtmlPlugin() {
 // Demo build config - outputs to demo folder for GitHub Pages
 export default defineConfig({
   plugins: [vue(), vuetify({ autoImport: true }), renameHtmlPlugin()],
-  base: "/esp32-photoframe/",
+  base: "/Tlg-esp32-photoframe/",
   publicDir: resolve(__dirname, "../demo"), // Serve demo folder as public (for sample.jpg, manifests)
   build: {
     outDir: resolve(__dirname, "../demo"),
@@ -37,7 +37,7 @@ export default defineConfig({
     },
   },
   server: {
-    open: "/esp32-photoframe/index.html",
+    open: "/Tlg-esp32-photoframe/index.html",
     fs: {
       allow: [resolve(__dirname, "..")],
     },

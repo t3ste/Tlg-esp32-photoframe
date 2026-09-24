@@ -95,7 +95,7 @@ This project has companion tools for different use cases:
 
 ## Image Quality Comparison
 
-**🎨 [Try the Interactive Demo](https://aitjcize.github.io/esp32-photoframe/)** - Drag the slider to compare algorithms in real-time with your own images!
+**🎨 [Try the Interactive Demo](https://t3ste.github.io/Tlg-esp32-photoframe/)** - Drag the slider to compare algorithms in real-time with your own images!
 
 <table>
 <tr>
@@ -105,10 +105,10 @@ This project has companion tools for different use cases:
 <td align="center"><b>Our Algorithm<br/>(on device)</b></td>
 </tr>
 <tr>
-<td><a href="https://github.com/aitjcize/esp32-photoframe/raw/refs/heads/main/.img/sample.jpg"><img src=".img/sample.jpg" width="200"/></a></td>
-<td><a href="https://github.com/aitjcize/esp32-photoframe/raw/refs/heads/main/.img/stock_algorithm_on_computer.bmp"><img src=".img/stock_algorithm_on_computer.bmp" width="200"/></a></td>
-<td><a href="https://github.com/aitjcize/esp32-photoframe/raw/refs/heads/main/.img/stock_algorithm.bmp"><img src=".img/stock_algorithm.bmp" width="200"/></a></td>
-<td><a href="https://github.com/aitjcize/esp32-photoframe/raw/refs/heads/main/.img/our_algorithm.png"><img src=".img/our_algorithm.png" width="200"/></a></td>
+<td><a href="https://github.com/t3ste/Tlg-esp32-photoframe/raw/refs/heads/main/.img/sample.jpg"><img src=".img/sample.jpg" width="200"/></a></td>
+<td><a href="https://github.com/t3ste/Tlg-esp32-photoframe/raw/refs/heads/main/.img/stock_algorithm_on_computer.bmp"><img src=".img/stock_algorithm_on_computer.bmp" width="200"/></a></td>
+<td><a href="https://github.com/t3ste/Tlg-esp32-photoframe/raw/refs/heads/main/.img/stock_algorithm.bmp"><img src=".img/stock_algorithm.bmp" width="200"/></a></td>
+<td><a href="https://github.com/t3ste/Tlg-esp32-photoframe/raw/refs/heads/main/.img/our_algorithm.png"><img src=".img/our_algorithm.png" width="200"/></a></td>
 </tr>
 <tr>
 <td align="center">Source JPEG</td>
@@ -367,6 +367,7 @@ Planned for upcoming work on this fork:
 - ~~Factory reset erases the Agenda ETag cache validators from NVS but leaves the small `.agenda_*_cache.*` files behind on the SD card/internal flash~~ — done, factory reset now also removes those three cache files
 - ~~Investigate the ESP-IDF NVS partition possibly running out of free pages under heavy cumulative write load, which would explain unexplained WiFi-reprovisioning-after-reflash incidents without a flash tool ever having touched the NVS region directly~~ — investigated with live evidence (`nvs_get_stats()`, added specifically to check this) and ruled out for the incidents that prompted it: NVS had 465/756 entries free at the time. The real cause was found instead in the always-on cold-boot path (`main.c`): a single failed WiFi connection attempt at boot immediately erased the saved SSID/password, regardless of whether the failure was a confirmed bad password or just a transient hiccup (router mid-reboot, brief congestion) - now retries up to 3 times unless the AP's disconnect reason explicitly indicates rejected credentials (failed 4-way handshake/MIC failure/auth-fail), in which case it still stops after one attempt as before. The `nvs_get_stats()` diagnostic logging itself was kept regardless, as permanent low-cost health telemetry
 - ~~A device that fell back to WiFi captive-portal mode was observed needing a second, separate reprovisioning shortly after the first succeeded~~ — very likely the same cold-boot credential-clearing bug fixed above (a transient failure during that session's testing hitting the same code path), though that specific historical occurrence itself was never directly re-diagnosed
+- ~~Chimes/Climate weren't gated behind an independent build flag the way the Alarm Clock feature is~~ — done, but differently than Alarm Clock on purpose: Alarm Clock is a new, optional feature with an independent `--alarmclock` opt-in flag, since there's no hardware signal for "should this be compiled in" (any board with a speaker/buttons *could* support it). Chimes/Climate are established features tied directly to real hardware presence, so instead of a new user-facing toggle, `main/chime.c` and `main/climate.c`/`main/climate_history.c` now compile out their real implementation (down to a handful of no-op stub functions) on any board that structurally can't ever use them, via two new generic capability macros in `components/board_hal/include/board_hal.h` (`BOARD_HAL_HAS_SPEAKER`, already existed; `BOARD_HAL_HAS_CLIMATE_SENSOR`, new - true when the board's Kconfig entry selects any climate sensor driver at all). Verified live: `waveshare_photopainter_73` (has both) builds to the exact same binary size as before and Chimes/Climate both still work on real hardware; `seeedstudio_xiao_ee02` (has neither) now builds successfully with the dead weight compiled out entirely, where it previously always compiled in unconditionally
 
 ## License
 

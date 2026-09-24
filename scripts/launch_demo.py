@@ -118,8 +118,23 @@ def download_stable_firmware(demo_dir, project_root):
         latest_tag = result.stdout.strip()
         print(f"  Latest release: {latest_tag}")
 
-        # Get repository info (always aitjcize/esp32-photoframe)
-        repo_path = "aitjcize/esp32-photoframe"
+        # Get repository info from the local git remote, so this downloads
+        # from whichever repo (upstream or a fork) actually holds the tag.
+        remote_result = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        remote_url = remote_result.stdout.strip()
+        if remote_result.returncode != 0 or "github.com" not in remote_url:
+            print("  ⚠ Warning: Could not determine GitHub repo from git remote, skipping")
+            return False
+        if remote_url.startswith("git@"):
+            repo_path = remote_url.split("github.com:")[1].replace(".git", "")
+        else:
+            repo_path = remote_url.split("github.com/")[1].replace(".git", "")
 
         for board in BOARDS:
             board_dir = demo_dir / board
@@ -347,19 +362,19 @@ def generate_manifests(project_root, boards=None):
 def serve_demo(demo_dir, port=8000):
     """Start local web server to serve the demo page.
 
-    The demo is built with base="/esp32-photoframe/" for GitHub Pages.
+    The demo is built with base="/Tlg-esp32-photoframe/" for GitHub Pages.
     To serve locally, we serve from the parent directory and create
-    a symlink so /esp32-photoframe/ maps to the demo folder.
+    a symlink so /Tlg-esp32-photoframe/ maps to the demo folder.
     """
 
     project_root = demo_dir.parent
-    symlink_path = project_root / "esp32-photoframe"
+    symlink_path = project_root / "Tlg-esp32-photoframe"
 
-    # Create symlink: project_root/esp32-photoframe -> demo/
-    # This allows /esp32-photoframe/assets/* to resolve correctly
+    # Create symlink: project_root/Tlg-esp32-photoframe -> demo/
+    # This allows /Tlg-esp32-photoframe/assets/* to resolve correctly
     if not symlink_path.exists():
         symlink_path.symlink_to(demo_dir.name)
-        print(f"  Created symlink: esp32-photoframe -> {demo_dir.name}")
+        print(f"  Created symlink: Tlg-esp32-photoframe -> {demo_dir.name}")
     elif symlink_path.is_symlink():
         # Symlink exists, verify it points to demo
         pass
@@ -379,9 +394,9 @@ def serve_demo(demo_dir, port=8000):
     print("ESP32 PhotoFrame Demo Page")
     print("=" * 60)
     print(f"\nDemo page available at:")
-    print(f"  http://localhost:{actual_port}/esp32-photoframe/#demo")
+    print(f"  http://localhost:{actual_port}/Tlg-esp32-photoframe/#demo")
     print(f"\nWeb flasher available at:")
-    print(f"  http://localhost:{actual_port}/esp32-photoframe/#flash")
+    print(f"  http://localhost:{actual_port}/Tlg-esp32-photoframe/#flash")
     print(f"\nPress Ctrl+C to stop the server")
     print("=" * 60 + "\n")
 

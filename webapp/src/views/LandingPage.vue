@@ -192,7 +192,7 @@ async function loadVersionInfo() {
   } else {
     try {
       const stableResponse = await fetch(
-        "https://api.github.com/repos/aitjcize/esp32-photoframe/releases/latest"
+        "https://api.github.com/repos/t3ste/Tlg-esp32-photoframe/releases/latest"
       );
       stableVersion.value = (await stableResponse.json()).tag_name;
     } catch (error) {
@@ -284,7 +284,7 @@ function scrollTo(id) {
           <span class="version-chip">{{ stableVersion }}</span>
           <a
             class="nav-github"
-            href="https://github.com/aitjcize/esp32-photoframe"
+            href="https://github.com/t3ste/Tlg-esp32-photoframe"
             target="_blank"
             rel="noopener"
             aria-label="View on GitHub"
@@ -701,7 +701,7 @@ function scrollTo(id) {
             </div>
           </div>
           <div class="footer-links">
-            <a href="https://github.com/aitjcize/esp32-photoframe" target="_blank" rel="noopener"
+            <a href="https://github.com/t3ste/Tlg-esp32-photoframe" target="_blank" rel="noopener"
               >Firmware</a
             >
             <a
@@ -720,7 +720,7 @@ function scrollTo(id) {
               >App</a
             >
             <a
-              href="https://github.com/aitjcize/esp32-photoframe/blob/main/LICENSE"
+              href="https://github.com/t3ste/Tlg-esp32-photoframe/blob/main/LICENSE"
               target="_blank"
               rel="noopener"
               >License</a
