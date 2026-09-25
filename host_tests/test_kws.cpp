@@ -234,9 +234,24 @@ TEST(KwsMatcher, EnrollingTheSpeakerThemselvesWorks)
 TEST(KwsMatcher, CalibrationScalesWithTheSpeakersVariation)
 {
     auto m = enrolled_matcher();
+    // two templates: each one's nearest neighbour is the other one
     float spread = kws_dtw_distance(&m->templates[0], &m->templates[1]);
     EXPECT_NEAR(m->threshold, std::max(KWS_DEFAULT_MARGIN * spread, KWS_DEFAULT_FLOOR_THRESHOLD),
                 1.0e-3f);
+}
+
+TEST(KwsMatcher, MoreEnrolmentsDoNotInflateTheThreshold)
+{
+    // Enrolling the same word again (different reading) must not raise the
+    // acceptance threshold: a repetition is scored against its best template.
+    auto two = enrolled_matcher();
+    kws_matcher_t *three = new kws_matcher_t(*two);
+    kws_matcher_add(three, word("stopp_hedda_r-2").get());
+    kws_matcher_calibrate(three, KWS_DEFAULT_MARGIN, KWS_DEFAULT_FLOOR_THRESHOLD);
+    EXPECT_LE(three->threshold, two->threshold + 1.0e-3f);
+    // ...while the word "Stock" stays out
+    EXPECT_GE(kws_matcher_score(three, word("neg_stock").get()), three->threshold);
+    delete three;
 }
 
 TEST(KwsMatcher, FullAndEmptyMatchers)

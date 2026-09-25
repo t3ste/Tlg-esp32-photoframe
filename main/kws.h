@@ -87,10 +87,10 @@ int kws_matcher_add(kws_matcher_t *m, const kws_pattern_t *pattern);
 float kws_matcher_score(const kws_matcher_t *m, const kws_pattern_t *utterance);
 
 /**
- * Sets the threshold from the enrolments: @p margin times the largest distance
- * between two enrolments (how much the speaker varies), but never below
- * @p floor_threshold. With fewer than two templates the threshold becomes
- * @p floor_threshold.
+ * Sets the threshold from the enrolments: @p margin times the largest
+ * nearest-neighbour distance among them (how far a repetition of the word lands
+ * from its closest earlier example), but never below @p floor_threshold. With
+ * fewer than two templates the threshold becomes @p floor_threshold.
  */
 void kws_matcher_calibrate(kws_matcher_t *m, float margin, float floor_threshold);
 

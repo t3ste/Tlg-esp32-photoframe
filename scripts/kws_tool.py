@@ -9,8 +9,9 @@ towards switching a ringing alarm off by voice; not connected to the alarm yet).
     python kws_tool.py 192.168.1.20 clear
 
 Enrolling: each round records for a few seconds - say the word once, shortly
-after "Speak now". Three enrolments at your normal speaking speed work best;
-the acceptance threshold is derived from how much your repetitions differ.
+after "Speak now". Three to four enrolments at your normal speaking speed work best;
+the acceptance threshold is derived from how far a repetition lands from its
+closest earlier example.
 """
 
 import argparse

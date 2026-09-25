@@ -396,13 +396,24 @@ float kws_matcher_score(const kws_matcher_t *m, const kws_pattern_t *utterance)
 
 void kws_matcher_calibrate(kws_matcher_t *m, float margin, float floor_threshold)
 {
+    // How far is each enrolment from its closest sibling? A later utterance is
+    // scored against its best template, so this - not the largest pairwise
+    // distance, which grows with every extra enrolment - is the natural scale
+    // of "the same word again".
     float spread = 0.0f;
-    for (int i = 0; i < m->count; i++) {
-        for (int j = i + 1; j < m->count; j++) {
-            float d = kws_dtw_distance(&m->templates[i], &m->templates[j]);
-            if (d < KWS_DTW_INFINITE && d > spread) {
-                spread = d;
+    for (int i = 0; i < m->count && m->count >= 2; i++) {
+        float nearest = KWS_DTW_INFINITE;
+        for (int j = 0; j < m->count; j++) {
+            if (j == i) {
+                continue;
             }
+            float d = kws_dtw_distance(&m->templates[i], &m->templates[j]);
+            if (d < nearest) {
+                nearest = d;
+            }
+        }
+        if (nearest < KWS_DTW_INFINITE && nearest > spread) {
+            spread = nearest;
         }
     }
     float thr = margin * spread;
