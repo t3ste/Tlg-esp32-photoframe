@@ -3143,8 +3143,8 @@ async function performFactoryReset() {
           >
             <v-alert type="info" variant="tonal" density="compact" class="mb-4">
               Wakes the device with no WiFi, photo rotation, or Agenda render - just the speaker.
-              Ringing plays a repeating G4-C5-E5-C5 tone; a long (3s) press of the KEY/rotate button
-              on the device stops it early.
+              Ringing plays a repeating G4-C5-E5-C5 tone; a short press of the KEY/rotate button on
+              the device stops it early (without changing the picture).
             </v-alert>
 
             <v-switch

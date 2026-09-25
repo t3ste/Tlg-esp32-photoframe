@@ -45,21 +45,30 @@ int alarm_manager_seconds_until_next_wake(void);
 
 /**
  * @brief True while alarm_manager_run() is actively ringing.
- *
- * Used by the button-driven alarm-setting UI (docs/ALARMCLOCK_FEASIBILITY.md's
- * Phase 3) to avoid double-handling a long KEY press that already stopped the
- * ring via alarm_manager_run()'s own should_stop check - only relevant at all
- * when the alarm rings via the always-on active loop (power_manager.c's
- * rotation_timer_task), since button_task never runs during a deep-sleep
- * timer wake in the first place, so there's no button_task to double-handle
- * anything in that case.
  */
 bool alarm_manager_is_ringing(void);
 
 /**
+ * @brief Called by button_task on a KEY (rotate button) press edge. If an alarm
+ * is ringing, stops it and returns true: the caller must then ignore this
+ * whole press (no rotation on release, no long-press action). Returns false
+ * when nothing is ringing. Always false on a build without the Alarm Clock.
+ */
+bool alarm_manager_key_pressed(void);
+
+/**
+ * @brief Called by button_task every iteration with the current KEY level
+ * (0 = pressed). Returns true while the key belongs to a press that stopped
+ * the alarm - including the release event that ends it - so button_task can
+ * skip all further handling of that press. Always false on a build without
+ * the Alarm Clock.
+ */
+bool alarm_manager_key_swallowed(int key_level);
+
+/**
  * @brief Rings the alarm: plays the repeating G4-C5-E5-C5 tone sequence
  * (docs/ALARMCLOCK_FEASIBILITY.md) for the configured ring duration, or
- * until a long (>=3s) press of the KEY/rotate button is detected, whichever
+ * until a press of the KEY/rotate button is detected, whichever
  * comes first. Blocks for the whole duration. Deliberately touches nothing
  * network/rotation/agenda-related - the caller (main.c's deep-sleep wake
  * dispatch) is responsible for skipping WiFi/rotation/agenda entirely for

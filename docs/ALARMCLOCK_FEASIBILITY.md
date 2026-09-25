@@ -159,9 +159,12 @@ rotation/agenda wakes while adding a third kind that deliberately skips network 
   different things depending on state (nothing new architecturally, same pattern applied to a
   second button). This reuses KEY's genuinely free ≥3000 ms slot, so **there is no collision with
   the existing BOOT-hold hotspot toggle at all** — the original conflict is gone, not worked around.
-- **Stop a ringing alarm: long-press (3s) KEY** (from the original spec) — a third meaning for the
-  same gesture, disambiguated by device state (ringing vs. idle-normal vs. idle-in-setting-mode).
-  These three states are mutually exclusive, so the single physical gesture never needs to guess.
+- **Stop a ringing alarm: short press KEY** (changed 2026-09-25 from the original 3s long press —
+  a tap is the natural gesture half asleep). A press that starts while the alarm rings is consumed
+  entirely by the alarm module (`alarm_manager_key_pressed()`/`_key_swallowed()`): it triggers neither
+  the normal image rotation on release nor the ≥3s alarm-setting entry. KEY's falling edge is
+  latched by a GPIO interrupt so a quick tap between two polls of the ring loop is not missed
+  (deep-sleep timer wakes have no `button_task`, only this module sees the key).
 - **This removes the PWR-button PMIC-IRQ work item entirely** — the original design's "confirm via
   PWR" would have needed new AXP2101 IRQ enable/handling that doesn't exist today; using KEY for
   confirm instead means this feature needs **zero PMIC driver changes**. This is a genuine

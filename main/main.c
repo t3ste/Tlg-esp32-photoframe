@@ -241,7 +241,17 @@ static void button_task(void *arg)
             // Handle KEY button - trigger rotation (or, while the
             // alarm-setting UI is active, roll the minute / enter-exit that
             // UI on a long press - see alarm_setting_ui.h).
+            // A press that stops a ringing alarm belongs to the alarm: it must
+            // neither rotate the image nor count towards the long-press UI.
+            bool key_consumed = false;
             if (current_key_state == 0 && last_key_state == 1) {
+                key_consumed = alarm_manager_key_pressed();
+            }
+            key_consumed = key_consumed || alarm_manager_key_swallowed(current_key_state);
+
+            if (key_consumed) {
+                // nothing more to do for this press
+            } else if (current_key_state == 0 && last_key_state == 1) {
                 key_press_time = xTaskGetTickCount();
             } else if (current_key_state == 0 && last_key_state == 0) {
                 // Still held - let the setting UI know how long, so it can

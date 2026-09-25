@@ -4,6 +4,10 @@ All notable changes to this fork are documented here. See [README.md → Changes
 
 ## [Unreleased]
 
+### Changed
+
+- Alarm Clock: a **short KEY press** now stops a ringing alarm (was a 3 s hold), and that press no longer also changes the picture or opens the alarm-setting menu
+
 ### Added
 
 - Web Flasher: an **Alarm Clock** option (shown for boards that support it, currently `waveshare_photopainter_73`) flashes the alarm firmware variant. Dev builds always offer it; Stable appears once a full (non-pre-)release ships the alarm binary. Driven by a new `alarmclock` flag in `boards/boards.json` and `generate_manifests.py --variant alarmclock`.

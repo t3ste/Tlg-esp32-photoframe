@@ -7,7 +7,7 @@ menu "Alarm Clock (bedside alarm)"
             Adds a configurable alarm schedule (Web UI / Telegram) that wakes
             the device with no WiFi, photo rotation, or Agenda render, plays
             a repeating tone through the Chimes speaker, and can be stopped
-            with a long KEY press - see docs/ALARMCLOCK_FEASIBILITY.md.
+            with a short KEY press - see docs/ALARMCLOCK_FEASIBILITY.md.
 
             Off by default and excluded from the build entirely rather than
             just hidden, since not every supported board can usefully act as
