@@ -235,7 +235,7 @@ Download from [Releases](https://github.com/t3ste/Tlg-esp32-photoframe/releases)
 esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 photoframe-firmware-<board>-merged.bin
 ```
 
-**Alarm Clock build:** for the Waveshare PhotoPainter (`waveshare_photopainter_73`, the only supported board with a speaker) every release also ships `photoframe-firmware-waveshare_photopainter_73-alarmclock-merged.bin`. It is the same firmware with the [Alarm Clock](#features) compiled in, and OTA updates keep it (they fetch the matching `-alarmclock` asset). All other boards get the regular firmware only.
+**Alarm Clock build:** for the Waveshare PhotoPainter (`waveshare_photopainter_73`, the only supported board with a speaker) every release also ships `photoframe-firmware-waveshare_photopainter_73-alarmclock-merged.bin`. It is the same firmware with the [Alarm Clock](#features) compiled in, and OTA updates keep it (they fetch the matching `-alarmclock` asset). The Web Flasher offers it too: tick **Alarm Clock** under *Firmware* when the PhotoPainter is selected (Dev builds always; Stable once a full release includes it). All other boards get the regular firmware only.
 
 **Device not detected?** Hold BOOT button + press PWR to enter download mode.
 

@@ -5,6 +5,7 @@
     "display": "7.3\" 6-color",
     "resolution": [800, 480],
     "storage": "SD card (SDIO)",
+    "alarmclock": true,
     "url": "https://www.waveshare.com/wiki/ESP32-S3-PhotoPainter"
   },
   {

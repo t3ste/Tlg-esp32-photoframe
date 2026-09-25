@@ -18,6 +18,8 @@ const selectedVersion = ref("stable");
 // manifest exists). New boards released between tags may only have a dev build.
 const stableAvailable = ref(true);
 const selectedBoard = ref("waveshare_photopainter_73");
+// Alarm Clock firmware variant (only offered for boards with a speaker).
+const withAlarm = ref(false);
 const baseUrl = import.meta.env.BASE_URL;
 
 const supportedBoards = boardsData.map((b) => ({
@@ -28,6 +30,17 @@ const supportedBoards = boardsData.map((b) => ({
 
 const selectedBoardMeta = computed(
   () => supportedBoards.find((b) => b.value === selectedBoard.value) || supportedBoards[0]
+);
+
+// Manifest filename suffix for the selected firmware variant ("" = regular build).
+const variantSuffix = computed(() =>
+  withAlarm.value && selectedBoardMeta.value.alarmclock ? "-alarmclock" : ""
+);
+const manifestFile = computed(
+  () =>
+    (selectedVersion.value === "stable" ? "manifest" : "manifest-dev") +
+    variantSuffix.value +
+    ".json"
 );
 
 const ecosystem = [
@@ -164,7 +177,7 @@ onMounted(async () => {
   }
 });
 
-watch(selectedBoard, () => loadVersionInfo());
+watch([selectedBoard, withAlarm], () => loadVersionInfo());
 
 async function loadVersionInfo() {
   // The stable version label MUST come from the deployed manifest — that is
@@ -175,7 +188,9 @@ async function loadVersionInfo() {
   // deployed for this board.
   let manifestVersion = null;
   try {
-    const stableManifest = await fetch(baseUrl + selectedBoard.value + "/manifest.json");
+    const stableManifest = await fetch(
+      baseUrl + selectedBoard.value + "/manifest" + variantSuffix.value + ".json"
+    );
     stableAvailable.value = stableManifest.ok;
     if (stableManifest.ok) {
       manifestVersion = (await stableManifest.json()).version || null;
@@ -202,8 +217,10 @@ async function loadVersionInfo() {
   }
 
   try {
-    let devResponse = await fetch(baseUrl + selectedBoard.value + "/manifest-dev.json");
-    if (!devResponse.ok) {
+    let devResponse = await fetch(
+      baseUrl + selectedBoard.value + "/manifest-dev" + variantSuffix.value + ".json"
+    );
+    if (!devResponse.ok && !variantSuffix.value) {
       devResponse = await fetch(baseUrl + "manifest-dev.json");
     }
     if (devResponse.ok) {
@@ -541,7 +558,11 @@ function scrollTo(id) {
                   <span class="radio-text">
                     <strong>Stable</strong>
                     <em class="radio-tag">{{
-                      stableAvailable ? stableVersion : "none for this board yet"
+                      stableAvailable
+                        ? stableVersion
+                        : variantSuffix
+                          ? "none for this variant yet"
+                          : "none for this board yet"
                     }}</em>
                   </span>
                 </label>
@@ -565,14 +586,28 @@ function scrollTo(id) {
               </select>
             </div>
 
+            <div v-if="selectedBoardMeta.alarmclock" class="flash-row">
+              <label class="flash-label">Firmware</label>
+              <div class="radio-row">
+                <label class="radio">
+                  <input v-model="withAlarm" type="checkbox" />
+                  <span class="radio-dot"></span>
+                  <span class="radio-text">
+                    <strong>Alarm Clock</strong>
+                    <em class="radio-tag">bedside alarm via the onboard speaker</em>
+                  </span>
+                </label>
+              </div>
+            </div>
+
             <div class="flash-row flash-action">
               <esp-web-install-button
-                :key="selectedBoard + selectedVersion"
+                :key="selectedBoard + selectedVersion + variantSuffix"
                 :manifest="
                   (baseUrl.endsWith('/') ? baseUrl : baseUrl + '/') +
                   selectedBoard +
                   '/' +
-                  (selectedVersion === 'stable' ? 'manifest.json' : 'manifest-dev.json')
+                  manifestFile
                 "
               >
                 <!-- native web-component slot (not a Vue slot): the attribute must stay -->

@@ -16,6 +16,10 @@ BOARD_DIMENSIONS = {b["id"]: tuple(b["resolution"]) for b in BOARDS}
 # the default). Used to pick the dithering palette for splash generation, etc.
 BOARD_DISPLAY_TYPE = {b["id"]: b.get("display_type", "spectra6") for b in BOARDS}
 
+# Boards that also get an Alarm Clock firmware variant (build.py --alarmclock):
+# only those with a speaker. Released and flashable as "<board>-alarmclock".
+ALARMCLOCK_BOARDS = [b["id"] for b in BOARDS if b.get("alarmclock")]
+
 # ESP-IDF target chip per board. All boards are ESP32-S3 except the M5Paper,
 # which is a plain ESP32 (ESP32-D0WDQ6-V3). Used to pass -DIDF_TARGET to
 # idf.py and to pick the esptool --chip / bootloader offset.
