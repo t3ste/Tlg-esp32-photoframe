@@ -6,6 +6,8 @@
 
 void mic_detect_init(mic_detect_t *d)
 {
+    d->manual = false;
+    d->manual_dbfs = MIC_DETECT_MIN_THRESHOLD_DBFS;
     d->windows = 0;
     d->baseline_power_sum = 0.0;
     d->baseline_count = 0;
@@ -16,10 +18,47 @@ void mic_detect_init(mic_detect_t *d)
     d->peak_dbfs = MIC_LEVEL_FLOOR_DBFS;
 }
 
+void mic_detect_set_manual(mic_detect_t *d, float threshold_dbfs)
+{
+    d->manual = true;
+    d->manual_dbfs = threshold_dbfs;
+}
+
+float mic_detect_auto_threshold_dbfs(float floor_dbfs)
+{
+    float thr = floor_dbfs + MIC_DETECT_RISE_DB;
+    return thr < MIC_DETECT_MIN_THRESHOLD_DBFS ? MIC_DETECT_MIN_THRESHOLD_DBFS : thr;
+}
+
 float mic_detect_threshold_dbfs(const mic_detect_t *d)
 {
-    float thr = d->baseline_dbfs + MIC_DETECT_RISE_DB;
-    return thr < MIC_DETECT_MIN_THRESHOLD_DBFS ? MIC_DETECT_MIN_THRESHOLD_DBFS : thr;
+    return d->manual ? d->manual_dbfs : mic_detect_auto_threshold_dbfs(d->baseline_dbfs);
+}
+
+void mic_floor_init(mic_floor_t *f)
+{
+    f->ready = false;
+    f->floor_dbfs = MIC_LEVEL_FLOOR_DBFS;
+    f->event_windows = 0;
+}
+
+void mic_floor_update(mic_floor_t *f, float rms_dbfs)
+{
+    if (!f->ready) {
+        f->floor_dbfs = rms_dbfs;
+        f->ready = true;
+        return;
+    }
+    if (rms_dbfs > f->floor_dbfs + MIC_FLOOR_EVENT_DB) {
+        // Loud event: don't let it raise the floor - unless it just stays that loud.
+        if (++f->event_windows >= MIC_FLOOR_RELOCK_WINDOWS) {
+            f->floor_dbfs = rms_dbfs;
+            f->event_windows = 0;
+        }
+        return;
+    }
+    f->event_windows = 0;
+    f->floor_dbfs += (rms_dbfs - f->floor_dbfs) * MIC_FLOOR_ALPHA;
 }
 
 void mic_detect_add_window(mic_detect_t *d, float rms_dbfs)
@@ -34,7 +73,9 @@ void mic_detect_add_window(mic_detect_t *d, float rms_dbfs)
             d->baseline_dbfs = (float) (10.0 * log10(d->baseline_power_sum / d->baseline_count));
             d->baseline_ready = true;
         }
-        return;
+        if (!d->manual) {
+            return;  // auto mode: the baseline windows are not evaluated
+        }
     }
 
     if (rms_dbfs > d->peak_dbfs) {

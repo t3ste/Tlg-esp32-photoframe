@@ -26,6 +26,8 @@ extern "C" {
  * afterwards every rise above baseline + MIC_DETECT_RISE_DB is one burst.
  */
 typedef struct {
+    bool manual;  // fixed threshold instead of "baseline + MIC_DETECT_RISE_DB"
+    float manual_dbfs;
     unsigned windows;
     double baseline_power_sum;
     unsigned baseline_count;
@@ -38,11 +40,39 @@ typedef struct {
 
 void mic_detect_init(mic_detect_t *d);
 
+/**
+ * Use a fixed threshold (dBFS) instead of the baseline-relative one. Call right
+ * after mic_detect_init(). Detection then starts with the first window; the
+ * baseline is still measured (for reporting).
+ */
+void mic_detect_set_manual(mic_detect_t *d, float threshold_dbfs);
+
 /** Feed one window's RMS level in dBFS. */
 void mic_detect_add_window(mic_detect_t *d, float rms_dbfs);
 
-/** Level a window has to exceed to count as sound (only meaningful once baseline_ready). */
+/** Level a window has to exceed to count as sound (auto: only meaningful once baseline_ready). */
 float mic_detect_threshold_dbfs(const mic_detect_t *d);
+
+/** The auto threshold for a given noise floor: floor + MIC_DETECT_RISE_DB, at least the minimum. */
+float mic_detect_auto_threshold_dbfs(float floor_dbfs);
+
+/**
+ * Live noise-floor estimate ("Grundpegel") for the Web UI's level meter: follows
+ * steady room noise slowly and ignores short loud events, so it is what the
+ * automatic threshold is derived from while the meter runs.
+ */
+#define MIC_FLOOR_ALPHA 0.1f          // per ~200 ms window (about a 2 s time constant)
+#define MIC_FLOOR_EVENT_DB 10.0f      // a window this far above the floor is an event...
+#define MIC_FLOOR_RELOCK_WINDOWS 50u  // ...unless it lasts this long (then the room got louder)
+
+typedef struct {
+    bool ready;
+    float floor_dbfs;
+    unsigned event_windows;
+} mic_floor_t;
+
+void mic_floor_init(mic_floor_t *f);
+void mic_floor_update(mic_floor_t *f, float rms_dbfs);
 
 #ifdef __cplusplus
 }

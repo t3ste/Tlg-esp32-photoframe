@@ -104,3 +104,65 @@ TEST(MicDetect, NothingCountedWhileStillInBaseline)
     EXPECT_FALSE(d.baseline_ready);
     EXPECT_EQ(d.bursts, 0u);
 }
+
+TEST(MicDetect, ManualThresholdCountsFromTheFirstWindow)
+{
+    mic_detect_t d;
+    mic_detect_init(&d);
+    mic_detect_set_manual(&d, -50.0f);
+    for (float db : {-30.0f, -70.0f, -70.0f, -70.0f, -70.0f, -30.0f, -70.0f}) {
+        mic_detect_add_window(&d, db);
+    }
+    EXPECT_EQ(d.bursts, 2u);  // the very first window already counts
+    EXPECT_FLOAT_EQ(mic_detect_threshold_dbfs(&d), -50.0f);
+}
+
+TEST(MicDetect, ManualThresholdIgnoresQuieterSound)
+{
+    mic_detect_t d;
+    mic_detect_init(&d);
+    mic_detect_set_manual(&d, -20.0f);
+    for (int i = 0; i < 12; i++) {
+        mic_detect_add_window(&d, i % 2 ? -25.0f : -60.0f);
+    }
+    EXPECT_EQ(d.bursts, 0u);
+    EXPECT_TRUE(d.baseline_ready);  // still measured for reporting
+}
+
+TEST(MicDetect, AutoThresholdFormula)
+{
+    EXPECT_FLOAT_EQ(mic_detect_auto_threshold_dbfs(-70.0f),
+                    -45.0f);  // -70 + 20 is below the -45 minimum
+    EXPECT_FLOAT_EQ(mic_detect_auto_threshold_dbfs(-30.0f), -10.0f);
+}
+
+TEST(MicFloor, FollowsSteadyNoiseAndIgnoresEvents)
+{
+    mic_floor_t f;
+    mic_floor_init(&f);
+    for (int i = 0; i < 40; i++) {
+        mic_floor_update(&f, -60.0f);
+    }
+    EXPECT_NEAR(f.floor_dbfs, -60.0f, 0.5f);
+    for (int i = 0; i < 4; i++) {
+        mic_floor_update(&f, -20.0f);  // a tone burst
+    }
+    EXPECT_NEAR(f.floor_dbfs, -60.0f, 0.5f);
+    for (int i = 0; i < 40; i++) {
+        mic_floor_update(&f, -58.0f);  // slowly a bit louder room
+    }
+    EXPECT_NEAR(f.floor_dbfs, -58.0f, 0.5f);
+}
+
+TEST(MicFloor, RelocksWhenTheRoomStaysLouder)
+{
+    mic_floor_t f;
+    mic_floor_init(&f);
+    for (int i = 0; i < 20; i++) {
+        mic_floor_update(&f, -65.0f);
+    }
+    for (unsigned i = 0; i < MIC_FLOOR_RELOCK_WINDOWS + 5; i++) {
+        mic_floor_update(&f, -35.0f);  // e.g. a fan switched on
+    }
+    EXPECT_NEAR(f.floor_dbfs, -35.0f, 1.0f);
+}

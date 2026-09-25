@@ -86,6 +86,7 @@ def main():
 
     print(
         f"  microphone: floor {result['baseline_dbfs']:.1f} dBFS, "
+        f"threshold {result['threshold_dbfs']:.1f} dBFS, "
         f"peak {result['mic_peak_dbfs']:.1f} dBFS, "
         f"{result['mic_bursts']}/{result['expected_bursts']} tone bursts"
     )

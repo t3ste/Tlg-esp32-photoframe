@@ -15,17 +15,35 @@ extern "C" {
 /** Tone bursts in the self-test sequence (see mic_monitor.c). */
 #define MIC_MONITOR_TEST_BURSTS 4
 
+/** Sensitivity of the tone/sound detection, persisted on the device. */
+#define MIC_THRESHOLD_MIN_DBFS (-90)
+#define MIC_THRESHOLD_MAX_DBFS 0
+#define MIC_THRESHOLD_DEFAULT_DBFS (-45)
+
+typedef struct {
+    bool auto_threshold;  // threshold = noise floor + 20 dB (at least -45 dBFS)
+    int threshold_dbfs;   // fixed threshold used when auto_threshold is off
+} mic_settings_t;
+
 typedef struct {
     bool running;        // a level monitor is running
     bool tones_running;  // this device is playing the self-test tones (speaker only)
     float rms_dbfs;      // last ~200 ms window, louder channel
     float peak_dbfs;
 
+    // Live values for the Web UI's level meter (last ~200 ms window).
+    float mic_dbfs;        // microphone 1 (left)
+    float mic2_dbfs;       // microphone 2 (right)
+    float floor_dbfs;      // running noise-floor estimate ("Grundpegel")
+    float threshold_dbfs;  // the threshold currently in effect (auto: derived from the floor)
+    bool auto_threshold;
+
     // Result of the last finished run (left channel = microphone 1, right channel =
     // microphone 2).
     bool have_result;
-    bool result_with_tones;  // the run played the tones on this device's own speaker
-    float baseline_dbfs;     // microphone noise floor before the tones
+    bool result_with_tones;       // the run played the tones on this device's own speaker
+    float baseline_dbfs;          // microphone noise floor before the tones
+    float result_threshold_dbfs;  // threshold that run used
     float mic_peak_dbfs;
     unsigned mic_bursts;
     float mic2_peak_dbfs;
@@ -59,6 +77,19 @@ esp_err_t mic_monitor_start(uint32_t seconds, bool play_tones);
 esp_err_t mic_monitor_play_tones(uint8_t volume_percent);
 
 void mic_monitor_get_status(mic_monitor_status_t *out);
+
+/** Ends a running monitor early (no-op when none runs). */
+void mic_monitor_stop(void);
+
+/** Loads the persisted sensitivity settings (defaults: automatic). */
+void mic_monitor_get_settings(mic_settings_t *out);
+
+/**
+ * Persists the sensitivity settings; they apply to the next monitor run (and
+ * immediately to the live threshold shown by the meter).
+ * ESP_ERR_INVALID_ARG if threshold_dbfs is outside MIC_THRESHOLD_MIN/MAX_DBFS.
+ */
+esp_err_t mic_monitor_set_settings(bool auto_threshold, int threshold_dbfs);
 
 #ifdef __cplusplus
 }
