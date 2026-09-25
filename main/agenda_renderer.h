@@ -42,18 +42,15 @@ typedef struct {
  * the exact same day-grouped, sorted list as A/B and follow the same
  * multi-day display mode. May be NULL/empty like A/B.
  *
- * Color-coded per docs/AGENDA_COLORS.html. ToDo rows color priority,
- * +project/@context tags, and due-date urgency independently within one
- * row. Calendar rows are colored by origin (events_a/b/c/d/e) via
- * calendar_source_color() - plain colored text (blue for A, green for B,
- * red for C, yellow for D, red for E), no background chip, on any page
- * background. The shared background
- * (config_manager_get_agenda_bg_color()) and its automatic
- * collision-avoidance fallback (agenda_avoid_bg_collision()) apply to
- * every plain (non-chip) text color in both columns, including the day
- * divider and both column headers, which invert (light chip average shown
- * dark and vice versa) rather than staying black-fixed like other chips
- * that draw their own always-black/white fill.
+ * ToDo rows color priority, +project/@context tags, and due-date urgency
+ * independently within one row, against a fixed plain black-on-white
+ * background (see docs/AGENDA_COLORS.html for the ToDo role/hue reference).
+ *
+ * The Calendar column's entire appearance - text/background, per-day and
+ * shared header colors, Calendar A-E colors, and shift-model marking - is
+ * instead controlled by the active user-imported color profile (see
+ * agenda_color_profile.h); with no profile active it falls back to a
+ * literal built-in black-on-white default with no marking.
  *
  * @param cal_weather Optional (NULL if the opt-in
  * config_manager_get_agenda_cal_weather_enabled() setting is off, or the

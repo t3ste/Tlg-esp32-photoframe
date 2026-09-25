@@ -42,10 +42,21 @@ int agenda_manager_seconds_until_next_wake(void);
  * coloring/grouping still depends on the current date, not just the source
  * content).
  *
- * Caller (deep_sleep_wake_main()) is responsible for having WiFi already
- * connected and for going back to sleep afterward - this function neither
- * manages WiFi nor sleeps.
+ * Caller (deep_sleep_wake_main()) is responsible for going back to sleep
+ * afterward - this function never sleeps itself.
+ *
+ * `wifi_connected` reports whether THIS wake's connection attempt actually
+ * succeeded (main.c already knows this before calling in) - when false, the
+ * three network-dependent sources (Calendar A/B, ToDo, weather) are skipped
+ * outright instead of each independently retrying and timing out against a
+ * connection that's already known to not exist. Calendar C/D/E (pure local
+ * reads of already-cached files - see load_extra_ics_source()) and the
+ * climate reading are unaffected either way, so a WiFi-down cycle still
+ * renders normally using whatever local sources are configured. Confirmed
+ * live (2026-09-20): a wake whose WiFi connect attempt failed still spent
+ * ~15s retrying doomed DNS/TLS connections for Calendar A/B/weather before
+ * falling back to local-only content it could have rendered immediately.
  */
-esp_err_t agenda_manager_run(void);
+esp_err_t agenda_manager_run(bool wifi_connected);
 
 #endif

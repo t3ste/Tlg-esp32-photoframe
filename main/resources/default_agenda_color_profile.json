@@ -1,0 +1,33 @@
+{
+  "type": "spectra6-firmware-profile",
+  "version": 1,
+  "name": "s2_BETA",
+  "mode": "color",
+  "mark": "yellow",
+  "headerFollowsEntries": true,
+  "headerFollowsEntriesColor": false,
+  "headerFollowsEntriesColorSafeInk": true,
+  "dayheadLeaderLine": true,
+  "markColorsHeader": false,
+  "headerDividerFilled": true,
+  "colors": {
+    "text": "black",
+    "textBg": "white",
+    "headerText": "white",
+    "headerBg": "black",
+    "topText": "black",
+    "topBg": "white",
+    "a": "blue",
+    "b": "green",
+    "c": "red",
+    "d": "red",
+    "e": "red",
+    "aBg": "white",
+    "bBg": "white",
+    "cBg": "white",
+    "dBg": "white",
+    "eBg": "white",
+    "iconBg": "#000000",
+    "iconBgMarked": "#000000"
+  }
+}

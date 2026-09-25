@@ -225,8 +225,14 @@ int agenda_manager_seconds_until_next_wake(void)
     return cron_seconds_until_next(&timeinfo, rules, n);
 }
 
-esp_err_t agenda_manager_run(void)
+esp_err_t agenda_manager_run(bool wifi_connected)
 {
+    if (!wifi_connected) {
+        ESP_LOGW(TAG,
+                 "WiFi not connected this wake - skipping Calendar A/B, ToDo, and weather "
+                 "fetches (would only retry a connection already known to be down); rendering "
+                 "with local sources only");
+    }
     bool want_todo = config_manager_get_agenda_todo_enabled();
     bool want_cal = config_manager_get_agenda_cal_enabled();
 
@@ -269,7 +275,16 @@ esp_err_t agenda_manager_run(void)
     // one first, while heap is freshest, is a safe, low-risk mitigation
     // regardless of the exact numbers.
     bool have_events_a = false, have_events_b = false;
-    int cal_days = config_manager_get_agenda_cal_days();
+    // The 7-day grid layouts always need a full 7-day fetch window
+    // regardless of the (1-3, list-mode-only) agenda_cal_days setting -
+    // draw_calendar_column() falls back to plain list rendering (using
+    // agenda_cal_days again, independently) if ToDo ends up sharing the
+    // screen this cycle, so over-fetching here on the "layout mode is
+    // grid" check alone (rather than re-deriving "will ToDo actually show
+    // anything") is the simpler, lower-risk choice - a few extra days of
+    // events/weather fetched but unused in that fallback case is harmless.
+    bool cal_grid_mode = config_manager_get_agenda_cal_layout_mode() != AGENDA_CAL_LAYOUT_LIST;
+    int cal_days = cal_grid_mode ? 7 : config_manager_get_agenda_cal_days();
     if (want_cal) {
         const char *url = config_manager_get_agenda_cal_url();
         const char *url2 = config_manager_get_agenda_cal_url2();
@@ -278,7 +293,7 @@ esp_err_t agenda_manager_run(void)
         }
         time_t now = time(NULL);
         time_t window_end = now + (time_t) cal_days * 86400;
-        if (url[0] != '\0') {
+        if (url[0] != '\0' && wifi_connected) {
             ESP_LOGI(TAG, "Free internal heap before Calendar fetch: %u bytes",
                      (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             char etag_out[HTTP_ETAG_MAX_LEN];
@@ -293,7 +308,7 @@ esp_err_t agenda_manager_run(void)
                 ESP_LOGW(TAG, "Calendar fetch failed, that column will be omitted this cycle");
             }
         }
-        if (url2[0] != '\0') {
+        if (url2[0] != '\0' && wifi_connected) {
             ESP_LOGI(TAG, "Free internal heap before Calendar 2 fetch: %u bytes",
                      (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             char etag_out[HTTP_ETAG_MAX_LEN];
@@ -339,8 +354,10 @@ esp_err_t agenda_manager_run(void)
     // Opt-in per-day forecast annotation on the Calendar column's day
     // dividers - reuses the exact same weather_fetch_forecast() the photo
     // weather overlay already calls (same location/provider settings, own
-    // toggle since this is a separate display path). Small enough
-    // (WEATHER_FORECAST_DAYS=3 days of a few fields each) to keep as a
+    // toggle since this is a separate display path). Requests the same
+    // day count as the event fetch above (cal_days: 7 in grid mode, else
+    // the 1-3 agenda_cal_days setting) - still small enough (at most
+    // WEATHER_FORECAST_DAYS_CAP=7 days of a few fields each) to keep as a
     // stack local, unlike todo/events above - no risk of repeating that
     // stack-overflow bug. Skipped entirely if neither calendar source
     // actually fetched anything, since there would be no day divider to
@@ -349,8 +366,8 @@ esp_err_t agenda_manager_run(void)
     memset(&cal_weather, 0, sizeof(cal_weather));
     bool have_cal_weather = false;
     if ((have_events_a || have_events_b || have_events_c || have_events_d || have_events_e) &&
-        config_manager_get_agenda_cal_weather_enabled()) {
-        bool ok = (weather_fetch_forecast(&cal_weather) == ESP_OK);
+        config_manager_get_agenda_cal_weather_enabled() && wifi_connected) {
+        bool ok = (weather_fetch_forecast(&cal_weather, cal_days) == ESP_OK);
         utils_record_internet_attempt(ok);
         have_cal_weather = ok && cal_weather.valid;
     }
@@ -360,7 +377,7 @@ esp_err_t agenda_manager_run(void)
         const char *url = config_manager_get_agenda_todo_url();
         if (url[0] == '\0') {
             ESP_LOGW(TAG, "ToDo enabled but no URL configured");
-        } else {
+        } else if (wifi_connected) {
             ESP_LOGI(TAG, "Free internal heap before ToDo fetch: %u bytes",
                      (unsigned) heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             char etag_out[HTTP_ETAG_MAX_LEN];

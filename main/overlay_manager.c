@@ -208,7 +208,7 @@ const char *overlay_manager_apply(const char *source_path)
 
     if (weather_on) {
         weather_forecast_t forecast;
-        bool weather_ok = (weather_fetch_forecast(&forecast) == ESP_OK);
+        bool weather_ok = (weather_fetch_forecast(&forecast, WEATHER_FORECAST_DAYS) == ESP_OK);
         utils_record_internet_attempt(weather_ok);
         if (weather_ok) {
             // Multi-line (one line per day) only when headlines won't also

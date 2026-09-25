@@ -1,13 +1,24 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useSettingsStore, useAppStore } from "../stores";
 import PaletteCalibration from "./PaletteCalibration.vue";
 import GrayscaleCalibration from "./GrayscaleCalibration.vue";
 import ProcessingControls from "./ProcessingControls.vue";
 import RotationSchedule from "./RotationSchedule.vue";
 import { isValidCron } from "../utils/cron";
+import { TIMEZONES } from "../data/timezones";
+import {
+  APPROXIMATE_ZONES,
+  CUSTOM_ZONE,
+  FIXED_OFFSET_ZONE,
+  TIMEZONE_MAX_BYTES,
+  browserTimeZone,
+  fixedOffsetLabel,
+  ruleForZone,
+  validateTimezone,
+  zoneForRule,
+} from "../utils/timezone";
 import { wideEdit } from "../utils/uiPrefs";
-import { TIMEZONE_PRESETS, parseDeviceWallClock, formatDeviceWallClock } from "../utils/timezone";
 
 const settingsStore = useSettingsStore();
 const appStore = useAppStore();
@@ -15,6 +26,27 @@ const appStore = useAppStore();
 const snackbar = ref(false);
 const snackbarText = ref("");
 const snackbarColor = ref("success");
+
+const hotspotBusy = ref(false);
+const hotspotMessage = ref("");
+
+async function handleStartHotspot() {
+  hotspotBusy.value = true;
+  hotspotMessage.value = "";
+  const result = await settingsStore.startApHotspot();
+  hotspotBusy.value = false;
+  hotspotMessage.value = result.ssid
+    ? `Hotspot starting - reconnect your phone/laptop to "${result.ssid}", then open ${result.url}`
+    : `Hotspot starting - reconnect to the device's hotspot, then open ${result.url}`;
+}
+
+async function handleStopHotspot() {
+  hotspotBusy.value = true;
+  hotspotMessage.value = "";
+  await settingsStore.stopApHotspot();
+  hotspotBusy.value = false;
+  hotspotMessage.value = "Hotspot stopping - the device is reconnecting to its saved WiFi network.";
+}
 function showSnackbar(text, color) {
   snackbarText.value = text;
   snackbarColor.value = color;
@@ -72,41 +104,95 @@ const scheduleValid = computed(() => {
   return rules.length >= 1 && rules.length <= 7 && rules.every((r) => isValidCron(r));
 });
 
-// Device time state. `/api/time`'s "time" field is the device's own
-// already-localized wall-clock string (localtime_r() against whatever TZ
-// is actually set, DST included) - trusted directly rather than
-// reconstructed from a Unix timestamp + a guessed numeric offset, which
-// broke for any DST-aware POSIX string (see webapp/src/utils/timezone.js).
+// Time zone picker. The store holds only the POSIX rule the device applies;
+// the IANA name shown here is derived from it and never leaves the browser.
+const browserZone = browserTimeZone();
+const browserZoneKnown = ruleForZone(browserZone) !== null;
+const showAdvancedTz = ref(false);
+
+const timezoneRule = computed(() => settingsStore.deviceSettings.timezone);
+// Only an edited rule is checked: a value an older firmware let through must
+// not block saving unrelated settings (the store sends changed fields only).
+const timezoneError = computed(() =>
+  timezoneRule.value === settingsStore.savedTimezone ? "" : validateTimezone(timezoneRule.value)
+);
+const approximateNote = computed(() => APPROXIMATE_ZONES[selectedZone.value] ?? "");
+
+const selectedZone = computed({
+  get: () => zoneForRule(timezoneRule.value, browserZone),
+  set: (name) => {
+    // The two sentinel entries stand for the rule already stored, and
+    // clearing the field (null) is not a choice either.
+    const rule = ruleForZone(name);
+    if (rule !== null) settingsStore.deviceSettings.timezone = rule;
+  },
+});
+
+const timezoneItems = computed(() => {
+  const items = Object.keys(TIMEZONES).map((name) => ({ title: name, value: name }));
+  if (selectedZone.value === FIXED_OFFSET_ZONE) {
+    const label = `Fixed offset ${fixedOffsetLabel(timezoneRule.value)} (no DST)`;
+    items.unshift({ title: label, value: FIXED_OFFSET_ZONE });
+  } else if (selectedZone.value === CUSTOM_ZONE) {
+    items.unshift({ title: "Custom rule", value: CUSTOM_ZONE });
+  }
+  return items;
+});
+
+// A rule no zone in the table produces can only be edited as text, so open
+// the field for it. It stays open (even if typing passes through a rule that
+// maps to a zone) until the user collapses it.
+watch(
+  selectedZone,
+  (zone) => {
+    if (zone === CUSTOM_ZONE) showAdvancedTz.value = true;
+  },
+  { immediate: true }
+);
+
+const saveBlocker = computed(() => {
+  if (!scheduleValid.value) return "Fix the rotation schedule first (invalid or too many rules)";
+  if (timezoneError.value) return "Fix the time zone rule first";
+  return "";
+});
+
+// Device time. The device reports its local wall-clock time as text; tick it
+// forward from there instead of re-deriving local time from the TZ rule,
+// which would need a POSIX DST evaluator in the browser.
 const deviceTime = ref("");
 const syncingTime = ref(false);
-let deviceWallClock = null; // Date holding the device's wall-clock time at the last fetch
-let localTimeOffset = 0; // Date.now() at that same moment, to tick the display forward locally
+let deviceLocalMs = null; // device wall-clock time, parsed as if it were UTC
+let receivedAt = 0; // Date.now() when it was reported
+let lastTickHour = null; // hour of the last tick, null right after a report
 let tickInterval = null;
 
 function updateDisplayTime() {
-  if (!deviceWallClock) return;
-  const elapsedMs = Date.now() - localTimeOffset;
-  deviceTime.value = formatDeviceWallClock(new Date(deviceWallClock.getTime() + elapsedMs));
+  if (deviceLocalMs === null) return;
+  const now = new Date(deviceLocalMs + (Date.now() - receivedAt));
+  // toISOString() prints in UTC, i.e. the wall-clock numbers we stored
+  deviceTime.value = now.toISOString().slice(0, 19).replace("T", " ");
+  // A DST rule moves the device's clock on an hour boundary, which ticking
+  // forward can't reproduce, so ask the device again whenever the hour rolls
+  // over. That also corrects any drift.
+  const hour = now.getUTCHours();
+  if (lastTickHour !== null && hour !== lastTickHour) fetchDeviceTime();
+  lastTickHour = hour;
 }
 
-// Keeps the Settings form honest about the device's actual configured
-// timezone (e.g. after an external change), without ever parsing it into a
-// lossy numeric offset.
-function syncTimezoneFromDevice(timezoneStr) {
-  if (timezoneStr && settingsStore.deviceSettings.timezone !== timezoneStr) {
-    settingsStore.deviceSettings.timezone = timezoneStr;
-  }
+function setDeviceTime(data) {
+  // "YYYY-MM-DD HH:MM:SS" in the device's zone
+  const wallClock = Date.parse(`${String(data.time ?? "").replace(" ", "T")}Z`);
+  deviceLocalMs = Number.isFinite(wallClock) ? wallClock : Number(data.timestamp) * 1000;
+  receivedAt = Date.now();
+  lastTickHour = null; // a report is authoritative, not a rollover
+  updateDisplayTime();
 }
 
 async function fetchDeviceTime() {
   try {
     const response = await fetch("/api/time");
     if (response.ok) {
-      const data = await response.json();
-      deviceWallClock = parseDeviceWallClock(data.time);
-      localTimeOffset = Date.now();
-      syncTimezoneFromDevice(data.timezone);
-      updateDisplayTime();
+      setDeviceTime(await response.json());
     }
   } catch (error) {
     console.error("Failed to fetch device time:", error);
@@ -120,10 +206,7 @@ async function syncTime() {
     if (response.ok) {
       const data = await response.json();
       if (data.status === "success") {
-        deviceWallClock = parseDeviceWallClock(data.time);
-        localTimeOffset = Date.now();
-        syncTimezoneFromDevice(data.timezone);
-        updateDisplayTime();
+        setDeviceTime(data);
       }
     }
   } catch (error) {
@@ -133,28 +216,12 @@ async function syncTime() {
   }
 }
 
-// v-combobox with object items (TIMEZONE_PRESETS) is inconsistent about what
-// it emits on selection across Vuetify versions - typing free text correctly
-// emits a plain string, but picking a preset from the dropdown can emit the
-// whole {title, value} object instead of just its item-value. Normalizing
-// through this computed keeps the store's `timezone` field a plain string
-// either way - binding item-title/item-value alone was not enough (a
-// selected preset silently failed to apply, since the device only accepts a
-// string in PATCH /api/config, per apply_config_from_json()'s
-// cJSON_IsString() check).
-const timezoneModel = computed({
-  get: () => settingsStore.deviceSettings.timezone,
-  set: (val) => {
-    settingsStore.deviceSettings.timezone =
-      val && typeof val === "object" ? (val.value ?? val.title ?? "") : (val ?? "");
-  },
-});
-
 onMounted(() => {
   fetchDeviceTime();
   // Tick every second to update display
   tickInterval = setInterval(updateDisplayTime, 1000);
   loadDisplayHistoryCount();
+  loadAgendaColorProfiles();
 });
 
 onUnmounted(() => {
@@ -177,33 +244,6 @@ const orientationOptions = computed(() => {
   return [
     { title: `Landscape (${maxDim}×${minDim})`, value: "landscape" },
     { title: `Portrait (${minDim}×${maxDim})`, value: "portrait" },
-  ];
-});
-
-// Mirrors agenda_renderer.c's agenda_background_color() exactly - the value
-// list a board can actually display depends on its BOARD_HAL_DISPLAY_TYPE
-// ("gc..." = grayscale, otherwise Spectra6 6-color), so this can't be one
-// static list. An element/text color that happens to collide with whatever
-// is picked here is automatically swapped to a safe fallback on-device
-// (agenda_avoid_bg_collision()) - no need to warn about that in this UI.
-const agendaBgOptions = computed(() => {
-  const displayType = appStore.systemInfo.display_type || "";
-  if (displayType.startsWith("gc")) {
-    return [
-      { title: "White", value: "white" },
-      { title: "Light gray", value: "gray75" },
-      { title: "Mid gray", value: "gray50" },
-      { title: "Dark gray", value: "gray25" },
-      { title: "Black", value: "black" },
-    ];
-  }
-  return [
-    { title: "White", value: "white" },
-    { title: "Black", value: "black" },
-    { title: "Yellow", value: "yellow" },
-    { title: "Red", value: "red" },
-    { title: "Blue", value: "blue" },
-    { title: "Green", value: "green" },
   ];
 });
 
@@ -241,13 +281,90 @@ const agendaTodoColorFields = [
   { key: "agendaProjectColor", label: "+Project" },
   { key: "agendaContextColor", label: "@Context" },
 ];
-const agendaCalendarColorFields = [
-  { key: "agendaCalAColor", label: "Calendar A" },
-  { key: "agendaCalBColor", label: "Calendar B" },
-  { key: "agendaCalCColor", label: "Calendar C" },
-  { key: "agendaCalDColor", label: "Calendar D" },
-  { key: "agendaCalEColor", label: "Calendar E" },
-];
+// Up to AGENDA_COLOR_PROFILE_SLOTS (3) user-imported Calendar-view color
+// profiles - see agenda_color_profile.h. Fetched separately from
+// /api/agenda/color-profile (not part of GET /api/config's settings blob),
+// since it's device-file state rather than a scalar setting; only the
+// *active* slot index (agendaColorProfileActive) lives in deviceSettings.
+const agendaColorProfileSlots = ref([]);
+const agendaColorProfileUploading = ref({ 1: false, 2: false, 3: false });
+// Plain (non-reactive) DOM element bookkeeping, not state - only ever used
+// imperatively to forward an "Import" button click to its slot's hidden
+// file input, so a v-for-friendly function ref is enough (no need for the
+// $refs array-collection behavior a repeated static ref name would trigger).
+const colorProfileFileInputs = {};
+
+async function loadAgendaColorProfiles() {
+  try {
+    const response = await fetch("/api/agenda/color-profile");
+    if (response.ok) {
+      const data = await response.json();
+      agendaColorProfileSlots.value = data.slots || [];
+    }
+  } catch (error) {
+    console.error("Failed to load Calendar color profiles:", error);
+  }
+}
+
+function onAgendaColorProfileFileSelected(event, slot) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  agendaColorProfileUploading.value[slot] = true;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const response = await fetch(`/api/agenda/color-profile?slot=${slot}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: e.target.result,
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      await loadAgendaColorProfiles();
+      saveSuccess.value = true;
+      saveMessage.value = `Color profile imported into slot ${slot}`;
+      setTimeout(() => (saveSuccess.value = false), 3000);
+    } catch (error) {
+      console.error(`Failed to import color profile into slot ${slot}:`, error);
+      saveError.value = true;
+      saveMessage.value = `Failed to import profile: ${error.message || "invalid file"}`;
+      setTimeout(() => (saveError.value = false), 5000);
+    } finally {
+      agendaColorProfileUploading.value[slot] = false;
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = "";
+}
+
+async function deleteAgendaColorProfile(slot) {
+  try {
+    const response = await fetch(`/api/agenda/color-profile?slot=${slot}`, { method: "DELETE" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    await loadAgendaColorProfiles();
+    if (settingsStore.deviceSettings.agendaColorProfileActive === slot) {
+      settingsStore.deviceSettings.agendaColorProfileActive = 0;
+    }
+    saveSuccess.value = true;
+    saveMessage.value = `Color profile slot ${slot} removed`;
+    setTimeout(() => (saveSuccess.value = false), 3000);
+  } catch (error) {
+    console.error(`Failed to delete color profile slot ${slot}:`, error);
+    saveError.value = true;
+    saveMessage.value = `Failed to remove profile slot ${slot}`;
+    setTimeout(() => (saveError.value = false), 5000);
+  }
+}
+
+const agendaColorProfileActiveOptions = computed(() => [
+  { title: "None (plain black/white default)", value: 0 },
+  ...agendaColorProfileSlots.value
+    .filter((s) => s.name)
+    .map((s) => ({ title: `${s.slot}: ${s.name}`, value: s.slot })),
+]);
 
 // 90/270 would swap the panel's logical dimensions, which the streaming
 // pipeline and dimensionless .epdgz payloads can't represent; portrait
@@ -267,6 +384,19 @@ const agendaTimeDisplayModeOptions = [
   { title: "Off (default) - start time only", value: "off" },
   { title: "Duration - e.g. 08:15 [45m]", value: "duration" },
   { title: "Range - e.g. 08:15-09:00", value: "range" },
+];
+
+const agendaCalLayoutModeOptions = [
+  { title: "List (default)", value: "list" },
+  { title: "7-Day Grid - Template A (today: full width)", value: "grid_a" },
+  { title: "7-Day Grid - Template B (today: double height)", value: "grid_b" },
+];
+
+const agendaShiftModelOptions = [
+  { title: "Off (default)", value: "none" },
+  { title: "2-2-3", value: "2-2-3" },
+  { title: "Week / week", value: "week_week" },
+  { title: "3-4", value: "3-4" },
 ];
 
 const chimeSpeakerModeOptions = [
@@ -370,6 +500,25 @@ function flashBlockedEnable(message) {
   saveMessage.value = message;
   setTimeout(() => (saveError.value = false), 4000);
 }
+
+// Alarm Clock arm/disarm switch. There's still no separate NVS-level
+// "enabled" flag on the device (armed purely means "has at least one
+// schedule rule" - see config.h's own comment on this) - this switch is
+// just a friendlier front for that same underlying state: off clears the
+// schedule, on with nothing configured yet is blocked with a hint rather
+// than silently doing nothing.
+const alarmArmedModel = computed({
+  get: () => settingsStore.deviceSettings.alarmCron.length > 0,
+  set: (val) => {
+    if (val) {
+      if (settingsStore.deviceSettings.alarmCron.length === 0) {
+        flashBlockedEnable("Add a schedule below first");
+      }
+    } else {
+      settingsStore.deviceSettings.alarmCron = [];
+    }
+  },
+});
 const calendarAbEnabledModel = computed({
   get: () => settingsStore.deviceSettings.agendaCalEnabled,
   set: (val) => {
@@ -744,6 +893,28 @@ function onImportFileSelected(event) {
   event.target.value = "";
 }
 
+// `fetch()` only rejects on a genuine network error - an HTTP error status
+// (e.g. the device's own "request body too large" 400) resolves normally,
+// so Promise.all() alone can't tell a rejected request from a successful
+// one. Confirmed live (2026-09-20): a full config export re-imported onto
+// a factory-reset device got entirely rejected by the device's own body-size
+// check, yet the UI still reported "imported successfully" - nothing here
+// ever looked at response.ok. Each request is now labelled and checked
+// individually so a failure actually surfaces.
+async function namedFetch(label, url, options) {
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (error) {
+    return { label, ok: false, detail: error.message };
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    return { label, ok: false, detail: `HTTP ${response.status}${detail ? ": " + detail : ""}` };
+  }
+  return { label, ok: true };
+}
+
 async function performImport() {
   if (!importData.value) return;
 
@@ -751,20 +922,13 @@ async function performImport() {
   saving.value = true;
 
   try {
-    const promises = [];
-
-    if (importData.value.config) {
-      promises.push(
-        fetch("/api/config", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(importData.value.config),
-        })
-      );
-    }
+    // Sequential, config last: a config that sets the device password turns
+    // authentication on, and any request still in flight/queued without
+    // credentials would then be refused with a 401.
+    const results = [];
     if (importData.value.processing) {
-      promises.push(
-        fetch("/api/settings/processing", {
+      results.push(
+        await namedFetch("Processing settings", "/api/settings/processing", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(importData.value.processing),
@@ -772,8 +936,8 @@ async function performImport() {
       );
     }
     if (importData.value.palette) {
-      promises.push(
-        fetch("/api/settings/palette", {
+      results.push(
+        await namedFetch("Color palette", "/api/settings/palette", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(importData.value.palette),
@@ -783,20 +947,34 @@ async function performImport() {
     if (Array.isArray(importData.value.albums)) {
       for (const album of importData.value.albums) {
         if (album && typeof album.name === "string" && typeof album.enabled === "boolean") {
-          promises.push(
-            fetch(`/api/albums/enabled?name=${encodeURIComponent(album.name)}`, {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ enabled: album.enabled }),
-            })
+          results.push(
+            await namedFetch(
+              `Album "${album.name}"`,
+              `/api/albums/enabled?name=${encodeURIComponent(album.name)}`,
+              {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled: album.enabled }),
+              }
+            )
           );
         }
       }
     }
+    if (importData.value.config) {
+      results.push(
+        await namedFetch("Device settings", "/api/config", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(importData.value.config),
+        })
+      );
+    }
 
-    await Promise.all(promises);
+    const failures = results.filter((r) => !r.ok);
 
-    // Reload all settings from device
+    // Reload all settings from device regardless - whatever DID apply
+    // should still be reflected, even if something else failed.
     await Promise.all([
       settingsStore.loadDeviceSettings(),
       settingsStore.loadSettings(),
@@ -804,10 +982,37 @@ async function performImport() {
       appStore.loadAlbums(),
     ]);
 
-    saveSuccess.value = true;
-    saveError.value = false;
-    saveMessage.value = "Config imported successfully!";
-    setTimeout(() => (saveSuccess.value = false), 3000);
+    // The device password is write-only: an export records only whether one
+    // was set, and http_auth_enabled is informational to the firmware. So an
+    // import can neither restore a password nor, deliberately, drop one --
+    // silently opening a protected frame is the worse surprise. Compare what
+    // the file says against what the device reports now and say so if they
+    // differ, rather than claim the import reproduced the exported state.
+    const importedAuth = importData.value.config?.http_auth_enabled;
+    const deviceAuth = settingsStore.deviceSettings.httpAuthEnabled;
+    let authNote = "";
+    if (typeof importedAuth === "boolean" && importedAuth !== deviceAuth) {
+      authNote = importedAuth
+        ? " Exports never include the device password: set it again under General → Advanced network settings to require one."
+        : " The device password was left in place: turn it off under General → Advanced network settings if you want the frame open.";
+    }
+
+    if (failures.length === 0) {
+      saveSuccess.value = true;
+      saveError.value = false;
+      saveMessage.value = authNote
+        ? `Config imported.${authNote}`
+        : "Config imported successfully!";
+      setTimeout(() => (saveSuccess.value = false), authNote ? 10000 : 3000);
+    } else {
+      saveSuccess.value = false;
+      saveError.value = true;
+      saveMessage.value =
+        `Import partially failed - ${failures.length} of ${results.length} part(s) not applied: ` +
+        failures.map((f) => `${f.label} (${f.detail})`).join("; ") +
+        authNote;
+      console.error("Config import failures:", failures);
+    }
   } catch (error) {
     console.error("Failed to import config:", error);
     saveError.value = true;
@@ -822,11 +1027,11 @@ async function performImport() {
 async function saveSettings() {
   saving.value = true;
 
-  // Save both device settings and processing settings
-  const [deviceResult, processingSuccess] = await Promise.all([
-    settingsStore.saveDeviceSettings(),
-    settingsStore.saveSettings(),
-  ]);
+  // Save processing settings first, then device settings. Not in parallel: the
+  // device PATCH may switch on the HTTP password, after which any request
+  // still in flight without credentials is refused with a 401.
+  const processingSuccess = await settingsStore.saveSettings();
+  const deviceResult = await settingsStore.saveDeviceSettings();
 
   saving.value = false;
 
@@ -887,6 +1092,9 @@ async function performFactoryReset() {
         <v-tab value="overlays"> Overlays </v-tab>
         <v-tab v-if="settingsStore.deviceSettings.chimeSpeakerAvailable" value="chimes">
           Chimes
+        </v-tab>
+        <v-tab v-if="settingsStore.deviceSettings.alarmClockAvailable" value="alarmClock">
+          Alarm Clock
         </v-tab>
         <v-tab v-if="settingsStore.deviceSettings.climateSensorAvailable" value="climate">
           Climate
@@ -958,6 +1166,85 @@ async function performFactoryReset() {
               only for mains/USB-powered frames, not battery-only ones.
             </div>
 
+            <v-switch
+              v-model="settingsStore.deviceSettings.wifiReprovisionOnFailEnabled"
+              label="Reprovision (clear saved WiFi credentials) when connection attempts run out"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              On (default) - unchanged existing behavior: once every retry above is exhausted, the
+              frame clears its saved WiFi password and reboots into setup mode. Turn off if that
+              reprovisioning cycle keeps repeating even though your password is correct (e.g. a
+              nearby repeater the frame still can't reliably reach) - the frame then keeps the saved
+              credentials instead of wiping them: if Deep Sleep is enabled it goes to sleep until
+              its next scheduled wake and tries again fresh from there, otherwise it just continues
+              starting up without WiFi this cycle (nothing here blocks - every later network step
+              already tolerates being offline) and retries on the next cold boot. A confirmed-wrong
+              password is never affected by this switch and always reprovisions immediately either
+              way.
+            </div>
+
+            <v-alert
+              v-if="settingsStore.deviceSettings.offlineModeEnabled"
+              type="info"
+              variant="tonal"
+              density="compact"
+              class="mb-4"
+            >
+              This device is configured for offline use (no WiFi network) - it was set up that way
+              on the setup form. Use the hotspot below to manage photos/settings any time.
+            </v-alert>
+
+            <v-card variant="outlined" class="pa-4 mb-4">
+              <div class="text-subtitle-2 mb-1">Offline hotspot</div>
+              <div class="text-caption text-medium-emphasis mb-3">
+                Starts the device's own WiFi hotspot (same as first-time setup) with the full web UI
+                reachable at http://192.168.4.1 - no WiFi network needed. Useful anywhere without
+                WiFi, or as a manual alternative to holding the BOOT button for 3 seconds on the
+                device itself. Starting it drops this device's current WiFi connection, so this page
+                will disconnect too - reconnect your phone/laptop to the hotspot SSID shown, then
+                reopen the same address.
+              </div>
+              <v-btn
+                v-if="!settingsStore.deviceSettings.apHotspotActive"
+                color="primary"
+                variant="tonal"
+                :loading="hotspotBusy"
+                @click="handleStartHotspot"
+              >
+                Start offline hotspot
+              </v-btn>
+              <v-btn
+                v-else
+                color="warning"
+                variant="tonal"
+                :loading="hotspotBusy"
+                @click="handleStopHotspot"
+              >
+                Stop hotspot (reconnect to WiFi)
+              </v-btn>
+              <div v-if="hotspotMessage" class="text-caption mt-2">{{ hotspotMessage }}</div>
+            </v-card>
+
+            <v-switch
+              v-model="settingsStore.deviceSettings.httpsEnabled"
+              label="Enable HTTPS (self-signed certificate)"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              Off by default. Adds a second, encrypted web UI on port 443 alongside the existing one
+              on port 80 (which keeps working unchanged - nothing that already talks to this device
+              over plain HTTP, like Home Assistant, breaks). Each device generates its own
+              self-signed certificate on first use, so browsers will show a one-time "not secure"
+              warning to click through - this protects your session from passive snooping on the
+              local network, not from an attacker willing to ignore that warning. Takes effect after
+              the device restarts or reconnects to WiFi.
+            </div>
+
             <v-row>
               <v-col cols="12" md="6">
                 <v-select
@@ -1006,19 +1293,58 @@ async function performFactoryReset() {
                 </v-text-field>
               </v-col>
               <v-col cols="12" md="6">
-                <v-combobox
-                  v-model="timezoneModel"
-                  :items="TIMEZONE_PRESETS"
-                  item-title="title"
-                  item-value="value"
-                  label="Timezone"
+                <v-autocomplete
+                  v-model="selectedZone"
+                  :items="timezoneItems"
+                  label="Time zone"
                   variant="outlined"
-                  hint="Pick a preset, or type any POSIX TZ string (e.g. a DST rule)"
+                  auto-select-first
+                  hint="The rotation schedule (Auto Rotate) runs in this time zone"
                   persistent-hint
                 />
+                <div class="text-caption text-medium-emphasis mt-1">
+                  POSIX TZ rule: <code>{{ timezoneRule }}</code>
+                </div>
+                <div v-if="approximateNote" class="text-caption text-warning mt-1">
+                  {{ approximateNote }}
+                </div>
+                <div class="d-flex flex-wrap ga-2 mt-1">
+                  <v-btn
+                    v-if="browserZoneKnown"
+                    size="small"
+                    variant="text"
+                    prepend-icon="mdi-web"
+                    :disabled="selectedZone === browserZone"
+                    @click="selectedZone = browserZone"
+                  >
+                    Use this browser's time zone ({{ browserZone }})
+                  </v-btn>
+                  <v-btn
+                    size="small"
+                    variant="text"
+                    :prepend-icon="showAdvancedTz ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+                    @click="showAdvancedTz = !showAdvancedTz"
+                  >
+                    Advanced: POSIX TZ rule
+                  </v-btn>
+                </div>
+                <v-expand-transition>
+                  <v-text-field
+                    v-if="showAdvancedTz"
+                    v-model="settingsStore.deviceSettings.timezone"
+                    label="POSIX TZ rule"
+                    variant="outlined"
+                    density="compact"
+                    class="mt-2"
+                    :maxlength="TIMEZONE_MAX_BYTES"
+                    :error-messages="timezoneError ? [timezoneError] : []"
+                    hint="Any rule tzset() accepts, e.g. EST5EDT,M3.2.0,M11.1.0. A fixed offset is UTC-8 for eight hours ahead of UTC (POSIX inverts the sign)."
+                    persistent-hint
+                  />
+                </v-expand-transition>
               </v-col>
             </v-row>
-            <!-- Advanced network settings (#43): collapsed by default — NTP,
+            <!-- Advanced network settings (#43, #130): collapsed by default — NTP,
                  static IP and DNS override are tinkerer territory. -->
             <v-expansion-panels class="mt-2" variant="accordion">
               <v-expansion-panel title="Advanced network settings" elevation="0">
@@ -1087,6 +1413,47 @@ async function performFactoryReset() {
                       />
                     </v-col>
                   </v-row>
+                  <v-switch
+                    v-model="settingsStore.deviceSettings.httpAuthEnabled"
+                    label="Require a password for this device's web interface"
+                    color="primary"
+                    class="mt-6"
+                    hide-details
+                  />
+                  <div class="text-caption text-medium-emphasis mb-2">
+                    Off by default. Most frames sit on a trusted home network, where this is
+                    unnecessary.
+                  </div>
+                  <v-text-field
+                    v-if="settingsStore.deviceSettings.httpAuthEnabled"
+                    v-model="settingsStore.deviceSettings.httpPassword"
+                    :label="
+                      settingsStore.deviceSettings.httpAuthEnabled &&
+                      settingsStore.deviceSettings.httpPassword === '' &&
+                      settingsStore.deviceSettings.httpAuthWasEnabled
+                        ? 'Password (set \u2014 leave blank to keep)'
+                        : 'Password'
+                    "
+                    type="password"
+                    maxlength="63"
+                    variant="outlined"
+                    hint="Any username is accepted; the password is the whole credential."
+                    persistent-hint
+                    class="mt-2"
+                  />
+                  <v-alert
+                    v-if="settingsStore.deviceSettings.httpAuthEnabled"
+                    type="warning"
+                    variant="tonal"
+                    density="compact"
+                    class="mt-3"
+                  >
+                    Enter the same password in the photoframe server, the Home Assistant integration
+                    and the mobile app, or they will stop syncing with this frame; older versions of
+                    them cannot send it at all. It is also sent unencrypted over plain HTTP &mdash;
+                    it guards against casual access on a shared network, not against someone who can
+                    capture your traffic.
+                  </v-alert>
                 </v-expansion-panel-text>
               </v-expansion-panel>
             </v-expansion-panels>
@@ -1602,13 +1969,14 @@ async function performFactoryReset() {
               hide-details
             />
             <div class="text-caption text-medium-emphasis mb-2">
-              An iCalendar/ICS feed - e.g. a Google Calendar "Secret address in iCal format"
-              (Calendar Settings → Integrate calendar). Google's own docs warn that only you should
-              know this address - treat it like a password, never share it. A second calendar is
-              optional (e.g. work alongside personal) - events from both are merged into one list,
-              sorted by time, and colored by origin: Calendar A is blue, Calendar B is green (shown
-              as a filled background on a light agenda background, plain colored text on a dark one
-              - see Appearance below).
+              On a device with no calendar configured yet, enter a URL below first, then turn this
+              on - it can't be enabled with no source behind it. An iCalendar/ICS feed - e.g. a
+              Google Calendar "Secret address in iCal format" (Calendar Settings → Integrate
+              calendar). Google's own docs warn that only you should know this address - treat it
+              like a password, never share it. A second calendar is optional (e.g. work alongside
+              personal) - events from both are merged into one list, sorted by time, and colored by
+              origin: Calendar A is blue, Calendar B is green (shown as a filled background on a
+              light agenda background, plain colored text on a dark one - see Appearance below).
             </div>
             <v-row dense>
               <v-col cols="12" sm="6">
@@ -1621,7 +1989,6 @@ async function performFactoryReset() {
                   hint="Leave empty to keep the current URL"
                   persistent-hint
                   placeholder="••••••••"
-                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 >
                   <template #append-inner>
                     <v-icon
@@ -1644,7 +2011,6 @@ async function performFactoryReset() {
                   placeholder="Calendar A"
                   hint='Shown in the Calendar header instead of "Calendar A"'
                   persistent-hint
-                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 />
               </v-col>
               <v-col cols="4" sm="3">
@@ -1654,7 +2020,6 @@ async function performFactoryReset() {
                   label="Days ahead"
                   variant="outlined"
                   density="compact"
-                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 />
               </v-col>
             </v-row>
@@ -1669,7 +2034,6 @@ async function performFactoryReset() {
                   hint="Leave empty to keep the current URL, or to use only one calendar"
                   persistent-hint
                   placeholder="••••••••"
-                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 >
                   <template #append-inner>
                     <v-icon
@@ -1692,7 +2056,6 @@ async function performFactoryReset() {
                   placeholder="Calendar B"
                   hint='Shown in the Calendar header instead of "Calendar B"'
                   persistent-hint
-                  :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
                 />
               </v-col>
             </v-row>
@@ -1761,17 +2124,69 @@ async function performFactoryReset() {
               (e.g. "08:00 [1h30m]" vs. "08:00-09:30" for Range) - pick whichever reads better for
               your events. Neither affects all-day events.
             </div>
+            <v-select
+              v-model="settingsStore.deviceSettings.agendaCalLayoutMode"
+              :items="agendaCalLayoutModeOptions"
+              item-title="title"
+              item-value="value"
+              label="Layout"
+              variant="outlined"
+              class="mt-2 mb-1"
+              hide-details
+              :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              List (default): today's existing 1-3 day list, set by "Days ahead" above. 7-Day Grid:
+              a full week at a glance, laid out as 4 rows x 2 columns with today getting extra space
+              (Template A: full width; Template B: double height) - only takes effect when the ToDo
+              column above is off (Calendar shown full-screen), falling back to List otherwise.
+              Forecasts (if enabled above) cover all 7 days in grid mode, still 3 in List mode.
+            </div>
+            <template v-if="settingsStore.deviceSettings.agendaCalLayoutMode !== 'list'">
+              <v-select
+                v-model="settingsStore.deviceSettings.agendaShiftModel"
+                :items="agendaShiftModelOptions"
+                item-title="title"
+                item-value="value"
+                label="Rotation pattern"
+                variant="outlined"
+                class="mt-2 mb-1"
+                hide-details
+                :disabled="!settingsStore.deviceSettings.agendaCalEnabled"
+              />
+              <div class="text-caption text-medium-emphasis mb-2">
+                Marks every other grid day by an alternating custody-style schedule (e.g. "2-2-3": 2
+                days/2 days/3 days, then which side starts flips the following week) - off by
+                default. Needs a start date below to anchor which day the pattern begins on. Which
+                color the marked days get, and whether it colors the day header or the appointment
+                area, comes from the active Color Profile below (its "mark" color and
+                "markColorsHeader" setting) rather than from a setting here.
+              </div>
+              <v-row v-if="settingsStore.deviceSettings.agendaShiftModel !== 'none'" dense>
+                <v-col cols="6" sm="4">
+                  <v-text-field
+                    v-model="settingsStore.deviceSettings.agendaShiftStart"
+                    label="Start date"
+                    type="date"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                  />
+                </v-col>
+              </v-row>
+            </template>
 
             <v-divider class="mb-4 mt-2" />
 
             <div class="text-subtitle-2 mb-2">Extra ICS Calendars</div>
             <div class="text-caption text-medium-emphasis mb-2">
               Up to three additional calendars (e.g. holidays, school holidays, or any other .ics
-              feed) shown in the same Calendar column above, each in its own color (see Appearance
-              tab). Unlike Calendar A/B, these are <strong>never refreshed automatically</strong> -
-              only when you save a new/changed URL, click "Refresh now", or upload a replacement
+              feed) shown in the same Calendar column above, each in its own color (set per-source
+              in the active Color Profile below) with a colored letter (C/D/E) in the header when
+              active. Unlike Calendar A/B, these are <strong>never refreshed automatically</strong>
+              - only when you save a new/changed URL, click "Refresh now", or upload a replacement
               file directly. If a source runs out of upcoming events, a permanent reminder appears
-              in the calendar identifying which one needs updating. Each source shows up to 24
+              in the calendar identifying which one needs updating. Each source shows up to 48
               events within its 30-day window - plenty for holidays/school-holidays, but a very
               densely-booked file could hit that cap.
             </div>
@@ -2039,26 +2454,20 @@ async function performFactoryReset() {
               <v-radio label="Stacked (ToDo above Calendar)" :value="true" />
               <v-radio label="Side by side" :value="false" />
             </v-radio-group>
-            <v-select
-              v-model="settingsStore.deviceSettings.agendaBgColor"
-              :items="agendaBgOptions"
-              label="Background color"
-              variant="outlined"
-              density="compact"
-              hint="Shared by both columns. If an element's own color happens to match this background, it's automatically swapped for a safe fallback."
-              persistent-hint
-              style="max-width: 320px"
-            />
+            <div class="text-caption text-medium-emphasis mb-2">
+              The ToDo column always uses a plain black-on-white page. The Calendar column's entire
+              appearance - background, header colors, per-source colors, and marking - is controlled
+              by the Color Profile you import below instead.
+            </div>
 
             <template v-if="!agendaIsGrayscaleBoard">
               <v-divider class="mb-4 mt-4" />
-              <div class="text-subtitle-2 mb-2">Colors</div>
+              <div class="text-subtitle-2 mb-2">ToDo Colors</div>
               <div class="text-caption text-medium-emphasis mb-3">
                 Color panels only - grayscale boards have no spare hue to assign here. Any color
-                that happens to match the background above is automatically swapped for a safe
+                that happens to match the fixed white page is automatically swapped for a safe
                 fallback, so nothing can silently disappear.
               </div>
-              <div class="text-caption text-medium-emphasis mb-1">ToDo</div>
               <v-row dense>
                 <v-col
                   v-for="field in agendaTodoColorFields"
@@ -2077,26 +2486,83 @@ async function performFactoryReset() {
                   />
                 </v-col>
               </v-row>
-              <div class="text-caption text-medium-emphasis mb-1 mt-3">Calendar</div>
-              <v-row dense>
-                <v-col
-                  v-for="field in agendaCalendarColorFields"
-                  :key="field.key"
-                  cols="6"
-                  sm="4"
-                  md="3"
-                >
-                  <v-select
-                    v-model="settingsStore.deviceSettings[field.key]"
-                    :items="agendaHueOptions"
-                    :label="field.label"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                  />
-                </v-col>
-              </v-row>
             </template>
+
+            <v-divider class="mb-4 mt-4" />
+            <div class="text-subtitle-2 mb-2">Calendar Color Profiles</div>
+            <div class="text-caption text-medium-emphasis mb-3">
+              Import a color profile JSON exported from the standalone "profile-editor.html" visual
+              editor tool to control exactly how the Calendar view is colored - text/background,
+              per-day headers, the shared top header, each Calendar source's color, and (if a
+              rotation pattern is set above) which single color marks a day. Up to 3 profiles can be
+              stored on the device; only one is active at a time. On a grayscale/monochrome display,
+              a color-mode profile is shown as a plain black/white inversion instead of its authored
+              hues - its "mode" only matters directly on a color panel.
+            </div>
+            <v-btn
+              variant="outlined"
+              size="small"
+              class="mb-4"
+              href="/profile-editor.html"
+              target="_blank"
+              rel="noopener"
+            >
+              Open Color Profile Editor
+            </v-btn>
+            <div class="text-caption text-medium-emphasis mb-3">
+              Opens the editor tool served directly by this device (new tab) - its own "An Gerät
+              senden" (send to device) button saves straight into a slot below, no manual
+              export/import round-trip needed.
+            </div>
+            <v-select
+              v-model="settingsStore.deviceSettings.agendaColorProfileActive"
+              :items="agendaColorProfileActiveOptions"
+              item-title="title"
+              item-value="value"
+              label="Active profile"
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="mb-4"
+              style="max-width: 420px"
+            />
+            <v-row dense>
+              <v-col v-for="slot in [1, 2, 3]" :key="slot" cols="12" sm="4">
+                <v-card variant="tonal">
+                  <v-card-text>
+                    <div class="text-caption text-medium-emphasis">Slot {{ slot }}</div>
+                    <div class="text-body-2 mb-2">
+                      {{ agendaColorProfileSlots.find((s) => s.slot === slot)?.name || "(empty)" }}
+                    </div>
+                    <v-btn
+                      size="small"
+                      variant="outlined"
+                      :loading="agendaColorProfileUploading[slot]"
+                      @click="colorProfileFileInputs[slot]?.click()"
+                    >
+                      Import
+                    </v-btn>
+                    <v-btn
+                      v-if="agendaColorProfileSlots.find((s) => s.slot === slot)?.name"
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      class="ml-2"
+                      @click="deleteAgendaColorProfile(slot)"
+                    >
+                      Remove
+                    </v-btn>
+                    <input
+                      :ref="(el) => (colorProfileFileInputs[slot] = el)"
+                      type="file"
+                      accept=".json,application/json"
+                      style="display: none"
+                      @change="onAgendaColorProfileFileSelected($event, slot)"
+                    />
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
           </v-tabs-window-item>
 
           <!-- Power Tab -->
@@ -2669,6 +3135,58 @@ async function performFactoryReset() {
             </div>
           </v-tabs-window-item>
 
+          <!-- Alarm Clock Tab -->
+          <v-tabs-window-item
+            v-if="settingsStore.deviceSettings.alarmClockAvailable"
+            class="mt-2"
+            value="alarmClock"
+          >
+            <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+              Wakes the device with no WiFi, photo rotation, or Agenda render - just the speaker.
+              Ringing plays a repeating G4-C5-E5-C5 tone; a long (3s) press of the KEY/rotate button
+              on the device stops it early.
+            </v-alert>
+
+            <v-switch
+              v-model="alarmArmedModel"
+              :label="alarmArmedModel ? 'Alarm armed' : 'Alarm disarmed'"
+              color="primary"
+              class="mb-2"
+              hide-details
+            />
+            <div class="text-caption text-medium-emphasis mb-4">
+              Turning this off clears the schedule below (same as removing every rule from it) -
+              there's no separate device-side flag, being armed just means having at least one
+              schedule rule. A schedule set from the device's own button UI (if available on this
+              board) shows up here too, as "Schedule 1".
+            </div>
+
+            <div class="text-subtitle-2 mb-2">Schedule</div>
+            <RotationSchedule v-model="settingsStore.deviceSettings.alarmCron" />
+
+            <v-divider class="mb-4 mt-2" />
+
+            <div class="text-subtitle-2 mb-2">Ring duration</div>
+            <v-row dense align="center">
+              <v-col cols="6" sm="3">
+                <v-text-field
+                  v-model.number="settingsStore.deviceSettings.alarmRingDurationSec"
+                  type="number"
+                  min="1"
+                  max="600"
+                  suffix="s"
+                  label="Duration"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              How long the alarm keeps ringing if never stopped early (default 60s, up to 600s).
+            </div>
+          </v-tabs-window-item>
+
           <!-- Climate Tab -->
           <v-tabs-window-item
             v-if="settingsStore.deviceSettings.climateSensorAvailable"
@@ -3023,17 +3541,13 @@ async function performFactoryReset() {
             {{ saveMessage || "Failed to save settings" }}
           </v-chip>
         </v-fade-transition>
-        <v-tooltip
-          text="Fix the rotation schedule first (invalid or too many rules)"
-          location="top"
-          :disabled="scheduleValid"
-        >
+        <v-tooltip :text="saveBlocker" location="top" :disabled="!saveBlocker">
           <template #activator="{ props: tooltipProps }">
             <span v-bind="tooltipProps">
               <v-btn
                 color="primary"
                 :loading="saving"
-                :disabled="!scheduleValid"
+                :disabled="!!saveBlocker"
                 @click="saveSettings"
               >
                 <v-icon icon="mdi-content-save" start />

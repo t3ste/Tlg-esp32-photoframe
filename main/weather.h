@@ -6,7 +6,19 @@
 
 #include "esp_err.h"
 
+// Used by the plain photo-overlay weather line (weather_format_line()/
+// weather_format_day_lines() below) - unaffected by Agenda grid mode's
+// larger request, see WEATHER_FORECAST_DAYS_CAP.
 #define WEATHER_FORECAST_DAYS 3
+
+// Capacity of weather_forecast_t.days[] - the most days ANY caller can ever
+// request via weather_fetch_forecast()'s max_days param (currently the
+// Agenda 7-day grid layout, agenda_manager.c). Kept distinct from
+// WEATHER_FORECAST_DAYS so raising it doesn't change the plain photo
+// overlay's own 3-day formatting/line-count (weather_format_day_lines()'s
+// array size, overlay_manager.c's OVERLAY_LINES_CAP) - only Agenda's grid
+// mode ever asks for more than WEATHER_FORECAST_DAYS.
+#define WEATHER_FORECAST_DAYS_CAP 7
 
 typedef struct {
     char date[11];  // "YYYY-MM-DD"
@@ -17,24 +29,26 @@ typedef struct {
 
 typedef struct {
     bool valid;
-    int count;  // number of populated entries in days[], up to WEATHER_FORECAST_DAYS
-    weather_day_t days[WEATHER_FORECAST_DAYS];
+    int count;  // number of populated entries in days[], up to WEATHER_FORECAST_DAYS_CAP
+    weather_day_t days[WEATHER_FORECAST_DAYS_CAP];
 } weather_forecast_t;
 
 /**
- * @brief Fetches a WEATHER_FORECAST_DAYS-day forecast (daily min/max
- * temperature + condition) for the configured location, from whichever
- * provider config_manager_get_weather_provider() selects - Open-Meteo
- * (default), wttr.in, or yr.no (MET Norway). All three are free/keyless;
- * wttr.in and yr.no exist as user-selectable alternatives if Open-Meteo isn't
- * reachable/reliable for a given network/region - there is no automatic
- * runtime failover between them. Each provider's own condition
+ * @brief Fetches up to `max_days` (clamped to [1, WEATHER_FORECAST_DAYS_CAP])
+ * of daily min/max temperature + condition for the configured location, from
+ * whichever provider config_manager_get_weather_provider() selects -
+ * Open-Meteo (default), wttr.in, or yr.no (MET Norway). All three are
+ * free/keyless; wttr.in and yr.no exist as user-selectable alternatives if
+ * Open-Meteo isn't reachable/reliable for a given network/region - there is
+ * no automatic runtime failover between them. Each provider's own condition
  * code/text is approximated into the same WMO-code vocabulary
  * condition_text() understands, so callers/formatting are provider-agnostic.
  * Open-Meteo's response uses "timezone=auto" (resolves the correct local
  * timezone from the coordinates server-side); yr.no has no such parameter
  * and buckets by UTC calendar date instead (see fetch_yrno() in weather.c
- * for the specific trade-offs that implies).
+ * for the specific trade-offs that implies). wttr.in's free `j1` format may
+ * not actually be able to return more than 3 days regardless of `max_days`
+ * - see fetch_wttrin() in weather.c.
  *
  * Resolution order: if both config_manager_get_weather_lat()/_lon() are set,
  * uses them directly. Otherwise, geocodes config_manager_get_weather_location_name()
@@ -54,7 +68,7 @@ typedef struct {
  * zeroed (valid = false) - callers should treat this as "no weather this
  * cycle", never fatal to the caller's own flow.
  */
-esp_err_t weather_fetch_forecast(weather_forecast_t *out);
+esp_err_t weather_fetch_forecast(weather_forecast_t *out, int max_days);
 
 /**
  * @brief Formats one summary line, e.g.

@@ -7,7 +7,7 @@ import sys
 
 # Add scripts to sys.path to import boards
 sys.path.append(os.path.join(os.path.dirname(__file__), "scripts"))
-from boards import SUPPORTED_BOARDS
+from boards import BOARD_TARGET, SUPPORTED_BOARDS
 
 BOARDS = list(SUPPORTED_BOARDS.keys())
 
@@ -100,7 +100,7 @@ def generate_splash(board):
         sys.exit(e.returncode)
 
 
-def build_firmware(board, extra_args, debug=False):
+def build_firmware(board, extra_args, debug=False, alarmclock=False):
     """Build firmware with idf.py."""
     print(f"\n=== Building firmware for {board}{' [debug]' if debug else ''} ===")
     sdkconfig_defaults = f"sdkconfig.defaults;boards/sdkconfig.defaults.{board}"
@@ -109,8 +109,21 @@ def build_firmware(board, extra_args, debug=False):
         # from generate_partitions.py). Changes the partition table — never used
         # for release or demo builds.
         sdkconfig_defaults += ";sdkconfig.defaults.debug"
+    if alarmclock:
+        # Opt-in overlay (CONFIG_ALARM_CLOCK_ENABLED=y) - see main/Kconfig and
+        # docs/ALARMCLOCK_FEASIBILITY.md. Off by default: not every supported
+        # board has a speaker/buttons in the shape this feature needs, so it's
+        # excluded from the build entirely unless explicitly requested here.
+        sdkconfig_defaults += ";sdkconfig.defaults.alarmclock"
+
+    # Boards differ in target chip (the M5Paper is a plain ESP32, everything
+    # else is an ESP32-S3). Pass it explicitly: idf.py resolves the target
+    # before it merges the defaults files, so CONFIG_IDF_TARGET in the board's
+    # sdkconfig.defaults alone is not enough on a clean tree.
+    target = BOARD_TARGET[board]
 
     idf_base = idf_py_command() + [
+        f"-DIDF_TARGET={target}",
         f"-DSDKCONFIG_DEFAULTS={sdkconfig_defaults}",
     ]
 
@@ -162,6 +175,12 @@ def main():
         "partition table (adds a coredump partition) — do not ship to users.",
     )
     parser.add_argument(
+        "--alarmclock",
+        action="store_true",
+        help="Include the bedside alarm clock feature (off by default - not "
+        "every board can usefully act as one). See docs/ALARMCLOCK_FEASIBILITY.md.",
+    )
+    parser.add_argument(
         "--step",
         choices=STEPS,
         action="append",
@@ -190,7 +209,9 @@ def main():
         generate_splash(args.board)
 
     if "firmware" in steps:
-        build_firmware(args.board, extra_args, debug=args.debug)
+        build_firmware(
+            args.board, extra_args, debug=args.debug, alarmclock=args.alarmclock
+        )
 
 
 if __name__ == "__main__":

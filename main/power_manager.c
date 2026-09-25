@@ -19,12 +19,14 @@
 #endif
 
 #include "agenda_manager.h"
+#include "alarm_manager.h"
 #include "board_hal.h"
 #include "climate_history.h"
 #include "config.h"
 #include "config_manager.h"
 #include "debug_log.h"
 #include "ha_integration.h"
+#include "network_backoff.h"
 #include "periodic_tasks.h"
 #include "storage.h"
 #include "utils.h"
@@ -32,6 +34,14 @@
 
 // RTC memory to store expected wakeup time (persists across deep sleep)
 RTC_DATA_ATTR static time_t expected_wakeup_time = 0;
+
+// Consecutive unattended wakes whose network work failed, and the earliest
+// time the next attempt may run (#121). RTC memory: survives deep sleep,
+// starts clean on a power cycle. The hold is anchored at the failure, not
+// recomputed at each sleep entry, so an early-wake re-sleep can't push the
+// schedule out again.
+RTC_DATA_ATTR static uint32_t network_failures = 0;
+RTC_DATA_ATTR static time_t network_retry_after = 0;
 
 // Boundary the current timer wake was targeting (from expected_wakeup_time).
 // Used to detect a wake that fired early due to RTC drift: if a clock
@@ -41,6 +51,52 @@ static time_t wake_target_boundary = 0;
 
 static const char *TAG = "power_manager";
 
+// --- Button wake-up routing ---------------------------------------------
+//
+// On the ESP32-S3 every button is an EXT1 source: its EXT1 unit matches "any of
+// these pins low", which is exactly what a set of active-low buttons needs.
+//
+// The original ESP32's EXT1 unit can only match "all pins low" or "any pin
+// high", neither of which works for any-of-N active-low buttons. Boards on that
+// chip (the M5Paper) therefore set BOARD_HAL_WAKEUP_KEY_USE_EXT0 to route the
+// wake key to EXT0 (one pin, level-triggered low) and BOARD_HAL_EXT1_KEYS_ARE_ALL_LOW
+// so EXT1 carries just the rotate key as a single-pin ALL_LOW mask. That leaves
+// the clear key working only while the device is awake — there is no third wake
+// unit to give it.
+#ifdef BOARD_HAL_WAKEUP_KEY_USE_EXT0
+#define WAKEUP_KEY_ON_EXT0 1
+#else
+#define WAKEUP_KEY_ON_EXT0 0
+#endif
+
+#ifdef BOARD_HAL_EXT1_KEYS_ARE_ALL_LOW
+// Single-pin mask, so "all low" and "any low" mean the same thing.
+#define EXT1_WAKEUP_MODE ESP_EXT1_WAKEUP_ALL_LOW
+#define CLEAR_KEY_CAN_WAKE 0
+#else
+#define EXT1_WAKEUP_MODE ESP_EXT1_WAKEUP_ANY_LOW
+#define CLEAR_KEY_CAN_WAKE 1
+#endif
+
+// Build the EXT1 pin mask. Keys handled by another wake unit, or that this chip
+// can't distinguish, are left out.
+static uint64_t ext1_button_mask(void)
+{
+    uint64_t mask = 0;
+    if (!WAKEUP_KEY_ON_EXT0 && BOARD_HAL_WAKEUP_KEY != GPIO_NUM_NC) {
+        mask |= (1ULL << BOARD_HAL_WAKEUP_KEY);
+    }
+    if (BOARD_HAL_ROTATE_KEY != GPIO_NUM_NC) {
+        mask |= (1ULL << BOARD_HAL_ROTATE_KEY);
+    }
+    if (CLEAR_KEY_CAN_WAKE && BOARD_HAL_CLEAR_KEY != GPIO_NUM_NC) {
+        // The ternary keeps the shift well-defined when the board defines no
+        // clear key (GPIO_NUM_NC is -1); the runtime guard above skips it.
+        mask |= (1ULL << (BOARD_HAL_CLEAR_KEY < 0 ? 0 : BOARD_HAL_CLEAR_KEY));
+    }
+    return mask;
+}
+
 static TaskHandle_t sleep_timer_task_handle = NULL;
 static TaskHandle_t rotation_timer_task_handle = NULL;
 static int64_t next_sleep_time = 0;  // Use absolute time for sleep timer
@@ -49,6 +105,7 @@ static wakeup_source_t wakeup_source = WAKEUP_SOURCE_NONE;
 static int64_t next_rotation_time = 0;  // Use absolute time for rotation
 static int64_t next_agenda_time = 0;    // Same convention, for the Agenda schedule below
 static int64_t next_climate_time = 0;   // Same convention, for the climate log below
+static int64_t next_alarm_time = 0;     // Same convention, for the Alarm Clock schedule below
 static uint64_t ext1_wakeup_pin_mask = 0;
 
 static void rotation_timer_task(void *arg)
@@ -86,6 +143,35 @@ static void rotation_timer_task(void *arg)
             }
         }
 
+        // Alarm Clock: an independent schedule, same "device stays awake"
+        // gating as rotation/agenda - mirrors deep_sleep_wake_main()'s
+        // alarm_wake decision for the case a deep-sleep board never actually
+        // sleeps (USB-powered) or has deep sleep disabled outright, which a
+        // bedside alarm clock use case can't just ignore (many such devices
+        // stay plugged in overnight). Checked and rung before agenda/
+        // rotation below - alarm_manager_run() blocks for the ring duration,
+        // so a same-tick agenda/rotation due-ness is still evaluated against
+        // this tick's "now" but its actual action lands after the alarm
+        // finishes, same "no makeup logic, just delayed" spirit as agenda
+        // pre-empting rotation below. alarm_manager_is_enabled()/_run() are
+        // harmless no-ops on a build without CONFIG_ALARM_CLOCK_ENABLED.
+        if (alarm_manager_is_enabled()) {
+            if (next_alarm_time == 0) {
+                int seconds_until_next = alarm_manager_seconds_until_next_wake();
+                next_alarm_time = now + (seconds_until_next * 1000000LL);
+                ESP_LOGI(TAG, "Active alarm check scheduled in %d seconds", seconds_until_next);
+            } else if (now >= next_alarm_time) {
+                ESP_LOGI(TAG, "Active alarm triggered");
+                alarm_manager_run();
+
+                int seconds_until_next = alarm_manager_seconds_until_next_wake();
+                next_alarm_time = esp_timer_get_time() + (seconds_until_next * 1000000LL);
+                ESP_LOGI(TAG, "Next alarm check scheduled in %d seconds", seconds_until_next);
+            }
+        } else {
+            next_alarm_time = 0;  // Reset if the alarm got disabled
+        }
+
         // Agenda: an independent schedule, same "device stays awake" gating
         // as rotation above - mirrors deep_sleep_wake_main()'s agenda_wake
         // decision for the case a deep-sleep board never actually sleeps
@@ -107,7 +193,7 @@ static void rotation_timer_task(void *arg)
 
         if (agenda_due) {
             ESP_LOGI(TAG, "Active agenda render triggered");
-            agenda_manager_run();
+            agenda_manager_run(wifi_manager_is_connected());
 
             int seconds_until_next = agenda_manager_seconds_until_next_wake();
             next_agenda_time = now + (seconds_until_next * 1000000LL);
@@ -327,8 +413,14 @@ esp_err_t power_manager_init(void)
             }
             expected_wakeup_time = 0;  // Reset after checking
         }
+    } else if (wakeup_causes & (1 << ESP_SLEEP_WAKEUP_EXT0)) {
+        // Only boards that route the wake key to EXT0 (see the routing notes at
+        // the top of this file) can report this cause, and EXT0 is a single pin,
+        // so there is nothing to disambiguate.
+        wakeup_source = WAKEUP_SOURCE_BOOT_BUTTON;
+        ESP_LOGI(TAG, "Wakeup caused by wake button (EXT0, GPIO %d)", BOARD_HAL_WAKEUP_KEY);
     } else if (wakeup_causes & (1 << ESP_SLEEP_WAKEUP_EXT1)) {
-        // ESP32-S3 only supports EXT1, check which GPIO triggered it
+        // Check which GPIO in the EXT1 mask triggered the wake
         ext1_wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
 
         if (BOARD_HAL_WAKEUP_KEY != GPIO_NUM_NC &&
@@ -352,6 +444,18 @@ esp_err_t power_manager_init(void)
         ESP_LOGI(TAG, "Not a deep sleep wakeup");
     }
 
+    // The backoff is for unattended wakes. Any other wake -- a button, a
+    // reset, a power-on -- means the owner is around and may have fixed the
+    // network; a hold left over from earlier failed timer wakes would
+    // otherwise still skip slots after they walk away. If the server is
+    // still down the next timer wake fails once and re-arms it from 5 min.
+    if (wakeup_source != WAKEUP_SOURCE_TIMER && network_failures > 0) {
+        ESP_LOGI(TAG, "Interactive wake; clearing network backoff (%lu failed wakes)",
+                 (unsigned long) network_failures);
+        network_failures = 0;
+        network_retry_after = 0;
+    }
+
     // Configure button GPIOs as input with pull-ups
     uint64_t pin_mask = 0;
     if (BOARD_HAL_WAKEUP_KEY != GPIO_NUM_NC) {
@@ -365,6 +469,18 @@ esp_err_t power_manager_init(void)
     }
 
     if (pin_mask != 0) {
+#ifdef BOARD_HAL_BUTTONS_NO_INTERNAL_PULL
+        // These pads (ESP32 GPIO34-39) are input-only: no internal pull
+        // resistors and no output latch, so neither the pull-up below nor
+        // gpio_hold_en() applies. The board provides external pull-ups, which
+        // also keeps the lines from floating during deep sleep.
+        gpio_config_t io_conf = {.intr_type = GPIO_INTR_DISABLE,
+                                 .mode = GPIO_MODE_INPUT,
+                                 .pin_bit_mask = pin_mask,
+                                 .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                                 .pull_up_en = GPIO_PULLUP_DISABLE};
+        gpio_config(&io_conf);
+#else
         gpio_config_t io_conf = {.intr_type = GPIO_INTR_DISABLE,
                                  .mode = GPIO_MODE_INPUT,
                                  .pin_bit_mask = pin_mask,
@@ -384,6 +500,7 @@ esp_err_t power_manager_init(void)
             gpio_hold_en(BOARD_HAL_CLEAR_KEY);
         }
         gpio_deep_sleep_hold_en();
+#endif
     }
 
     // LEDs are initialized by board_hal_init(), just set initial state
@@ -410,6 +527,23 @@ void power_manager_enter_sleep(void)
 {
     power_manager_disable_auto_light_sleep();
 
+    // Report how close this wake came to exhausting its stack. Every sleep
+    // path goes through here, so the worst case across the whole wake --
+    // including the rotation work -- shows up in the debug log. Nothing else
+    // in the firmware measures this, which is why the "is 6144 bytes enough?"
+    // question has only ever been answered by guesswork (see #121 / PR #133).
+    // Scheduled wakes reach this from the main task; interactive ones from
+    // sleep_timer or httpd, hence the task name. StackType_t is uint8_t on
+    // ESP-IDF, so the multiply is a no-op there and only keeps this correct
+    // for word-sized ports.
+    ESP_LOGI(TAG, "Stack headroom at sleep: task '%s' had %u bytes free (min)", pcTaskGetName(NULL),
+             (unsigned) (uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)));
+
+    // How long this wake kept the chip up: the number that battery life
+    // actually depends on, and the first thing to compare between a frame
+    // that drains fast and one that doesn't (#121).
+    ESP_LOGI(TAG, "Awake for %lld ms this wake", (long long) (esp_timer_get_time() / 1000));
+
     ESP_LOGI(TAG, "Preparing to enter deep sleep mode");
 
     // Only notify HA offline when the network is actually up. The early-wake
@@ -426,23 +560,75 @@ void power_manager_enter_sleep(void)
     board_hal_led_set(BOARD_HAL_LED_POWER, false);
     board_hal_led_set(BOARD_HAL_LED_ACTIVITY, false);
 
-    // Timer-based sleep if either the normal photo rotation schedule or the
-    // independent agenda (ToDo + Calendar) schedule is enabled - whichever
-    // fires sooner. The two are otherwise unrelated: deep_sleep_wake_main()
-    // re-checks which one(s) actually matched at the moment the device
-    // wakes (a coarse timer wake can't itself carry that information), and
-    // renders the photo or the agenda screen accordingly - see
-    // agenda_manager_wake_matches_now().
+    // Timer-based sleep if any of the normal photo rotation schedule, the
+    // independent agenda (ToDo + Calendar) schedule, or the independent
+    // alarm clock schedule is enabled - whichever fires soonest. All three
+    // are otherwise unrelated: deep_sleep_wake_main() re-checks which one(s)
+    // actually matched at the moment the device wakes (a coarse timer wake
+    // can't itself carry that information), and renders the photo, the
+    // agenda screen, or rings the alarm accordingly - see
+    // agenda_manager_wake_matches_now()/alarm_manager_wake_matches_now().
+    // alarm_manager_is_enabled() is a harmless no-op (always false) on a
+    // build without CONFIG_ALARM_CLOCK_ENABLED.
     bool rotate_on = config_manager_get_auto_rotate();
     bool agenda_on = agenda_manager_is_enabled();
-    if (rotate_on || agenda_on) {
+    bool alarm_on = alarm_manager_is_enabled();
+    if (rotate_on || agenda_on || alarm_on) {
         int rotate_wake = rotate_on ? get_seconds_until_next_wakeup() : INT_MAX;
         int agenda_wake = agenda_on ? agenda_manager_seconds_until_next_wake() : INT_MAX;
-        int wake_seconds = (rotate_wake < agenda_wake) ? rotate_wake : agenda_wake;
-        bool via_agenda = (agenda_wake < rotate_wake);
+        int alarm_wake = alarm_on ? alarm_manager_seconds_until_next_wake() : INT_MAX;
+        int wake_seconds = rotate_wake;
+        const char *wake_reason = "rotate cron";
+        if (agenda_wake < wake_seconds) {
+            wake_seconds = agenda_wake;
+            wake_reason = "agenda cron";
+        }
+        if (alarm_wake < wake_seconds) {
+            wake_seconds = alarm_wake;
+            wake_reason = "alarm cron";
+        }
 
-        ESP_LOGI(TAG, "Setting timer wake-up for %d seconds (%s)", wake_seconds,
-                 via_agenda ? "agenda cron" : "rotate cron");
+        // Network backoff only concerns the rotate schedule -
+        // deep_sleep_wake_main() only ever records a network outcome for
+        // rotation (URL fetch / HA veto check), never for an agenda or alarm
+        // wake - so if one of those is what actually drives this wake, it
+        // must not be delayed by rotate's unrelated backoff hold.
+        if (strcmp(wake_reason, "rotate cron") == 0) {
+            time_t now;
+            time(&now);
+
+            // The hold was anchored with the clock as it read at the failure. If
+            // the clock has since been set back -- an NTP correction, or an
+            // external RTC that was ahead -- the anchor is off by that amount, so
+            // never hold longer than the delay this failure count earns, measured
+            // from now. (A clock set forward just ends the hold early: one attempt
+            // at the next slot, and the count carries on from there.)
+            time_t hold_limit = now + network_backoff_delay_sec(network_failures);
+            if (network_retry_after > hold_limit) {
+                ESP_LOGW(TAG, "Network backoff hold %lld s ahead of the clock; capping at %d s",
+                         (long long) (network_retry_after - now),
+                         network_backoff_delay_sec(network_failures));
+                network_retry_after = hold_limit;
+            }
+
+            // Under network backoff, skip slots until the hold has passed. The
+            // hold only ever lengthens the wait; the schedule is never brought
+            // forward.
+            if (network_retry_after > now) {
+                cron_rule_t rules[MAX_CRON_RULES];
+                int n = config_manager_get_compiled_cron_rules(rules, MAX_CRON_RULES);
+                int held = network_backoff_seconds_until_slot(now, network_retry_after, rules, n,
+                                                              CRON_FALLBACK_SEC);
+                if (held > wake_seconds) {
+                    ESP_LOGW(TAG,
+                             "Network backoff (%lu failed wakes): next attempt in %d s, not %d s",
+                             (unsigned long) network_failures, held, wake_seconds);
+                    wake_seconds = held;
+                }
+            }
+        }
+
+        ESP_LOGI(TAG, "Setting timer wake-up for %d seconds (%s)", wake_seconds, wake_reason);
         esp_sleep_enable_timer_wakeup(wake_seconds * 1000000ULL);
 
         // Store expected wakeup time in RTC memory for drift detection -
@@ -454,20 +640,17 @@ void power_manager_enter_sleep(void)
         expected_wakeup_time = now + wake_seconds;
     }
 
-    // Enable boot button and key button wake-up (ESP32-S3 only supports EXT1)
-    uint64_t wakeup_mask = 0;
+    // Enable button wake-up. See the routing notes at the top of this file for
+    // why some boards split the keys across EXT0 and EXT1.
+#if WAKEUP_KEY_ON_EXT0
     if (BOARD_HAL_WAKEUP_KEY != GPIO_NUM_NC) {
-        wakeup_mask |= (1ULL << BOARD_HAL_WAKEUP_KEY);
+        esp_sleep_enable_ext0_wakeup(BOARD_HAL_WAKEUP_KEY, 0);
     }
-    if (BOARD_HAL_ROTATE_KEY != GPIO_NUM_NC) {
-        wakeup_mask |= (1ULL << BOARD_HAL_ROTATE_KEY);
-    }
-    if (BOARD_HAL_CLEAR_KEY != GPIO_NUM_NC) {
-        wakeup_mask |= (1ULL << (BOARD_HAL_CLEAR_KEY < 0 ? 0 : BOARD_HAL_CLEAR_KEY));
-    }
+#endif
 
+    uint64_t wakeup_mask = ext1_button_mask();
     if (wakeup_mask != 0) {
-        esp_sleep_enable_ext1_wakeup(wakeup_mask, ESP_EXT1_WAKEUP_ANY_LOW);
+        esp_sleep_enable_ext1_wakeup(wakeup_mask, EXT1_WAKEUP_MODE);
     }
 
     // Stop WiFi cleanly before deep sleep so the MAC/PHY drains pending
@@ -542,6 +725,35 @@ void power_manager_reset_agenda_timer(void)
 
     next_agenda_time = esp_timer_get_time() + (seconds_until_next * 1000000LL);
     ESP_LOGI(TAG, "Agenda timer reset, next agenda render in %d seconds", seconds_until_next);
+}
+
+void power_manager_record_network_wake(bool succeeded)
+{
+    // Only scheduled wakes feed the backoff. A ROTATE-button wake is the
+    // owner's doing: power_manager_init already dropped the hold for it, and
+    // its outcome must not arm one -- the hold decides which scheduled slots
+    // to skip, and a press two minutes before a slot must not skip that slot.
+    if (wakeup_source != WAKEUP_SOURCE_TIMER) {
+        return;
+    }
+
+    if (succeeded) {
+        if (network_failures > 0) {
+            ESP_LOGI(TAG, "Network back after %lu failed wake(s); backoff cleared",
+                     (unsigned long) network_failures);
+        }
+        network_failures = 0;
+        network_retry_after = 0;
+        return;
+    }
+
+    network_failures++;
+    int delay = network_backoff_delay_sec(network_failures);
+    time_t now;
+    time(&now);
+    network_retry_after = now + delay;
+    ESP_LOGW(TAG, "Network failed on %lu consecutive wake(s); holding off for at least %d s",
+             (unsigned long) network_failures, delay);
 }
 
 int power_manager_get_seconds_until_wake_target(void)

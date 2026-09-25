@@ -7,7 +7,12 @@
 
 #include "esp_err.h"
 
-#define ICS_MAX_EVENTS 24
+// 48 (was 24): the Agenda 7-day grid layout can touch a full week across up
+// to 5 calendar sources - 24 was already borderline for a busy calendar
+// even at the old 1-3 day lookahead. Heap-allocated (ics_event_list_t is
+// always heap_caps_calloc'd, never a stack local - see agenda_manager.c),
+// so this only costs PSRAM, not stack.
+#define ICS_MAX_EVENTS 48
 #define ICS_SUMMARY_MAX_LEN 160
 
 typedef struct {

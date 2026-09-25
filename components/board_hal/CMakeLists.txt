@@ -15,6 +15,7 @@ set(PRIV_REQS
     rtc_driver_pcf85063
     rtc_driver_pcf8563
     sdcard
+    sensor_driver_sht3x
     sensor_driver_sht40
     sensor_driver_shtc3
 )
@@ -33,12 +34,19 @@ elseif(CONFIG_BOARD_DRIVER_SEEEDSTUDIO_RETERMINAL_E1003)
     list(APPEND SRCS "src/driver_seeedstudio_reterminal_e1003.c")
 elseif(CONFIG_BOARD_DRIVER_SEEEDSTUDIO_RETERMINAL_E1004)
     list(APPEND SRCS "src/driver_seeedstudio_reterminal_e1004.c")
+elseif(CONFIG_BOARD_DRIVER_M5STACK_M5PAPER_V11)
+    list(APPEND SRCS "src/driver_m5stack_m5paper_v11.c")
 endif()
 
 idf_component_register(
     SRCS "${SRCS}"
     INCLUDE_DIRS "include"
+    # esp_driver_usb_serial_jtag is registered on every target (with no sources
+    # on chips without the peripheral, e.g. the ESP32), so require it
+    # unconditionally. Kconfig values such as CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
+    # are not visible during IDF's early requirement expansion, so a conditional
+    # here silently drops it and breaks the S3 boards that detect USB through it.
     REQUIRES esp_timer driver esp_adc esp_driver_gpio esp_driver_i2c esp_driver_i2s
-              esp_driver_usb_serial_jtag epaper sensor
+             esp_driver_usb_serial_jtag epaper sensor
     PRIV_REQUIRES ${PRIV_REQS}
 )

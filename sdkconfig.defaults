@@ -83,3 +83,12 @@ CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE=y
 # self-signed root, not whether it's cross-signed by one). Costs ~700
 # bytes of heap per the option's own Kconfig help text.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y
+
+# HTTPS web UI (opt-in, off by default via config_manager - github.com/
+# aitjcize/esp32-photoframe#130): esp_https_server plus the two mbedtls
+# options its on-device self-signed cert generation needs. Neither symbol
+# is on by default even with the rest of TLS-client support already linked
+# in for outbound HTTPS (weather/calendar/OTA/Telegram) - see main/https_cert.c.
+CONFIG_ESP_HTTPS_SERVER_ENABLE=y
+CONFIG_MBEDTLS_X509_CREATE_C=y
+CONFIG_MBEDTLS_X509_CRT_WRITE_C=y

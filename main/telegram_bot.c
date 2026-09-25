@@ -2484,6 +2484,35 @@ static void execute_command(const char *raw_text)
                 telegram_bot_send_message(msg);
             }
         }
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+    } else if (strcmp(cmd, "/alarm_cron") == 0) {
+        // Single-rule set, same convention as /rotate_cron above - the Web
+        // UI's Alarm settings tab (RotationSchedule.vue) is the way to manage
+        // several alarm times at once. An empty schedule permanently
+        // disarms the alarm (see config.h's NVS_ALARM_CRON_KEY comment).
+        if (!args) {
+            telegram_bot_send_message(
+                "[i] Usage: /alarm_cron <Minute Hour Weekday>\n"
+                "Example: /alarm_cron 0 7 1-5 (7:00 on workdays)\n"
+                "Use /alarm_off to disarm.");
+        } else {
+            cron_rule_t tmp;
+            if (!cron_parse(args, &tmp)) {
+                char msg[192];
+                snprintf(msg, sizeof(msg), "[ERROR] Invalid cron expression: %.100s", args);
+                telegram_bot_send_message(msg);
+            } else {
+                const char *one[1] = {args};
+                config_manager_set_alarm_cron_rules(one, 1);
+                char msg[192];
+                snprintf(msg, sizeof(msg), "[OK] Alarm set: %.100s", args);
+                telegram_bot_send_message(msg);
+            }
+        }
+    } else if (strcmp(cmd, "/alarm_off") == 0) {
+        config_manager_set_alarm_cron_rules(NULL, 0);
+        telegram_bot_send_message("[OK] Alarm disarmed.");
+#endif
     } else if (strcmp(cmd, "/deep_sleep") == 0) {
         if (args && strcasecmp(args, "on") == 0) {
             power_manager_set_deep_sleep_enabled(true);
@@ -2775,6 +2804,10 @@ static void execute_command(const char *raw_text)
             "\n"
             "Settings (each on|off, no argument = help):\n"
             "/rotate_cron <M H Weekday> - Set the rotation schedule\n"
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+            "/alarm_cron <M H Weekday> - Set the alarm clock (e.g. 0 7 1-5)\n"
+            "/alarm_off - Disarm the alarm clock\n"
+#endif
             "/deep_sleep on|off\n"
             "/auto_rotate on|off\n"
             "/wake_notify on|off - Status ping on every wake-up\n"

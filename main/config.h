@@ -47,6 +47,30 @@ typedef enum {
     AGENDA_TIME_DISPLAY_RANGE = 2,     // "08:15-09:00 Kaffee trinken"
 } agenda_time_display_mode_t;
 
+// Calendar-only-fullscreen layout (main/agenda_renderer.c). GRID_A/GRID_B
+// only actually take effect when the Calendar column is shown alone (no
+// ToDo) - agenda_renderer_render() falls back to LIST otherwise. Values are
+// stored as-is in NVS, so the numbering must stay stable across firmware
+// versions.
+typedef enum {
+    AGENDA_CAL_LAYOUT_LIST = 0,    // existing single-column day list (1-3 days)
+    AGENDA_CAL_LAYOUT_GRID_A = 1,  // 7-day grid, today = full-width row
+    AGENDA_CAL_LAYOUT_GRID_B = 2,  // 7-day grid, today = double-height half-width cell
+} agenda_cal_layout_mode_t;
+
+// Optional 2-group rotation/"shift" coloring for the 7-day grid layouts
+// (e.g. a 2-2-3 custody-style schedule) - see agenda_shift_group_for_day()
+// in agenda_renderer.c. Segment lengths always sum to one 7-day "half";
+// which group holds the first segment flips every other half, giving a
+// real alternating-fortnightly pattern (the classic "2-2-3" convention),
+// anchored at NVS_AGENDA_SHIFT_START_KEY. Values are stored as-is in NVS.
+typedef enum {
+    AGENDA_SHIFT_MODEL_NONE = 0,
+    AGENDA_SHIFT_MODEL_2_2_3 = 1,      // 2/2/3-day segments
+    AGENDA_SHIFT_MODEL_WEEK_WEEK = 2,  // 7-day segment (whole week alternates)
+    AGENDA_SHIFT_MODEL_3_4 = 3,        // 3/4-day segments
+} agenda_shift_model_t;
+
 // Master mode for the Chimes speaker feature (see board_hal_has_speaker() /
 // board_hal_play_beep_pattern() and main/chime.c). Values are stored as-is
 // in NVS, so the numbering must stay stable across firmware versions.
@@ -102,6 +126,9 @@ typedef enum {
 #define TIMEZONE_MAX_LEN 64
 #define NTP_SERVER_MAX_LEN 128
 #define ACCESS_TOKEN_MAX_LEN 512
+// Optional password guarding the device's own HTTP API (#130). Empty disables
+// it, which is the default -- most frames live on a trusted home network.
+#define HTTP_PASSWORD_MAX_LEN 64  // buffer size: at most 63 bytes of password
 #define HTTP_HEADER_KEY_MAX_LEN 64
 #define HTTP_HEADER_VALUE_MAX_LEN 512
 #define CA_CERT_MAX_LEN 4096
@@ -139,6 +166,9 @@ typedef enum {
 #define TELEGRAM_ORIGINALS_DIRECTORY TELEGRAM_DOWNLOAD_DIRECTORY "/Originals"
 
 #define CURRENT_UPLOAD_PATH FS_MOUNT_POINT "/.current.tmp"
+// A downloaded thumbnail waits here until its image is on the panel; the
+// direct-display upload stages its thumbnail under the same name.
+#define CURRENT_THUMB_UPLOAD_PATH FS_MOUNT_POINT "/.current_thumb.tmp"
 #define CURRENT_JPG_PATH FS_MOUNT_POINT "/.current.jpg"
 #define CURRENT_BMP_PATH FS_MOUNT_POINT "/.current.bmp"
 #define CURRENT_PNG_PATH FS_MOUNT_POINT "/.current.png"
@@ -270,6 +300,19 @@ typedef enum {
 // late config push can land. A server-requested post-rotate wait can extend it.
 #define HA_CONFIG_WINDOW_SEC 10
 
+// Image fetch timing (#121). FETCH_IO_TIMEOUT_MS bounds each socket operation
+// (connect, time to first byte, and every wait for more data), so a dead link
+// fails fast while a slow one still finishes. Retries only start while the
+// fetch has used less than FETCH_RETRY_BUDGET_MS in total: quick failures
+// (refused, DNS, HTTP error) get retried, but an attempt that already ran into
+// the I/O timeout is not repeated. A frame on weak WiFi can legitimately need
+// 30-80 s for one image, so this is not a cap on a single transfer; the
+// auto-sleep timer remains the backstop for that.
+#define FETCH_IO_TIMEOUT_MS 30000
+#define FETCH_RETRY_BUDGET_MS 20000
+// Pause between fetch attempts; counted against FETCH_RETRY_BUDGET_MS.
+#define FETCH_RETRY_DELAY_MS 3000
+
 // Default rotation schedule for fresh / factory-reset devices: every 12 hours.
 // Simplified 3-field cron: "minute hour day-of-week".
 #define DEFAULT_ROTATE_CRON "0 */12 *"
@@ -315,6 +358,7 @@ typedef enum {
 #define NVS_IMAGE_URL_KEY "image_url"
 #define NVS_CA_CERT_KEY "ca_cert"
 #define NVS_ACCESS_TOKEN_KEY "access_token"
+#define NVS_HTTP_PASSWORD_KEY "http_password"
 #define NVS_HTTP_HEADER_KEY_KEY "http_hdr_key"
 #define NVS_HTTP_HEADER_VALUE_KEY "http_hdr_val"
 #define NVS_SAVE_DOWNLOADED_KEY "save_dl"
@@ -397,6 +441,44 @@ typedef enum {
 // surfaced via the HTTP API (nothing for a user to usefully do with it).
 #define NVS_WIFI_COLDBOOT_FAIL_COUNT_KEY "wifi_cb_fail"
 
+// Whether a cold-boot connect exhaustion (WIFI_COLD_BOOT_CONNECT_MAX_ATTEMPTS,
+// or the extended-retry cap above if that's also on) is allowed to wipe the
+// saved SSID/password and reboot into provisioning at all. On (default):
+// unchanged existing behavior. Off: a genuine credential rejection still
+// wipes immediately either way (a wrong password can't fix itself), but a
+// non-rejection exhaustion instead keeps the credentials and, if deep sleep
+// is enabled, goes to sleep until the next scheduled wake (which retries the
+// whole connection sequence fresh) - or, if deep sleep is disabled (USB/
+// always-on/Home-Assistant-polled use), just continues the rest of the
+// normal boot flow without WiFi this cycle rather than blocking here, since
+// every network-touching step past this point either already checks
+// wifi_manager_is_connected() first or has its own bounded timeout. Real
+// incident (2026-09-19): a device a few meters from a repeater kept hitting
+// this exact exhaustion path on WIFI_REASON_AUTH_EXPIRE/CONNECTION_FAIL
+// (never a real reject reason) and cycled through repeated wipe ->
+// reprovision -> exhaust -> wipe again, needing a fresh manual reprovision
+// every time despite the saved credentials being correct the whole time.
+#define NVS_WIFI_REPROV_ON_FAIL_KEY "wifi_reprov_en"
+
+// Set during first-time setup (github.com/aitjcize/esp32-photoframe#90) when
+// the user picks "use offline, no WiFi network" instead of entering real
+// credentials. OR'd into wifi_provisioning_is_provisioned()'s gate so the
+// device boots normally instead of looping back into the OOBE AP forever,
+// and skips the cold-boot WiFi connect attempts entirely (main.c) since
+// there's deliberately nothing to connect to. Does not affect the separate
+// on-demand hotspot (wifi_manager_start_ap_hotspot()), which any configured
+// device - offline or not - can enter any time via a long BOOT hold.
+#define NVS_OFFLINE_MODE_KEY "offline_mode"
+
+// Opt-in second HTTPS listener alongside the always-on plain HTTP one
+// (github.com/aitjcize/esp32-photoframe#130) - off by default since it uses
+// a per-device self-signed certificate (main/https_cert.c), which every
+// browser flags with a click-through warning (no CA can vouch for a device
+// with no public hostname). Protects against passive LAN sniffing of the
+// session, not an active on-path attacker who ignores that warning. Takes
+// effect on the next http_server_init() (boot/reconnect), not live.
+#define NVS_HTTPS_ENABLED_KEY "https_enabled"
+
 // Orientation-pairing during normal (non-Telegram) auto-rotation: when the
 // randomly-picked next image doesn't match the panel's orientation, look for
 // another mismatched image in the active album(s) and combine them instead
@@ -461,12 +543,13 @@ typedef enum {
 // command-only update is never itself discarded by this - see telegram_bot.c.
 // Opt-in, off by default.
 #define NVS_TELEGRAM_POWER_SAVE_LATEST_ONLY_KEY "tg_ps_latest"
-// WiFi connect timeout used on an automatic Telegram-mode wake while power
-// save is on, in place of the normal 60s budget - a manual button wake is
-// never affected (see NVS_TELEGRAM_POWER_SAVE_ENABLED_KEY above).
-#define TELEGRAM_POWER_SAVE_WIFI_TIMEOUT_SEC 15
 // Reconnect-attempt budget used in place of the normal 5 (see
-// wifi_manager_set_max_retries()) under the same conditions.
+// wifi_manager_set_max_retries()) on an automatic Telegram-mode wake while
+// power save is on - a manual button wake is never affected (see
+// NVS_TELEGRAM_POWER_SAVE_ENABLED_KEY above). wifi_manager_connect() no
+// longer takes a per-call timeout of its own (bounded internally by
+// WIFI_CONNECT_TIMEOUT_MS in wifi_manager.c); fewer retries alone still gives
+// up faster in practice.
 #define TELEGRAM_POWER_SAVE_WIFI_MAX_RETRIES 1
 
 // On-device output format for Telegram-ingested photos. EPDGZ is the
@@ -670,6 +753,27 @@ typedef enum {
 #define AGENDA_CAL_DAYS_DEFAULT 2
 #define AGENDA_CAL_DAYS_MIN 1
 #define AGENDA_CAL_DAYS_MAX 3
+// Calendar-only-fullscreen layout - see agenda_cal_layout_mode_t above.
+// Only takes effect when the Calendar column is shown alone (no ToDo).
+#define NVS_AGENDA_CAL_LAYOUT_KEY "agenda_cal_lay"
+// 2-group rotation/"shift" coloring for the 7-day grid layouts (event rows
+// only - the day header itself is never shift-colored, see draw_day_cell()
+// in agenda_renderer.c for why) - see agenda_shift_model_t above.
+#define NVS_AGENDA_SHIFT_MODEL_KEY "agenda_shft_md"
+// "YYYY-MM-DD" anchor date - which day the first segment of the first
+// (non-flipped) half starts on. Empty = unset, treated as "no coloring"
+// even if a model above is selected (fail-soft: an unanchored pattern
+// can't be resolved to an actual group).
+#define NVS_AGENDA_SHIFT_START_KEY "agenda_shft_dt"
+#define AGENDA_SHIFT_START_MAX_LEN 11
+// The rotation's single marker color (which of the 2 groups is "marked" on
+// any given day still comes from agenda_shift_group_for_day() above - only
+// the *color* used to paint that group's days is chosen here) now comes
+// from the active color profile's "mark" field instead of a device setting
+// - see agenda_color_profile.h. The unmarked group simply keeps the
+// profile's plain text/textBg colors, per the user's explicit "a switch
+// model only needs one marker color, other days keep their normal
+// background" requirement.
 // Opt-in: annotates each Calendar day divider with that day's forecast
 // (min/max temp + short condition, e.g. "Fr 11. [18/25 cloudy]"), reusing
 // the same weather_fetch_forecast() / location / provider settings as the
@@ -715,26 +819,24 @@ typedef enum {
 // original default and is kept as an option.
 #define NVS_AGENDA_STACK_KEY "agenda_stack"
 #define AGENDA_STACK_DEFAULT true
-// Shared by both the ToDo and Calendar columns (one setting, not two - a
-// mismatched split background was explicitly rejected). One of "white"
-// (default), "black", or a hardware-specific name (agenda_renderer.c's
-// agenda_background_color() has the authoritative list per display
-// profile) - an unrecognized or hardware-inapplicable value falls back to
-// white rather than erroring, matching this project's fail-soft style.
-#define NVS_AGENDA_BG_KEY "agenda_bg"
-#define AGENDA_BG_MAX_LEN 16
-#define AGENDA_BG_DEFAULT "white"
+// ToDo column background - plain, fixed black-on-white (no user setting):
+// the Calendar column's appearance is fully controlled by the imported
+// color-profile system below instead (see agenda_color_profile.h), and the
+// old shared "agenda_bg_color" setting was removed along with it rather than
+// kept as a separate ToDo-only knob.
 
-// Per-role color customization (Spectra6/color boards only - grayscale has
-// no spare hue to pick between, see agenda_renderer.c's role_hue()). Every
-// value is one of "red"/"yellow"/"blue"/"green" (the 4 chromatic Spectra6
-// hues) - never a free RGB value, since anything off this exact palette
-// dithers into visual noise on real hardware (see agenda_renderer.c's
-// priority_color() comment for the full story). Each role falls back to its
-// original hardcoded default if unset/unrecognized. A role whose chosen hue
-// exactly matches the current agenda_bg_color automatically falls back to
-// the same black/white polarity the day divider and column headers use,
-// rather than silently disappearing into the page background.
+// Per-role color customization for the ToDo column (Spectra6/color boards
+// only - grayscale has no spare hue to pick between, see agenda_renderer.c's
+// role_hue()). Every value is one of "red"/"yellow"/"blue"/"green" (the 4
+// chromatic Spectra6 hues) - never a free RGB value, since anything off this
+// exact palette dithers into visual noise on real hardware (see
+// agenda_renderer.c's priority_color() comment for the full story). Each
+// role falls back to its original hardcoded default if unset/unrecognized. A
+// role whose chosen hue exactly matches the ToDo column's fixed plain
+// background automatically falls back to the same black/white polarity the
+// day divider and column headers use, rather than silently disappearing
+// into the page background. (The Calendar column's own colors are no longer
+// part of this scheme - see agenda_color_profile.h.)
 #define AGENDA_ROLE_COLOR_MAX_LEN 8
 #define NVS_AGENDA_PRI_A_KEY "agenda_pri_a"
 #define AGENDA_PRI_A_DEFAULT "red"
@@ -754,39 +856,46 @@ typedef enum {
 #define AGENDA_PROJ_C_DEFAULT "blue"
 #define NVS_AGENDA_CTX_C_KEY "agenda_ctx_c"
 #define AGENDA_CTX_C_DEFAULT "green"
-#define NVS_AGENDA_CAL_A_C_KEY "agenda_cal_a_c"
-#define AGENDA_CAL_A_C_DEFAULT "blue"
-#define NVS_AGENDA_CAL_B_C_KEY "agenda_cal_b_c"
-#define AGENDA_CAL_B_C_DEFAULT "green"
 // Three extra, independently-named ICS sources (e.g. holidays, school
 // holidays, other special-days feeds a user finds/exports as .ics) shown in
-// the same Calendar column as A/B, each in its own hue. Unlike A/B, these
-// have NO periodic refresh (see AGENDA_CAL_CACHE_PATH_C etc. above) - only
-// (re)fetched when the URL is set/changed, "refresh now" is clicked, or a
-// file is uploaded directly. Only red and yellow are left unused by the
-// other roles above at this column's own two existing hues (blue/green,
-// cal_a/cal_b) - the third source (E) necessarily reuses "red" (same as C),
-// same as several other roles already share a hue across different
-// contexts; still visually distinct from cal_a/cal_b within this column.
+// the same Calendar column as A/B. Unlike A/B, these have NO periodic
+// refresh (see AGENDA_CAL_CACHE_PATH_C etc. above) - only (re)fetched when
+// the URL is set/changed, "refresh now" is clicked, or a file is uploaded
+// directly. Per-source color used to live here too (agenda_cal_c/d/e_color)
+// but is now controlled by the imported color-profile system instead (see
+// agenda_color_profile.h) - only the source identity/URL/name settings
+// remain per-role.
 #define NVS_AGENDA_CAL_C_ENABLED_KEY "agenda_cal_c_en"
 #define NVS_AGENDA_CAL_C_URL_KEY "agenda_cal_c_url"
 #define AGENDA_CAL_C_URL_MAX_LEN 256
 #define NVS_AGENDA_CAL_C_NAME_KEY "agenda_cal_c_nm"
-#define NVS_AGENDA_CAL_C_C_KEY "agenda_cal_c_c"
-#define AGENDA_CAL_C_C_DEFAULT "red"
 #define NVS_AGENDA_CAL_D_ENABLED_KEY "agenda_cal_d_en"
 #define NVS_AGENDA_CAL_D_URL_KEY "agenda_cal_d_url"
 #define AGENDA_CAL_D_URL_MAX_LEN 256
 #define NVS_AGENDA_CAL_D_NAME_KEY "agenda_cal_d_nm"
-#define NVS_AGENDA_CAL_D_C_KEY "agenda_cal_d_c"
-#define AGENDA_CAL_D_C_DEFAULT "yellow"
 #define NVS_AGENDA_CAL_E_ENABLED_KEY "agenda_cal_e_en"
 #define NVS_AGENDA_CAL_E_URL_KEY "agenda_cal_e_url"
 #define AGENDA_CAL_E_URL_MAX_LEN 256
 #define NVS_AGENDA_CAL_E_NAME_KEY "agenda_cal_e_nm"
-#define NVS_AGENDA_CAL_E_C_KEY "agenda_cal_e_c"
-#define AGENDA_CAL_E_C_DEFAULT "red"
 #define AGENDA_CAL_CDE_NAME_MAX_LEN 24
+
+// User-authored Calendar-view color profiles (see agenda_color_profile.h),
+// imported via the Web UI as JSON exported by the companion browser tool
+// "profile-editor.html". Up to AGENDA_COLOR_PROFILE_SLOTS profiles can be
+// stored on the device at once; at most one is "active" at a time
+// (0 = none, use the built-in plain default). Each slot is a whole JSON
+// file on the SD card rather than an NVS blob - profiles are small
+// (well under 1KB) but arbitrary/free-form, unlike every other Agenda
+// setting here which is a single scalar value.
+#define AGENDA_COLOR_PROFILE_SLOTS 3
+#define NVS_AGENDA_COLOR_PROFILE_ACTIVE_KEY "agenda_clrp_a"
+#define AGENDA_COLOR_PROFILE_PATH_1 FS_MOUNT_POINT "/.agenda_color_profile_1.json"
+#define AGENDA_COLOR_PROFILE_PATH_2 FS_MOUNT_POINT "/.agenda_color_profile_2.json"
+#define AGENDA_COLOR_PROFILE_PATH_3 FS_MOUNT_POINT "/.agenda_color_profile_3.json"
+// Generous but bounded - profile-editor.html's export is a small fixed-shape
+// JSON document (16 color fields + a handful of flags/strings), never
+// user-supplied free text.
+#define AGENDA_COLOR_PROFILE_MAX_BYTES 8192
 
 // WiFi association draws a brief high-current TX burst; whenever a battery
 // is in the loop (battery-only, or USB+battery together - see
@@ -799,12 +908,6 @@ typedef enum {
 // without a marginal battery rail, or users who'd rather trade the small
 // brownout-risk reduction back for full WiFi range, can turn it off.
 #define NVS_WIFI_TX_POWER_CAP_ENABLED_KEY "tx_pwr_cap_en"
-
-// Default bound for wifi_manager_connect()'s wait - matches the ~60s budget
-// callers effectively relied on before that wait was made explicitly bounded
-// (see wifi_manager.c: it used to block forever via portMAX_DELAY, which
-// could hang indefinitely on a DHCP stall after a successful association).
-#define WIFI_CONNECT_DEFAULT_TIMEOUT_MS 60000
 
 // AI API Keys (for webapp client use)
 #define AI_API_KEY_MAX_LEN 256
@@ -914,5 +1017,21 @@ typedef enum {
 #define NVS_CLIMATE_TEMP_OFFSET_KEY "climate_toff"
 #define NVS_CLIMATE_HUM_OFFSET_KEY "climate_hoff"
 #define CLIMATE_OFFSET_MAX_LEN 16
+
+// ----------------------------------------------------------------------------
+// Alarm Clock (only present in a build compiled with CONFIG_ALARM_CLOCK_ENABLED
+// - see main/Kconfig, `build.py --alarmclock`, docs/ALARMCLOCK_FEASIBILITY.md).
+// Same simplified 3-field cron grammar/limits as the rotate/agenda schedules
+// above (MAX_CRON_RULES/CRON_RULE_MAX_LEN, reused as-is) - an alarm is
+// "armed" purely by having at least one rule, "permanently disabled" purely
+// by having none, no separate enabled flag. No seeded default: unlike the
+// agenda schedule, there's no "enabled but no schedule" state to unstick -
+// an empty schedule just means no alarm is set, which is the correct
+// starting state for a fresh device.
+// ----------------------------------------------------------------------------
+#define NVS_ALARM_CRON_KEY "alarm_cron"
+#define NVS_ALARM_RING_SEC_KEY "alarm_ring_sec"
+#define ALARM_RING_DURATION_DEFAULT_SEC 60
+#define ALARM_RING_DURATION_MAX_SEC 600  // 10 minutes - generous upper bound, not a hard spec limit
 
 #endif

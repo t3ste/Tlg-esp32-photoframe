@@ -1,9 +1,53 @@
 #include "climate.h"
 
+#include "board_hal.h"
+
+// No climate sensor driver at all selected for this board
+// (components/board_hal/Kconfig - neither SENSOR_DRIVER_SHTC3 nor
+// SENSOR_DRIVER_SHT40) - every reading/classification this file would
+// otherwise carry can never do anything but fail, so it's compiled out
+// entirely. Every caller (agenda_manager.c, overlay_manager.c,
+// climate_history.c) already treats a failed read as "no climate data this
+// cycle", so these stubs need no special handling at the call sites.
+#if !BOARD_HAL_HAS_CLIMATE_SENSOR
+
+climate_category_t climate_classify_temperature(float celsius, climate_room_type_t room)
+{
+    (void) celsius;
+    (void) room;
+    return CLIMATE_CATEGORY_GOOD;
+}
+
+climate_category_t climate_classify_humidity(float humidity_percent, climate_room_type_t room)
+{
+    (void) humidity_percent;
+    (void) room;
+    return CLIMATE_CATEGORY_GOOD;
+}
+
+int climate_celsius_to_fahrenheit(float celsius)
+{
+    (void) celsius;
+    return 0;
+}
+
+esp_err_t climate_read_temperature(float *out_celsius)
+{
+    (void) out_celsius;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t climate_read_humidity(float *out_percent)
+{
+    (void) out_percent;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+#else
+
 #include <math.h>
 #include <stdlib.h>
 
-#include "board_hal.h"
 #include "config_manager.h"
 
 // One row per climate_room_type_t value (same order). Bad is an outer
@@ -87,3 +131,5 @@ esp_err_t climate_read_humidity(float *out_percent)
     *out_percent = raw + strtof(config_manager_get_climate_hum_offset(), NULL);
     return ESP_OK;
 }
+
+#endif  // BOARD_HAL_HAS_CLIMATE_SENSOR

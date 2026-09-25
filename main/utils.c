@@ -23,8 +23,10 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "http_auth.h"
 #include "image_processor.h"
 #include "mdns_service.h"
 #include "nvs.h"
@@ -200,9 +202,24 @@ static void apply_extra_ics_url(cJSON *root, const char *url_field, const char *
     }
 }
 
-esp_err_t apply_config_from_json(cJSON *root)
+esp_err_t apply_config_from_json(cJSON *root, bool from_remote)
 {
     cJSON *item;
+    // Every field below is independent - one field failing validation must
+    // never discard every field after it in the same request. Confirmed
+    // live (2026-09-20): a single non-numeric telegram_chat_id (or, in the
+    // separate incident that surfaced this, a WiFi SSID unreachable from
+    // this network) made this function `return ESP_FAIL` partway through,
+    // silently dropping every remaining field in a large Settings-page
+    // config import - Agenda, Chimes, Climate, Overlays, all of it - even
+    // though the request otherwise had nothing wrong with those fields.
+    // `had_error` now just records that *something* failed so the HTTP
+    // handler can still report it, without stopping unrelated fields from
+    // applying. utils_consume_config_error() only ever holds the most
+    // recent message if more than one field fails in the same request -
+    // still a strict improvement over previously reporting exactly one
+    // failure and hiding how much else silently never happened.
+    bool had_error = false;
 
     // General
     item = cJSON_GetObjectItem(root, "device_name");
@@ -216,12 +233,47 @@ esp_err_t apply_config_from_json(cJSON *root)
         }
     }
 
+    // Only the shape of the rule is checked. newlib's tzset() reports nothing
+    // when it can't parse one (it quietly falls back to UTC), and a POSIX
+    // parser here would only disagree with it in the corners. What is
+    // rejected is wrong under any grammar: an empty rule, control or
+    // non-ASCII bytes, and a rule the device would have to truncate.
     item = cJSON_GetObjectItem(root, "timezone");
     if (item && cJSON_IsString(item)) {
         const char *tz = cJSON_GetStringValue(item);
-        config_manager_set_timezone(tz);
-        setenv("TZ", tz, 1);
-        tzset();
+        bool tz_ok = true;
+        if (tz[0] == '\0') {
+            utils_set_config_error("Time zone must not be empty");
+            tz_ok = false;
+        }
+        if (tz_ok) {
+            for (const unsigned char *p = (const unsigned char *) tz; *p != '\0'; p++) {
+                if (*p < 0x20 || *p > 0x7e) {
+                    utils_set_config_error("Time zone must be printable ASCII");
+                    tz_ok = false;
+                    break;
+                }
+            }
+        }
+        if (tz_ok) {
+            esp_err_t tz_err = config_manager_set_timezone(tz);
+            if (tz_err == ESP_ERR_INVALID_SIZE) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Time zone is too long (max %d characters)",
+                         TIMEZONE_MAX_LEN - 1);
+                utils_set_config_error(msg);
+                tz_ok = false;
+            } else if (tz_err != ESP_OK) {
+                utils_set_config_error("Failed to save the time zone");
+                tz_ok = false;
+            } else {
+                setenv("TZ", tz, 1);
+                tzset();
+            }
+        }
+        if (!tz_ok) {
+            had_error = true;
+        }
     }
 
     // Advanced network settings (#43): custom NTP server, static IP and DNS
@@ -248,9 +300,10 @@ esp_err_t apply_config_from_json(cJSON *root)
         const char *addr = cJSON_GetStringValue(item);
         if (addr[0] != '\0' && esp_netif_str_to_ip4(addr, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid static IP address");
-            return ESP_FAIL;
+            had_error = true;
+        } else {
+            config_manager_set_static_ip(addr);
         }
-        config_manager_set_static_ip(addr);
     }
 
     item = cJSON_GetObjectItem(root, "static_netmask");
@@ -258,9 +311,10 @@ esp_err_t apply_config_from_json(cJSON *root)
         const char *addr = cJSON_GetStringValue(item);
         if (addr[0] != '\0' && esp_netif_str_to_ip4(addr, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid static netmask");
-            return ESP_FAIL;
+            had_error = true;
+        } else {
+            config_manager_set_static_netmask(addr);
         }
-        config_manager_set_static_netmask(addr);
     }
 
     item = cJSON_GetObjectItem(root, "static_gateway");
@@ -268,28 +322,39 @@ esp_err_t apply_config_from_json(cJSON *root)
         const char *addr = cJSON_GetStringValue(item);
         if (addr[0] != '\0' && esp_netif_str_to_ip4(addr, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid static gateway");
-            return ESP_FAIL;
+            had_error = true;
+        } else {
+            config_manager_set_static_gateway(addr);
         }
-        config_manager_set_static_gateway(addr);
     }
 
     item = cJSON_GetObjectItem(root, "ip_mode");
     if (item && cJSON_IsString(item)) {
         bool want_static = (strcmp(cJSON_GetStringValue(item), "static") == 0);
         if (want_static) {
+            bool static_ok = true;
             if (esp_netif_str_to_ip4(config_manager_get_static_ip(), &parsed) != ESP_OK) {
                 utils_set_config_error("Invalid static IP address");
-                return ESP_FAIL;
+                had_error = true;
+                static_ok = false;
             }
             if (esp_netif_str_to_ip4(config_manager_get_static_netmask(), &parsed) != ESP_OK) {
                 utils_set_config_error("Invalid static netmask");
-                return ESP_FAIL;
+                had_error = true;
+                static_ok = false;
             }
             if (esp_netif_str_to_ip4(config_manager_get_static_gateway(), &parsed) != ESP_OK) {
                 utils_set_config_error("Invalid static gateway");
-                return ESP_FAIL;
+                had_error = true;
+                static_ok = false;
             }
-            config_manager_set_ip_mode(IP_MODE_STATIC);
+            // Only actually switch to static mode if all three fields it
+            // depends on are valid - leaving ip_mode alone (not forcing back
+            // to DHCP) otherwise, same "don't touch what wasn't asked for"
+            // spirit as every other skipped field in this function.
+            if (static_ok) {
+                config_manager_set_ip_mode(IP_MODE_STATIC);
+            }
         } else {
             config_manager_set_ip_mode(IP_MODE_DHCP);
         }
@@ -300,9 +365,10 @@ esp_err_t apply_config_from_json(cJSON *root)
         const char *dns = cJSON_GetStringValue(item);
         if (dns[0] != '\0' && esp_netif_str_to_ip4(dns, &parsed) != ESP_OK) {
             utils_set_config_error("Invalid DNS server address");
-            return ESP_FAIL;
+            had_error = true;
+        } else {
+            config_manager_set_dns_server(dns);
         }
-        config_manager_set_dns_server(dns);
     }
 
     // WiFi
@@ -324,8 +390,7 @@ esp_err_t apply_config_from_json(cJSON *root)
 
             ESP_LOGI(TAG, "WiFi credentials changed, testing connection to: %s", new_ssid);
 
-            esp_err_t err =
-                wifi_manager_connect(new_ssid, new_password, WIFI_CONNECT_DEFAULT_TIMEOUT_MS);
+            esp_err_t err = wifi_manager_connect(new_ssid, new_password);
             if (err == ESP_OK) {
                 config_manager_set_wifi_ssid(new_ssid);
                 if (wifi_password_obj && cJSON_IsString(wifi_password_obj) &&
@@ -334,10 +399,19 @@ esp_err_t apply_config_from_json(cJSON *root)
                 }
                 ESP_LOGI(TAG, "Successfully connected and saved WiFi credentials");
             } else {
+                // Deliberately falls through instead of returning - every
+                // other field in this function is independent and applies
+                // on its own merits; a bad SSID (e.g. importing another
+                // device's config export onto one that isn't on the same
+                // network) shouldn't silently discard every field still to
+                // come below just because it happened to be processed
+                // first. Confirmed live (2026-09-20) this WAS the one
+                // early-return in an otherwise skip-and-continue function -
+                // not what actually caused that incident (a request-body
+                // size limit rejected the whole PATCH before this code
+                // ever ran), but a real latent bug in its own right.
                 ESP_LOGW(TAG, "Failed to connect to new WiFi, reverting to previous credentials");
-                wifi_manager_connect(current_ssid, config_manager_get_wifi_password(),
-                                     WIFI_CONNECT_DEFAULT_TIMEOUT_MS);
-                return ESP_FAIL;
+                wifi_manager_connect(current_ssid, config_manager_get_wifi_password());
             }
         }
     }
@@ -364,7 +438,7 @@ esp_err_t apply_config_from_json(cJSON *root)
             display_manager_initialize_paint();
         } else {
             utils_set_config_error("Display rotation must be 0 or 180 degrees");
-            return ESP_FAIL;
+            had_error = true;
         }
     }
 
@@ -376,51 +450,67 @@ esp_err_t apply_config_from_json(cJSON *root)
     }
 
     // Rotation schedule: an array of cron expressions. Validate every rule
-    // before applying any; reject the whole request on the first bad one.
+    // before applying any; reject just THIS field (not the rest of the
+    // request - see this function's own top-of-function comment) on the
+    // first bad one. The do/while(0)+break wrapper exists purely so a
+    // validation failure partway through the array can skip straight to
+    // "leave the existing schedule alone" without an early function return.
     item = cJSON_GetObjectItem(root, "rotate_cron");
-    if (item && cJSON_IsArray(item)) {
-        int count = cJSON_GetArraySize(item);
-        if (count > MAX_CRON_RULES) {
-            char msg[64];
-            snprintf(msg, sizeof(msg), "Too many schedule rules (max %d)", MAX_CRON_RULES);
-            utils_set_config_error(msg);
-            return ESP_FAIL;
-        }
-        // An empty schedule is ambiguous (it would silently fall back to
-        // hourly rotation, and the empty set can't be restored after a
-        // reboot). Turning auto_rotate off is the way to stop rotating.
-        if (count == 0) {
-            utils_set_config_error("Schedule must contain at least one rule");
-            return ESP_FAIL;
-        }
-        const char *rules[MAX_CRON_RULES];
-        int n = 0;
-        cJSON *el;
-        cJSON_ArrayForEach(el, item)
-        {
-            if (!cJSON_IsString(el)) {
-                utils_set_config_error("Schedule rule must be a string");
-                return ESP_FAIL;
-            }
-            const char *expr = cJSON_GetStringValue(el);
-            if (strlen(expr) >= CRON_RULE_MAX_LEN) {
-                utils_set_config_error("Cron expression too long");
-                return ESP_FAIL;
-            }
-            cron_rule_t tmp;
-            if (!cron_parse(expr, &tmp)) {
-                char msg[96];
-                snprintf(msg, sizeof(msg), "Invalid cron expression: %s", expr);
+    if (item && cJSON_IsArray(item))
+        do {
+            int count = cJSON_GetArraySize(item);
+            if (count > MAX_CRON_RULES) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Too many schedule rules (max %d)", MAX_CRON_RULES);
                 utils_set_config_error(msg);
-                return ESP_FAIL;
+                had_error = true;
+                break;
             }
-            if (n < MAX_CRON_RULES) {
-                rules[n++] = expr;
+            // An empty schedule is ambiguous (it would silently fall back to
+            // hourly rotation, and the empty set can't be restored after a
+            // reboot). Turning auto_rotate off is the way to stop rotating.
+            if (count == 0) {
+                utils_set_config_error("Schedule must contain at least one rule");
+                had_error = true;
+                break;
             }
-        }
-        config_manager_set_cron_rules(rules, n);
-        power_manager_reset_rotate_timer();
-    } else {
+            const char *rules[MAX_CRON_RULES];
+            int n = 0;
+            cJSON *el;
+            bool rule_error = false;
+            cJSON_ArrayForEach(el, item)
+            {
+                if (!cJSON_IsString(el)) {
+                    utils_set_config_error("Schedule rule must be a string");
+                    rule_error = true;
+                    break;
+                }
+                const char *expr = cJSON_GetStringValue(el);
+                if (strlen(expr) >= CRON_RULE_MAX_LEN) {
+                    utils_set_config_error("Cron expression too long");
+                    rule_error = true;
+                    break;
+                }
+                cron_rule_t tmp;
+                if (!cron_parse(expr, &tmp)) {
+                    char msg[96];
+                    snprintf(msg, sizeof(msg), "Invalid cron expression: %s", expr);
+                    utils_set_config_error(msg);
+                    rule_error = true;
+                    break;
+                }
+                if (n < MAX_CRON_RULES) {
+                    rules[n++] = expr;
+                }
+            }
+            if (rule_error) {
+                had_error = true;
+                break;
+            }
+            config_manager_set_cron_rules(rules, n);
+            power_manager_reset_rotate_timer();
+        } while (0);
+    else {
         // Backward compatibility: convert a legacy interval to a cron rule.
         item = cJSON_GetObjectItem(root, "rotate_interval");
         if (item && cJSON_IsNumber(item)) {
@@ -471,19 +561,47 @@ esp_err_t apply_config_from_json(cJSON *root)
                 if (pin_ret != ESP_OK) {
                     ESP_LOGE(TAG, "Cert pin failed, rejecting config: %s", err_buf);
                     utils_set_cert_pin_error(err_buf);
-                    return ESP_FAIL;
+                    had_error = true;
+                } else {
+                    config_manager_set_image_url(new_url);
                 }
-            } else if (cur_is_https) {
-                // Downgrading to HTTP/empty: clear the pinned cert
-                cert_pin_clear();
+            } else {
+                if (cur_is_https) {
+                    // Downgrading to HTTP/empty: clear the pinned cert
+                    cert_pin_clear();
+                }
+                config_manager_set_image_url(new_url);
             }
-            config_manager_set_image_url(new_url);
         }
     }
 
     item = cJSON_GetObjectItem(root, "access_token");
     if (item && cJSON_IsString(item)) {
         config_manager_set_access_token(cJSON_GetStringValue(item));
+    }
+
+    // Optional password for the device's own HTTP API (#130). Send "" to
+    // disable it again. Never echoed back by GET /api/config.
+    // Refuse an over-long one rather than store a truncated prefix: the owner
+    // would then be locked out by the very password they typed.
+    // Only a client that already passed the password gate may change it. The
+    // image server's config push arrives on the frame's own outbound request,
+    // with no such check, so a compromised or misconfigured server must not
+    // be able to lock the owner out or quietly open the device.
+    item = cJSON_GetObjectItem(root, "http_password");
+    if (item && from_remote) {
+        ESP_LOGW(TAG, "Ignoring http_password in server-pushed config");
+    } else if (item && cJSON_IsString(item)) {
+        esp_err_t pw_err = config_manager_set_http_password(cJSON_GetStringValue(item));
+        if (pw_err == ESP_ERR_INVALID_SIZE) {
+            utils_set_config_error("Device password is too long (max 63 bytes)");
+            had_error = true;
+        } else if (pw_err != ESP_OK) {
+            utils_set_config_error("Failed to save the device password");
+            had_error = true;
+        }
+        // Lockouts earned against the old password shouldn't outlive it.
+        http_auth_limiter_reset();
     }
 
     item = cJSON_GetObjectItem(root, "http_header_key");
@@ -534,9 +652,10 @@ esp_err_t apply_config_from_json(cJSON *root)
         }
         if (!valid) {
             utils_set_config_error("Telegram chat ID must be a numeric ID");
-            return ESP_FAIL;
+            had_error = true;
+        } else {
+            config_manager_set_telegram_chat_id(chat_id);
         }
-        config_manager_set_telegram_chat_id(chat_id);
     }
 
     item = cJSON_GetObjectItem(root, "telegram_pairing_enabled");
@@ -602,6 +721,17 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "wifi_extended_retry_enabled");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_wifi_extended_retry_enabled(cJSON_IsTrue(item));
+    }
+
+    item = cJSON_GetObjectItem(root, "wifi_reprovision_on_fail_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_wifi_reprovision_on_fail_enabled(cJSON_IsTrue(item));
+    }
+
+    // Takes effect on the next http_server_init() (boot/reconnect), not live.
+    item = cJSON_GetObjectItem(root, "https_enabled");
+    if (item && cJSON_IsBool(item)) {
+        config_manager_set_https_enabled(cJSON_IsTrue(item));
     }
 
     // Auto-rotate orientation pairing (random mode only)
@@ -772,6 +902,34 @@ esp_err_t apply_config_from_json(cJSON *root)
     item = cJSON_GetObjectItem(root, "agenda_cal_days");
     if (item && cJSON_IsNumber(item)) {
         config_manager_set_agenda_cal_days(item->valueint);
+    }
+    item = cJSON_GetObjectItem(root, "agenda_cal_layout_mode");
+    if (item && cJSON_IsString(item)) {
+        const char *layout_str = cJSON_GetStringValue(item);
+        agenda_cal_layout_mode_t layout_mode = AGENDA_CAL_LAYOUT_LIST;
+        if (strcmp(layout_str, "grid_a") == 0) {
+            layout_mode = AGENDA_CAL_LAYOUT_GRID_A;
+        } else if (strcmp(layout_str, "grid_b") == 0) {
+            layout_mode = AGENDA_CAL_LAYOUT_GRID_B;
+        }
+        config_manager_set_agenda_cal_layout_mode(layout_mode);
+    }
+    item = cJSON_GetObjectItem(root, "agenda_shift_model");
+    if (item && cJSON_IsString(item)) {
+        const char *model_str = cJSON_GetStringValue(item);
+        agenda_shift_model_t shift_model = AGENDA_SHIFT_MODEL_NONE;
+        if (strcmp(model_str, "2-2-3") == 0) {
+            shift_model = AGENDA_SHIFT_MODEL_2_2_3;
+        } else if (strcmp(model_str, "week_week") == 0) {
+            shift_model = AGENDA_SHIFT_MODEL_WEEK_WEEK;
+        } else if (strcmp(model_str, "3-4") == 0) {
+            shift_model = AGENDA_SHIFT_MODEL_3_4;
+        }
+        config_manager_set_agenda_shift_model(shift_model);
+    }
+    item = cJSON_GetObjectItem(root, "agenda_shift_start");
+    if (item && cJSON_IsString(item)) {
+        config_manager_set_agenda_shift_start(cJSON_GetStringValue(item));
     }
     item = cJSON_GetObjectItem(root, "agenda_cal_weather_enabled");
     if (item && cJSON_IsBool(item)) {
@@ -958,53 +1116,60 @@ esp_err_t apply_config_from_json(cJSON *root)
     // requires a non-empty schedule before agenda mode can ever fire, so
     // an empty schedule is just "not configured yet," not an error).
     item = cJSON_GetObjectItem(root, "agenda_cron");
-    if (item && cJSON_IsArray(item)) {
-        int count = cJSON_GetArraySize(item);
-        if (count > MAX_CRON_RULES) {
-            char msg[64];
-            snprintf(msg, sizeof(msg), "Too many agenda schedule rules (max %d)", MAX_CRON_RULES);
-            utils_set_config_error(msg);
-            config_manager_end_agenda_batch();
-            return ESP_FAIL;
-        }
-        const char *rules[MAX_CRON_RULES];
-        int n = 0;
-        cJSON *el;
-        cJSON_ArrayForEach(el, item)
-        {
-            if (!cJSON_IsString(el)) {
-                utils_set_config_error("Agenda schedule rule must be a string");
-                config_manager_end_agenda_batch();
-                return ESP_FAIL;
-            }
-            const char *expr = cJSON_GetStringValue(el);
-            if (strlen(expr) >= CRON_RULE_MAX_LEN) {
-                utils_set_config_error("Cron expression too long");
-                config_manager_end_agenda_batch();
-                return ESP_FAIL;
-            }
-            cron_rule_t tmp;
-            if (!cron_parse(expr, &tmp)) {
-                char msg[96];
-                snprintf(msg, sizeof(msg), "Invalid agenda cron expression: %s", expr);
+    if (item && cJSON_IsArray(item))
+        do {
+            int count = cJSON_GetArraySize(item);
+            if (count > MAX_CRON_RULES) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Too many agenda schedule rules (max %d)",
+                         MAX_CRON_RULES);
                 utils_set_config_error(msg);
-                config_manager_end_agenda_batch();
-                return ESP_FAIL;
+                had_error = true;
+                break;
             }
-            if (n < MAX_CRON_RULES) {
-                rules[n++] = expr;
+            const char *rules[MAX_CRON_RULES];
+            int n = 0;
+            cJSON *el;
+            bool rule_error = false;
+            cJSON_ArrayForEach(el, item)
+            {
+                if (!cJSON_IsString(el)) {
+                    utils_set_config_error("Agenda schedule rule must be a string");
+                    rule_error = true;
+                    break;
+                }
+                const char *expr = cJSON_GetStringValue(el);
+                if (strlen(expr) >= CRON_RULE_MAX_LEN) {
+                    utils_set_config_error("Cron expression too long");
+                    rule_error = true;
+                    break;
+                }
+                cron_rule_t tmp;
+                if (!cron_parse(expr, &tmp)) {
+                    char msg[96];
+                    snprintf(msg, sizeof(msg), "Invalid agenda cron expression: %s", expr);
+                    utils_set_config_error(msg);
+                    rule_error = true;
+                    break;
+                }
+                if (n < MAX_CRON_RULES) {
+                    rules[n++] = expr;
+                }
             }
-        }
-        config_manager_set_agenda_cron_rules(rules, n);
-        power_manager_reset_agenda_timer();
-    }
+            if (rule_error) {
+                had_error = true;
+                break;
+            }
+            config_manager_set_agenda_cron_rules(rules, n);
+            power_manager_reset_agenda_timer();
+        } while (0);
     item = cJSON_GetObjectItem(root, "agenda_stack_layout");
     if (item && cJSON_IsBool(item)) {
         config_manager_set_agenda_stack_layout(cJSON_IsTrue(item));
     }
-    item = cJSON_GetObjectItem(root, "agenda_bg_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_bg_color(cJSON_GetStringValue(item));
+    item = cJSON_GetObjectItem(root, "agenda_color_profile_active");
+    if (item && cJSON_IsNumber(item)) {
+        config_manager_set_agenda_color_profile_active(item->valueint);
     }
     // Per-role color pickers - all optional, non-secret, plain strings (one
     // of "red"/"yellow"/"blue"/"green"); an invalid/unrecognized value is
@@ -1045,29 +1210,74 @@ esp_err_t apply_config_from_json(cJSON *root)
     if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
         config_manager_set_agenda_context_color(cJSON_GetStringValue(item));
     }
-    item = cJSON_GetObjectItem(root, "agenda_cal_a_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_cal_a_color(cJSON_GetStringValue(item));
+
+    // Alarm clock schedule - same shape/validation as agenda_cron above.
+    // config_manager_set_alarm_cron_rules() is a harmless no-op on a build
+    // without CONFIG_ALARM_CLOCK_ENABLED, so this needs no #ifdef here.
+    item = cJSON_GetObjectItem(root, "alarm_cron");
+    if (item && cJSON_IsArray(item))
+        do {
+            int count = cJSON_GetArraySize(item);
+            if (count > MAX_CRON_RULES) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Too many alarm schedule rules (max %d)",
+                         MAX_CRON_RULES);
+                utils_set_config_error(msg);
+                had_error = true;
+                break;
+            }
+            const char *rules[MAX_CRON_RULES];
+            int n = 0;
+            cJSON *el;
+            bool rule_error = false;
+            cJSON_ArrayForEach(el, item)
+            {
+                if (!cJSON_IsString(el)) {
+                    utils_set_config_error("Alarm schedule rule must be a string");
+                    rule_error = true;
+                    break;
+                }
+                const char *expr = cJSON_GetStringValue(el);
+                if (strlen(expr) >= CRON_RULE_MAX_LEN) {
+                    utils_set_config_error("Cron expression too long");
+                    rule_error = true;
+                    break;
+                }
+                cron_rule_t tmp;
+                if (!cron_parse(expr, &tmp)) {
+                    char msg[96];
+                    snprintf(msg, sizeof(msg), "Invalid alarm cron expression: %s", expr);
+                    utils_set_config_error(msg);
+                    rule_error = true;
+                    break;
+                }
+                if (n < MAX_CRON_RULES) {
+                    rules[n++] = expr;
+                }
+            }
+            if (rule_error) {
+                had_error = true;
+                break;
+            }
+            config_manager_set_alarm_cron_rules(rules, n);
+        } while (0);
+
+    item = cJSON_GetObjectItem(root, "alarm_ring_duration_sec");
+    if (item && cJSON_IsNumber(item)) {
+        if (item->valueint > 0 && item->valueint <= ALARM_RING_DURATION_MAX_SEC) {
+            config_manager_set_alarm_ring_duration_sec((uint16_t) item->valueint);
+        } else {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Alarm ring duration must be 1-%d seconds",
+                     ALARM_RING_DURATION_MAX_SEC);
+            utils_set_config_error(msg);
+            had_error = true;
+        }
     }
-    item = cJSON_GetObjectItem(root, "agenda_cal_b_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_cal_b_color(cJSON_GetStringValue(item));
-    }
-    item = cJSON_GetObjectItem(root, "agenda_cal_c_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_cal_c_color(cJSON_GetStringValue(item));
-    }
-    item = cJSON_GetObjectItem(root, "agenda_cal_d_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_cal_d_color(cJSON_GetStringValue(item));
-    }
-    item = cJSON_GetObjectItem(root, "agenda_cal_e_color");
-    if (item && cJSON_IsString(item) && strlen(cJSON_GetStringValue(item)) > 0) {
-        config_manager_set_agenda_cal_e_color(cJSON_GetStringValue(item));
-    }
+
     config_manager_end_agenda_batch();
 
-    return ESP_OK;
+    return had_error ? ESP_FAIL : ESP_OK;
 }
 
 // Context for HTTP event handler
@@ -1144,9 +1354,11 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 // *not_modified and returns ESP_OK with nothing downloaded. On success,
 // detects the image format (falling back to the Content-Type header) and
 // hands out the optional thumbnail URL and remote-config payload the server
-// sent along (heap strings, caller frees; NULL/empty when absent).
+// sent along, and the response ETag (heap strings, caller frees; NULL/empty
+// when absent).
 static esp_err_t fetch_perform_download(const char *url, bool *not_modified, image_format_t *format,
-                                        char **thumbnail_url_out, char **config_payload_out)
+                                        char **thumbnail_url_out, char **config_payload_out,
+                                        char **etag_out)
 {
     // Reset per-fetch; the HTTP event handler sets it if the server sends the
     // X-Post-Rotate-Wait-Sec header (on either a 200 or a 304 response).
@@ -1167,6 +1379,7 @@ static esp_err_t fetch_perform_download(const char *url, bool *not_modified, ima
 
     *thumbnail_url_out = NULL;
     *config_payload_out = NULL;
+    *etag_out = NULL;
 
     // Allocate buffers once before retry loop
     thumbnail_url_buffer = calloc(512, 1);
@@ -1176,6 +1389,9 @@ static esp_err_t fetch_perform_download(const char *url, bool *not_modified, ima
 
     if (!content_type || !thumbnail_url_buffer || !config_payload_buffer || !etag_buffer) {
         ESP_LOGE(TAG, "Failed to allocate memory for download context");
+        // Every failure leaves its own reason, so /api/rotate and the UI
+        // never report an older one.
+        utils_set_last_fetch_error("Out of memory");
         free(content_type);
         free(thumbnail_url_buffer);
         free(config_payload_buffer);
@@ -1183,12 +1399,28 @@ static esp_err_t fetch_perform_download(const char *url, bool *not_modified, ima
         return ESP_FAIL;
     }
 
-    // Retry loop
+    // Retry loop. A retry only starts while the fetch is still inside its time
+    // budget: quick failures (connection refused, a server hiccup) get their
+    // retries, but after a slow attempt on a weak link -- where each try can take
+    // a minute or more -- another one mostly spends battery on the same result
+    // (#121).
+    int64_t fetch_start_us = esp_timer_get_time();
+    int attempts = 0;
     for (int retry = 0; retry < max_retries; retry++) {
         if (retry > 0) {
-            ESP_LOGW(TAG, "Retry attempt %d/%d after 3 second delay...", retry + 1, max_retries);
-            vTaskDelay(pdMS_TO_TICKS(3000));  // 3 second delay between retries
+            // Count the delay below too: the next attempt must start inside
+            // the budget, not merely the wait before it.
+            int elapsed_ms = (int) ((esp_timer_get_time() - fetch_start_us) / 1000);
+            if (elapsed_ms + FETCH_RETRY_DELAY_MS >= FETCH_RETRY_BUDGET_MS) {
+                ESP_LOGW(TAG, "Not retrying: fetch already took %d ms (budget %d ms)", elapsed_ms,
+                         FETCH_RETRY_BUDGET_MS);
+                break;
+            }
+            ESP_LOGW(TAG, "Retry attempt %d/%d after %d ms delay...", retry + 1, max_retries,
+                     FETCH_RETRY_DELAY_MS);
+            vTaskDelay(pdMS_TO_TICKS(FETCH_RETRY_DELAY_MS));
         }
+        attempts++;
 
         FILE *file = fopen(temp_upload_path, "wb");
         if (!file) {
@@ -1214,7 +1446,10 @@ static esp_err_t fetch_perform_download(const char *url, bool *not_modified, ima
 
         esp_http_client_config_t config = {
             .url = url,
-            .timeout_ms = 120000,
+            // Per socket operation (connect, and each wait for more data), not
+            // for the whole transfer: a slow-but-moving download still
+            // completes, a stalled one is abandoned in FETCH_IO_TIMEOUT_MS.
+            .timeout_ms = FETCH_IO_TIMEOUT_MS,
             .event_handler = http_event_handler,
             .user_data = &ctx,
             .max_redirection_count = 5,
@@ -1309,10 +1544,19 @@ static esp_err_t fetch_perform_download(const char *url, bool *not_modified, ima
             free(palette_json);
         }
 
-        // Add battery level
-        char batt_str[4];
-        snprintf(batt_str, sizeof(batt_str), "%i", board_hal_get_battery_percent());
-        esp_http_client_set_header(client, "X-Battery-Percentage", batt_str);
+        // Report the battery level, but only when it is actually known.
+        // board_hal_get_battery_percent() answers -1 when it has no reading,
+        // and that sentinel was going out on the wire, where the server drops
+        // it (it only records 0..100) -- indistinguishable from a frame that
+        // never reported at all, which is how #123 looked from the outside.
+        // Omitting the header instead makes absence unambiguously mean
+        // "unknown" for any consumer.
+        int battery_percent = board_hal_get_battery_percent();
+        if (battery_percent >= 0 && battery_percent <= 100) {
+            char batt_str[4];
+            snprintf(batt_str, sizeof(batt_str), "%d", battery_percent);
+            esp_http_client_set_header(client, "X-Battery-Percentage", batt_str);
+        }
 
         err = esp_http_client_perform(client);
 
@@ -1341,8 +1585,9 @@ static esp_err_t fetch_perform_download(const char *url, bool *not_modified, ima
 
         // Check if download was successful
         if (err == ESP_OK && status_code == 200 && total_downloaded > 0) {
-            ESP_LOGI(TAG, "Downloaded %d bytes (content_length: %d), content_type: %s",
-                     total_downloaded, content_length, content_type);
+            ESP_LOGI(TAG, "Downloaded %d bytes (content_length: %d), content_type: %s in %d ms",
+                     total_downloaded, content_length, content_type,
+                     (int) ((esp_timer_get_time() - fetch_start_us) / 1000));
             break;  // Success, exit retry loop
         }
 
@@ -1357,10 +1602,20 @@ static esp_err_t fetch_perform_download(const char *url, bool *not_modified, ima
 
         // Clean up failed download (don't free content_type - it's reused across retries)
         unlink(temp_upload_path);
+
+        // A 4xx is the server's verdict on this request (bad URL, bad token,
+        // 429 telling us to slow down); asking again 3 s later only spends
+        // battery on the same answer (#121, #134). 5xx and transport errors
+        // still get their retries.
+        if (err == ESP_OK && status_code >= 400 && status_code < 500) {
+            ESP_LOGW(TAG, "HTTP %d will not change on retry; giving up", status_code);
+            break;
+        }
     }
     // Check final result after all retries
     if (err != ESP_OK || status_code != 200 || total_downloaded <= 0) {
-        ESP_LOGE(TAG, "Failed to download image after %d attempts", max_retries);
+        ESP_LOGE(TAG, "Failed to download image after %d attempt(s) in %d ms", attempts,
+                 (int) ((esp_timer_get_time() - fetch_start_us) / 1000));
         // Store descriptive error for UI display
         char err_msg[256];
         if (err != ESP_OK) {
@@ -1384,10 +1639,12 @@ static esp_err_t fetch_perform_download(const char *url, bool *not_modified, ima
         return ESP_FAIL;
     }
 
-    // Persist the ETag from this successful 200 response (or clear if the server
-    // dropped it) so the next request can send If-None-Match.
-    config_manager_set_image_etag(etag_buffer);
-    free(etag_buffer);
+    // The ETag from this 200 (empty if the server sent none) goes back to the
+    // caller, which persists it only once the image is on the panel. Storing
+    // it here meant a failed decode or display was followed by a 304 on the
+    // next wake -- "unchanged", so no refresh -- and the frame stayed stuck
+    // on the previous picture until the server's image changed (#134).
+    *etag_out = etag_buffer;
 
     // Detect format regardless of Content-Type (which might be unreliable),
     // falling back to the header only when the magic-byte check fails
@@ -1407,13 +1664,17 @@ static esp_err_t fetch_perform_download(const char *url, bool *not_modified, ima
     return ESP_OK;
 }
 
-// Fetch the server-provided thumbnail into the .current.jpg slot; returns
-// whether it now holds a thumbnail for the image being displayed
+// Fetch the server-provided thumbnail into its staging file; returns whether
+// it now holds a thumbnail for the image being displayed. It takes the
+// .current.jpg slot only once the panel shows that image (see
+// fetch_promote_thumbnail): until then the slot still previews the picture
+// the panel keeps if the decode or display fails, and /api/current_image must
+// go on serving that one, not the thumbnail of a picture that never showed.
 static bool fetch_download_thumbnail(const char *thumbnail_url)
 {
     ESP_LOGI(TAG, "Downloading thumbnail from: %s", thumbnail_url);
 
-    const char *temp_jpg_path = CURRENT_JPG_PATH;
+    const char *temp_jpg_path = CURRENT_THUMB_UPLOAD_PATH;
     FILE *thumb_file = fopen(temp_jpg_path, "wb");
     if (!thumb_file) {
         return false;
@@ -1475,6 +1736,19 @@ static bool fetch_download_thumbnail(const char *thumbnail_url)
     return false;
 }
 
+// Move the staged thumbnail into the .current.jpg slot. Call only once the
+// panel shows its image. Returns whether the slot now holds it.
+static bool fetch_promote_thumbnail(void)
+{
+    unlink(CURRENT_JPG_PATH);
+    if (rename(CURRENT_THUMB_UPLOAD_PATH, CURRENT_JPG_PATH) != 0) {
+        ESP_LOGW(TAG, "Failed to save downloaded thumbnail");
+        unlink(CURRENT_THUMB_UPLOAD_PATH);
+        return false;
+    }
+    return true;
+}
+
 // Apply a remote config payload received from the server. Expected
 // structure: { "config": {...}, "processing_settings": {...},
 // "color_palette": {...} }
@@ -1490,7 +1764,7 @@ static void fetch_apply_remote_config(const char *config_payload)
 
     cJSON *config_obj = cJSON_GetObjectItem(payload, "config");
     if (config_obj && cJSON_IsObject(config_obj)) {
-        apply_config_from_json(config_obj);
+        apply_config_from_json(config_obj, true);
         applied = true;
     }
 
@@ -1571,6 +1845,8 @@ static esp_err_t fetch_stream_display(image_format_t image_format, bool thumbnai
         esp_err_t read_err = display_flow_read_file(temp_upload_path, &file_buffer, &file_size);
         if (read_err != ESP_OK) {
             unlink(temp_upload_path);
+            unlink(CURRENT_THUMB_UPLOAD_PATH);
+            utils_set_last_fetch_error("Failed to read downloaded image");
             return read_err;
         }
         if (!persistent) {
@@ -1583,11 +1859,17 @@ static esp_err_t fetch_stream_display(image_format_t image_format, bool thumbnai
     // Stage the album preview BEFORE display: end_rgb_stream publishes the
     // album link under the display mutex, and the link's .jpg sibling must
     // already exist at that moment or /api/current_image can 404
-    // (transiently, or permanently if the move fails)
+    // (transiently, or permanently if the move fails).
+    //
+    // Everything else waits: a downloaded thumbnail sits in its staging file
+    // and the .current.jpg slot keeps previewing the picture on the panel,
+    // which is what /api/current_image must serve if the display fails.
+    bool thumb_staged = thumbnail_downloaded;
     bool preview_staged = false;
     if (save_to_album && album_has_preview) {
         if (thumbnail_downloaded) {
-            preview_staged = rename(temp_jpg_path, album_thumb_path) == 0;
+            preview_staged = rename(CURRENT_THUMB_UPLOAD_PATH, album_thumb_path) == 0;
+            thumb_staged = !preview_staged;
         } else {
             preview_staged = rename(temp_upload_path, album_thumb_path) == 0;
         }
@@ -1626,12 +1908,18 @@ static esp_err_t fetch_stream_display(image_format_t image_format, bool thumbnai
         ESP_LOGW(TAG, "Album snapshot failed; keeping download as current image only");
         if (preview_staged) {
             // Bring the staged album preview back as the current thumbnail
-            // so the fallback link resolves
+            // so the fallback link resolves. The panel shows the new image,
+            // so the previous picture's preview goes; left in place it would
+            // make the rename fail on FAT and keep being served.
+            unlink(temp_jpg_path);
             if (rename(album_thumb_path, temp_jpg_path) == 0) {
                 thumbnail_downloaded = true;
             } else {
+                // No thumbnail claims the slot, so the keep-original
+                // disposal below keeps a JPG original as the preview
                 ESP_LOGW(TAG, "Failed to restore staged album thumbnail");
                 unlink(album_thumb_path);
+                thumbnail_downloaded = false;
             }
             preview_staged = false;
         }
@@ -1641,9 +1929,13 @@ static esp_err_t fetch_stream_display(image_format_t image_format, bool thumbnai
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to process and display image: %s", esp_err_to_name(err));
         unlink(temp_upload_path);
+        unlink(CURRENT_THUMB_UPLOAD_PATH);
         if (preview_staged) {
             unlink(album_thumb_path);
         }
+        char err_msg[96];
+        snprintf(err_msg, sizeof(err_msg), "Failed to process image (%s)", esp_err_to_name(err));
+        utils_set_last_fetch_error(err_msg);
         return err;
     }
 
@@ -1662,8 +1954,18 @@ static esp_err_t fetch_stream_display(image_format_t image_format, bool thumbnai
         }
         ESP_LOGI(TAG, "Saved to Downloads album: %s", album_image_path);
     } else {
-        // Keep-original policy, matching the direct display endpoint
+        // Keep-original policy, matching the direct display endpoint. The
+        // downloaded thumbnail takes the .current.jpg slot now, or the
+        // original stays as the preview if that fails.
+        if (thumb_staged) {
+            thumbnail_downloaded = fetch_promote_thumbnail();
+            thumb_staged = false;
+        }
         display_flow_retire_source(temp_upload_path, image_format, thumbnail_downloaded);
+    }
+    if (thumb_staged) {
+        // Its album staging failed above; the original serves as the preview
+        unlink(CURRENT_THUMB_UPLOAD_PATH);
     }
 
     ESP_LOGI(TAG, "Image displayed via stream");
@@ -1675,10 +1977,16 @@ static esp_err_t fetch_stream_display(image_format_t image_format, bool thumbnai
 // display-ready), optionally moving it into the Downloads album first
 static esp_err_t fetch_display_file(image_format_t image_format, bool thumbnail_fresh)
 {
+    // Staging replaces the previous .current.{epdgz,bmp} original, but its
+    // .jpg preview is untouched until the panel shows the new image, so on a
+    // failure /api/current_image still previews the picture the panel keeps.
     const char *staged = display_flow_stage_file(CURRENT_UPLOAD_PATH, image_format);
     if (!staged) {
+        unlink(CURRENT_THUMB_UPLOAD_PATH);
+        utils_set_last_fetch_error("Failed to stage downloaded image");
         return ESP_FAIL;
     }
+    bool thumb_staged = thumbnail_fresh;
 
     char display_path[512];
     snprintf(display_path, sizeof(display_path), "%s", staged);
@@ -1707,15 +2015,15 @@ static esp_err_t fetch_display_file(image_format_t image_format, bool thumbnail_
             } else {
                 snprintf(display_path, sizeof(display_path), "%s", final_image_path);
 
-                // Move the thumbnail to the album if we moved the main image
+                // Move the downloaded thumbnail to the album alongside it
                 bool thumbnail_saved_to_album = false;
-                struct stat thumb_st;
-                if (stat(CURRENT_JPG_PATH, &thumb_st) == 0) {
+                if (thumb_staged) {
                     char final_thumb_path[512];
                     snprintf(final_thumb_path, sizeof(final_thumb_path), "%s/%s.jpg",
                              downloads_path, filename_base);
-                    if (rename(CURRENT_JPG_PATH, final_thumb_path) == 0) {
+                    if (rename(CURRENT_THUMB_UPLOAD_PATH, final_thumb_path) == 0) {
                         thumbnail_saved_to_album = true;
+                        thumb_staged = false;
                     } else {
                         ESP_LOGW(TAG, "Failed to move thumbnail to Downloads album");
                     }
@@ -1739,16 +2047,17 @@ static esp_err_t fetch_display_file(image_format_t image_format, bool thumbnail_
         if (strcmp(display_path, staged) == 0) {
             unlink(display_path);
         }
+        unlink(CURRENT_THUMB_UPLOAD_PATH);
         utils_set_last_fetch_error("Failed to display fetched image");
         return ESP_FAIL;
     }
 
     // Keep the displayed .current file so /api/current_image can serve the
     // original (matching the direct-display policy); drop the stale
-    // siblings. Album saves already moved theirs. Cleanup runs only after a
-    // successful display, so a failure keeps the previous image's files
-    // (and thumbnail) intact.
-    display_flow_drop_stale_current(display_path, thumbnail_fresh);
+    // siblings. Album saves already moved theirs; a thumbnail still staged
+    // takes the .current.jpg slot only now that the panel shows its image.
+    bool keep_thumbnail = thumb_staged && fetch_promote_thumbnail();
+    display_flow_drop_stale_current(display_path, keep_thumbnail);
 
     utils_set_last_fetch_error(NULL);  // Clear error on success
     return ESP_OK;
@@ -1929,12 +2238,18 @@ esp_err_t fetch_and_display_image_from_url(const char *url, bool *not_modified)
         *not_modified = false;
     }
 
+    // The URL this ETag will belong to. `url` is normally the configured
+    // one, which the server's config push below may replace in place.
+    char fetched_url[IMAGE_URL_MAX_LEN];
+    snprintf(fetched_url, sizeof(fetched_url), "%s", url);
+
     image_format_t image_format = IMAGE_FORMAT_UNKNOWN;
     char *thumbnail_url = NULL;
     char *config_payload = NULL;
+    char *etag = NULL;
     bool was_not_modified = false;
     esp_err_t err = fetch_perform_download(url, &was_not_modified, &image_format, &thumbnail_url,
-                                           &config_payload);
+                                           &config_payload, &etag);
     if (err != ESP_OK) {
         return err;
     }
@@ -1942,6 +2257,7 @@ esp_err_t fetch_and_display_image_from_url(const char *url, bool *not_modified)
         if (not_modified) {
             *not_modified = true;
         }
+        free(etag);
         return ESP_OK;
     }
 
@@ -1956,18 +2272,38 @@ esp_err_t fetch_and_display_image_from_url(const char *url, bool *not_modified)
     }
     free(config_payload);
 
+    esp_err_t shown;
     switch (image_format) {
     case IMAGE_FORMAT_PNG:
     case IMAGE_FORMAT_JPG:
-        return fetch_stream_display(image_format, thumbnail_downloaded);
+        shown = fetch_stream_display(image_format, thumbnail_downloaded);
+        break;
     case IMAGE_FORMAT_EPD_GZ:
     case IMAGE_FORMAT_BMP:
-        return fetch_display_file(image_format, thumbnail_downloaded);
+        shown = fetch_display_file(image_format, thumbnail_downloaded);
+        break;
     default:
         ESP_LOGE(TAG, "Unsupported image format: %d", image_format);
         unlink(CURRENT_UPLOAD_PATH);
-        return ESP_FAIL;
+        unlink(CURRENT_THUMB_UPLOAD_PATH);
+        utils_set_last_fetch_error("Unsupported image format");
+        shown = ESP_FAIL;
+        break;
     }
+
+    // Only a picture that reached the panel may claim the ETag (or clear it
+    // when the server sent none). After a failure the stored one still names
+    // the picture on the panel, so the next wake asks for this one again.
+    // And only for the URL it came from: a config push in this very response
+    // may have pointed the frame elsewhere, in which case set_image_url has
+    // cleared the ETag and this one must not undo that -- offered to the new
+    // URL it could match a tag of its own and turn the first fetch there into
+    // a 304.
+    if (shown == ESP_OK && strcmp(config_manager_get_image_url(), fetched_url) == 0) {
+        config_manager_set_image_etag(etag ? etag : "");
+    }
+    free(etag);
+    return shown;
 }
 
 esp_err_t trigger_image_rotation(void)
@@ -2072,9 +2408,11 @@ esp_err_t trigger_image_rotation(void)
                 ESP_LOGI(TAG, "Image unchanged on server, skipping display refresh");
             }
         } else {
-            ESP_LOGE(TAG,
-                     "Failed to fetch and display image from URL, falling back to local rotation");
-            display_manager_rotate_from_storage();
+            // Keep whatever is on the panel. Repainting a local fallback cost
+            // a full e-paper refresh (~30 s at high current) on every failed
+            // wake, and swapped the owner's picture for a random one with no
+            // hint why (#121). The error is reported via last_fetch_error.
+            ESP_LOGE(TAG, "Failed to fetch image from URL; keeping the current picture");
             result = ESP_FAIL;
         }
     } else {

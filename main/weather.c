@@ -134,14 +134,15 @@ static esp_err_t resolve_lat_lon(char *out_lat, size_t out_lat_len, char *out_lo
     return ESP_OK;
 }
 
-static esp_err_t fetch_open_meteo(const char *lat, const char *lon, weather_forecast_t *out)
+static esp_err_t fetch_open_meteo(const char *lat, const char *lon, weather_forecast_t *out,
+                                  int max_days)
 {
     char url[320];
     snprintf(url, sizeof(url),
              "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
              "&daily=temperature_2m_max,temperature_2m_min,weather_code"
              "&forecast_days=%d&timezone=auto",
-             lat, lon, WEATHER_FORECAST_DAYS);
+             lat, lon, max_days);
 
     char *body = NULL;
     size_t body_len = 0;
@@ -171,8 +172,8 @@ static esp_err_t fetch_open_meteo(const char *lat, const char *lon, weather_fore
     }
 
     int n = cJSON_GetArraySize(time_arr);
-    if (n > WEATHER_FORECAST_DAYS) {
-        n = WEATHER_FORECAST_DAYS;
+    if (n > max_days) {
+        n = max_days;
     }
     for (int i = 0; i < n; i++) {
         cJSON *t = cJSON_GetArrayItem(time_arr, i);
@@ -275,7 +276,8 @@ static int wttrin_code_to_wmo(int code)
     }
 }
 
-static esp_err_t fetch_wttrin(const char *lat, const char *lon, weather_forecast_t *out)
+static esp_err_t fetch_wttrin(const char *lat, const char *lon, weather_forecast_t *out,
+                              int max_days)
 {
     char url[160];
     snprintf(url, sizeof(url), "https://wttr.in/%s,%s?format=j1", lat, lon);
@@ -308,8 +310,8 @@ static esp_err_t fetch_wttrin(const char *lat, const char *lon, weather_forecast
     }
 
     int n = cJSON_GetArraySize(weather_arr);
-    if (n > WEATHER_FORECAST_DAYS) {
-        n = WEATHER_FORECAST_DAYS;
+    if (n > max_days) {
+        n = max_days;
     }
     for (int i = 0; i < n; i++) {
         cJSON *day_obj = cJSON_GetArrayItem(weather_arr, i);
@@ -415,7 +417,7 @@ static int yrno_symbol_to_wmo(const char *symbol)
 // far from UTC. "Today" is necessarily a partial day (only hours from now
 // onward are in the forecast), so its min/max can undercount relative to
 // Open-Meteo's full-calendar-day figures.
-static esp_err_t fetch_yrno(const char *lat, const char *lon, weather_forecast_t *out)
+static esp_err_t fetch_yrno(const char *lat, const char *lon, weather_forecast_t *out, int max_days)
 {
     char url[200];
     snprintf(url, sizeof(url),
@@ -456,7 +458,7 @@ static esp_err_t fetch_yrno(const char *lat, const char *lon, weather_forecast_t
     int best_hour_distance = 999;   // tracks closest-to-noon entry seen for `day_symbol`
 
     int n = cJSON_GetArraySize(timeseries);
-    for (int i = 0; i < n && out->count < WEATHER_FORECAST_DAYS; i++) {
+    for (int i = 0; i < n && out->count < max_days; i++) {
         cJSON *entry = cJSON_GetArrayItem(timeseries, i);
         cJSON *time_item = entry ? cJSON_GetObjectItem(entry, "time") : NULL;
         if (!time_item || !cJSON_IsString(time_item) || strlen(time_item->valuestring) < 13) {
@@ -484,7 +486,7 @@ static esp_err_t fetch_yrno(const char *lat, const char *lon, weather_forecast_t
             have_temp = false;
             day_symbol = NULL;
             best_hour_distance = 999;
-            if (out->count >= WEATHER_FORECAST_DAYS) {
+            if (out->count >= max_days) {
                 break;
             }
         }
@@ -532,7 +534,7 @@ static esp_err_t fetch_yrno(const char *lat, const char *lon, weather_forecast_t
     }
     // Flush the final in-progress bucket (loop above only flushes on a day
     // boundary, so the last day never gets flushed inside the loop).
-    if (have_temp && out->count < WEATHER_FORECAST_DAYS) {
+    if (have_temp && out->count < max_days) {
         weather_day_t *day = &out->days[out->count];
         strncpy(day->date, current_date, sizeof(day->date) - 1);
         day->date[sizeof(day->date) - 1] = '\0';
@@ -546,12 +548,18 @@ static esp_err_t fetch_yrno(const char *lat, const char *lon, weather_forecast_t
     return ESP_OK;
 }
 
-esp_err_t weather_fetch_forecast(weather_forecast_t *out)
+esp_err_t weather_fetch_forecast(weather_forecast_t *out, int max_days)
 {
     if (!out) {
         return ESP_ERR_INVALID_ARG;
     }
     memset(out, 0, sizeof(*out));
+
+    if (max_days < 1) {
+        max_days = 1;
+    } else if (max_days > WEATHER_FORECAST_DAYS_CAP) {
+        max_days = WEATHER_FORECAST_DAYS_CAP;
+    }
 
     char lat[WEATHER_LATLON_MAX_LEN];
     char lon[WEATHER_LATLON_MAX_LEN];
@@ -562,11 +570,11 @@ esp_err_t weather_fetch_forecast(weather_forecast_t *out)
 
     const char *provider = config_manager_get_weather_provider();
     if (strcmp(provider, WEATHER_PROVIDER_WTTR_IN) == 0) {
-        err = fetch_wttrin(lat, lon, out);
+        err = fetch_wttrin(lat, lon, out, max_days);
     } else if (strcmp(provider, WEATHER_PROVIDER_YR_NO) == 0) {
-        err = fetch_yrno(lat, lon, out);
+        err = fetch_yrno(lat, lon, out, max_days);
     } else {
-        err = fetch_open_meteo(lat, lon, out);
+        err = fetch_open_meteo(lat, lon, out, max_days);
     }
     if (err != ESP_OK) {
         return err;

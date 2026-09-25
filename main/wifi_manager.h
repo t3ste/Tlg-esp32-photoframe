@@ -22,11 +22,25 @@ esp_err_t wifi_manager_set_performance_mode(bool enable);
 // Called automatically by wifi_manager_connect; exposed for the provisioning
 // connection test, which drives esp_wifi directly (#43).
 esp_err_t wifi_manager_apply_ip_config(void);
-// Blocks until connected, definitively failed, or timeout_ms elapses - never
-// longer, unlike the old unbounded wait (see wifi_manager.c for why that
-// could hang forever on a DHCP stall). Returns ESP_ERR_TIMEOUT if neither
-// happens in time.
-esp_err_t wifi_manager_connect(const char *ssid, const char *password, int timeout_ms);
+// Connect and wait for an IP, bounded by a time limit (WIFI_CONNECT_TIMEOUT_MS
+// in wifi_manager.c) - never longer, unlike the old per-call timeout_ms this
+// used to take (an unbounded wait could hang forever on a DHCP stall). ESP_OK
+// once connected; ESP_FAIL when every retry failed, or when the time limit ran
+// out while the AP was rejecting the credentials (see
+// wifi_manager_last_failure_is_credential_reject()); ESP_ERR_TIMEOUT when the
+// time limit ran out for any other reason (DHCP not answering, AP absent or
+// slow). On a timeout the attempt is still running: follow up with
+// wifi_manager_stop_connecting() or wifi_manager_keep_reconnecting().
+esp_err_t wifi_manager_connect(const char *ssid, const char *password);
+// Give up on the current connection attempt: no more automatic reconnects,
+// and WiFi is stopped. For callers that will not use the network this wake.
+void wifi_manager_stop_connecting(void);
+// Keep reconnecting with no retry limit until connected (or until sleep stops
+// WiFi). For callers that stay awake and want the network whenever it appears.
+// The one exception is an AP that keeps rejecting the credentials: after as
+// many rejections as a normal connect allows, WIFI_FAIL_BIT is set and the
+// retries stop.
+void wifi_manager_keep_reconnecting(void);
 esp_err_t wifi_manager_disconnect(void);
 // True if the most recent wifi_manager_connect() failure's disconnect reason
 // (WIFI_EVENT_STA_DISCONNECTED) is one the AP itself uses specifically to
@@ -47,5 +61,17 @@ esp_err_t wifi_manager_load_credentials(char *ssid, char *password);
 esp_err_t wifi_manager_load_credentials_from_sdcard(char *ssid, char *password);
 EventGroupHandle_t wifi_manager_get_event_group(void);
 int wifi_manager_scan(wifi_ap_record_t *results, int max_results);
+
+// On-demand offline hotspot (github.com/aitjcize/esp32-photoframe#90):
+// switches to AP-only mode with the same open/no-password SSID scheme as
+// first-time-setup provisioning, making the ALREADY-RUNNING main web UI
+// (main/http_server.c - netif-agnostic, no changes needed) reachable at
+// http://192.168.4.1 with no real WiFi network involved. Drops any existing
+// STA connection. `ssid_out` (may be NULL) receives the chosen SSID, e.g.
+// for a splash-screen QR code. wifi_manager_stop_ap_hotspot() reconnects to
+// the saved network (if any) and returns to normal operation.
+esp_err_t wifi_manager_start_ap_hotspot(char *ssid_out, size_t ssid_out_len);
+esp_err_t wifi_manager_stop_ap_hotspot(void);
+bool wifi_manager_is_ap_hotspot_active(void);
 
 #endif

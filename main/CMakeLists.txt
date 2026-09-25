@@ -1,6 +1,9 @@
 set(SOURCES
+    "agenda_color_profile.c"
     "agenda_manager.c"
     "agenda_renderer.c"
+    "alarm_manager.c"
+    "alarm_setting_ui.c"
     "album_manager.c"
     "battery_history.c"
     "calendar_ics.c"
@@ -19,11 +22,14 @@ set(SOURCES
     "ha_integration.c"
     "headlines.c"
     "history_manager.c"
+    "http_auth.c"
     "http_fetch.c"
     "http_server.c"
+    "https_cert.c"
     "image_processor.c"
     "main.c"
     "mdns_service.c"
+    "network_backoff.c"
     "ota_manager.c"
     "overlay_manager.c"
     "periodic_tasks.c"
@@ -55,6 +61,7 @@ set(PRIV_REQUIRES
     esp_http_client
     esp_http_server
     esp_https_ota
+    esp_https_server
     esp-tls
     esp_netif
     esp_timer
@@ -77,7 +84,7 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES ""
     PRIV_REQUIRES ${PRIV_REQUIRES} 
-    EMBED_FILES "webapp/index.html.gz" "webapp/icon.svg.gz" "webapp/assets/index.css.gz" "webapp/assets/index.js.gz" "webapp/assets/index2.js.gz" "webapp/assets/exif-reader.js.gz" "webapp/assets/browser.js.gz" "webapp/assets/__vite-browser-external.js.gz" "resources/measurement_sample.jpg"
+    EMBED_FILES "webapp/index.html.gz" "webapp/icon.svg.gz" "webapp/assets/index.css.gz" "webapp/assets/index.js.gz" "webapp/assets/index2.js.gz" "webapp/assets/exif-reader.js.gz" "webapp/assets/browser.js.gz" "webapp/assets/__vite-browser-external.js.gz" "webapp/profile-editor.html.gz" "resources/measurement_sample.jpg" "resources/default_agenda_color_profile.json"
 )
 
 # Embed splash screen EPDGZ files (generated at build time by generate_splash.py)

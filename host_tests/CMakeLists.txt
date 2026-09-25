@@ -57,6 +57,45 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
 
+# Backoff between failed unattended network wakes (#121), against the real cron engine
+add_executable(
+  network_backoff_test
+  test_network_backoff.cpp
+  ../main/network_backoff.c
+  ../main/cron.c
+)
+
+target_link_libraries(
+  network_backoff_test
+  GTest::gtest_main
+)
+
+target_include_directories(
+  network_backoff_test
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
+# HTTP Basic credential checking for the optional device API password (#130)
+add_executable(
+  http_auth_test
+  test_http_auth.cpp
+  ../main/http_auth.c
+)
+
+target_link_libraries(
+  http_auth_test
+  GTest::gtest_main
+)
+
+target_include_directories(
+  http_auth_test
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
 # Headline/RSS extraction (pure parsing logic split out of headlines.c's
 # network-calling headlines_fetch(), specifically so it's host-testable
 # without a real HTTP stack)
@@ -137,6 +176,8 @@ gtest_discover_tests(wake_schedule_test)
 gtest_discover_tests(headlines_test)
 gtest_discover_tests(todo_test)
 gtest_discover_tests(calendar_ics_test)
+gtest_discover_tests(network_backoff_test)
+gtest_discover_tests(http_auth_test)
 
 # On-device image pipeline characterization tests (host build of
 # main/image_processor.c against ESP-IDF stubs + system libpng)

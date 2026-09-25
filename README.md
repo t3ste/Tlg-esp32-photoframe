@@ -1,6 +1,6 @@
 # ESP32 PhotoFrame - with optional native Telegram integration
 
-A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently supporting **Waveshare PhotoPainter**, **Seeed Studio XIAO EE02/EE03/EE04**, and **Seeed Studio reTerminal E1002/E1003/E1004**). This firmware replaces stock firmware with a powerful RESTful API, web interface, and **significantly better image quality**.
+A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently supporting **Waveshare PhotoPainter**, **Seeed Studio XIAO EE02/EE03/EE04**, **Seeed Studio reTerminal E1002/E1003/E1004**, and **M5Stack M5Paper**). This firmware replaces stock firmware with a powerful RESTful API, web interface, and **significantly better image quality**.
 
 > **This is an independently maintained fork** of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe) (based on its `v2.18.0` release), maintained here as its own repository going forward rather than as a pull request back upstream. See [Changes from Upstream](#changes-from-upstream) below for the full list of what's different, and [Roadmap](#roadmap) for what's planned next. All companion-project links below (server, app, Home Assistant integration) point at the original upstream project's ecosystem, not this fork.
 
@@ -32,6 +32,7 @@ A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently 
 - 🗓️ **Agenda Mode**: ToDo (todo.txt format) and/or Calendar (up to two auto-refreshing ICS/iCal URLs, plus three extra manually-managed ICS sources for things like holidays/school-holidays that shouldn't auto-update - via URL or direct file upload) rendered full-screen — alone, or together stacked/side-by-side — on its own independent wake schedule that runs alongside normal photo rotation rather than replacing it; a matching wake just takes over the display for that one cycle, with color-coded priorities/tags/due dates, per-calendar-source colors, and a configurable background ([docs](docs/AGENDA_COLORS.html)). Each calendar source is capped at 24 events within its refresh window (30 days for the three manual sources, matching the ~183-byte-per-event fixed-size buffer this project uses everywhere instead of dynamic allocation) - comfortably enough for holidays/school-holidays, but a densely-booked source could hit it
 - 🔔 **Chimes** (`waveshare_photopainter_73` only): short beep feedback on the board's onboard speaker for photo rotated, a new Telegram photo, low battery, WiFi reprovisioning, an overdue Agenda item, a successful firmware update, or WiFi/internet lost - each individually toggleable, with a 3-way power mode (off / battery+mains / mains-only) and an optional quiet-hours window
 - 🌡️ **Climate**: temperature/humidity monitoring via the onboard SHTC3 sensor (any board whose sensor responds, not tied to one specific board) — 5 preset room-type comfort profiles, optional photo-overlay badges and Agenda-header readout, a Climate History chart, and a user-settable calibration offset
+- ⏰ **Alarm Clock** (opt-in, `waveshare_photopainter_73` only — build with `build.py --alarmclock`): bedside-alarm scheduling (Web UI or Telegram `/alarm_cron`), a repeating musical ring tone through the onboard speaker, and a fully offline physical-button time-setting UI (long-press to enter, BOOT/KEY to roll hours/minutes with tone feedback) — no WiFi or display rotation during arming or ringing, so it works even with Deep Sleep enabled; compiled out entirely on builds that don't opt in
 
 ## Screenshots
 
@@ -145,6 +146,8 @@ The measured palette accounts for the fact that e-paper displays show darker, mo
 
 **Auto-Rotation**: SD card (default) or URL-based (fetch from web)
 
+**Time zone**: pick your zone in **Settings > General** (DST is handled); the rotation schedule runs in that zone.
+
 Configure via web interface **Settings** section.
 
 ### Real-World Battery Life
@@ -179,8 +182,11 @@ Configure your API keys in **Settings > AI Generation**.
 | [Seeed Studio reTerminal E1002](https://www.seeedstudio.com/reTerminal-E1002-p-6533.html) | 7.3" 6-color | SD card (SPI) + Internal flash | `seeedstudio_reterminal_e1002` |
 | [Seeed Studio reTerminal E1003](https://www.seeedstudio.com/reTerminal-E1003-p-6731.html) | 10.3" 16-level grayscale | SD card (SPI) + Internal flash | `seeedstudio_reterminal_e1003` |
 | [Seeed Studio reTerminal E1004](https://www.seeedstudio.com/reTerminal-E1004-p-6692.html) | 13.3" 6-color | SD card (SPI) + Internal flash | `seeedstudio_reterminal_e1004` |
+| [M5Stack M5Paper v1.1](https://docs.m5stack.com/en/core/m5paper_v1.1) | 4.7" 16-level grayscale | SD card (SPI) | `m5stack_m5paper_v11` |
 
-The reTerminal E1002, E1003, and E1004 also include a SHT40 temperature/humidity sensor, PCF8563 RTC, and battery monitoring. The XIAO EE03 has a SHT40 sensor and battery monitoring as well (but no RTC).
+The reTerminal E1002, E1003, and E1004 also include a SHT40 temperature/humidity sensor, PCF8563 RTC, and battery monitoring. The XIAO EE03 has a SHT40 sensor and battery monitoring as well (but no RTC). The M5Paper has an SHT30 sensor, a BM8563 RTC, and battery monitoring.
+
+> **M5Paper note:** this is the only supported board built on the original **ESP32** rather than an ESP32-S3, so its firmware is a separate binary — flash `m5stack_m5paper_v11` and nothing else to it. The **v1.0** and **v1.1** revisions are electrically identical (v1.1 only swapped the rigid panel for a flexible one), so the same firmware runs on both. The touchscreen is not used by this firmware.
 
 ### Button Functions
 
@@ -188,11 +194,11 @@ Buttons behave differently depending on whether the device is awake (web UI acce
 
 **When in deep sleep:**
 
-| Button | Waveshare PhotoPainter | XIAO EE02 / EE03 / EE04 | reTerminal E1002 | reTerminal E1003 | reTerminal E1004 |
-|--------|----------------------|-------------------|------------------|------------------|------------------|
-| **Wake** | BOOT button | Button 3 | Green button | Refresh button | Refresh button |
-| **Rotate** | KEY button | Button 1 | Left button | Left button | Right button |
-| **Clear** | N/A | Button 2 | Right button | Right button | Left button |
+| Button | Waveshare PhotoPainter | XIAO EE02 / EE03 / EE04 | reTerminal E1002 | reTerminal E1003 | reTerminal E1004 | M5Paper |
+|--------|----------------------|-------------------|------------------|------------------|------------------|---------|
+| **Wake** | BOOT button | Button 3 | Green button | Refresh button | Refresh button | Centre (push) button |
+| **Rotate** | KEY button | Button 1 | Left button | Left button | Right button | Left button |
+| **Clear** | N/A | Button 2 | Right button | Right button | Left button | N/A (awake only) |
 
 - **Wake**: Wakes the device and starts the web UI / HTTP server (stays awake)
 - **Rotate**: Wakes the device, rotates to the next image, then goes back to sleep
@@ -206,11 +212,13 @@ Buttons behave differently depending on whether the device is awake (web UI acce
 | **Clear** | Clears the display to white |
 
 ### 💾 Internal Flash Storage
-Boards with larger flash chips (XIAO EE02/EE03/EE04, reTerminal E1002/E1004) use internal flash as persistent storage via LittleFS. On the reTerminal, the SD card takes priority when inserted; internal flash serves as a fallback. The Waveshare board does not have internal flash storage due to its 16MB flash being fully allocated to OTA partitions.
+Boards with larger flash chips (XIAO EE02/EE03/EE04, reTerminal E1002/E1004) use internal flash as persistent storage via LittleFS. On the reTerminal, the SD card takes priority when inserted; internal flash serves as a fallback. The Waveshare and M5Paper boards do not have internal flash storage due to their 16MB flash being fully allocated to OTA partitions — the M5Paper stores images on its microSD card.
 
 ### Known Issues 🚧
 
 - **PhotoPainter Restarts**: All existing Waveshare PhotoPainter boards on the market use the AXP2101 power management IC, which causes unexplained restarts when connected to both Type-C and a lithium battery simultaneously. **Workaround:** use either USB power only or battery only. Using both at the same time may cause frequent firmware restarts due to unstable power supply. Waveshare has confirmed this issue and future boards will ship with TG28 as a replacement, which will not have this problem. See [waveshareteam/ESP32-S3-PhotoPainter#5](https://github.com/waveshareteam/ESP32-S3-PhotoPainter/issues/5#issuecomment-3876269519) for details.
+- **M5Paper Deep Sleep & USB Power**: the M5Paper routes no USB VBUS signal to a GPIO and has no I2C charger to ask, so the firmware cannot tell whether it is on USB power and will keep going to sleep on its auto-sleep timer while plugged in. **Workaround:** disable deep sleep in **Settings > General** if you want the device always reachable on USB.
+- **M5Paper Clear Button**: the original ESP32's wake logic can only distinguish two buttons out of deep sleep (its EXT1 unit cannot match "any of several pins low", so the wake button uses EXT0 and the rotate button uses EXT1). The right-hand **Clear** button therefore only works while the device is awake; press the centre button first to wake it.
 - **Seeed Studio Deep Sleep & USB Power**: The XIAO EE02, EE03, and EE04 can only detect USB connections from a **PC** (via USB-Serial-JTAG SOF packets); chargers and power banks will **not** keep them awake (these boards do not route USB VBUS to an ESP32 GPIO). The same applies to **reTerminal E1002 hardware revisions earlier than V1.2**, which use the non-I2C **ETA6003** charger. The reTerminal **E1002 V1.2+** (which switched to the **SY6974B** charger) **and the E1004** read the SY6974B's power-good status over I2C, so they detect *any* USB/charger/power-bank input and stay awake on external power automatically — no workaround needed. The Waveshare PhotoPainter likewise detects USB power via its AXP2101 PMIC. **Workaround (XIAO EE02/EE03/EE04, and E1002 boards older than V1.2):** if you want the device always accessible while powered by a charger or power bank, disable deep sleep in **Settings > General**.
 
 ## Installation
@@ -254,6 +262,9 @@ We provide a `build.py` helper script to simplify building for different boards.
 
 # Build for Seeed Studio reTerminal E1004 (13.3" 6-color e-paper)
 ./build.py --board seeedstudio_reterminal_e1004
+
+# Build for M5Stack M5Paper v1.0/v1.1 (4.7" 16-level grayscale e-paper, ESP32)
+./build.py --board m5stack_m5paper_v11
 
 # Flash the firmware
 idf.py -p /dev/ttyUSB0 flash monitor
