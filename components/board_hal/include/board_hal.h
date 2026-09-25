@@ -62,7 +62,7 @@ typedef enum {
 #define BOARD_HAL_HAS_SPEAKER 0
 #endif
 
-// Boards with an onboard microphone (codec ADC -> I2S DIN) define
+// Boards with an onboard microphone (ADC -> I2S DIN) define
 // BOARD_HAL_HAS_MICROPHONE 1 in their own header, next to the speaker pins.
 #ifndef BOARD_HAL_HAS_MICROPHONE
 #define BOARD_HAL_HAS_MICROPHONE 0
