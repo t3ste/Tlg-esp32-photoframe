@@ -84,11 +84,21 @@ static void backup_history_before_reset(void)
     struct tm tm_old, tm_new;
     localtime_r(&oldest, &tm_old);
     localtime_r(&newest, &tm_new);
-    char dst_path[96];
-    snprintf(dst_path, sizeof(dst_path),
-             FS_MOUNT_POINT "/battery_history_backup_%04d%02d%02d-%04d%02d%02d.csv",
+    char base[128];
+    snprintf(base, sizeof(base), FS_MOUNT_POINT "/battery_history_backup_%04d%02d%02d-%04d%02d%02d",
              tm_old.tm_year + 1900, tm_old.tm_mon + 1, tm_old.tm_mday, tm_new.tm_year + 1900,
              tm_new.tm_mon + 1, tm_new.tm_mday);
+    char dst_path[160];
+    snprintf(dst_path, sizeof(dst_path), "%s.csv", base);
+    // Never overwrite an earlier backup that covers the same date range.
+    for (int n = 2; n <= 99; n++) {
+        FILE *probe = fopen(dst_path, "r");
+        if (!probe) {
+            break;
+        }
+        fclose(probe);
+        snprintf(dst_path, sizeof(dst_path), "%s_%d.csv", base, n);
+    }
 
     src = fopen(BATTERY_HISTORY_PATH, "r");
     if (!src) {
