@@ -7,6 +7,8 @@ All notable changes to this fork are documented here. See [README.md → Changes
 ### Added
 
 - **Microphone level monitor** (`waveshare_photopainter_73`, first step towards voice control): the onboard microphones sit on an **ES7210** ADC (not on the ES8311), which the firmware now initialises the same way Waveshare's stock example does. `POST /api/mic/level?seconds=N` (or the Maintenance tab's "Log microphone level" button) prints the input level to the console / debug log five times a second as a bar plus RMS and peak in dBFS; `GET /api/mic/level` reports the last level. Nothing is recorded or stored. `microphone_available` in the config tells the UI whether the board has a microphone.
+- **OTA release channel + firmware variant** in the Web UI's Updates tab: "Stable" (default) or "Include pre-releases", and — on boards with a speaker — an "Alarm Clock firmware" option to switch a device between the regular and the Alarm Clock build (same version is offered when only the variant differs; an older release is never offered as a "switch"). Stored on the device (`GET/PUT /api/ota/options`); the update status reports `latest_prerelease` and `variant_switch`.
+- **Web Flasher**: a **Pre-release** option (the newest published pre-release that is newer than the stable release; its firmware is hosted on the Pages site, since release assets can't be fetched cross-origin), also with the Alarm Clock option. A published pre-release no longer shows up as "Stable" in the flasher.
 
 ---
 

@@ -30,6 +30,8 @@ static const char *TAG = "ota_manager";
 #define OTA_NVS_NAMESPACE "ota"
 #define OTA_NVS_LATEST_VERSION_KEY "latest_ver"
 #define OTA_NVS_STATE_KEY "state"
+#define OTA_NVS_CHANNEL_KEY "channel"
+#define OTA_NVS_ALARM_KEY "alarm"
 #define OTA_CHECK_INTERVAL_SECONDS (24 * 60 * 60)  // 24 hours
 
 static ota_status_t ota_status = {.state = OTA_STATE_IDLE,
@@ -38,6 +40,18 @@ static ota_status_t ota_status = {.state = OTA_STATE_IDLE,
                                   .error_message = "",
                                   .progress_percent = 0};
 
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+#define RUNNING_ALARMCLOCK true
+#else
+#define RUNNING_ALARMCLOCK false
+#endif
+
+// Which release / firmware variant the next check uses (persisted, see
+// ota_set_options()). The variant defaults to whatever this build already is,
+// so an Alarm Clock build keeps updating to the Alarm Clock firmware.
+static ota_channel_t s_channel = OTA_CHANNEL_STABLE;
+static bool s_alarm_variant = RUNNING_ALARMCLOCK;
+
 static SemaphoreHandle_t ota_status_mutex = NULL;
 static bool update_available = false;
 static char firmware_url[256] = "";
@@ -45,6 +59,7 @@ static char firmware_url[256] = "";
 // Forward declarations
 static void ota_save_status_to_nvs(void);
 static void ota_load_status_from_nvs(void);
+static void ota_load_options_from_nvs(void);
 static esp_err_t ota_check_periodic_callback(void);
 
 static void set_ota_state(ota_state_t state, const char *error_msg)
@@ -99,8 +114,13 @@ static int version_compare(const char *v1, const char *v2)
     return v1_patch - v2_patch;
 }
 
+static bool want_alarm_variant(void)
+{
+    return s_alarm_variant && board_hal_has_speaker();
+}
+
 static esp_err_t fetch_github_release_info(char *latest_version, size_t version_len,
-                                           char *download_url, size_t url_len)
+                                           char *download_url, size_t url_len, bool *prerelease_out)
 {
     esp_err_t err = ESP_FAIL;
     char *response_buffer = NULL;
@@ -117,8 +137,9 @@ static esp_err_t fetch_github_release_info(char *latest_version, size_t version_
     // JSON (GitHub's per-asset metadata, e.g. the uploader object, is
     // verbose) - 64 KB leaves real headroom for more assets later.
     size_t response_len = 0;
-    err = http_fetch_get(GITHUB_API_URL, 10000, 64 * 1024, &response_buffer, &response_len, NULL,
-                         "ESP32-PhotoFrame");
+    err =
+        http_fetch_get(s_channel == OTA_CHANNEL_PRERELEASE ? GITHUB_API_URL_NEWEST : GITHUB_API_URL,
+                       10000, 64 * 1024, &response_buffer, &response_len, NULL, "ESP32-PhotoFrame");
     if (err != ESP_OK || !response_buffer) {
         ESP_LOGE(TAG, "Failed to fetch release info: %s", esp_err_to_name(err));
         return ESP_FAIL;
@@ -132,8 +153,21 @@ static esp_err_t fetch_github_release_info(char *latest_version, size_t version_
         goto cleanup;
     }
 
+    // /releases/latest returns the release object, /releases?per_page=1 an
+    // array holding it.
+    cJSON *release = json;
+    if (cJSON_IsArray(json)) {
+        release = cJSON_GetArrayItem(json, 0);
+        if (release == NULL) {
+            ESP_LOGE(TAG, "No release in response");
+            cJSON_Delete(json);
+            err = ESP_FAIL;
+            goto cleanup;
+        }
+    }
+
     // Get tag_name (version)
-    cJSON *tag_name = cJSON_GetObjectItem(json, "tag_name");
+    cJSON *tag_name = cJSON_GetObjectItem(release, "tag_name");
     if (tag_name == NULL || !cJSON_IsString(tag_name)) {
         ESP_LOGE(TAG, "tag_name not found in response");
         cJSON_Delete(json);
@@ -142,9 +176,12 @@ static esp_err_t fetch_github_release_info(char *latest_version, size_t version_
     }
 
     snprintf(latest_version, version_len, "%s", tag_name->valuestring);
+    if (prerelease_out) {
+        *prerelease_out = cJSON_IsTrue(cJSON_GetObjectItem(release, "prerelease"));
+    }
 
     // Get assets array and find .bin file
-    cJSON *assets = cJSON_GetObjectItem(json, "assets");
+    cJSON *assets = cJSON_GetObjectItem(release, "assets");
     if (assets == NULL || !cJSON_IsArray(assets)) {
         ESP_LOGE(TAG, "assets not found in response");
         cJSON_Delete(json);
@@ -157,13 +194,10 @@ static esp_err_t fetch_github_release_info(char *latest_version, size_t version_
 
     const char *board_name = BOARD_HAL_NAME;
 
-    // A build with the Alarm Clock compiled in must update to the matching
-    // "-alarmclock" release asset, or its first OTA would silently drop the feature.
-#ifdef CONFIG_ALARM_CLOCK_ENABLED
-    const char *variant_suffix = "-alarmclock";
-#else
-    const char *variant_suffix = "";
-#endif
+    // The Alarm Clock firmware is a separate "-alarmclock" release asset. By
+    // default a build updates to its own variant (an Alarm Clock build must not
+    // silently lose the feature); the Web UI can pick the other one.
+    const char *variant_suffix = want_alarm_variant() ? "-alarmclock" : "";
     char target_binary[80];
     snprintf(target_binary, sizeof(target_binary), "esp32-photoframe-%s%s.bin", board_name,
              variant_suffix);
@@ -191,7 +225,7 @@ static esp_err_t fetch_github_release_info(char *latest_version, size_t version_
 
     if (!found_binary) {
         ESP_LOGE(TAG, "No .bin file found in release assets");
-        err = ESP_FAIL;
+        err = ESP_ERR_NOT_FOUND;
         goto cleanup;
     }
 
@@ -216,29 +250,43 @@ static void ota_check_task(void *pvParameter)
     char latest_version[32] = {0};
     char download_url[256] = {0};
 
+    bool prerelease = false;
     esp_err_t err = fetch_github_release_info(latest_version, sizeof(latest_version), download_url,
-                                              sizeof(download_url));
+                                              sizeof(download_url), &prerelease);
 
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to fetch release info");
-        set_ota_state(OTA_STATE_ERROR, "Failed to check for updates");
+        if (err == ESP_ERR_NOT_FOUND) {
+            set_ota_state(OTA_STATE_ERROR, want_alarm_variant()
+                                               ? "This release has no Alarm Clock firmware yet"
+                                               : "This release has no firmware for this board");
+        } else {
+            set_ota_state(OTA_STATE_ERROR, "Failed to check for updates");
+        }
         vTaskDelete(NULL);
         return;
     }
+
+    // Installing the found release also changes the firmware variant?
+    bool variant_switch = (want_alarm_variant() != RUNNING_ALARMCLOCK);
 
     // Store latest version and URL
     if (ota_status_mutex && xSemaphoreTake(ota_status_mutex, portMAX_DELAY) == pdTRUE) {
         snprintf(ota_status.latest_version, sizeof(ota_status.latest_version), "%s",
                  latest_version);
+        ota_status.latest_prerelease = prerelease;
+        ota_status.variant_switch = variant_switch;
         xSemaphoreGive(ota_status_mutex);
     }
     snprintf(firmware_url, sizeof(firmware_url), "%s", download_url);
 
-    // Compare versions
+    // Compare versions. Same version but the other variant (Alarm Clock <->
+    // regular) is offered too; an older release is never offered as a "switch".
     int cmp = version_compare(ota_status.current_version, latest_version);
 
-    if (cmp < 0) {
-        ESP_LOGI(TAG, "Update available: %s -> %s", ota_status.current_version, latest_version);
+    if (cmp < 0 || (cmp == 0 && variant_switch)) {
+        ESP_LOGI(TAG, "Update available: %s -> %s%s%s", ota_status.current_version, latest_version,
+                 prerelease ? " (pre-release)" : "", variant_switch ? " (variant switch)" : "");
         update_available = true;
         set_ota_state(OTA_STATE_UPDATE_AVAILABLE, NULL);
     } else {
@@ -382,6 +430,7 @@ esp_err_t ota_manager_init(void)
 
     // Load last known OTA status from NVS (latest_version, state)
     ota_load_status_from_nvs();
+    ota_load_options_from_nvs();
 
     // Mark current partition as valid (for rollback support)
     const esp_partition_t *running = esp_ota_get_running_partition();
@@ -498,6 +547,80 @@ static esp_err_t ota_check_periodic_callback(void)
     // Check for updates without notifying HA (HA will poll for status)
     xTaskCreate(&ota_check_task, "ota_check_task", 12288, NULL, 5, NULL);
 
+    return ESP_OK;
+}
+
+static void ota_load_options_from_nvs(void)
+{
+    s_channel = OTA_CHANNEL_STABLE;
+    s_alarm_variant = RUNNING_ALARMCLOCK;
+
+    nvs_handle_t nvs_handle;
+    if (nvs_open(OTA_NVS_NAMESPACE, NVS_READONLY, &nvs_handle) != ESP_OK) {
+        return;
+    }
+    uint8_t value = 0;
+    if (nvs_get_u8(nvs_handle, OTA_NVS_CHANNEL_KEY, &value) == ESP_OK &&
+        value <= OTA_CHANNEL_PRERELEASE) {
+        s_channel = (ota_channel_t) value;
+    }
+    if (nvs_get_u8(nvs_handle, OTA_NVS_ALARM_KEY, &value) == ESP_OK) {
+        s_alarm_variant = (value != 0);
+    }
+    nvs_close(nvs_handle);
+}
+
+void ota_get_options(ota_options_t *out)
+{
+    out->channel = s_channel;
+    out->alarmclock = want_alarm_variant();
+    out->alarmclock_available = board_hal_has_speaker();
+    out->running_alarmclock = RUNNING_ALARMCLOCK;
+}
+
+esp_err_t ota_set_options(ota_channel_t channel, bool alarmclock)
+{
+    if (channel != OTA_CHANNEL_STABLE && channel != OTA_CHANNEL_PRERELEASE) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (alarmclock && !board_hal_has_speaker()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (ota_status.state == OTA_STATE_CHECKING || ota_status.state == OTA_STATE_DOWNLOADING ||
+        ota_status.state == OTA_STATE_INSTALLING) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_u8(nvs_handle, OTA_NVS_CHANNEL_KEY, (uint8_t) channel);
+    if (err == ESP_OK) {
+        err = nvs_set_u8(nvs_handle, OTA_NVS_ALARM_KEY, alarmclock ? 1 : 0);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs_handle);
+    }
+    nvs_close(nvs_handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_channel = channel;
+    s_alarm_variant = alarmclock;
+
+    // The last check answered a different question - forget it.
+    update_available = false;
+    if (ota_status_mutex && xSemaphoreTake(ota_status_mutex, portMAX_DELAY) == pdTRUE) {
+        ota_status.latest_version[0] = '\0';
+        ota_status.latest_prerelease = false;
+        ota_status.variant_switch = false;
+        xSemaphoreGive(ota_status_mutex);
+    }
+    set_ota_state(OTA_STATE_IDLE, NULL);
+    ota_save_status_to_nvs();
     return ESP_OK;
 }
 
