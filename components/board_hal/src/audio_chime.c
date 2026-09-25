@@ -47,6 +47,19 @@ esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t o
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+esp_err_t board_hal_mic_capture_with_tones(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
+                                           void *user, const board_hal_note_t *notes,
+                                           int note_count, uint8_t volume_percent)
+{
+    (void) duration_ms;
+    (void) on_block;
+    (void) user;
+    (void) notes;
+    (void) note_count;
+    (void) volume_percent;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 #else
 
 #include <math.h>
@@ -381,7 +394,7 @@ static void play_beep_pattern_tones(i2s_chan_handle_t tx, board_hal_chime_kind_t
 // capsules, MIC3 = speaker-amp reference for echo cancellation, SDOUT1 ->
 // I2S_DSOUT = GPIO18). Register sequence follows Waveshare's own stock
 // esp_codec_dev ES7210 driver as used by 01_Audio_Test ("in: {codec: ES7210}",
-// MIC1 + MIC3 selected -> stereo slot 0 = MIC1, slot 1 = MIC3, slave mode,
+// MIC1 + MIC3 selected there; here MIC1 + MIC2 -> stereo slot 0 = MIC1, slot 1 = MIC2, slave mode,
 // 16 kHz / 16 bit).
 #define ES7210_I2C_ADDR_FIRST 0x40  // AD0/AD1 select 0x40..0x43
 #define ES7210_I2C_ADDR_LAST 0x43
@@ -399,7 +412,11 @@ static esp_err_t es7210_update_bits(i2c_master_dev_handle_t dev, uint8_t reg, ui
     return es8311_write(dev, reg, (uint8_t) ((v & (uint8_t) ~mask) | (value & mask)));
 }
 
-// Enables MIC1 and MIC3 (the two I2S slots) - mirrors es7210_mic_select().
+// Enables MIC1 and MIC2 (the two onboard capsules -> left/right I2S slot) -
+// mirrors es7210_mic_select(). Waveshare's stock code selects MIC1 + MIC3 (MIC3
+// = speaker-amp reference for echo cancellation), but the ES7210 routes ADC1/2
+// to SDOUT1 (the only output wired to the ESP) and ADC3/4 to SDOUT2, so that
+// reference never reached the right slot (measured: exactly silent).
 static void es7210_select_mics(i2c_master_dev_handle_t dev, uint8_t gain)
 {
     for (uint8_t i = 0; i < 4; i++) {
@@ -412,11 +429,11 @@ static void es7210_select_mics(i2c_master_dev_handle_t dev, uint8_t gain)
     es8311_write(dev, 0x4B, 0x00);
     es7210_update_bits(dev, 0x43, 0x10, 0x10);
     es7210_update_bits(dev, 0x43, 0x0F, gain);
-    // MIC3
-    es7210_update_bits(dev, 0x01, 0x15, 0x00);
-    es8311_write(dev, 0x4C, 0x00);
-    es7210_update_bits(dev, 0x45, 0x10, 0x10);
-    es7210_update_bits(dev, 0x45, 0x0F, gain);
+    // MIC2
+    es7210_update_bits(dev, 0x01, 0x0B, 0x00);
+    es8311_write(dev, 0x4B, 0x00);
+    es7210_update_bits(dev, 0x44, 0x10, 0x10);
+    es7210_update_bits(dev, 0x44, 0x0F, gain);
     es8311_write(dev, 0x12, 0x00);  // plain 2-channel I2S, no TDM
 }
 
@@ -459,7 +476,7 @@ static esp_err_t es7210_mic_init(i2c_master_dev_handle_t dev, uint8_t gain)
     err |= es8311_write(dev, 0x00, 0x41);
     // Final PGA gain (the stock code applies it after enabling).
     err |= es7210_update_bits(dev, 0x43, 0x0F, gain);
-    err |= es7210_update_bits(dev, 0x45, 0x0F, gain);
+    err |= es7210_update_bits(dev, 0x44, 0x0F, gain);
     return err;
 }
 
@@ -766,69 +783,112 @@ bool board_hal_has_microphone(void)
     return true;
 }
 
-esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t on_block, void *user)
+// Steps through a note sequence one block at a time (a tone or silence per
+// note, 8 ms attack/release like play_tone()), then stays silent.
+typedef struct {
+    const board_hal_note_t *notes;
+    int count;
+    int idx;
+    int frame;
+    float phase;
+} tone_seq_t;
+
+static void tone_seq_fill(tone_seq_t *t, int16_t *out, int frames)
+{
+    const int edge = CHIME_SAMPLE_RATE * 8 / 1000;
+    for (int i = 0; i < frames; i++) {
+        int16_t sample = 0;
+        if (t->idx < t->count) {
+            const board_hal_note_t *note = &t->notes[t->idx];
+            int n = CHIME_SAMPLE_RATE * note->duration_ms / 1000;
+            if (note->freq_hz > 0.0f && n > 0) {
+                float env = 1.0f;
+                if (t->frame < edge) {
+                    env = (float) t->frame / (float) edge;
+                } else if (t->frame > n - edge) {
+                    env = (float) (n - t->frame) / (float) edge;
+                }
+                sample = (int16_t) (sinf(t->phase) * (float) CHIME_AMPLITUDE * env);
+                t->phase += 2.0f * (float) M_PI * note->freq_hz / (float) CHIME_SAMPLE_RATE;
+                if (t->phase > 2.0f * (float) M_PI) {
+                    t->phase -= 2.0f * (float) M_PI;
+                }
+            }
+            if (++t->frame >= n) {
+                t->idx++;
+                t->frame = 0;
+                t->phase = 0.0f;
+            }
+        }
+        out[i * 2] = sample;
+        out[i * 2 + 1] = sample;
+    }
+}
+
+// Shared by board_hal_mic_capture() and board_hal_mic_capture_with_tones():
+// with a note sequence the speaker plays it while the microphone is read, in
+// the same full-duplex I2S session.
+static esp_err_t mic_capture_impl(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
+                                  void *user, const board_hal_note_t *notes, int note_count,
+                                  uint8_t volume_percent)
 {
     if (!on_block) {
         return ESP_ERR_INVALID_ARG;
     }
+    const bool play = notes != NULL && note_count > 0;
     chime_mutex_init();
     if (!s_chime_mutex || xSemaphoreTake(s_chime_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
     audio_session_t session;
-    esp_err_t err = audio_session_open(&session, 0, true, false);
+    esp_err_t err = audio_session_open(&session, play ? volume_percent : 0, true, play);
     if (err == ESP_OK) {
         // 256 stereo frames = 16 ms per block at 16 kHz. The first blocks after
         // start-up are discarded: the analog front end of the codec still settles.
         const int SETTLE_BLOCKS = 10;
         int16_t buf[256 * 2];
-        {
-            static const uint8_t regs[] = {0x00, 0x01, 0x02, 0x03, 0x06, 0x07, 0x08, 0x11, 0x12,
-                                           0x40, 0x41, 0x42, 0x43, 0x45, 0x47, 0x49, 0x4B, 0x4C};
-            char line[200];
-            int n = 0;
-            for (size_t i = 0; i < sizeof(regs); i++) {
-                uint8_t v = 0xEE;
-                es8311_read(session.es7210, regs[i], &v);
-                n += snprintf(line + n, sizeof(line) - (size_t) n, "%02X=%02X ", regs[i], v);
-            }
-            ESP_LOGD(TAG, "ES7210 regs: %s", line);
-        }
+        int16_t tx[256 * 2];
+        tone_seq_t seq = {.notes = notes, .count = play ? note_count : 0};
         int64_t end_us = esp_timer_get_time() + (int64_t) duration_ms * 1000;
         int block = 0;
         bool keep_going = true;
         while (keep_going && esp_timer_get_time() < end_us) {
+            if (play) {
+                tone_seq_fill(&seq, tx, 256);
+                size_t written = 0;
+                i2s_channel_write(session.tx, tx, sizeof(tx), &written, pdMS_TO_TICKS(200));
+            }
             size_t bytes = 0;
             err = i2s_channel_read(session.rx, buf, sizeof(buf), &bytes, pdMS_TO_TICKS(200));
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "i2s_channel_read failed: %s", esp_err_to_name(err));
                 break;
             }
-            if (block == SETTLE_BLOCKS) {
-                int32_t mn[2] = {32767, 32767}, mx[2] = {-32768, -32768};
-                for (size_t i = 0; i < bytes / 4; i++) {
-                    for (int c = 0; c < 2; c++) {
-                        int16_t v = buf[i * 2 + (size_t) c];
-                        if (v < mn[c])
-                            mn[c] = v;
-                        if (v > mx[c])
-                            mx[c] = v;
-                    }
-                }
-                ESP_LOGD(TAG, "first block: %u bytes, L[%d..%d] R[%d..%d] raw %d %d %d %d %d %d",
-                         (unsigned) bytes, (int) mn[0], (int) mx[0], (int) mn[1], (int) mx[1],
-                         buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]);
-            }
             if (++block > SETTLE_BLOCKS) {
                 keep_going = on_block(buf, bytes / 4, user);
             }
+        }
+        if (play) {
+            i2s_write_silence(session.tx, 128);
         }
         audio_session_close(&session);
     }
 
     xSemaphoreGive(s_chime_mutex);
     return err;
+}
+
+esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t on_block, void *user)
+{
+    return mic_capture_impl(duration_ms, on_block, user, NULL, 0, 0);
+}
+
+esp_err_t board_hal_mic_capture_with_tones(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
+                                           void *user, const board_hal_note_t *notes,
+                                           int note_count, uint8_t volume_percent)
+{
+    return mic_capture_impl(duration_ms, on_block, user, notes, note_count, volume_percent);
 }
 
 #endif

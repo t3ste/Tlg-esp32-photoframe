@@ -40,27 +40,32 @@ static float to_dbfs(double amplitude)
     return db < MIC_LEVEL_FLOOR_DBFS ? MIC_LEVEL_FLOOR_DBFS : db;
 }
 
+mic_level_t mic_level_acc_channel(const mic_level_acc_t *acc, int ch)
+{
+    mic_level_t out = {MIC_LEVEL_FLOOR_DBFS, MIC_LEVEL_FLOOR_DBFS};
+    if (acc->frames == 0 || ch < 0 || ch > 1) {
+        return out;
+    }
+    double mean = (double) acc->sum[ch] / (double) acc->frames;
+    double var = (double) acc->sum_sq[ch] / (double) acc->frames - mean * mean;
+    double rms = var > 0.0 ? sqrt(var) : 0.0;
+    double peak_hi = (double) acc->max[ch] - mean;
+    double peak_lo = mean - (double) acc->min[ch];
+    out.rms_dbfs = to_dbfs(rms);
+    out.peak_dbfs = to_dbfs(peak_hi > peak_lo ? peak_hi : peak_lo);
+    return out;
+}
+
 mic_level_t mic_level_acc_result(const mic_level_acc_t *acc)
 {
     mic_level_t out = {MIC_LEVEL_FLOOR_DBFS, MIC_LEVEL_FLOOR_DBFS};
-    if (acc->frames == 0) {
-        return out;
-    }
     for (int ch = 0; ch < 2; ch++) {
-        double mean = (double) acc->sum[ch] / (double) acc->frames;
-        double var = (double) acc->sum_sq[ch] / (double) acc->frames - mean * mean;
-        double rms = var > 0.0 ? sqrt(var) : 0.0;
-        double peak_hi = (double) acc->max[ch] - mean;
-        double peak_lo = mean - (double) acc->min[ch];
-        double peak = peak_hi > peak_lo ? peak_hi : peak_lo;
-
-        float rms_db = to_dbfs(rms);
-        float peak_db = to_dbfs(peak);
-        if (rms_db > out.rms_dbfs) {
-            out.rms_dbfs = rms_db;
+        mic_level_t c = mic_level_acc_channel(acc, ch);
+        if (c.rms_dbfs > out.rms_dbfs) {
+            out.rms_dbfs = c.rms_dbfs;
         }
-        if (peak_db > out.peak_dbfs) {
-            out.peak_dbfs = peak_db;
+        if (c.peak_dbfs > out.peak_dbfs) {
+            out.peak_dbfs = c.peak_dbfs;
         }
     }
     return out;

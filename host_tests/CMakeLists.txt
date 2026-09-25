@@ -100,7 +100,9 @@ target_include_directories(
 add_executable(
   mic_level_test
   test_mic_level.cpp
+  test_mic_detect.cpp
   ../main/mic_level.c
+  ../main/mic_detect.c
 )
 
 target_link_libraries(

@@ -39,6 +39,7 @@
 #include "https_cert.h"
 #include "image_processor.h"
 #include "lwip/sockets.h"
+#include "mic_detect.h"
 #include "mic_monitor.h"
 #include "nvs_flash.h"
 #include "ota_manager.h"
@@ -1281,22 +1282,36 @@ static esp_err_t battery_handler(httpd_req_t *req)
 
 // Microphone level test (first step towards voice control): POST starts a
 // monitor that prints the input level to the console for ?seconds=N (default
-// 10), GET reports whether it runs and the last measured level.
+// 10). With &tones=1 this device also plays the self-test tone sequence on its
+// own speaker at 100 % (speaker + microphone self-test); without it the monitor
+// just listens (e.g. to another device's tones, or as the Web UI's live level
+// meter). DELETE stops a running monitor. GET reports whether it runs, the live
+// levels / noise floor / threshold and the result of the last finished run.
 static esp_err_t mic_level_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
-    char body[128];
+    char body[760];
+
+    if (req->method == HTTP_DELETE) {
+        mic_monitor_stop();
+        httpd_resp_sendstr(req, "{\"status\":\"stopping\"}");
+        return ESP_OK;
+    }
 
     if (req->method == HTTP_POST) {
         uint32_t seconds = 10;
-        char query[32];
+        bool tones = false;
+        char query[48];
         if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
             char value[8];
             if (httpd_query_key_value(query, "seconds", value, sizeof(value)) == ESP_OK) {
                 seconds = (uint32_t) strtoul(value, NULL, 10);
             }
+            if (httpd_query_key_value(query, "tones", value, sizeof(value)) == ESP_OK) {
+                tones = strcmp(value, "1") == 0 || strcmp(value, "true") == 0;
+            }
         }
-        esp_err_t err = mic_monitor_start(seconds);
+        esp_err_t err = mic_monitor_start(seconds, tones);
         if (err == ESP_ERR_NOT_SUPPORTED) {
             httpd_resp_set_status(req, HTTPD_404);
             httpd_resp_sendstr(req, "{\"error\":\"no microphone on this board\"}");
@@ -1310,20 +1325,133 @@ static esp_err_t mic_level_handler(httpd_req_t *req)
             httpd_resp_set_status(req, HTTPD_500);
             httpd_resp_sendstr(req, "{\"error\":\"could not start\"}");
         } else {
-            snprintf(body, sizeof(body), "{\"status\":\"started\",\"seconds\":%u}",
-                     (unsigned) seconds);
+            snprintf(body, sizeof(body), "{\"status\":\"started\",\"seconds\":%u,\"tones\":%s}",
+                     (unsigned) seconds, tones ? "true" : "false");
             httpd_resp_sendstr(req, body);
         }
         return ESP_OK;
     }
 
-    mic_monitor_status_t status;
-    mic_monitor_get_status(&status);
-    snprintf(body, sizeof(body),
-             "{\"available\":%s,\"running\":%s,\"rms_dbfs\":%.1f,\"peak_dbfs\":%.1f}",
-             mic_monitor_available() ? "true" : "false", status.running ? "true" : "false",
-             (double) status.rms_dbfs, (double) status.peak_dbfs);
+    mic_monitor_status_t st;
+    mic_monitor_get_status(&st);
+    int n =
+        snprintf(body, sizeof(body),
+                 "{\"available\":%s,\"running\":%s,\"tones_running\":%s,\"rms_dbfs\":%.1f,"
+                 "\"peak_dbfs\":%.1f,\"mic_dbfs\":%.1f,\"mic2_dbfs\":%.1f,\"floor_dbfs\":%.1f,"
+                 "\"threshold_dbfs\":%.1f,\"auto_threshold\":%s,\"result\":",
+                 mic_monitor_available() ? "true" : "false", st.running ? "true" : "false",
+                 st.tones_running ? "true" : "false", (double) st.rms_dbfs, (double) st.peak_dbfs,
+                 (double) st.mic_dbfs, (double) st.mic2_dbfs, (double) st.floor_dbfs,
+                 (double) st.threshold_dbfs, st.auto_threshold ? "true" : "false");
+    if (st.have_result) {
+        snprintf(body + n, sizeof(body) - (size_t) n,
+                 "{\"tones\":%s,\"baseline_dbfs\":%.1f,\"threshold_dbfs\":%.1f,"
+                 "\"mic_peak_dbfs\":%.1f,\"mic_bursts\":%u,\"mic2_peak_dbfs\":%.1f,"
+                 "\"mic2_bursts\":%u,\"expected_bursts\":%d,\"heard\":%s}}",
+                 st.result_with_tones ? "true" : "false", (double) st.baseline_dbfs,
+                 (double) st.result_threshold_dbfs, (double) st.mic_peak_dbfs, st.mic_bursts,
+                 (double) st.mic2_peak_dbfs, st.mic2_bursts, MIC_MONITOR_TEST_BURSTS,
+                 st.heard ? "true" : "false");
+    } else {
+        snprintf(body + n, sizeof(body) - (size_t) n, "null}");
+    }
     httpd_resp_sendstr(req, body);
+    return ESP_OK;
+}
+
+// GET/PUT /api/mic/settings - sensitivity of the sound detection: automatic
+// (noise floor + 20 dB, at least -45 dBFS) or a fixed threshold in dBFS.
+static esp_err_t mic_settings_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    mic_settings_t settings;
+    mic_monitor_get_settings(&settings);
+
+    if (req->method == HTTP_PUT) {
+        char buf[96];
+        int ret = httpd_req_recv(req, buf, MIN(req->content_len, sizeof(buf) - 1));
+        if (ret <= 0) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read request");
+            return ESP_FAIL;
+        }
+        buf[ret] = '\0';
+        cJSON *json = cJSON_Parse(buf);
+        if (!json) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+            return ESP_FAIL;
+        }
+        bool valid = true;
+        bool auto_threshold = settings.auto_threshold;
+        int threshold = settings.threshold_dbfs;
+        cJSON *item = cJSON_GetObjectItem(json, "auto");
+        if (item) {
+            if (cJSON_IsBool(item)) {
+                auto_threshold = cJSON_IsTrue(item);
+            } else {
+                valid = false;
+            }
+        }
+        item = cJSON_GetObjectItem(json, "threshold_dbfs");
+        if (item) {
+            if (cJSON_IsNumber(item)) {
+                threshold = (int) item->valuedouble;
+            } else {
+                valid = false;
+            }
+        }
+        cJSON_Delete(json);
+        if (!valid || mic_monitor_set_settings(auto_threshold, threshold) != ESP_OK) {
+            httpd_resp_set_status(req, HTTPD_400);
+            httpd_resp_sendstr(
+                req,
+                "{\"error\":\"auto must be a boolean, threshold_dbfs a number from -90 to 0\"}");
+            return ESP_OK;
+        }
+        mic_monitor_get_settings(&settings);
+    }
+
+    char body[160];
+    snprintf(body, sizeof(body),
+             "{\"auto\":%s,\"threshold_dbfs\":%d,\"min\":%d,\"max\":%d,"
+             "\"auto_rise_db\":%d,\"auto_min_dbfs\":%d}",
+             settings.auto_threshold ? "true" : "false", settings.threshold_dbfs,
+             MIC_THRESHOLD_MIN_DBFS, MIC_THRESHOLD_MAX_DBFS, (int) MIC_DETECT_RISE_DB,
+             (int) MIC_DETECT_MIN_THRESHOLD_DBFS);
+    httpd_resp_sendstr(req, body);
+    return ESP_OK;
+}
+
+// POST /api/mic/tones?volume=100 - plays the self-test tone sequence on this
+// device's speaker only (async), for another device's microphone to listen to.
+static esp_err_t mic_tones_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    uint32_t volume = 100;
+    char query[32];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char value[8];
+        if (httpd_query_key_value(query, "volume", value, sizeof(value)) == ESP_OK) {
+            volume = (uint32_t) strtoul(value, NULL, 10);
+        }
+    }
+    esp_err_t err = mic_monitor_play_tones((uint8_t) (volume > 255 ? 255 : volume));
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        httpd_resp_set_status(req, HTTPD_404);
+        httpd_resp_sendstr(req, "{\"error\":\"no speaker on this board\"}");
+    } else if (err == ESP_ERR_INVALID_ARG) {
+        httpd_resp_set_status(req, HTTPD_400);
+        httpd_resp_sendstr(req, "{\"error\":\"volume must be 0-100\"}");
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req, "{\"error\":\"audio already in use\"}");
+    } else if (err != ESP_OK) {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "{\"error\":\"could not start\"}");
+    } else {
+        char body[64];
+        snprintf(body, sizeof(body), "{\"status\":\"started\",\"volume\":%u}", (unsigned) volume);
+        httpd_resp_sendstr(req, body);
+    }
     return ESP_OK;
 }
 
@@ -3630,6 +3758,10 @@ static void register_all_handlers(httpd_handle_t handle)
     register_uri(handle, "/api/battery-history", HTTP_DELETE, battery_history_handler);
     register_uri(handle, "/api/mic/level", HTTP_GET, mic_level_handler);
     register_uri(handle, "/api/mic/level", HTTP_POST, mic_level_handler);
+    register_uri(handle, "/api/mic/level", HTTP_DELETE, mic_level_handler);
+    register_uri(handle, "/api/mic/tones", HTTP_POST, mic_tones_handler);
+    register_uri(handle, "/api/mic/settings", HTTP_GET, mic_settings_handler);
+    register_uri(handle, "/api/mic/settings", HTTP_PUT, mic_settings_handler);
     register_uri(handle, "/api/history", HTTP_GET, display_history_handler);
     register_uri(handle, "/api/history", HTTP_DELETE, display_history_handler);
     register_uri(handle, "/api/albums/organize-crop", HTTP_POST, organize_crop_variants_handler);
@@ -3678,10 +3810,9 @@ static void register_all_handlers(httpd_handle_t handle)
 esp_err_t http_server_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    // 72: 62 handlers are registered below as of this comment (the offline
-    // hotspot start/stop endpoints pushed the previous 64-handler margin -
-    // itself already raised twice before, from 50 then 55 - down to 2 free
-    // slots). Keep real margin above the exact count so the next handler
+    // 80: 70 handlers are registered below as of this comment (the microphone
+    // endpoints pushed the previous 72-handler margin - raised before from 64,
+    // 55 and 50 - down to 2 free slots). Keep real margin above the exact count so the next handler
     // added here doesn't silently fail to register
     // (httpd_register_uri_handler() only logs a warning on overflow, never a
     // hard error, and every following handler in the same init function
@@ -3689,7 +3820,7 @@ esp_err_t http_server_init(void)
     // silently vanish, which is what made this so easy to miss before -
     // run `grep -c "register_uri(handle," main/http_server.c` and compare
     // against this number whenever you add a new endpoint).
-    config.max_uri_handlers = 72;
+    config.max_uri_handlers = 80;
     // 16384: rotate_handler() (/api/rotate) calls trigger_image_rotation()
     // synchronously on this worker task - the same heavy pipeline that's
     // needed the same bump on button_task/deep_sleep_wake_task (12288 wasn't
@@ -3717,7 +3848,7 @@ esp_err_t http_server_init(void)
         size_t cert_len, key_len;
         if (https_cert_get(&cert_der, &cert_len, &key_der, &key_len) == ESP_OK) {
             httpd_ssl_config_t https_config = HTTPD_SSL_CONFIG_DEFAULT();
-            https_config.httpd.max_uri_handlers = 72;
+            https_config.httpd.max_uri_handlers = 80;
             https_config.httpd.stack_size = 16384;
             https_config.httpd.max_open_sockets =
                 4;  // TLS sockets cost real RAM - see esp_https_server.h

@@ -6,9 +6,18 @@ All notable changes to this fork are documented here. See [README.md → Changes
 
 ### Added
 
+- **Adjustable microphone sensitivity with a live level meter** (Maintenance tab, boards with a microphone): a "Live level" switch makes the frame listen and shows both microphones as bars with markers for the running **noise floor** (blue) and the **threshold** (red), so the threshold can be chosen from what the room actually looks like. The threshold is either automatic (noise floor + 20 dB, at least -45 dBFS) or a fixed value (slider, -90 to 0 dBFS); stored on the device (`GET/PUT /api/mic/settings`) and used by the speaker/microphone self-test and any other listener. `GET /api/mic/level` reports the live levels, floor and threshold; `DELETE` stops a running monitor.
 - **Microphone level monitor** (`waveshare_photopainter_73`, first step towards voice control): the onboard microphones sit on an **ES7210** ADC (not on the ES8311), which the firmware now initialises the same way Waveshare's stock example does. `POST /api/mic/level?seconds=N` (or the Maintenance tab's "Log microphone level" button) prints the input level to the console / debug log five times a second as a bar plus RMS and peak in dBFS; `GET /api/mic/level` reports the last level. Nothing is recorded or stored. `microphone_available` in the config tells the UI whether the board has a microphone.
 - **OTA release channel + firmware variant** in the Web UI's Updates tab: "Stable" (default) or "Include pre-releases", and — on boards with a speaker — an "Alarm Clock firmware" option to switch a device between the regular and the Alarm Clock build (same version is offered when only the variant differs; an older release is never offered as a "switch"). Stored on the device (`GET/PUT /api/ota/options`); the update status reports `latest_prerelease` and `variant_switch`.
 - **Web Flasher**: a **Pre-release** option (the newest published pre-release that is newer than the stable release; its firmware is hosted on the Pages site, since release assets can't be fetched cross-origin), also with the Alarm Clock option. A published pre-release no longer shows up as "Stable" in the flasher.
+
+---
+
+## [Unreleased]
+
+### Added
+
+- **Speaker + microphone self-test** (`waveshare_photopainter_73`): plays a tone sequence (four beeps with pauses, 100 % volume) on the speaker while the microphone listens and counts the bursts against the measured noise floor (at least 20 dB and -45 dBFS above it). Both onboard microphones are read now (left = MIC1, right = MIC2; Waveshare's stock MIC1 + MIC3 pairing left the right slot silent). Same frame (`POST /api/mic/level?seconds=8&tones=1`, also a Maintenance-tab button) or two frames (`POST /api/mic/tones` on the speaker frame while the other one listens). `GET /api/mic/level` now reports the result; `scripts/mic_selftest.py <mic-host> [--speaker <host>]` runs either variant and exits 0/1.
 
 ---
 
