@@ -9,6 +9,8 @@ set(SOURCES
     "calendar_ics.c"
     "cert_pin.c"
     "chime.c"
+    "kws.c"
+    "kws_service.c"
     "mic_detect.c"
     "mic_level.c"
     "mic_monitor.c"

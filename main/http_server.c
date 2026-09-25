@@ -38,6 +38,7 @@
 #include "http_auth.h"
 #include "https_cert.h"
 #include "image_processor.h"
+#include "kws_service.h"
 #include "lwip/sockets.h"
 #include "mic_detect.h"
 #include "mic_monitor.h"
@@ -1418,6 +1419,108 @@ static esp_err_t mic_settings_handler(httpd_req_t *req)
              MIC_THRESHOLD_MIN_DBFS, MIC_THRESHOLD_MAX_DBFS, (int) MIC_DETECT_RISE_DB,
              (int) MIC_DETECT_MIN_THRESHOLD_DBFS);
     httpd_resp_sendstr(req, body);
+    return ESP_OK;
+}
+
+// Stop-word recognition (first step towards switching a ringing alarm off by
+// voice, see kws.h): enrol the word by speaking it a few times, then test.
+static esp_err_t kws_send_error(httpd_req_t *req, esp_err_t err)
+{
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        httpd_resp_set_status(req, HTTPD_404);
+        httpd_resp_sendstr(req, "{\"error\":\"no microphone on this board\"}");
+    } else if (err == ESP_ERR_INVALID_ARG) {
+        httpd_resp_set_status(req, HTTPD_400);
+        httpd_resp_sendstr(req, "{\"error\":\"invalid duration\"}");
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req,
+                           "{\"error\":\"busy, no templates to test, or five templates already\"}");
+    } else {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "{\"error\":\"could not start\"}");
+    }
+    return ESP_OK;
+}
+
+static uint32_t kws_seconds_param(httpd_req_t *req, uint32_t fallback)
+{
+    char query[32];
+    char value[8];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "seconds", value, sizeof(value)) == ESP_OK) {
+        return (uint32_t) strtoul(value, NULL, 10);
+    }
+    return fallback;
+}
+
+// GET /api/kws/status
+static esp_err_t kws_status_handler(httpd_req_t *req)
+{
+    kws_service_status_t st;
+    kws_service_get_status(&st);
+    const char *mode = st.mode == KWS_SERVICE_ENROLLING ? "enrolling"
+                       : st.mode == KWS_SERVICE_TESTING ? "testing"
+                                                        : "idle";
+    char best[16] = "null";
+    char last[16] = "null";
+    if (st.best_score < 1.0e8f) {
+        snprintf(best, sizeof(best), "%.2f", (double) st.best_score);
+    }
+    if (st.last_score < 1.0e8f) {
+        snprintf(last, sizeof(last), "%.2f", (double) st.last_score);
+    }
+    char enroll[64] = "null";
+    if (st.have_enroll_result) {
+        snprintf(enroll, sizeof(enroll), "{\"status\":%d,\"frames\":%d}", st.enroll_status,
+                 st.enroll_frames);
+    }
+    char body[460];
+    snprintf(body, sizeof(body),
+             "{\"available\":%s,\"mode\":\"%s\",\"templates\":%d,\"max_templates\":%d,"
+             "\"threshold\":%.2f,\"enroll\":%s,"
+             "\"test\":{\"utterances\":%u,\"detections\":%u,\"best_score\":%s,"
+             "\"last_score\":%s}}",
+             st.available ? "true" : "false", mode, st.templates, KWS_MAX_TEMPLATES,
+             (double) st.threshold, enroll, st.test_utterances, st.test_detections, best, last);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, body);
+    return ESP_OK;
+}
+
+// POST /api/kws/enroll?seconds=3 - records and adds one template of the spoken word
+static esp_err_t kws_enroll_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = kws_service_enroll(kws_seconds_param(req, 3));
+    if (err != ESP_OK) {
+        return kws_send_error(req, err);
+    }
+    httpd_resp_sendstr(req, "{\"status\":\"recording\"}");
+    return ESP_OK;
+}
+
+// POST /api/kws/test?seconds=10 - listens and counts how often the word is heard
+static esp_err_t kws_test_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = kws_service_test(kws_seconds_param(req, 10));
+    if (err != ESP_OK) {
+        return kws_send_error(req, err);
+    }
+    httpd_resp_sendstr(req, "{\"status\":\"listening\"}");
+    return ESP_OK;
+}
+
+// DELETE /api/kws/templates - forget the enrolled word
+static esp_err_t kws_templates_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = kws_service_clear();
+    if (err != ESP_OK) {
+        return kws_send_error(req, err);
+    }
+    httpd_resp_sendstr(req, "{\"status\":\"cleared\"}");
     return ESP_OK;
 }
 
@@ -3762,6 +3865,10 @@ static void register_all_handlers(httpd_handle_t handle)
     register_uri(handle, "/api/mic/tones", HTTP_POST, mic_tones_handler);
     register_uri(handle, "/api/mic/settings", HTTP_GET, mic_settings_handler);
     register_uri(handle, "/api/mic/settings", HTTP_PUT, mic_settings_handler);
+    register_uri(handle, "/api/kws/status", HTTP_GET, kws_status_handler);
+    register_uri(handle, "/api/kws/enroll", HTTP_POST, kws_enroll_handler);
+    register_uri(handle, "/api/kws/test", HTTP_POST, kws_test_handler);
+    register_uri(handle, "/api/kws/templates", HTTP_DELETE, kws_templates_handler);
     register_uri(handle, "/api/history", HTTP_GET, display_history_handler);
     register_uri(handle, "/api/history", HTTP_DELETE, display_history_handler);
     register_uri(handle, "/api/albums/organize-crop", HTTP_POST, organize_crop_variants_handler);
@@ -3810,7 +3917,7 @@ static void register_all_handlers(httpd_handle_t handle)
 esp_err_t http_server_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    // 80: 70 handlers are registered below as of this comment (the microphone
+    // 80: 74 handlers are registered below as of this comment (the microphone
     // endpoints pushed the previous 72-handler margin - raised before from 64,
     // 55 and 50 - down to 2 free slots). Keep real margin above the exact count so the next handler
     // added here doesn't silently fail to register
