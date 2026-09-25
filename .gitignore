@@ -56,6 +56,7 @@ _BATT_ANAL/
 docs/AGENDA_AUDIT.md
 docs/FIRMWARE_AUDIT.md
 docs/VOICE_ALARM_AUDIT.md
+docs/PRIVACY_AUDIT.md
 docs/examples/
 docs/CMD_examples.txt
 docs/HOLIDAYS_API_PLAN.md
@@ -75,3 +76,23 @@ _icons/HEX/
 _icons/XBM/
 _icons/drafts/
 docs/UPSTREAM_INTEGRATION_STATUS.md
+
+# Local working files in the project root (device logs, test photos, drafts, third-party
+# material) - never meant for the repo; the logs contain MAC/IP addresses.
+/01_Audio_Test.ino
+/BOOTandKEY.txt
+/ESP32-S3-PhotoPainter-Schematic.pdf
+/INVERTIERT*.jpg
+/NORMAL*.jpg
+/Layout_*.jpg
+/Key.log
+/KeybtnTestwake.log
+/Versuch*.log
+/setalarm.log
+/VorschlagIconColors.md
+/color_profiles/
+/coloricons.html
+/photoframe-config*.json
+/profil-SchwarzGelb.json
+/profile-editor.html
+docs/CROP_EDITOR_PLAN.md

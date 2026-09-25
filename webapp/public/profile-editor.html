@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Spectra6 Farbprofil-Editor (Firmware)</title>
+<title>Spectra6 Color Profile Editor (Firmware)</title>
 <style>
 :root{
   --page:#fff; --ink:#000;
@@ -99,48 +99,48 @@ details.editor[open] > summary{border-bottom:1px solid #eee;border-radius:8px 8p
 <main>
   <div class="toolbar">
     <div class="field">
-      <label for="profile">Farbprofil</label>
+      <label for="profile">Color profile</label>
       <select id="profile">
         <option value="Normal">Normal</option>
-        <option value="Invertiert">Invertiert</option>
-        <option value="Benutzerdefiniert">Benutzerdefiniert (unbenannt)</option>
+        <option value="Inverted">Inverted</option>
+        <option value="Custom">Custom (unnamed)</option>
       </select>
     </div>
     <div class="field">
-      <label for="mode">Zielanzeige</label>
+      <label for="mode">Target display</label>
       <select id="mode">
-        <option value="color">Spectra6 – Farbe</option>
-        <option value="mono-normal">Monochrom</option>
-        <option value="mono-invert">Monochrom invertiert</option>
+        <option value="color">Spectra6 – color</option>
+        <option value="mono-normal">Monochrome</option>
+        <option value="mono-invert">Monochrome inverted</option>
       </select>
     </div>
     <div class="field">
-      <label for="mark">Wechselmodell (Markierfarbe)</label>
+      <label for="mark">Shift model (highlight color)</label>
       <select id="mark">
-        <option value="none">Keine Markierung</option>
-        <option value="black">Schwarz markieren</option>
-        <option value="white">Weiß markieren</option>
-        <option value="red">Rot markieren</option>
-        <option value="yellow">Gelb markieren</option>
-        <option value="blue">Blau markieren</option>
-        <option value="green">Grün markieren</option>
+        <option value="none">No highlight</option>
+        <option value="black">Highlight in black</option>
+        <option value="white">Highlight in white</option>
+        <option value="red">Highlight in red</option>
+        <option value="yellow">Highlight in yellow</option>
+        <option value="blue">Highlight in blue</option>
+        <option value="green">Highlight in green</option>
       </select>
     </div>
-    <label class="switch"><input id="headerFollowsEntries" type="checkbox"> Header folgt Eintragsfarbe (Monochrom)</label>
-    <label class="switch"><input id="headerFollowsEntriesColor" type="checkbox"> Header folgt Eintragsfarbe (Spectra6)</label>
-    <label class="switch" title="Nur relevant wenn 'Header folgt Eintragsfarbe (Spectra6)' an ist und 'Nur Header markierter Tage in Markierfarbe' aus ist: der markierte Tagesheader übernimmt sonst die normale Text-Rohfarbe unverändert, was bei einer Text-/Markierfarben-Kombination wie Weiß auf Weiß unlesbar werden kann. Mit dieser Option wird stattdessen - nur für den markierten Header, der restliche Tag bleibt unverändert - automatisch Schwarz oder Weiß gewählt, je nachdem was auf der Markierfarbe besser lesbar ist."><input id="headerFollowsEntriesColorSafeInk" type="checkbox"> Markierter Header: Text automatisch kontrastsicher</label>
-    <label class="switch"><input id="dayheadLeaderLine" type="checkbox"> Punktlinie zwischen Tag und Temperatur</label>
-    <label class="switch"><input id="markColorsHeader" type="checkbox"> Nur Header markierter Tage in Markierfarbe</label>
-    <label class="switch" title="Ohne diese Option zeigt die gestrichelte Trennlinie im Tagesheader zwischen ihren Strichen die Seiten-Hintergrundfarbe statt der Header-Farbe - das kann wie zwei verschiedene Farben in einem Header wirken. Wirkt sich nur auf der Firmware aus, nicht in dieser Vorschau."><input id="headerDividerFilled" type="checkbox"> Trennlinie im Tagesheader ohne Lücken (Vollfarbe)</label>
+    <label class="switch"><input id="headerFollowsEntries" type="checkbox"> Header follows entry color (monochrome)</label>
+    <label class="switch"><input id="headerFollowsEntriesColor" type="checkbox"> Header follows entry color (Spectra6)</label>
+    <label class="switch" title="Only relevant when 'Header follows entry color (Spectra6)' is on and 'Only highlight the header of marked days' is off: the marked day header otherwise keeps the plain raw text color, which can become unreadable for a text/highlight combination such as white on white. With this option black or white is chosen automatically instead - for the marked header only, the rest of the day is unchanged - whichever reads better on the highlight color."><input id="headerFollowsEntriesColorSafeInk" type="checkbox"> Marked header: automatic high-contrast text</label>
+    <label class="switch"><input id="dayheadLeaderLine" type="checkbox"> Dotted line between day and temperature</label>
+    <label class="switch"><input id="markColorsHeader" type="checkbox"> Only highlight the header of marked days</label>
+    <label class="switch" title="Without this option the dashed divider line in the day header shows the page background color between its dashes instead of the header color - it can look like two different colors in one header. Only affects the firmware, not this preview."><input id="headerDividerFilled" type="checkbox"> Day header divider line without gaps (solid color)</label>
     <div class="field">
-      <label for="iconBg" title="Eigene Hintergrundfarbe für das Wetter-Icon eines UNMARKIERTEN Tages, unabhängig von der Tagesheader-Farbe - verhindert, dass ein Icon (dessen Farbe den Wetterzustand anzeigt und nicht änderbar ist) im gleichen Farbton wie der Header unsichtbar wird. Auf Monochrom-Zielanzeigen wird diese Farbe ignoriert (das Icon bekommt dort automatisch immer die zum jeweiligen Tagesheader entgegengesetzte Farbe). Wirkt sich nur auf der Firmware aus, nicht in dieser Vorschau.">Wetter-Icon Hintergrund (unmarkiert)</label>
+      <label for="iconBg" title="Separate background color for the weather icon of an UNMARKED day, independent of the day header color - prevents an icon (whose color shows the weather and cannot be changed) from disappearing in the same hue as the header. Ignored on monochrome target displays (the icon always gets the color opposite to its day header there). Only affects the firmware, not this preview.">Weather icon background (unmarked)</label>
       <input type="color" id="iconBg" value="#ffffff">
     </div>
     <div class="field">
-      <label for="iconBgMarked" title="Eigene Hintergrundfarbe für das Wetter-Icon eines MARKIERTEN Tages (Wechselmodell) - unabhängig von der Hintergrundfarbe oben, die dann nur noch für unmarkierte Tage gilt. Ohne eigene Wahl gleich der unmarkierten Farbe. Auf Monochrom-Zielanzeigen ignoriert, wie oben. Wirkt sich nur auf der Firmware aus, nicht in dieser Vorschau.">Wetter-Icon Hintergrund (markiert)</label>
+      <label for="iconBgMarked" title="Separate background color for the weather icon of a MARKED day (shift model) - independent of the background color above, which then only applies to unmarked days. Defaults to the unmarked color. Ignored on monochrome target displays, as above. Only affects the firmware, not this preview.">Weather icon background (marked)</label>
       <input type="color" id="iconBgMarked" value="#ffffff">
     </div>
-    <div class="hint">Farbprofil-Editor für die eInk-Firmware. Farben direkt in der Zustandstabelle bearbeiten, Kalendertage markieren und Termine anpassen.</div>
+    <div class="hint">Color profile editor for the e-paper firmware. Edit colors directly in the state table, mark calendar days and adjust the sample entries.</div>
   </div>
 
   <div class="workspace">
@@ -149,19 +149,19 @@ details.editor[open] > summary{border-bottom:1px solid #eee;border-radius:8px 8p
     </div>
 
     <details class="editor" id="stateTableBox" open>
-      <summary><h2>Farbprofil: Zustände normal / markiert</h2></summary>
+      <summary><h2>Color profile: states normal / marked</h2></summary>
       <div class="hint" style="margin-bottom:8px">
-        Die Zeilen "normal" sind editierbar (Rohfarben, Farbprofil-Basis). Wenn ein Schalter wie "Header folgt Eintragsfarbe" die tatsächlich angezeigte Farbe eines normalen Tages verändert, erscheint unter dem Farbfeld zusätzlich "effektiv: …" mit dem wirklich sichtbaren Wert.
-        Die Zeilen "markiert" sind rein berechnete Vorschauwerte und daher nicht direkt editierbar.
+        The "normal" rows are editable (raw colors, the basis of the color profile). If a switch such as "Header follows entry color" changes the color actually shown for a normal day, "effective: …" with the value that is really visible appears below the color field.
+        The "marked" rows are computed preview values only and therefore cannot be edited directly.
       </div>
       <div class="overview-wrap">
         <table class="overview" id="stateTable">
-          <caption>Element-Farben: "normal" editierbar (Farbprofil-Basis), "markiert" berechnete Vorschau</caption>
+          <caption>Element colors: "normal" editable (color profile basis), "marked" computed preview</caption>
           <thead>
             <tr>
               <th>Element</th>
-              <th>Zustand</th>
-              <th>Hintergrund</th>
+              <th>State</th>
+              <th>Background</th>
               <th>Text</th>
             </tr>
           </thead>
@@ -169,38 +169,38 @@ details.editor[open] > summary{border-bottom:1px solid #eee;border-radius:8px 8p
         </table>
       </div>
       <div class="hint" style="margin-top:8px">
-        "+N mehr"-Anzeige entspricht der Textfarbe der Tagesfläche (normal bzw. markiert) und wird deshalb nicht separat aufgeführt.
+        The "+N more" indicator uses the text color of the day area (normal or marked) and is therefore not listed separately.
       </div>
       <div class="profile-actions">
-        <button id="save">Profil speichern …</button>
-        <button id="deleteProfile" class="danger">Profil löschen</button>
-        <button id="reset">Auswahl zurücksetzen</button>
-        <button id="exportProfile" class="primary">Profil exportieren (JSON)</button>
-        <button id="importProfileBtn" class="primary">Profil importieren (JSON)</button>
+        <button id="save">Save profile …</button>
+        <button id="deleteProfile" class="danger">Delete profile</button>
+        <button id="reset">Reset selection</button>
+        <button id="exportProfile" class="primary">Export profile (JSON)</button>
+        <button id="importProfileBtn" class="primary">Import profile (JSON)</button>
         <input type="file" id="importProfileFile" accept="application/json,.json">
       </div>
       <div class="profile-actions">
-        <label for="deviceSlot" style="font-weight:700;font-size:12px">An Gerät senden, Slot:</label>
+        <label for="deviceSlot" style="font-weight:700;font-size:12px">Send to device, slot:</label>
         <select id="deviceSlot">
           <option value="1">1</option>
           <option value="2">2</option>
           <option value="3">3</option>
         </select>
-        <button id="sendToDevice" class="primary">An Gerät senden</button>
+        <button id="sendToDevice" class="primary">Send to device</button>
       </div>
       <div id="profileNote" class="note"></div>
     </details>
   </div>
 
   <details class="editor" id="dayMarkBox" style="margin-top:16px">
-    <summary><h2>Wechselmodell-Tage</h2></summary>
-    <div class="hint" style="margin-bottom:8px">Wählt aus, welche Tage im Vorschau-Layout als "markiert" gelten. Mindestens ein markierter Tag ist nötig, damit die "markiert"-Zustände in der Tabelle und Vorschau sichtbar werden.</div>
+    <summary><h2>Shift model days</h2></summary>
+    <div class="hint" style="margin-bottom:8px">Selects which days count as "marked" in the preview layout. At least one marked day is needed for the "marked" states to become visible in the table and preview.</div>
     <div class="grid" id="dayChecks"></div>
   </details>
 
   <details class="editor" id="entriesBox" style="margin-top:16px">
-    <summary><h2>Kalender und Einträge</h2></summary>
-    <div class="hint" style="margin-bottom:8px">Vorbelegte Beispieltermine je Kalender und Tag. Text bearbeiten oder Eintrag per Checkbox aus dem Layout aus-/einblenden.</div>
+    <summary><h2>Calendars and entries</h2></summary>
+    <div class="hint" style="margin-bottom:8px">Prefilled sample entries per calendar and day. Edit the text or hide/show an entry in the layout with its checkbox.</div>
     <div class="entries" id="entries"></div>
   </details>
 </main>
@@ -209,7 +209,7 @@ details.editor[open] > summary{border-bottom:1px solid #eee;border-radius:8px 8p
 const P = { black:'#000000', white:'#ffffff', red:'#ff0000', yellow:'#ffff00', blue:'#0000ff', green:'#00ff00' };
 const MARK_VALUES = ['none','black','white','red','yellow','blue','green'];
 const MARK_HEX = { black:'#000000', white:'#ffffff', red:'#ff0000', yellow:'#ffff00', blue:'#0000ff', green:'#00ff00' };
-const MARK_LABEL = { none:'Keine Markierung', black:'Schwarz', white:'Weiß', red:'Rot', yellow:'Gelb', blue:'Blau', green:'Grün' };
+const MARK_LABEL = { none:'No highlight', black:'Black', white:'White', red:'Red', yellow:'Yellow', blue:'Blue', green:'Green' };
 // Not part of COLOR_KEYS/labels below - the firmware treats "iconBg" as an
 // optional colour (falls back to white if a profile predates this field),
 // unlike the 16 required ones, so it's kept out of the required-field
@@ -222,7 +222,7 @@ const builtinProfiles = {
     a:'blue', b:'green', c:'red', d:'red', e:'red',
     aBg:'white', bBg:'white', cBg:'white', dBg:'white', eBg:'white'
   },
-  Invertiert: {
+  Inverted: {
     text:'white', textBg:'black', headerText:'black', headerBg:'white', topText:'black', topBg:'white',
     a:'yellow', b:'green', c:'red', d:'red', e:'red',
     aBg:'black', bBg:'black', cBg:'black', dBg:'black', eBg:'black'
@@ -232,25 +232,25 @@ const builtinProfiles = {
 // The 16 raw colour values that fully define a firmware colour profile. Every rendered / computed
 // state in the tool is derived exclusively from these plus mode/mark/switch selections.
 const labels = {
-  text:'Tagesfläche – Text', textBg:'Tagesfläche – Hintergrund',
-  headerText:'Tages-Header – Text', headerBg:'Tages-Header – Hintergrund',
-  topText:'Oberster Header – Text', topBg:'Oberster Header – Hintergrund',
-  a:'Kalendereintrag A (Tino) – Text', b:'Kalendereintrag B (Liebe) – Text',
-  c:'Kalendereintrag C – Text', d:'Kalendereintrag D – Text', e:'Kalendereintrag E – Text',
-  aBg:'Kalendereintrag A (Tino) – Hintergrund', bBg:'Kalendereintrag B (Liebe) – Hintergrund',
-  cBg:'Kalendereintrag C – Hintergrund', dBg:'Kalendereintrag D – Hintergrund', eBg:'Kalendereintrag E – Hintergrund'
+  text:'Day area – text', textBg:'Day area – background',
+  headerText:'Day header – text', headerBg:'Day header – background',
+  topText:'Top header – text', topBg:'Top header – background',
+  a:'Calendar entry A (Private) – text', b:'Calendar entry B (Work) – text',
+  c:'Calendar entry C – text', d:'Calendar entry D – text', e:'Calendar entry E – text',
+  aBg:'Calendar entry A (Private) – background', bBg:'Calendar entry B (Work) – background',
+  cBg:'Calendar entry C – background', dBg:'Calendar entry D – background', eBg:'Calendar entry E – background'
 };
 const COLOR_KEYS = Object.keys(labels);
 
 const TODAY_ISO = '2026-09-17';
 const days = [
-  {label:'Do 17.', date:'2026-09-17', low:10, high:19},
-  {label:'Fr 18.', date:'2026-09-18', low:13, high:19},
-  {label:'Sa 19.', date:'2026-09-19', low:12, high:20},
-  {label:'So 20.', date:'2026-09-20', low:13, high:20},
-  {label:'Mo 21.', date:'2026-09-21', low:10, high:17},
-  {label:'Di 22.', date:'2026-09-22', low:9,  high:16},
-  {label:'Mi 23.', date:'2026-09-23', low:4,  high:18}
+  {label:'Thu 17.', date:'2026-09-17', low:10, high:19},
+  {label:'Fri 18.', date:'2026-09-18', low:13, high:19},
+  {label:'Sat 19.', date:'2026-09-19', low:12, high:20},
+  {label:'Sun 20.', date:'2026-09-20', low:13, high:20},
+  {label:'Mon 21.', date:'2026-09-21', low:10, high:17},
+  {label:'Tue 22.', date:'2026-09-22', low:9,  high:16},
+  {label:'Wed 23.', date:'2026-09-23', low:4,  high:18}
 ];
 
 const layoutPlan = [
@@ -263,53 +263,53 @@ const layoutPlan = [
   {date:'2026-09-23', col:2, rowStart:4, rowSpan:1, capacity:4}
 ];
 
-const calNames = { a:'Tino', b:'Liebe', c:'C', d:'D', e:'E' };
+const calNames = { a:'Private', b:'Work', c:'C', d:'D', e:'E' };
 
 const sample = {
   a: [
-    ['2026-09-17','16:30 Uhr Lia Kita-Abholung'], ['2026-09-17','Das ist ein sehr langer Text der nicht vollständig passt'],
-    ['2026-09-18','Oktoberfest Matthias 19:00 Uhr'], ['2026-09-18','Zahnarzt 11:15 Uhr'],
-    ['2026-09-19','Buecheloh Schünenmusi 15:00 Uhr'], ['2026-09-19','Einkauf Drogerie 17:00 Uhr'],
-    ['2026-09-20','Frühstück mit Oma 09:30 Uhr'], ['2026-09-20','Bibliothek 15:30 Uhr'],
-    ['2026-09-21','Arzttermin Sarah 09:30 Uhr'], ['2026-09-21','Besprechung 13:00 Uhr'],
-    ['2026-09-22','Sport Lia 16:30 Uhr'], ['2026-09-22','Telefonat Schule 14:00 Uhr'],
-    ['2026-09-23','Wochenmarkt 10:00 Uhr'], ['2026-09-23','Herbstbasteln 16:00 Uhr']
+    ['2026-09-17','16:30 Football practice'], ['2026-09-17','This is a very long text that does not fit completely'],
+    ['2026-09-18','Street festival 19:00'], ['2026-09-18','Dentist 11:15'],
+    ['2026-09-19','Brass band concert 15:00'], ['2026-09-19','Grocery shopping 17:00'],
+    ['2026-09-20','Brunch with friends 09:30'], ['2026-09-20','Library 15:30'],
+    ['2026-09-21','Doctor appointment 09:30'], ['2026-09-21','Team meeting 13:00'],
+    ['2026-09-22','Swimming lesson 16:30'], ['2026-09-22','Parent call 14:00'],
+    ['2026-09-23','Farmers market 10:00'], ['2026-09-23','Autumn crafts 16:00']
   ],
   b: [
-    ['2026-09-17','Elterngespräch 08:30 Uhr'], ['2026-09-17','Teamrunde 10:00 Uhr'],
-    ['2026-09-18','Weltkindertag Veranstaltung'], ['2026-09-18','Elternabend 19:00 Uhr'],
-    ['2026-09-19','Geburtstag Anna Geschenk'], ['2026-09-19','Pilates 18:00 Uhr'],
-    ['2026-09-20','Projektplanung 10:00 Uhr'], ['2026-09-20','Einkauf Lebensmittel'],
-    ['2026-09-21','Sarah Arzt 09:30 Uhr'], ['2026-09-21','Rechnung überweisen'],
-    ['2026-09-22','Lauftraining 17:30 Uhr'], ['2026-09-22','Paket abholen 18:00 Uhr'],
-    ['2026-09-23','Wochenplanung'], ['2026-09-23','Bücherei 11:00 Uhr']
+    ['2026-09-17','Customer meeting 08:30'], ['2026-09-17','Team sync 10:00'],
+    ['2026-09-18','Company event'], ['2026-09-18','Project review 19:00'],
+    ['2026-09-19','Birthday party gift'], ['2026-09-19','Pilates 18:00'],
+    ['2026-09-20','Project planning 10:00'], ['2026-09-20','Grocery shopping'],
+    ['2026-09-21','Doctor visit 09:30'], ['2026-09-21','Pay invoices'],
+    ['2026-09-22','Running club 17:30'], ['2026-09-22','Pick up parcel 18:00'],
+    ['2026-09-23','Weekly planning'], ['2026-09-23','Library 11:00']
   ],
   c: [
-    ['2026-09-17','Frühdienst 06:30 Uhr'], ['2026-09-17','Übergabe dokumentieren'],
-    ['2026-09-18','Rechnung überweisen'], ['2026-09-18','Kita-Material bestellen'],
-    ['2026-09-19','Geburtstag Anna'], ['2026-09-19','Geschenk besorgen'],
-    ['2026-09-20','Bibliothek 15:30 Uhr'], ['2026-09-20','Rückgabe Bücher'],
-    ['2026-09-21','Besprechung 13:00 Uhr'], ['2026-09-21','Protokoll schreiben'],
-    ['2026-09-22','Paket abholen 18:00 Uhr'], ['2026-09-22','Apotheke'],
-    ['2026-09-23','Wäsche und Haushalt'], ['2026-09-23','Einkaufsliste']
+    ['2026-09-17','Early shift 06:30'], ['2026-09-17','Write handover notes'],
+    ['2026-09-18','Pay invoices'], ['2026-09-18','Order office supplies'],
+    ['2026-09-19','Birthday party'], ['2026-09-19','Buy a gift'],
+    ['2026-09-20','Library 15:30'], ['2026-09-20','Return books'],
+    ['2026-09-21','Team meeting 13:00'], ['2026-09-21','Write minutes'],
+    ['2026-09-22','Pick up parcel 18:00'], ['2026-09-22','Pharmacy'],
+    ['2026-09-23','Laundry and housework'], ['2026-09-23','Shopping list']
   ],
   d: [
-    ['2026-09-17','Frühdienst 06:30 Uhr'], ['2026-09-17','Dienstübergabe'],
-    ['2026-09-18','Elternabend 19:00 Uhr'], ['2026-09-18','Vorbereitung'],
-    ['2026-09-19','Pilates 18:00 Uhr'], ['2026-09-19','Dehnen'],
-    ['2026-09-20','Projektplanung 10:00 Uhr'], ['2026-09-20','Material prüfen'],
-    ['2026-09-21','Einkauf Lebensmittel'], ['2026-09-21','Kassenbon ablegen'],
-    ['2026-09-22','Lauftraining 17:30 Uhr'], ['2026-09-22','Duschen'],
-    ['2026-09-23','Wochenplanung'], ['2026-09-23','Kalender aktualisieren']
+    ['2026-09-17','Early shift 06:30'], ['2026-09-17','Shift handover'],
+    ['2026-09-18','Project review 19:00'], ['2026-09-18','Preparation'],
+    ['2026-09-19','Pilates 18:00'], ['2026-09-19','Stretching'],
+    ['2026-09-20','Project planning 10:00'], ['2026-09-20','Check materials'],
+    ['2026-09-21','Grocery shopping'], ['2026-09-21','File receipts'],
+    ['2026-09-22','Running club 17:30'], ['2026-09-22','Shower'],
+    ['2026-09-23','Weekly planning'], ['2026-09-23','Update calendar']
   ],
   e: [
-    ['2026-09-17','Lia Sport 16:30 Uhr'], ['2026-09-17','Sporttasche packen'],
-    ['2026-09-18','Weltkindertag'], ['2026-09-18','Veranstaltung vorbereiten'],
-    ['2026-09-19','Herbstaequinoctium'], ['2026-09-19','Herbstspaziergang'],
-    ['2026-09-20','Kino 20:00 Uhr'], ['2026-09-20','Tickets prüfen'],
-    ['2026-09-21','Sarah Arzt 09:30 Uhr'], ['2026-09-21','Unterlagen mitnehmen'],
-    ['2026-09-22','Lia Sport 16:30 Uhr'], ['2026-09-22','Wasserflasche'],
-    ['2026-09-23','Bücherei 11:00 Uhr'], ['2026-09-23','Bücher zurückgeben']
+    ['2026-09-17','16:30 Football practice'], ['2026-09-17','Pack the sports bag'],
+    ['2026-09-18','Company event'], ['2026-09-18','Prepare the event'],
+    ['2026-09-19','Autumn equinox'], ['2026-09-19','Autumn walk'],
+    ['2026-09-20','Cinema 20:00'], ['2026-09-20','Check tickets'],
+    ['2026-09-21','Doctor visit 09:30'], ['2026-09-21','Bring documents'],
+    ['2026-09-22','Swimming lesson 16:30'], ['2026-09-22','Water bottle'],
+    ['2026-09-23','Library 11:00'], ['2026-09-23','Return books']
   ]
 };
 
@@ -349,6 +349,9 @@ function fresh(){
 }
 
 let state = JSON.parse(localStorage.getItem('spectra6-profile-editor') || 'null') || fresh();
+// State saved by the earlier German version used German names for the two internal profiles.
+const LEGACY_PROFILE_NAMES = { Invertiert:'Inverted', Custom:'Custom' };
+if(LEGACY_PROFILE_NAMES[state.profile]) state.profile = LEGACY_PROFILE_NAMES[state.profile];
 if(!state.entries) state.entries = sampleToEntries();
 if(!state.marked) state.marked = {};
 if(!state.customProfiles) state.customProfiles = {};
@@ -421,18 +424,18 @@ function isMono(){ return state.mode!=='color'; }
 function renderProfileOptions(){
   profileEl.innerHTML='';
   const addOpt=(value,text)=>{ let o=document.createElement('option'); o.value=value; o.textContent=text; profileEl.append(o); };
-  addOpt('Normal','Normal'); addOpt('Invertiert','Invertiert');
-  const customNames = Object.keys(state.customProfiles).sort((a,b)=>a.localeCompare(b,'de'));
+  addOpt('Normal','Normal'); addOpt('Inverted','Inverted');
+  const customNames = Object.keys(state.customProfiles).sort((a,b)=>a.localeCompare(b,'en'));
   if(customNames.length){
-    let group=document.createElement('optgroup'); group.label='Gespeicherte Profile';
+    let group=document.createElement('optgroup'); group.label='Saved profiles';
     customNames.forEach(name=>{ let o=document.createElement('option'); o.value='custom:'+name; o.textContent=name; group.append(o); });
     profileEl.append(group);
   }
-  addOpt('Benutzerdefiniert','Benutzerdefiniert (unbenannt)');
-  if(state.profile==='Benutzerdefiniert') profileEl.value='Benutzerdefiniert';
+  addOpt('Custom','Custom (unnamed)');
+  if(state.profile==='Custom') profileEl.value='Custom';
   else if(state.activeCustomProfile && state.customProfiles[state.activeCustomProfile]) profileEl.value='custom:'+state.activeCustomProfile;
   else if(builtinProfiles[state.profile]) profileEl.value=state.profile;
-  else profileEl.value='Benutzerdefiniert';
+  else profileEl.value='Custom';
 }
 
 // Profile-selector <option> refresh only -- the actual colour inputs now live directly inside
@@ -459,7 +462,7 @@ function renderEntries(){
   en.innerHTML='';
   Object.keys(calNames).forEach(k=>{
     let box2=document.createElement('div'); box2.className='calendar-box';
-    let title=document.createElement('div'); title.className='calendar-title'; title.textContent='Kalender '+k.toUpperCase()+' – '+calNames[k];
+    let title=document.createElement('div'); title.className='calendar-title'; title.textContent='Calendar '+k.toUpperCase()+' – '+calNames[k];
     box2.append(title);
     days.forEach(d=>{
       [0,1].forEach(j=>{
@@ -467,7 +470,7 @@ function renderEntries(){
         state.entries[k][d.date][j] = state.entries[k][d.date][j] || {text:'', on:j===0};
         const entry = state.entries[k][d.date][j];
         let row=document.createElement('div'); row.className='entry'; if(!entry.on) row.classList.add('disabled');
-        let cb=document.createElement('input'); cb.type='checkbox'; cb.checked=!!entry.on; cb.title='Eintrag im Layout anzeigen';
+        let cb=document.createElement('input'); cb.type='checkbox'; cb.checked=!!entry.on; cb.title='Show entry in the layout';
         cb.onchange=()=>{ entry.on=cb.checked; renderEntries(); render(); };
         let lab=document.createElement('label'); lab.textContent=d.label+' #'+(j+1);
         let input=document.createElement('input'); input.type='text'; input.value=entry.text;
@@ -533,23 +536,23 @@ function computeBase(){
 // the picker ALWAYS shows and writes the actual raw colour (rawBg/rawText), so editing never gets
 // confused by a switch temporarily overriding what's displayed elsewhere. Separately, "bg"/"text"
 // carry the fully computed, EFFECTIVE colour (same branching as computeBase()/render()), because
-// "Header folgt Eintragsfarbe" can make the Tages-Header show the Tagesfläche colours instead of its
+// "Header follows entry color" can make the day header show the day-area colours instead of its
 // own raw colour, even on an unmarked day. When effective != raw, renderStateTable adds a small
-// "effektiv: ..." note next to the picker so the switch's impact is never silently invisible.
+// "effective: ..." note next to the picker so the switch's impact is never silently invisible.
 function buildStateRows(){
   const base = computeBase();
   const c = state.colors;
   const rows = [];
 
-  // Oberster Header is never affected by any switch or by markColorsHeader/headerFollows, so its
-  // effective value always equals its raw colour, in both "normal" and "markiert" state.
-  rows.push({ name:'Oberster Header', stateLabel:'normal', bg: base.topBg, text: base.topInk,
+  // The top header is never affected by any switch or by markColorsHeader/headerFollows, so its
+  // effective value always equals its raw colour, in both "normal" and "marked" state.
+  rows.push({ name:'Top header', stateLabel:'normal', bg: base.topBg, text: base.topInk,
     rawBg: hex(c.topBg), rawText: hex(c.topText), bgKey:'topBg', textKey:'topText', editable:true });
-  rows.push({ name:'Oberster Header', stateLabel:'markiert', bg: base.topBg, text: base.topInk, editable:false });
+  rows.push({ name:'Top header', stateLabel:'marked', bg: base.topBg, text: base.topInk, editable:false });
 
   // Mirrors render()'s exact if/else-if chain for the day header:
   //   headerFollowsOn -> BOTH normal and marked days switch away from headerBg/headerText
-  //   markColorsHeader (only on the MARKED day) -> then overrides with the Wechselmodell colour
+  //   markColorsHeader (only on the MARKED day) -> then overrides with the shift-model colour
   let headNormalBg = base.headBg, headNormalInk = base.headInk;
   let headMarkedBg = base.headBg, headMarkedInk = base.headInk;
   const headerFollowsOn = base.monoV ? state.headerFollowsEntries : state.headerFollowsEntriesColor;
@@ -562,22 +565,22 @@ function buildStateRows(){
   if(state.markColorsHeader){
     headMarkedBg = base.markBg; headMarkedInk = base.monoV ? base.markEventInk : base.markInk;
   }
-  rows.push({ name:'Tages-Header', stateLabel:'normal', bg:headNormalBg, text:headNormalInk,
+  rows.push({ name:'Day header', stateLabel:'normal', bg:headNormalBg, text:headNormalInk,
     rawBg: hex(c.headerBg), rawText: hex(c.headerText), bgKey:'headerBg', textKey:'headerText', editable:true });
-  rows.push({ name:'Tages-Header', stateLabel:'markiert', bg:headMarkedBg, text:headMarkedInk, editable:false });
+  rows.push({ name:'Day header', stateLabel:'marked', bg:headMarkedBg, text:headMarkedInk, editable:false });
 
   const bodyMarkApplies = !state.markColorsHeader;
-  rows.push({ name:'Tagesfläche', stateLabel:'normal', bg: base.page, text: base.ink,
+  rows.push({ name:'Day area', stateLabel:'normal', bg: base.page, text: base.ink,
     rawBg: hex(c.textBg), rawText: hex(c.text), bgKey:'textBg', textKey:'text', editable:true });
-  rows.push({ name:'Tagesfläche', stateLabel:'markiert',
+  rows.push({ name:'Day area', stateLabel:'marked',
     bg: bodyMarkApplies ? base.markBg : base.page,
     text: bodyMarkApplies ? (base.monoV ? base.markEventInk : base.ink) : base.ink, editable:false });
 
   Object.keys(calNames).forEach(k=>{
     const cal = base.calResolved[k];
-    rows.push({ name:'Kalendereintrag '+k.toUpperCase()+' ('+calNames[k]+')', stateLabel:'normal',
+    rows.push({ name:'Calendar entry '+k.toUpperCase()+' ('+calNames[k]+')', stateLabel:'normal',
       bg: cal.bg, text: cal.ink, rawBg: hex(c[k+'Bg']), rawText: hex(c[k]), bgKey:k+'Bg', textKey:k, editable:true });
-    rows.push({ name:'Kalendereintrag '+k.toUpperCase()+' ('+calNames[k]+')', stateLabel:'markiert',
+    rows.push({ name:'Calendar entry '+k.toUpperCase()+' ('+calNames[k]+')', stateLabel:'marked',
       bg: bodyMarkApplies ? base.markBg : cal.bg, text:cal.ink, editable:false });
   });
 
@@ -589,7 +592,7 @@ function colorPickerCell(currentHex, key){
   input.type='color'; input.className='color'; input.style.width='90px';
   input.value=hex(currentHex);
   input.oninput=()=>{
-    state.profile='Benutzerdefiniert'; state.activeCustomProfile=null;
+    state.profile='Custom'; state.activeCustomProfile=null;
     state.colors[key]=input.value;
     renderProfileOptions(); render();
   };
@@ -605,8 +608,8 @@ function editableCellWithEffective(rawHex, effectiveHex, key){
   if(hex(rawHex).toLowerCase() !== hex(effectiveHex).toLowerCase()){
     let note=document.createElement('div');
     note.style.fontSize='10px'; note.style.color='#0a5ab0'; note.style.marginTop='2px';
-    note.innerHTML = 'effektiv: ' + swatchCell(effectiveHex);
-    note.title = 'Ein Schalter (z. B. "Header folgt Eintragsfarbe") überschreibt hier die Rohfarbe -- die Vorschau und die Firmware zeigen diesen Wert, die Rohfarbe im Picker bleibt zum Bearbeiten trotzdem sichtbar.';
+    note.innerHTML = 'effective: ' + swatchCell(effectiveHex);
+    note.title = 'A switch (e.g. "Header follows entry color") overrides the raw color here -- the preview and the firmware show this value, the raw color in the picker stays visible for editing.';
     container.append(note);
   }
   return container;
@@ -620,11 +623,11 @@ function renderStateTable(){
   const marked = anyDayMarked();
   rows.forEach(row=>{
     let tr=document.createElement('tr');
-    if(row.stateLabel==='markiert' && !marked) tr.style.opacity='0.5';
+    if(row.stateLabel==='marked' && !marked) tr.style.opacity='0.5';
 
     let nameTd=document.createElement('td'); nameTd.className='element-name'; nameTd.textContent=row.name;
     let stateTd=document.createElement('td');
-    stateTd.innerHTML = row.stateLabel + (row.stateLabel==='markiert' && !marked ? ' <span class="muted">(kein Tag markiert)</span>' : '');
+    stateTd.innerHTML = row.stateLabel + (row.stateLabel==='marked' && !marked ? ' <span class="muted">(no day marked)</span>' : '');
 
     let bgTd=document.createElement('td');
     let textTd=document.createElement('td');
@@ -733,11 +736,11 @@ function render(){
 
 profileEl.onchange=()=>{
   const v=profileEl.value;
-  if(v==='Benutzerdefiniert'){ state.profile='Benutzerdefiniert'; state.activeCustomProfile=null; }
+  if(v==='Custom'){ state.profile='Custom'; state.activeCustomProfile=null; }
   else if(v.startsWith('custom:')){
     const name=v.slice(7);
     if(state.customProfiles[name]){
-      state.profile='Benutzerdefiniert'; state.activeCustomProfile=name;
+      state.profile='Custom'; state.activeCustomProfile=name;
       const p = state.customProfiles[name];
       state.colors={...p.colors};
       if(typeof state.colors.iconBg === 'undefined') state.colors.iconBg = ICON_BG_DEFAULT;
@@ -773,7 +776,7 @@ iconBgEl.oninput=()=>{ state.colors.iconBg=iconBgEl.value; localStorage.setItem(
 iconBgMarkedEl.oninput=()=>{ state.colors.iconBgMarked=iconBgMarkedEl.value; localStorage.setItem('spectra6-profile-editor', JSON.stringify(state)); };
 
 // --- SIMPLE FIRMWARE PROFILE SCHEMA ---
-// Exactly: the 16 raw colours + the 4 switches + Zielanzeige (mode) + Wechselmodell-Farbe (mark).
+// Exactly: the 16 raw colours + the 4 switches + target display (mode) + shift-model colour (mark).
 // No overrides, no entries/marked-days state -- those are editor conveniences, not part of a colour
 // profile that the firmware needs to reproduce the element/state colour table 1:1.
 function buildProfilePayload(name){
@@ -792,9 +795,9 @@ function buildProfilePayload(name){
 }
 
 function applyProfilePayload(p){
-  if(!p || typeof p !== 'object' || !p.colors) throw new Error('Ungültiges Format: colors fehlt.');
+  if(!p || typeof p !== 'object' || !p.colors) throw new Error('Invalid format: colors is missing.');
   const missing = COLOR_KEYS.filter(k=>!(k in p.colors));
-  if(missing.length) throw new Error('Farbwerte fehlen: '+missing.join(', '));
+  if(missing.length) throw new Error('Missing color values: '+missing.join(', '));
   state.colors = {...p.colors};
   if(typeof state.colors.iconBg === 'undefined') state.colors.iconBg = ICON_BG_DEFAULT;
       if(typeof state.colors.iconBgMarked === 'undefined') state.colors.iconBgMarked = ICON_BG_DEFAULT;
@@ -816,19 +819,19 @@ function applyProfilePayload(p){
 
 document.querySelector('#save').onclick=()=>{
   const suggested=state.activeCustomProfile||'';
-  const name=window.prompt('Name für dieses Farbprofil', suggested);
+  const name=window.prompt('Name for this color profile', suggested);
   if(!name) return;
   const trimmed=name.trim(); if(!trimmed) return;
   state.customProfiles[trimmed]=buildProfilePayload(trimmed);
-  state.profile='Benutzerdefiniert'; state.activeCustomProfile=trimmed;
+  state.profile='Custom'; state.activeCustomProfile=trimmed;
   localStorage.setItem('spectra6-profile-editor', JSON.stringify(state));
   renderColorEditor(); render();
-  showNote('Profil "'+trimmed+'" wurde gespeichert und ist jetzt in der Liste auswählbar.', 'info');
+  showNote('Profile "'+trimmed+'" was saved and can now be selected in the list.', 'info');
 };
 
 document.querySelector('#deleteProfile').onclick=()=>{
   if(!state.activeCustomProfile || !state.customProfiles[state.activeCustomProfile]){
-    showNote('Kein gespeichertes Profil ausgewählt, das gelöscht werden könnte.', 'bad'); return;
+    showNote('No saved profile is selected that could be deleted.', 'bad'); return;
   }
   const name=state.activeCustomProfile;
   delete state.customProfiles[name];
@@ -836,7 +839,7 @@ document.querySelector('#deleteProfile').onclick=()=>{
   iconBgEl.value=hex(ICON_BG_DEFAULT); iconBgMarkedEl.value=hex(ICON_BG_DEFAULT);
   localStorage.setItem('spectra6-profile-editor', JSON.stringify(state));
   renderColorEditor(); render();
-  showNote('Profil "'+name+'" wurde gelöscht.', 'info');
+  showNote('Profile "'+name+'" was deleted.', 'info');
 };
 
 document.querySelector('#reset').onclick=()=>{
@@ -851,13 +854,13 @@ document.querySelector('#reset').onclick=()=>{
 };
 
 document.querySelector('#exportProfile').onclick=()=>{
-  const exportName = state.activeCustomProfile || (state.profile!=='Benutzerdefiniert' ? state.profile : 'Benutzerdefiniert');
+  const exportName = state.activeCustomProfile || (state.profile!=='Custom' ? state.profile : 'Custom');
   const payload = buildProfilePayload(exportName);
   const blob=new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
   const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download='spectra6-firmware-profil-'+exportName.replace(/[^a-z0-9-]/gi,'_')+'.json';
+  const a=document.createElement('a'); a.href=url; a.download='spectra6-firmware-profile-'+exportName.replace(/[^a-z0-9-]/gi,'_')+'.json';
   document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  showNote('Profil "'+exportName+'" wurde als JSON exportiert.', 'info');
+  showNote('Profile "'+exportName+'" was exported as JSON.', 'info');
 };
 
 document.querySelector('#importProfileBtn').onclick=()=>document.querySelector('#importProfileFile').click();
@@ -870,14 +873,14 @@ document.querySelector('#importProfileFile').onchange=(ev)=>{
       applyProfilePayload(data);
       const importedName = data.name && String(data.name).trim() || file.name.replace(/\.json$/i,'');
       state.customProfiles[importedName]=buildProfilePayload(importedName);
-      state.profile='Benutzerdefiniert'; state.activeCustomProfile=importedName;
+      state.profile='Custom'; state.activeCustomProfile=importedName;
       localStorage.setItem('spectra6-profile-editor', JSON.stringify(state));
       renderColorEditor(); render();
-      showNote('Profil "'+importedName+'" wurde importiert und gespeichert.', 'info');
-    } catch(err){ showNote('Import fehlgeschlagen: '+err.message, 'bad'); }
+      showNote('Profile "'+importedName+'" was imported and saved.', 'info');
+    } catch(err){ showNote('Import failed: '+err.message, 'bad'); }
     finally{ ev.target.value=''; }
   };
-  reader.onerror=()=>{ showNote('Datei konnte nicht gelesen werden.', 'bad'); ev.target.value=''; };
+  reader.onerror=()=>{ showNote('The file could not be read.', 'bad'); ev.target.value=''; };
   reader.readAsText(file);
 };
 
@@ -888,7 +891,7 @@ document.querySelector('#importProfileFile').onchange=(ev)=>{
 // host has no device to talk to, so a failed request is reported plainly rather than silently
 // swallowed.
 document.querySelector('#sendToDevice').onclick=async()=>{
-  const exportName = state.activeCustomProfile || (state.profile!=='Benutzerdefiniert' ? state.profile : 'Benutzerdefiniert');
+  const exportName = state.activeCustomProfile || (state.profile!=='Custom' ? state.profile : 'Custom');
   const payload = buildProfilePayload(exportName);
   const slot = document.querySelector('#deviceSlot').value;
   try{
@@ -898,9 +901,9 @@ document.querySelector('#sendToDevice').onclick=async()=>{
       body: JSON.stringify(payload)
     });
     if(!res.ok){ throw new Error((await res.text()) || ('HTTP '+res.status)); }
-    showNote('Profil "'+exportName+'" wurde in Slot '+slot+' auf dem Gerät gespeichert.', 'info');
+    showNote('Profile "'+exportName+'" was saved to slot '+slot+' on the device.', 'info');
   } catch(err){
-    showNote('Senden an das Gerät fehlgeschlagen: '+(err.message||err)+' - ist diese Seite vom Gerät selbst geladen?', 'bad');
+    showNote('Sending to the device failed: '+(err.message||err)+' - was this page loaded from the device itself?', 'bad');
   }
 };
 
