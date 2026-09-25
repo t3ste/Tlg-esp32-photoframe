@@ -34,6 +34,19 @@ esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+bool board_hal_has_microphone(void)
+{
+    return false;
+}
+
+esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t on_block, void *user)
+{
+    (void) duration_ms;
+    (void) on_block;
+    (void) user;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 #else
 
 #include <math.h>
@@ -43,6 +56,7 @@ esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -360,16 +374,130 @@ static void play_beep_pattern_tones(i2s_chan_handle_t tx, board_hal_chime_kind_t
     }
 }
 
+// ---- ES7210 4-channel ADC (microphones) -----------------------------------
+//
+// The onboard microphones are not on the ES8311's own ADC input but on a
+// separate ES7210 that shares the I2S bus (schematic: U5 ES7210, MIC1/MIC2
+// capsules, MIC3 = speaker-amp reference for echo cancellation, SDOUT1 ->
+// I2S_DSOUT = GPIO18). Register sequence follows Waveshare's own stock
+// esp_codec_dev ES7210 driver as used by 01_Audio_Test ("in: {codec: ES7210}",
+// MIC1 + MIC3 selected -> stereo slot 0 = MIC1, slot 1 = MIC3, slave mode,
+// 16 kHz / 16 bit).
+#define ES7210_I2C_ADDR_FIRST 0x40  // AD0/AD1 select 0x40..0x43
+#define ES7210_I2C_ADDR_LAST 0x43
+#define ES7210_GAIN_34_5DB \
+    0x0C  // PGA gain register value: 3 dB steps, 0x0C = 34.5 dB (Waveshare's stock value)
+
+static esp_err_t es7210_update_bits(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t mask,
+                                    uint8_t value)
+{
+    uint8_t v = 0;
+    esp_err_t err = es8311_read(dev, reg, &v);
+    if (err != ESP_OK) {
+        return err;
+    }
+    return es8311_write(dev, reg, (uint8_t) ((v & (uint8_t) ~mask) | (value & mask)));
+}
+
+// Enables MIC1 and MIC3 (the two I2S slots) - mirrors es7210_mic_select().
+static void es7210_select_mics(i2c_master_dev_handle_t dev, uint8_t gain)
+{
+    for (uint8_t i = 0; i < 4; i++) {
+        es7210_update_bits(dev, (uint8_t) (0x43 + i), 0x10, 0x00);
+    }
+    es8311_write(dev, 0x4B, 0xFF);
+    es8311_write(dev, 0x4C, 0xFF);
+    // MIC1
+    es7210_update_bits(dev, 0x01, 0x0B, 0x00);
+    es8311_write(dev, 0x4B, 0x00);
+    es7210_update_bits(dev, 0x43, 0x10, 0x10);
+    es7210_update_bits(dev, 0x43, 0x0F, gain);
+    // MIC3
+    es7210_update_bits(dev, 0x01, 0x15, 0x00);
+    es8311_write(dev, 0x4C, 0x00);
+    es7210_update_bits(dev, 0x45, 0x10, 0x10);
+    es7210_update_bits(dev, 0x45, 0x0F, gain);
+    es8311_write(dev, 0x12, 0x00);  // plain 2-channel I2S, no TDM
+}
+
+static esp_err_t es7210_mic_init(i2c_master_dev_handle_t dev, uint8_t gain)
+{
+    esp_err_t err = ESP_OK;
+    // open()
+    err |= es8311_write(dev, 0x00, 0xFF);
+    err |= es8311_write(dev, 0x00, 0x41);
+    err |= es8311_write(dev, 0x01, 0x3F);
+    err |= es8311_write(dev, 0x09, 0x30);
+    err |= es8311_write(dev, 0x0A, 0x30);
+    err |= es8311_write(dev, 0x23, 0x2A);
+    err |= es8311_write(dev, 0x22, 0x0A);
+    err |= es8311_write(dev, 0x20, 0x0A);
+    err |= es8311_write(dev, 0x21, 0x2A);
+    err |= es7210_update_bits(dev, 0x08, 0x01, 0x00);  // I2S slave
+    err |= es8311_write(dev, 0x40, 0x43);
+    err |= es8311_write(dev, 0x41, 0x70);  // mic bias 2.87 V
+    err |= es8311_write(dev, 0x42, 0x70);
+    err |= es8311_write(dev, 0x07, 0x20);
+    err |= es8311_write(dev, 0x02, 0xC1);
+    es7210_select_mics(dev, 0);
+    uint8_t off_reg = 0;
+    es8311_read(dev, 0x01, &off_reg);
+    // set_fs(): 16 bit, I2S format (slave mode: the sample-rate dividers stay unused)
+    err |= es7210_update_bits(dev, 0x11, 0xE0, 0x60);
+    err |= es7210_update_bits(dev, 0x11, 0x03, 0x00);
+    // enable()/start()
+    err |= es8311_write(dev, 0x01, off_reg);
+    err |= es8311_write(dev, 0x06, 0x00);
+    err |= es8311_write(dev, 0x40, 0x43);
+    err |= es8311_write(dev, 0x47, 0x08);
+    err |= es8311_write(dev, 0x48, 0x08);
+    err |= es8311_write(dev, 0x49, 0x08);
+    err |= es8311_write(dev, 0x4A, 0x08);
+    es7210_select_mics(dev, 0);
+    err |= es8311_write(dev, 0x40, 0x43);
+    err |= es8311_write(dev, 0x00, 0x71);
+    err |= es8311_write(dev, 0x00, 0x41);
+    // Final PGA gain (the stock code applies it after enabling).
+    err |= es7210_update_bits(dev, 0x43, 0x0F, gain);
+    err |= es7210_update_bits(dev, 0x45, 0x0F, gain);
+    return err;
+}
+
+static void es7210_standby(i2c_master_dev_handle_t dev)
+{
+    es8311_write(dev, 0x47, 0xFF);
+    es8311_write(dev, 0x48, 0xFF);
+    es8311_write(dev, 0x49, 0xFF);
+    es8311_write(dev, 0x4A, 0xFF);
+    es8311_write(dev, 0x4B, 0xFF);
+    es8311_write(dev, 0x4C, 0xFF);
+    es8311_write(dev, 0x40, 0xC0);
+    es8311_write(dev, 0x01, 0x7F);
+    es8311_write(dev, 0x06, 0x07);
+}
+
 typedef struct {
     i2s_chan_handle_t tx;
+    i2s_chan_handle_t rx;  // only when opened with with_rx (microphone capture)
     i2c_master_dev_handle_t es8311;
+    i2c_master_dev_handle_t es7210;  // microphone ADC, only with with_rx
 } audio_session_t;
 
 static void audio_session_close(audio_session_t *s)
 {
     pa_set(false);
+    if (s->es7210) {
+        es7210_standby(s->es7210);
+        i2c_master_bus_rm_device(s->es7210);
+        s->es7210 = NULL;
+    }
     if (s->es8311) {
         es8311_standby(s->es8311);
+    }
+    if (s->rx) {
+        i2s_channel_disable(s->rx);
+        i2s_del_channel(s->rx);
+        s->rx = NULL;
     }
     if (s->tx) {
         i2s_channel_disable(s->tx);
@@ -382,7 +510,11 @@ static void audio_session_close(audio_session_t *s)
     }
 }
 
-static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
+// with_rx: also open the I2S receive path (ES7210 microphone ADC -> DIN) for
+// microphone capture. enable_pa: switch the speaker amplifier on (playback); mic
+// capture leaves it off so nothing is audible.
+static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent, bool with_rx,
+                                    bool enable_pa)
 {
     memset(s, 0, sizeof(*s));
 
@@ -419,7 +551,7 @@ static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
     // clock present to ack register writes reliably.
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
-    err = i2s_new_channel(&chan_cfg, &s->tx, NULL);
+    err = i2s_new_channel(&chan_cfg, &s->tx, with_rx ? &s->rx : NULL);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "i2s_new_channel failed: %s", esp_err_to_name(err));
         audio_session_close(s);
@@ -436,7 +568,7 @@ static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
                 .bclk = BOARD_HAL_AUDIO_I2S_BCLK_PIN,
                 .ws = BOARD_HAL_AUDIO_I2S_WS_PIN,
                 .dout = BOARD_HAL_AUDIO_I2S_DOUT_PIN,
-                .din = I2S_GPIO_UNUSED,
+                .din = with_rx ? BOARD_HAL_AUDIO_I2S_DIN_PIN : I2S_GPIO_UNUSED,
                 .invert_flags =
                     {
                         .mclk_inv = false,
@@ -448,8 +580,14 @@ static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
     std_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;
 
     err = i2s_channel_init_std_mode(s->tx, &std_cfg);
+    if (err == ESP_OK && with_rx) {
+        err = i2s_channel_init_std_mode(s->rx, &std_cfg);
+    }
     if (err == ESP_OK) {
         err = i2s_channel_enable(s->tx);
+    }
+    if (err == ESP_OK && with_rx) {
+        err = i2s_channel_enable(s->rx);
     }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "I2S init failed: %s", esp_err_to_name(err));
@@ -464,7 +602,51 @@ static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
         return err;
     }
 
+    if (with_rx) {
+        // The microphones sit on the ES7210, which drives I2S DIN. Tri-state the
+        // ES8311's own ADC output (SDP_OUT bit 6) so the two don't fight over it.
+        uint8_t sdp_out = 0;
+        if (es8311_read(s->es8311, ES8311_REG_SDP_OUT, &sdp_out) == ESP_OK) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(
+                es8311_write(s->es8311, ES8311_REG_SDP_OUT, (uint8_t) (sdp_out | 0x40)));
+        }
+
+        i2c_master_bus_handle_t mic_bus = board_hal_get_i2c_bus();
+        uint8_t mic_addr = 0;
+        for (uint8_t a = ES7210_I2C_ADDR_FIRST; a <= ES7210_I2C_ADDR_LAST; a++) {
+            if (i2c_master_probe(mic_bus, a, 50) == ESP_OK) {
+                mic_addr = a;
+                break;
+            }
+        }
+        if (mic_addr == 0) {
+            ESP_LOGE(TAG, "ES7210 microphone ADC not found on I2C 0x%02x-0x%02x",
+                     ES7210_I2C_ADDR_FIRST, ES7210_I2C_ADDR_LAST);
+            audio_session_close(s);
+            return ESP_ERR_NOT_FOUND;
+        }
+        i2c_device_config_t mic_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = mic_addr,
+            .scl_speed_hz = 100000,
+        };
+        err = i2c_master_bus_add_device(mic_bus, &mic_cfg, &s->es7210);
+        if (err == ESP_OK) {
+            err = es7210_mic_init(s->es7210, ES7210_GAIN_34_5DB);
+        }
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "ES7210 init failed: %s", esp_err_to_name(err));
+            audio_session_close(s);
+            return err;
+        }
+        ESP_LOGI(TAG, "ES7210 microphone ADC at I2C 0x%02x initialised", mic_addr);
+    }
+
     i2s_write_silence(s->tx, 128);
+    if (!enable_pa) {
+        vTaskDelay(pdMS_TO_TICKS(100));  // let the ADC front end settle
+        return ESP_OK;
+    }
     pa_set(true);
     // NS4150B (or its own soft-start/anti-pop ramp) needs real time to fully
     // turn on after CTRL goes high - confirmed live: a 20s continuous test
@@ -489,7 +671,7 @@ esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volum
     }
 
     audio_session_t session;
-    esp_err_t err = audio_session_open(&session, volume_percent);
+    esp_err_t err = audio_session_open(&session, volume_percent, false, true);
     if (err == ESP_OK) {
         play_beep_pattern_tones(session.tx, kind);
         i2s_write_silence(session.tx, 128);
@@ -519,7 +701,7 @@ esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_m
     const int PAUSE_CHUNK_MS = 200;
 
     audio_session_t session;
-    esp_err_t err = audio_session_open(&session, volume_percent);
+    esp_err_t err = audio_session_open(&session, volume_percent, false, true);
     if (err == ESP_OK) {
         uint32_t elapsed_ms = 0;
         bool stop = false;
@@ -562,7 +744,7 @@ esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t
     }
 
     audio_session_t session;
-    esp_err_t err = audio_session_open(&session, volume_percent);
+    esp_err_t err = audio_session_open(&session, volume_percent, false, true);
     if (err == ESP_OK) {
         for (int i = 0; i < count; i++) {
             if (notes[i].freq_hz > 0.0f) {
@@ -572,6 +754,76 @@ esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t
             }
         }
         i2s_write_silence(session.tx, 128);
+        audio_session_close(&session);
+    }
+
+    xSemaphoreGive(s_chime_mutex);
+    return err;
+}
+
+bool board_hal_has_microphone(void)
+{
+    return true;
+}
+
+esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t on_block, void *user)
+{
+    if (!on_block) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    chime_mutex_init();
+    if (!s_chime_mutex || xSemaphoreTake(s_chime_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    audio_session_t session;
+    esp_err_t err = audio_session_open(&session, 0, true, false);
+    if (err == ESP_OK) {
+        // 256 stereo frames = 16 ms per block at 16 kHz. The first blocks after
+        // start-up are discarded: the analog front end of the codec still settles.
+        const int SETTLE_BLOCKS = 10;
+        int16_t buf[256 * 2];
+        {
+            static const uint8_t regs[] = {0x00, 0x01, 0x02, 0x03, 0x06, 0x07, 0x08, 0x11, 0x12,
+                                           0x40, 0x41, 0x42, 0x43, 0x45, 0x47, 0x49, 0x4B, 0x4C};
+            char line[200];
+            int n = 0;
+            for (size_t i = 0; i < sizeof(regs); i++) {
+                uint8_t v = 0xEE;
+                es8311_read(session.es7210, regs[i], &v);
+                n += snprintf(line + n, sizeof(line) - (size_t) n, "%02X=%02X ", regs[i], v);
+            }
+            ESP_LOGD(TAG, "ES7210 regs: %s", line);
+        }
+        int64_t end_us = esp_timer_get_time() + (int64_t) duration_ms * 1000;
+        int block = 0;
+        bool keep_going = true;
+        while (keep_going && esp_timer_get_time() < end_us) {
+            size_t bytes = 0;
+            err = i2s_channel_read(session.rx, buf, sizeof(buf), &bytes, pdMS_TO_TICKS(200));
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "i2s_channel_read failed: %s", esp_err_to_name(err));
+                break;
+            }
+            if (block == SETTLE_BLOCKS) {
+                int32_t mn[2] = {32767, 32767}, mx[2] = {-32768, -32768};
+                for (size_t i = 0; i < bytes / 4; i++) {
+                    for (int c = 0; c < 2; c++) {
+                        int16_t v = buf[i * 2 + (size_t) c];
+                        if (v < mn[c])
+                            mn[c] = v;
+                        if (v > mx[c])
+                            mx[c] = v;
+                    }
+                }
+                ESP_LOGD(TAG, "first block: %u bytes, L[%d..%d] R[%d..%d] raw %d %d %d %d %d %d",
+                         (unsigned) bytes, (int) mn[0], (int) mx[0], (int) mn[1], (int) mx[1],
+                         buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]);
+            }
+            if (++block > SETTLE_BLOCKS) {
+                keep_going = on_block(buf, bytes / 4, user);
+            }
+        }
         audio_session_close(&session);
     }
 

@@ -2,6 +2,14 @@
 
 All notable changes to this fork are documented here. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full running list of everything this fork adds on top of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe); this file covers per-release deltas only.
 
+## [Unreleased]
+
+### Added
+
+- **Microphone level monitor** (`waveshare_photopainter_73`, first step towards voice control): the onboard microphones sit on an **ES7210** ADC (not on the ES8311), which the firmware now initialises the same way Waveshare's stock example does. `POST /api/mic/level?seconds=N` (or the Maintenance tab's "Log microphone level" button) prints the input level to the console / debug log five times a second as a bar plus RMS and peak in dBFS; `GET /api/mic/level` reports the last level. Nothing is recorded or stored. `microphone_available` in the config tells the UI whether the board has a microphone.
+
+---
+
 ## [v218.5.0] - 2026-09-25
 
 ### Changed

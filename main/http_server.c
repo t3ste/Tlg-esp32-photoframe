@@ -39,6 +39,7 @@
 #include "https_cert.h"
 #include "image_processor.h"
 #include "lwip/sockets.h"
+#include "mic_monitor.h"
 #include "nvs_flash.h"
 #include "ota_manager.h"
 #include "overlay_manager.h"
@@ -1278,6 +1279,54 @@ static esp_err_t battery_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Microphone level test (first step towards voice control): POST starts a
+// monitor that prints the input level to the console for ?seconds=N (default
+// 10), GET reports whether it runs and the last measured level.
+static esp_err_t mic_level_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    char body[128];
+
+    if (req->method == HTTP_POST) {
+        uint32_t seconds = 10;
+        char query[32];
+        if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+            char value[8];
+            if (httpd_query_key_value(query, "seconds", value, sizeof(value)) == ESP_OK) {
+                seconds = (uint32_t) strtoul(value, NULL, 10);
+            }
+        }
+        esp_err_t err = mic_monitor_start(seconds);
+        if (err == ESP_ERR_NOT_SUPPORTED) {
+            httpd_resp_set_status(req, HTTPD_404);
+            httpd_resp_sendstr(req, "{\"error\":\"no microphone on this board\"}");
+        } else if (err == ESP_ERR_INVALID_ARG) {
+            httpd_resp_set_status(req, HTTPD_400);
+            httpd_resp_sendstr(req, "{\"error\":\"seconds must be 1-60\"}");
+        } else if (err == ESP_ERR_INVALID_STATE) {
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_sendstr(req, "{\"error\":\"already running\"}");
+        } else if (err != ESP_OK) {
+            httpd_resp_set_status(req, HTTPD_500);
+            httpd_resp_sendstr(req, "{\"error\":\"could not start\"}");
+        } else {
+            snprintf(body, sizeof(body), "{\"status\":\"started\",\"seconds\":%u}",
+                     (unsigned) seconds);
+            httpd_resp_sendstr(req, body);
+        }
+        return ESP_OK;
+    }
+
+    mic_monitor_status_t status;
+    mic_monitor_get_status(&status);
+    snprintf(body, sizeof(body),
+             "{\"available\":%s,\"running\":%s,\"rms_dbfs\":%.1f,\"peak_dbfs\":%.1f}",
+             mic_monitor_available() ? "true" : "false", status.running ? "true" : "false",
+             (double) status.rms_dbfs, (double) status.peak_dbfs);
+    httpd_resp_sendstr(req, body);
+    return ESP_OK;
+}
+
 static esp_err_t battery_history_handler(httpd_req_t *req)
 {
     if (!system_ready) {
@@ -1897,6 +1946,8 @@ static esp_err_t config_handler(httpd_req_t *req)
         // Hardware capability, not a user setting - lets the Web UI hide the
         // whole Chimes tab on boards with no onboard speaker.
         cJSON_AddBoolToObject(root, "chime_speaker_available", board_hal_has_speaker());
+        // Same idea for the microphone (Maintenance tab's level test).
+        cJSON_AddBoolToObject(root, "microphone_available", board_hal_has_microphone());
         const char *chime_mode_str = "off";
         switch (config_manager_get_chime_speaker_mode()) {
         case CHIME_SPEAKER_BATTERY_AND_MAINS:
@@ -3495,6 +3546,8 @@ static void register_all_handlers(httpd_handle_t handle)
     register_uri(handle, "/api/battery", HTTP_GET, battery_handler);
     register_uri(handle, "/api/battery-history", HTTP_GET, battery_history_handler);
     register_uri(handle, "/api/battery-history", HTTP_DELETE, battery_history_handler);
+    register_uri(handle, "/api/mic/level", HTTP_GET, mic_level_handler);
+    register_uri(handle, "/api/mic/level", HTTP_POST, mic_level_handler);
     register_uri(handle, "/api/history", HTTP_GET, display_history_handler);
     register_uri(handle, "/api/history", HTTP_DELETE, display_history_handler);
     register_uri(handle, "/api/albums/organize-crop", HTTP_POST, organize_crop_variants_handler);

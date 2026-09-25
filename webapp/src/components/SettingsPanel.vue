@@ -53,6 +53,29 @@ function showSnackbar(text, color) {
   snackbar.value = true;
 }
 
+// Starts the firmware's microphone level monitor: it prints the input level
+// to the device console (serial terminal / debug log) for a few seconds.
+const testingMic = ref(false);
+async function testMicrophone() {
+  testingMic.value = true;
+  try {
+    const response = await fetch("/api/mic/level?seconds=15", { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) {
+      showSnackbar(
+        `Listening for ${data.seconds} s - watch the device console or the debug log`,
+        "success"
+      );
+    } else {
+      showSnackbar(data.error || "Failed to start the microphone test", "error");
+    }
+  } catch (_error) {
+    showSnackbar("Failed to start the microphone test", "error");
+  } finally {
+    setTimeout(() => (testingMic.value = false), 3000);
+  }
+}
+
 const testingErrorOverlay = ref(false);
 async function testErrorOverlay() {
   testingErrorOverlay.value = true;
@@ -3513,6 +3536,25 @@ async function performFactoryReset() {
                 </v-btn>
               </v-col>
             </v-row>
+
+            <template v-if="settingsStore.deviceSettings.microphoneAvailable">
+              <v-divider class="my-6" />
+
+              <div class="text-subtitle-1 mb-4">Microphone</div>
+              <v-row>
+                <v-col cols="12">
+                  <v-btn variant="outlined" :loading="testingMic" @click="testMicrophone">
+                    <v-icon start>mdi-microphone</v-icon>
+                    Log microphone level (15 s)
+                  </v-btn>
+                  <div class="text-caption text-medium-emphasis mt-2">
+                    First step towards voice control: the frame prints the input level (bar and
+                    dBFS) to its console for 15 seconds - make some noise and watch the serial
+                    terminal (or the debug log download). Nothing is recorded or stored.
+                  </div>
+                </v-col>
+              </v-row>
+            </template>
 
             <v-divider class="my-6" />
 
