@@ -50,6 +50,7 @@
 //   i2s: {mclk: 14, bclk: 15, ws: 16, din: 18, dout: 17}
 //   out: {codec: ES8311, pa: 7, use_mclk: 1}
 #define BOARD_HAL_HAS_SPEAKER 1
+#define BOARD_HAL_HAS_MICROPHONE 1  // ES8311 ADC (mic input) -> I2S DIN below
 #define BOARD_HAL_AUDIO_I2S_MCLK_PIN GPIO_NUM_14
 #define BOARD_HAL_AUDIO_I2S_BCLK_PIN GPIO_NUM_15
 #define BOARD_HAL_AUDIO_I2S_WS_PIN GPIO_NUM_16

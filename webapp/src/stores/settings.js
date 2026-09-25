@@ -127,6 +127,9 @@ export const useSettingsStore = defineStore("settings", () => {
     // sent in a PATCH. Off by default across the board, per-event flags
     // mirror the firmware's own conservative defaults (see config.h).
     chimeSpeakerAvailable: false,
+    // Read-only hardware capability flag too (never sent in a PATCH): shows the
+    // Maintenance tab's microphone level test.
+    microphoneAvailable: false,
     chimeSpeakerMode: "off",
     chimeVolume: 80,
     chimeQuietEnabled: false,
@@ -465,6 +468,7 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.batteryHistoryBackupEnabled =
         data.battery_history_backup_enabled === true;
       deviceSettings.value.chimeSpeakerAvailable = data.chime_speaker_available === true;
+      deviceSettings.value.microphoneAvailable = data.microphone_available === true;
       deviceSettings.value.chimeSpeakerMode = data.chime_speaker_mode || "off";
       deviceSettings.value.chimeVolume = data.chime_volume ?? 80;
       deviceSettings.value.chimeQuietEnabled = data.chime_quiet_enabled === true;

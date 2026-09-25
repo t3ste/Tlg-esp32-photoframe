@@ -9,6 +9,8 @@ set(SOURCES
     "calendar_ics.c"
     "cert_pin.c"
     "chime.c"
+    "mic_level.c"
+    "mic_monitor.c"
     "climate.c"
     "climate_history.c"
     "color_palette.c"

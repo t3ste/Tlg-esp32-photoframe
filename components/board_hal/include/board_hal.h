@@ -2,6 +2,7 @@
 
 #include <hal/gpio_types.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <time.h>
 
@@ -59,6 +60,12 @@ typedef enum {
 // header (see board_waveshare_photopainter_73.h) before including this file.
 #ifndef BOARD_HAL_HAS_SPEAKER
 #define BOARD_HAL_HAS_SPEAKER 0
+#endif
+
+// Boards with an onboard microphone (codec ADC -> I2S DIN) define
+// BOARD_HAL_HAS_MICROPHONE 1 in their own header, next to the speaker pins.
+#ifndef BOARD_HAL_HAS_MICROPHONE
+#define BOARD_HAL_HAS_MICROPHONE 0
 #endif
 
 // True if this board's Kconfig entry selects any climate sensor driver
@@ -249,6 +256,28 @@ esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volum
  */
 esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_ms,
                                bool (*should_stop)(void));
+
+/**
+ * @brief True if this board has an onboard microphone
+ */
+bool board_hal_has_microphone(void);
+
+/**
+ * @brief Called with each captured block: interleaved signed 16-bit stereo
+ * (L,R,L,R,...) at 16 kHz. Return false to stop the capture early.
+ */
+typedef bool (*board_hal_mic_block_cb_t)(const int16_t *samples, size_t frames, void *user);
+
+/**
+ * @brief Capture microphone audio for up to @p duration_ms, handing each ~16 ms
+ * block to @p on_block. Blocking; shares the audio mutex with the chimes and
+ * the alarm (they can't run at once). The speaker amplifier stays off.
+ *
+ * @return ESP_OK, ESP_ERR_NOT_SUPPORTED if no microphone, ESP_ERR_TIMEOUT if
+ *         the audio path is busy, or another error if the codec / I2S path failed
+ */
+esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
+                                void *user);
 
 // One note in a board_hal_play_notes() sequence: `freq_hz` 0 plays
 // `duration_ms` of silence instead of a tone (used for the gap between

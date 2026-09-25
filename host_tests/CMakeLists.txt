@@ -96,6 +96,25 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
 
+# Microphone level maths (RMS/peak in dBFS, text bar) behind the console level test
+add_executable(
+  mic_level_test
+  test_mic_level.cpp
+  ../main/mic_level.c
+)
+
+target_link_libraries(
+  mic_level_test
+  GTest::gtest_main
+)
+
+target_include_directories(
+  mic_level_test
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
 # Headline/RSS extraction (pure parsing logic split out of headlines.c's
 # network-calling headlines_fetch(), specifically so it's host-testable
 # without a real HTTP stack)
@@ -178,6 +197,7 @@ gtest_discover_tests(todo_test)
 gtest_discover_tests(calendar_ics_test)
 gtest_discover_tests(network_backoff_test)
 gtest_discover_tests(http_auth_test)
+gtest_discover_tests(mic_level_test)
 
 # On-device image pipeline characterization tests (host build of
 # main/image_processor.c against ESP-IDF stubs + system libpng)

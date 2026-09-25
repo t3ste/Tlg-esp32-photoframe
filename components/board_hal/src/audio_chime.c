@@ -34,6 +34,19 @@ esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+bool board_hal_has_microphone(void)
+{
+    return false;
+}
+
+esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t on_block, void *user)
+{
+    (void) duration_ms;
+    (void) on_block;
+    (void) user;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 #else
 
 #include <math.h>
@@ -43,6 +56,7 @@ esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -362,6 +376,7 @@ static void play_beep_pattern_tones(i2s_chan_handle_t tx, board_hal_chime_kind_t
 
 typedef struct {
     i2s_chan_handle_t tx;
+    i2s_chan_handle_t rx;  // only when opened with with_rx (microphone capture)
     i2c_master_dev_handle_t es8311;
 } audio_session_t;
 
@@ -370,6 +385,11 @@ static void audio_session_close(audio_session_t *s)
     pa_set(false);
     if (s->es8311) {
         es8311_standby(s->es8311);
+    }
+    if (s->rx) {
+        i2s_channel_disable(s->rx);
+        i2s_del_channel(s->rx);
+        s->rx = NULL;
     }
     if (s->tx) {
         i2s_channel_disable(s->tx);
@@ -382,7 +402,11 @@ static void audio_session_close(audio_session_t *s)
     }
 }
 
-static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
+// with_rx: also open the I2S receive path (ES8311 ADC -> DIN) for microphone
+// capture. enable_pa: switch the speaker amplifier on (playback); microphone
+// capture leaves it off so nothing is audible.
+static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent, bool with_rx,
+                                    bool enable_pa)
 {
     memset(s, 0, sizeof(*s));
 
@@ -419,7 +443,7 @@ static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
     // clock present to ack register writes reliably.
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
-    err = i2s_new_channel(&chan_cfg, &s->tx, NULL);
+    err = i2s_new_channel(&chan_cfg, &s->tx, with_rx ? &s->rx : NULL);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "i2s_new_channel failed: %s", esp_err_to_name(err));
         audio_session_close(s);
@@ -436,7 +460,7 @@ static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
                 .bclk = BOARD_HAL_AUDIO_I2S_BCLK_PIN,
                 .ws = BOARD_HAL_AUDIO_I2S_WS_PIN,
                 .dout = BOARD_HAL_AUDIO_I2S_DOUT_PIN,
-                .din = I2S_GPIO_UNUSED,
+                .din = with_rx ? BOARD_HAL_AUDIO_I2S_DIN_PIN : I2S_GPIO_UNUSED,
                 .invert_flags =
                     {
                         .mclk_inv = false,
@@ -448,8 +472,14 @@ static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
     std_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;
 
     err = i2s_channel_init_std_mode(s->tx, &std_cfg);
+    if (err == ESP_OK && with_rx) {
+        err = i2s_channel_init_std_mode(s->rx, &std_cfg);
+    }
     if (err == ESP_OK) {
         err = i2s_channel_enable(s->tx);
+    }
+    if (err == ESP_OK && with_rx) {
+        err = i2s_channel_enable(s->rx);
     }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "I2S init failed: %s", esp_err_to_name(err));
@@ -464,7 +494,20 @@ static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent)
         return err;
     }
 
+    if (with_rx) {
+        // ADC output enabled (SDP_OUT bit 6 clear = not tri-stated/muted).
+        uint8_t sdp_out = 0;
+        if (es8311_read(s->es8311, ES8311_REG_SDP_OUT, &sdp_out) == ESP_OK) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(
+                es8311_write(s->es8311, ES8311_REG_SDP_OUT, (uint8_t) (sdp_out & 0xBF)));
+        }
+    }
+
     i2s_write_silence(s->tx, 128);
+    if (!enable_pa) {
+        vTaskDelay(pdMS_TO_TICKS(100));  // let the ADC front end settle
+        return ESP_OK;
+    }
     pa_set(true);
     // NS4150B (or its own soft-start/anti-pop ramp) needs real time to fully
     // turn on after CTRL goes high - confirmed live: a 20s continuous test
@@ -489,7 +532,7 @@ esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volum
     }
 
     audio_session_t session;
-    esp_err_t err = audio_session_open(&session, volume_percent);
+    esp_err_t err = audio_session_open(&session, volume_percent, false, true);
     if (err == ESP_OK) {
         play_beep_pattern_tones(session.tx, kind);
         i2s_write_silence(session.tx, 128);
@@ -519,7 +562,7 @@ esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_m
     const int PAUSE_CHUNK_MS = 200;
 
     audio_session_t session;
-    esp_err_t err = audio_session_open(&session, volume_percent);
+    esp_err_t err = audio_session_open(&session, volume_percent, false, true);
     if (err == ESP_OK) {
         uint32_t elapsed_ms = 0;
         bool stop = false;
@@ -562,7 +605,7 @@ esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t
     }
 
     audio_session_t session;
-    esp_err_t err = audio_session_open(&session, volume_percent);
+    esp_err_t err = audio_session_open(&session, volume_percent, false, true);
     if (err == ESP_OK) {
         for (int i = 0; i < count; i++) {
             if (notes[i].freq_hz > 0.0f) {
@@ -572,6 +615,49 @@ esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t
             }
         }
         i2s_write_silence(session.tx, 128);
+        audio_session_close(&session);
+    }
+
+    xSemaphoreGive(s_chime_mutex);
+    return err;
+}
+
+bool board_hal_has_microphone(void)
+{
+    return true;
+}
+
+esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t on_block, void *user)
+{
+    if (!on_block) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    chime_mutex_init();
+    if (!s_chime_mutex || xSemaphoreTake(s_chime_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    audio_session_t session;
+    esp_err_t err = audio_session_open(&session, 0, true, false);
+    if (err == ESP_OK) {
+        // 256 stereo frames = 16 ms per block at 16 kHz. The first blocks after
+        // start-up are discarded: the analog front end of the codec still settles.
+        const int SETTLE_BLOCKS = 10;
+        int16_t buf[256 * 2];
+        int64_t end_us = esp_timer_get_time() + (int64_t) duration_ms * 1000;
+        int block = 0;
+        bool keep_going = true;
+        while (keep_going && esp_timer_get_time() < end_us) {
+            size_t bytes = 0;
+            err = i2s_channel_read(session.rx, buf, sizeof(buf), &bytes, pdMS_TO_TICKS(200));
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "i2s_channel_read failed: %s", esp_err_to_name(err));
+                break;
+            }
+            if (++block > SETTLE_BLOCKS) {
+                keep_going = on_block(buf, bytes / 4, user);
+            }
+        }
         audio_session_close(&session);
     }
 
