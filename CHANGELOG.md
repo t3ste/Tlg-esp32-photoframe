@@ -2,6 +2,14 @@
 
 All notable changes to this fork are documented here. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full running list of everything this fork adds on top of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe); this file covers per-release deltas only.
 
+## [Unreleased]
+
+### Added
+
+- Web Flasher: an **Alarm Clock** option (shown for boards that support it, currently `waveshare_photopainter_73`) flashes the alarm firmware variant. Dev builds always offer it; Stable appears once a full (non-pre-)release ships the alarm binary. Driven by a new `alarmclock` flag in `boards/boards.json` and `generate_manifests.py --variant alarmclock`.
+
+---
+
 ## [v218.4.0] - 2026-09-25
 
 ### Added

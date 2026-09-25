@@ -317,6 +317,29 @@ jobs:
             ${STABLE_TAG:+--stable-version "$STABLE_TAG"}
         done
 
+        # Alarm Clock variant (only boards with a speaker, see boards.json). Same
+        # stable/dev handling as above; a stable release published before the
+        # variant existed simply has no such asset, so the stable option is
+        # omitted for it and the flasher falls back to the dev build.
+        ALARM_BOARDS="waveshare_photopainter_73"
+        for board in $ALARM_BOARDS; do
+          variant="$board-alarmclock"
+          alarm_dev="firmware-artifacts/photoframe-firmware-$variant-merged.bin"
+          [[ -f "$alarm_dev" ]] || { echo "::warning::No alarmclock build for $board"; continue; }
+          cp "$alarm_dev" "demo/$board/photoframe-firmware-$variant-dev.bin"
+
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            cp "demo/$board/photoframe-firmware-$variant-dev.bin" "demo/$board/photoframe-firmware-$variant-merged.bin"
+          elif [[ -n "$STABLE_TAG" ]] && gh release download "$STABLE_TAG" --pattern "photoframe-firmware-$variant-merged.bin" --dir "demo/$board" --clobber; then
+            echo "Downloaded stable alarmclock firmware ${STABLE_TAG} for $board"
+          else
+            echo "::warning::No stable alarmclock release asset for $board (${STABLE_TAG:-no release}); omitting the stable alarmclock option."
+            rm -f "demo/$board/photoframe-firmware-$variant-merged.bin"
+          fi
+
+          python3 scripts/generate_manifests.py --no-copy --dev --demo-dir "demo/$board" --board "$board" --variant alarmclock             ${STABLE_TAG:+--stable-version "$STABLE_TAG"}
+        done
+
         # Link a default manifest at the root of demo for backward compatibility or default view
         # (the stable manifest may be absent if no release asset was available)
         [ -f demo/waveshare_photopainter_73/manifest.json ] && cp demo/waveshare_photopainter_73/manifest.json demo/

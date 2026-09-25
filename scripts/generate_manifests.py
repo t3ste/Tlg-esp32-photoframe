@@ -18,7 +18,12 @@ from pathlib import Path
 # Import version detection functions from get_version module
 import get_version as version_module
 
-from boards import SUPPORTED_BOARDS, board_chip_family, board_flash_args
+from boards import (  # isort:skip
+    ALARMCLOCK_BOARDS,
+    SUPPORTED_BOARDS,
+    board_chip_family,
+    board_flash_args,
+)
 
 
 def check_firmware_exists(firmware_path):
@@ -30,7 +35,12 @@ def check_firmware_exists(firmware_path):
     return True
 
 
-def copy_firmware_to_demo(build_dir, demo_dir, board):
+def variant_suffix(variant):
+    """Filename suffix for a firmware variant ("" for the regular build)."""
+    return f"-{variant}" if variant else ""
+
+
+def copy_firmware_to_demo(build_dir, demo_dir, board, variant=""):
     """Copy firmware files from build directory to demo."""
     import shutil
 
@@ -45,7 +55,9 @@ def copy_firmware_to_demo(build_dir, demo_dir, board):
         return False
 
     # Create merged firmware using esptool
-    merged_bin = os.path.join(demo_dir, f"photoframe-firmware-{board}-merged.bin")
+    merged_bin = os.path.join(
+        demo_dir, f"photoframe-firmware-{board}{variant_suffix(variant)}-merged.bin"
+    )
 
     # The target chip decides both the esptool chip name and where the
     # 2nd-stage bootloader lives (0x1000 on the ESP32, 0x0 on the S3).
@@ -83,13 +95,19 @@ def copy_firmware_to_demo(build_dir, demo_dir, board):
         return False
 
 
-def generate_manifest(output_path, version, firmware_file, board, is_dev=False):
+def generate_manifest(
+    output_path, version, firmware_file, board, is_dev=False, variant=""
+):
     """Generate a manifest.json file."""
 
     board_display = SUPPORTED_BOARDS.get(board, board)
 
     manifest = {
-        "name": f"ESP32 PhotoFrame {board_display}{' (Development)' if is_dev else ''}",
+        "name": (
+            f"ESP32 PhotoFrame {board_display}"
+            f"{' + Alarm Clock' if variant == 'alarmclock' else ''}"
+            f"{' (Development)' if is_dev else ''}"
+        ),
         "version": version,
         "home_assistant_domain": "esphome",
         "new_install_prompt_erase": True,
@@ -111,7 +129,7 @@ def generate_manifest(output_path, version, firmware_file, board, is_dev=False):
 
 
 def generate_manifests(
-    demo_dir, board, build_dir=None, dev_mode=False, stable_version=None
+    demo_dir, board, build_dir=None, dev_mode=False, stable_version=None, variant=""
 ):
     """Generate manifest files for web flasher."""
 
@@ -124,18 +142,24 @@ def generate_manifests(
 
     # Copy firmware if build_dir provided
     if build_dir:
-        if not copy_firmware_to_demo(build_dir, demo_dir, board):
+        if not copy_firmware_to_demo(build_dir, demo_dir, board, variant):
             return False
 
     # Check if firmware exists
-    firmware_file = f"photoframe-firmware-{board}-merged.bin"
+    sfx = variant_suffix(variant)
+    firmware_file = f"photoframe-firmware-{board}{sfx}-merged.bin"
     firmware_path = demo_path / firmware_file
 
     # Generate stable manifest
-    manifest_path = demo_path / "manifest.json"
+    manifest_path = demo_path / f"manifest{sfx}.json"
     if check_firmware_exists(firmware_path):
         generate_manifest(
-            manifest_path, stable_version, firmware_file, board, is_dev=False
+            manifest_path,
+            stable_version,
+            firmware_file,
+            board,
+            is_dev=False,
+            variant=variant,
         )
     else:
         print(
@@ -146,9 +170,9 @@ def generate_manifests(
     if dev_mode:
         # Get dev version (commit hash)
         dev_version = version_module.get_dev_version()
-        dev_manifest_path = demo_path / "manifest-dev.json"
+        dev_manifest_path = demo_path / f"manifest-dev{sfx}.json"
         # Dev manifest points to dev firmware file
-        dev_firmware_file = f"photoframe-firmware-{board}-dev.bin"
+        dev_firmware_file = f"photoframe-firmware-{board}{sfx}-dev.bin"
         # Check if dev firmware exists, fallback to merged if not
         if not (demo_path / dev_firmware_file).exists():
             print(
@@ -156,7 +180,12 @@ def generate_manifests(
             )
             dev_firmware_file = firmware_file
         generate_manifest(
-            dev_manifest_path, dev_version, dev_firmware_file, board, is_dev=True
+            dev_manifest_path,
+            dev_version,
+            dev_firmware_file,
+            board,
+            is_dev=True,
+            variant=variant,
         )
 
     return True
@@ -191,11 +220,20 @@ def main():
         help="Board type to build",
     )
     parser.add_argument(
+        "--variant",
+        choices=["alarmclock"],
+        default="",
+        help="Firmware variant (only for boards that have one, see boards.json)",
+    )
+    parser.add_argument(
         "--stable-version",
         help="Override stable version (default: auto-detect from git/GitHub)",
     )
 
     args = parser.parse_args()
+
+    if args.variant == "alarmclock" and args.board not in ALARMCLOCK_BOARDS:
+        parser.error(f"{args.board} has no alarmclock firmware variant")
 
     # Get absolute paths - resolve relative to project root (parent of scripts dir)
     script_dir = Path(__file__).parent
@@ -206,7 +244,12 @@ def main():
     # Generate manifests
     print(f"Generating manifests for {args.board}...")
     if not generate_manifests(
-        demo_dir, args.board, build_dir, args.dev, args.stable_version
+        demo_dir,
+        args.board,
+        build_dir,
+        args.dev,
+        args.stable_version,
+        args.variant,
     ):
         sys.exit(1)
 
