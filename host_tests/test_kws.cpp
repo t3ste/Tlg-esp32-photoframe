@@ -9,6 +9,7 @@
 #include <vector>
 
 extern "C" {
+#include "alarm_pattern.h"
 #include "kws.h"
 }
 
@@ -415,4 +416,97 @@ TEST(KwsStream, HandlesTinyAndHugeBlocks)
     Pcm huge = silence(100000);  // more than the ring holds
     EXPECT_FALSE(kws_stream_push(&s, m.get(), huge.data(), huge.size(), &score));
     EXPECT_FALSE(kws_stream_push(&s, m.get(), nullptr, 0, &score));
+}
+
+// The alarm rings loudly while the stop word is spoken: the notes are muted for
+// the detector (as alarm_manager.c does with alarm_pattern_tone_sounding()), so
+// only the pauses are listened to.
+TEST(KwsAlarm, StopWordInAPauseBetweenAlarmNotesIsHeard)
+{
+    auto m = enrolled_matcher();
+    const int sr = KWS_SAMPLE_RATE;
+    const size_t total = (size_t) sr * 14;
+    Pcm audio(total, 0);
+
+    // alarm tones (loud) at the start of every cycle
+    alarm_note_t notes[64];
+    int n = alarm_pattern_build(notes, 64, 14000);
+    size_t pos = 0;
+    double phase = 0;
+    for (int i = 0; i < n; i++) {
+        size_t len = (size_t) notes[i].duration_ms * sr / 1000;
+        for (size_t k = 0; k < len && pos + k < total; k++) {
+            if (notes[i].freq_hz > 0) {
+                phase += 2.0 * 3.14159265358979 * notes[i].freq_hz / sr;
+                audio[pos + k] = (int16_t) (9000.0 * std::sin(phase));
+            }
+        }
+        pos += len;
+    }
+    // the stop word spoken 2.3 s into the first pause (t = 1.2 s + 2.3 s), at speaking level
+    Pcm word_pcm = load_wav("stopp_hedda_r-2");
+    size_t at = (size_t) (3.5 * sr);
+    for (size_t k = 0; k < word_pcm.size(); k++) {
+        audio[at + k] =
+            (int16_t) std::max(-32768, std::min(32767, (int) audio[at + k] + word_pcm[k]));
+    }
+
+    std::vector<int16_t> ring(32000);
+    auto scratch = std::make_unique<kws_pattern_t>();
+    kws_stream_t s;
+    kws_stream_init(&s, ring.data(), ring.size(), scratch.get());
+    int detections = 0;
+    size_t detected_at = 0;
+    for (size_t p = 0; p < total; p += 256) {
+        size_t len = std::min<size_t>(256, total - p);
+        Pcm block(audio.begin() + (long) p, audio.begin() + (long) (p + len));
+        uint32_t t_ms = (uint32_t) ((p + len / 2) * 1000 / sr);
+        if (alarm_pattern_tone_sounding(t_ms)) {
+            std::fill(block.begin(), block.end(), 0);  // deaf while the notes sound
+        }
+        float score = 0;
+        if (kws_stream_push(&s, m.get(), block.data(), len, &score)) {
+            detections++;
+            detected_at = p + len;
+        }
+    }
+    EXPECT_EQ(detections, 1);
+    EXPECT_GT(detected_at, at + word_pcm.size());
+    EXPECT_LT(detected_at, (size_t) (6.2 * sr));  // before the next cycle's notes
+}
+
+TEST(KwsAlarm, AlarmNotesAloneNeverTrigger)
+{
+    auto m = enrolled_matcher();
+    const int sr = KWS_SAMPLE_RATE;
+    std::vector<int16_t> ring(32000);
+    auto scratch = std::make_unique<kws_pattern_t>();
+    kws_stream_t s;
+    kws_stream_init(&s, ring.data(), ring.size(), scratch.get());
+    alarm_note_t notes[64];
+    int n = alarm_pattern_build(notes, 64, 20000);
+    int detections = 0;
+    double phase = 0;
+    size_t t = 0;
+    for (int i = 0; i < n; i++) {
+        size_t len = (size_t) notes[i].duration_ms * sr / 1000;
+        for (size_t k = 0; k < len; k += 256) {
+            size_t blen = std::min<size_t>(256, len - k);
+            Pcm block(blen, 0);
+            if (notes[i].freq_hz > 0) {
+                for (size_t j = 0; j < blen; j++) {
+                    phase += 2.0 * 3.14159265358979 * notes[i].freq_hz / sr;
+                    block[j] = (int16_t) (9000.0 * std::sin(phase));
+                }
+            }
+            // deliberately NOT muted: even unmuted, the notes are no keyword
+            float score = 0;
+            if (kws_stream_push(&s, m.get(), block.data(), blen, &score)) {
+                detections++;
+            }
+            t += blen;
+        }
+    }
+    (void) t;
+    EXPECT_EQ(detections, 0);
 }

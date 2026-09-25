@@ -117,12 +117,32 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
 
+# Ring pattern of the alarm (notes / pauses / when the microphone must ignore the room)
+add_executable(
+  alarm_pattern_test
+  test_alarm_pattern.cpp
+  ../main/alarm_pattern.c
+)
+
+target_link_libraries(
+  alarm_pattern_test
+  GTest::gtest_main
+)
+
+target_include_directories(
+  alarm_pattern_test
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
 # Stop-word (keyword) recognition: MFCC + DTW template matching, tested on
 # text-to-speech samples (host_tests/data/kws)
 add_executable(
   kws_test
   test_kws.cpp
   ../main/kws.c
+  ../main/alarm_pattern.c
 )
 
 target_compile_definitions(
@@ -227,6 +247,7 @@ gtest_discover_tests(network_backoff_test)
 gtest_discover_tests(http_auth_test)
 gtest_discover_tests(mic_level_test)
 gtest_discover_tests(kws_test)
+gtest_discover_tests(alarm_pattern_test)
 
 # On-device image pipeline characterization tests (host build of
 # main/image_processor.c against ESP-IDF stubs + system libpng)

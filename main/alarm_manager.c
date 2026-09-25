@@ -10,6 +10,8 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "alarm_manager";
 
@@ -45,6 +47,18 @@ bool alarm_manager_key_pressed(void)
     return false;
 }
 
+esp_err_t alarm_manager_ring_now(void)
+{
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+void alarm_manager_stop(void) {}
+
+const char *alarm_manager_last_stop_reason(void)
+{
+    return "";
+}
+
 bool alarm_manager_key_swallowed(int key_level)
 {
     (void) key_level;
@@ -58,7 +72,17 @@ void alarm_manager_run(void)
 
 #else
 
+#if BOARD_HAL_VOICE_ENABLED
+#include <stdlib.h>
+
+#include "alarm_pattern.h"
+#include "kws_service.h"
+#endif
+
 static volatile bool s_ringing = false;
+static volatile bool s_api_stop = false;  // stop requested from the Web UI
+static const char *volatile s_stop_reason = "";
+static volatile bool s_ring_task_pending = false;
 
 bool alarm_manager_is_compiled_in(void)
 {
@@ -152,6 +176,9 @@ bool alarm_manager_key_swallowed(int key_level)
 // Polled by board_hal_play_alarm() between notes/silence chunks.
 static bool key_press_requests_stop(void)
 {
+    if (s_api_stop) {
+        return true;
+    }
     if (BOARD_HAL_ROTATE_KEY != GPIO_NUM_NC && !s_stop_requested) {
         // Level check as a fallback for the interrupt; only counts a press that
         // followed a release, so a key already held when the ring started
@@ -174,6 +201,86 @@ bool alarm_manager_is_ringing(void)
     return s_ringing;
 }
 
+#if BOARD_HAL_VOICE_ENABLED
+// Ringing with the microphone open: the alarm notes are played through the same
+// full-duplex session that hands the microphone audio to the stop-word listener.
+// While a note sounds (plus its echo) the audio is muted for the listener, so
+// only the pauses between the notes can carry the word. Runs on its own task:
+// the recognition needs far more stack than the callers of alarm_manager_run().
+typedef struct {
+    kws_listener_t *listener;
+    uint64_t frames;     // frames delivered so far (after the start-up discard)
+    const char *reason;  // set when the ring was ended early
+} voice_ctx_t;
+
+static bool voice_block(const int16_t *stereo, size_t frames, void *user)
+{
+    voice_ctx_t *c = user;
+    uint32_t t_ms = (uint32_t) (((uint64_t) BOARD_HAL_MIC_SETTLE_FRAMES + c->frames + frames / 2) *
+                                1000u / 16000u);
+    c->frames += frames;
+    if (key_press_requests_stop()) {
+        c->reason = s_api_stop ? "api" : "key";
+        return false;
+    }
+    if (kws_service_listener_feed(c->listener, stereo, frames, alarm_pattern_tone_sounding(t_ms))) {
+        c->reason = "voice";
+        return false;
+    }
+    return true;
+}
+
+typedef struct {
+    uint32_t duration_ms;
+    uint8_t volume;
+    esp_err_t err;
+    const char *reason;
+    TaskHandle_t caller;
+} voice_job_t;
+
+static void voice_ring_task(void *arg)
+{
+    voice_job_t *job = arg;
+    job->err = ESP_FAIL;
+    job->reason = "";
+    kws_listener_t *listener = kws_service_listener_open();
+    int cap = alarm_pattern_count(job->duration_ms);
+    alarm_note_t *pattern = malloc((size_t) cap * sizeof(alarm_note_t));
+    board_hal_note_t *notes = malloc((size_t) cap * sizeof(board_hal_note_t));
+    if (listener && pattern && notes) {
+        int n = alarm_pattern_build(pattern, cap, job->duration_ms);
+        for (int i = 0; i < n; i++) {
+            notes[i].freq_hz = pattern[i].freq_hz;
+            notes[i].duration_ms = pattern[i].duration_ms;
+        }
+        voice_ctx_t ctx = {.listener = listener};
+        job->err = board_hal_mic_capture_with_tones(job->duration_ms, voice_block, &ctx, notes, n,
+                                                    job->volume);
+        job->reason = ctx.reason ? ctx.reason : "";
+    }
+    free(pattern);
+    free(notes);
+    kws_service_listener_close(listener);
+    xTaskNotifyGive(job->caller);
+    vTaskDelete(NULL);
+}
+
+static esp_err_t ring_with_voice(uint16_t duration_sec, const char **reason)
+{
+    voice_job_t job = {.duration_ms = (uint32_t) duration_sec * 1000u,
+                       .volume = (uint8_t) config_manager_get_chime_volume(),
+                       .err = ESP_FAIL,
+                       .reason = "",
+                       .caller = xTaskGetCurrentTaskHandle()};
+    if (xTaskCreate(voice_ring_task, "alarm_voice", 16384, &job, 5, NULL) != pdPASS) {
+        return ESP_ERR_NO_MEM;
+    }
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    *reason = job.reason;
+    return job.err;
+}
+#endif  // BOARD_HAL_VOICE_ENABLED
+
 void alarm_manager_run(void)
 {
     if (!board_hal_has_speaker()) {
@@ -186,6 +293,8 @@ void alarm_manager_run(void)
              (unsigned) duration_sec);
 
     s_stop_requested = false;
+    s_api_stop = false;
+    s_stop_reason = "";
     s_swallow_key = false;
     s_key_edge = false;
     s_key_seen_released =
@@ -204,8 +313,27 @@ void alarm_manager_run(void)
     }
 
     s_ringing = true;
-    esp_err_t err = board_hal_play_alarm((uint8_t) config_manager_get_chime_volume(),
-                                         (uint32_t) duration_sec * 1000u, key_press_requests_stop);
+    esp_err_t err = ESP_FAIL;
+    bool ring_done = false;
+#if BOARD_HAL_VOICE_ENABLED
+    if (kws_service_alarm_stop_ready()) {
+        ESP_LOGI(TAG, "Listening for the stop word in the pauses between the notes");
+        const char *reason = "";
+        err = ring_with_voice(duration_sec, &reason);
+        if (err == ESP_OK) {
+            ring_done = true;
+            s_stop_reason = reason[0] ? reason : "timeout";
+        } else {
+            ESP_LOGW(TAG, "Ringing with the microphone failed (%s) - plain alarm instead",
+                     esp_err_to_name(err));
+        }
+    }
+#endif
+    if (!ring_done) {
+        err = board_hal_play_alarm((uint8_t) config_manager_get_chime_volume(),
+                                   (uint32_t) duration_sec * 1000u, key_press_requests_stop);
+        s_stop_reason = s_api_stop ? "api" : s_stop_requested ? "key" : "timeout";
+    }
     s_ringing = false;
 
     if (isr_added) {
@@ -215,8 +343,40 @@ void alarm_manager_run(void)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Alarm playback failed: %s", esp_err_to_name(err));
     } else {
-        ESP_LOGI(TAG, "Alarm finished ringing");
+        ESP_LOGI(TAG, "Alarm finished ringing (%s)", s_stop_reason);
     }
+}
+
+static void ring_now_task(void *arg)
+{
+    alarm_manager_run();
+    s_ring_task_pending = false;
+    vTaskDelete(NULL);
+}
+
+esp_err_t alarm_manager_ring_now(void)
+{
+    if (s_ringing || s_ring_task_pending) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_ring_task_pending = true;
+    if (xTaskCreate(ring_now_task, "alarm_test", 6144, NULL, 5, NULL) != pdPASS) {
+        s_ring_task_pending = false;
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+void alarm_manager_stop(void)
+{
+    if (s_ringing) {
+        s_api_stop = true;
+    }
+}
+
+const char *alarm_manager_last_stop_reason(void)
+{
+    return s_ringing ? "" : s_stop_reason;
 }
 
 #endif  // CONFIG_ALARM_CLOCK_ENABLED

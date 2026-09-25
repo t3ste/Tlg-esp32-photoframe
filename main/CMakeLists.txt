@@ -3,6 +3,7 @@ set(SOURCES
     "agenda_manager.c"
     "agenda_renderer.c"
     "alarm_manager.c"
+    "alarm_pattern.c"
     "alarm_setting_ui.c"
     "album_manager.c"
     "battery_history.c"

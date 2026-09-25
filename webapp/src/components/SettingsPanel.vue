@@ -6,6 +6,7 @@ import GrayscaleCalibration from "./GrayscaleCalibration.vue";
 import ProcessingControls from "./ProcessingControls.vue";
 import RotationSchedule from "./RotationSchedule.vue";
 import MicrophoneTools from "./MicrophoneTools.vue";
+import VoiceStopTools from "./VoiceStopTools.vue";
 import { isValidCron } from "../utils/cron";
 import { TIMEZONES } from "../data/timezones";
 import {
@@ -3186,6 +3187,22 @@ async function performFactoryReset() {
             <div class="text-caption text-medium-emphasis mb-2">
               How long the alarm keeps ringing if never stopped early (default 60s, up to 600s).
             </div>
+
+            <v-divider class="my-4" />
+
+            <VoiceStopTools
+              :voice-available="settingsStore.deviceSettings.voiceAvailable"
+              @message="(m) => showSnackbar(m.text, m.color)"
+            />
+
+            <template v-if="settingsStore.deviceSettings.voiceAvailable">
+              <v-divider class="my-6" />
+
+              <MicrophoneTools
+                :speaker-available="settingsStore.deviceSettings.chimeSpeakerAvailable"
+                @message="(m) => showSnackbar(m.text, m.color)"
+              />
+            </template>
           </v-tabs-window-item>
 
           <!-- Climate Tab -->
@@ -3514,15 +3531,6 @@ async function performFactoryReset() {
                 </v-btn>
               </v-col>
             </v-row>
-
-            <template v-if="settingsStore.deviceSettings.microphoneAvailable">
-              <v-divider class="my-6" />
-
-              <MicrophoneTools
-                :speaker-available="settingsStore.deviceSettings.chimeSpeakerAvailable"
-                @message="(m) => showSnackbar(m.text, m.color)"
-              />
-            </template>
 
             <v-divider class="my-6" />
 

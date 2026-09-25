@@ -4,8 +4,9 @@
 /*
  * Device side of the stop-word ("Wortmuster") recognition, see kws.h: enrolling
  * the word, keeping the templates, and testing detection on the microphone.
- * First step towards switching a ringing alarm off by voice - it is not wired
- * into the alarm yet. Only boards with a microphone; stubs elsewhere.
+ * Belongs to the Alarm Clock: switching a ringing alarm off by voice. Compiled
+ * in only in an Alarm Clock firmware on a board with speaker and microphone
+ * (BOARD_HAL_VOICE_ENABLED); stubs elsewhere.
  */
 
 #include <stdbool.h>
@@ -32,6 +33,7 @@ typedef struct {
     kws_service_mode_t mode;
     int templates;  // enrolled patterns
     float threshold;
+    bool alarm_stop;  // the ringing alarm listens for the word
 
     // Last enrolment
     bool have_enroll_result;
@@ -66,6 +68,30 @@ esp_err_t kws_service_clear(void);
 esp_err_t kws_service_test(uint32_t seconds);
 
 void kws_service_get_status(kws_service_status_t *out);
+
+/** Switch: should a ringing alarm listen for the stop word? (persisted) */
+esp_err_t kws_service_set_alarm_stop(bool enabled);
+
+/** True when the alarm should listen: the switch is on and a word is enrolled. */
+bool kws_service_alarm_stop_ready(void);
+
+/**
+ * Word listener for the ringing alarm (see alarm_manager.c). Holds the audio
+ * window (about 70 KB, PSRAM if available) and works on the audio blocks the
+ * microphone capture hands over.
+ */
+typedef struct kws_listener kws_listener_t;
+
+/** NULL unless kws_service_alarm_stop_ready() (or out of memory). */
+kws_listener_t *kws_service_listener_open(void);
+
+/**
+ * Feeds one block of interleaved stereo audio. @p mute replaces it by silence
+ * (the alarm notes are sounding). Returns true when the stop word was heard.
+ */
+bool kws_service_listener_feed(kws_listener_t *l, const int16_t *stereo, size_t frames, bool mute);
+
+void kws_service_listener_close(kws_listener_t *l);
 
 #ifdef __cplusplus
 }

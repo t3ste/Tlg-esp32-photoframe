@@ -5,9 +5,9 @@
 #include "board_hal.h"
 #include "kws.h"
 
-#if !BOARD_HAL_HAS_MICROPHONE
+#if !BOARD_HAL_VOICE_ENABLED
 
-// Compiled out to stubs on boards without a microphone.
+// Compiled out to stubs unless this is an Alarm Clock build on a board with speaker + microphone.
 esp_err_t kws_service_enroll(uint32_t seconds)
 {
     (void) seconds;
@@ -31,6 +31,36 @@ void kws_service_get_status(kws_service_status_t *out)
     out->threshold = KWS_DEFAULT_FLOOR_THRESHOLD;
 }
 
+esp_err_t kws_service_set_alarm_stop(bool enabled)
+{
+    (void) enabled;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+bool kws_service_alarm_stop_ready(void)
+{
+    return false;
+}
+
+kws_listener_t *kws_service_listener_open(void)
+{
+    return NULL;
+}
+
+bool kws_service_listener_feed(kws_listener_t *l, const int16_t *stereo, size_t frames, bool mute)
+{
+    (void) l;
+    (void) stereo;
+    (void) frames;
+    (void) mute;
+    return false;
+}
+
+void kws_service_listener_close(kws_listener_t *l)
+{
+    (void) l;
+}
+
 #else
 
 #include <stdio.h>
@@ -41,6 +71,7 @@ void kws_service_get_status(kws_service_status_t *out)
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
 #include "power_manager.h"
 #include "storage.h"
 
@@ -214,36 +245,144 @@ static void enroll_task(void *arg)
     vTaskDelete(NULL);
 }
 
-typedef struct {
-    kws_stream_t stream;
-    unsigned seen;
-} test_ctx_t;
+// ------------------------------------------------------------------ alarm stop
 
-static bool test_block(const int16_t *stereo, size_t frames, void *user)
+#define KWS_NVS_NAMESPACE "kws"
+#define KWS_NVS_ALARM_KEY "alarm"
+static bool s_alarm_stop = false;
+static bool s_alarm_stop_loaded = false;
+
+static bool alarm_stop_enabled(void)
 {
-    test_ctx_t *c = user;
+    if (!s_alarm_stop_loaded) {
+        s_alarm_stop_loaded = true;
+        nvs_handle_t h;
+        if (nvs_open(KWS_NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+            uint8_t v = 0;
+            if (nvs_get_u8(h, KWS_NVS_ALARM_KEY, &v) == ESP_OK) {
+                s_alarm_stop = v != 0;
+            }
+            nvs_close(h);
+        }
+    }
+    return s_alarm_stop;
+}
+
+esp_err_t kws_service_set_alarm_stop(bool enabled)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(KWS_NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_u8(h, KWS_NVS_ALARM_KEY, enabled ? 1 : 0);
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+    if (err == ESP_OK) {
+        s_alarm_stop_loaded = true;
+        s_alarm_stop = enabled;
+    }
+    return err;
+}
+
+bool kws_service_alarm_stop_ready(void)
+{
+    kws_matcher_t *m = matcher();
+    ensure_loaded();
+    return alarm_stop_enabled() && m && m->count > 0;
+}
+
+// ------------------------------------------------------------------ listener
+
+struct kws_listener {
+    kws_stream_t stream;
+    int16_t *ring;
+    kws_pattern_t *scratch;
+    unsigned seen;
+};
+
+static kws_listener_t *listener_open(void)
+{
+    kws_matcher_t *m = matcher();
+    ensure_loaded();
+    if (!m || m->count == 0) {
+        return NULL;
+    }
+    kws_listener_t *l = calloc(1, sizeof(*l));
+    if (!l) {
+        return NULL;
+    }
+    l->ring = big_alloc(STREAM_RING_SAMPLES * sizeof(int16_t));
+    l->scratch = big_alloc(sizeof(kws_pattern_t));
+    if (!l->ring || !l->scratch) {
+        free(l->ring);
+        free(l->scratch);
+        free(l);
+        return NULL;
+    }
+    kws_stream_init(&l->stream, l->ring, STREAM_RING_SAMPLES, l->scratch);
+    return l;
+}
+
+kws_listener_t *kws_service_listener_open(void)
+{
+    if (!kws_service_alarm_stop_ready()) {
+        return NULL;
+    }
+    return listener_open();
+}
+
+// Returns true when the stop word was heard; @p scored_out counts utterances.
+static bool listener_feed(kws_listener_t *l, const int16_t *stereo, size_t frames, bool mute)
+{
     int16_t mono[256];
     if (frames > 256) {
         frames = 256;
     }
     for (size_t i = 0; i < frames; i++) {
-        mono[i] = (int16_t) (((int) stereo[i * 2] + (int) stereo[i * 2 + 1]) / 2);
+        mono[i] = mute ? 0 : (int16_t) (((int) stereo[i * 2] + (int) stereo[i * 2 + 1]) / 2);
     }
     float score = 0;
-    if (kws_stream_push(&c->stream, s_matcher, mono, frames, &score)) {
-        s_last.test_detections++;
+    bool heard = kws_stream_push(&l->stream, s_matcher, mono, frames, &score);
+    if (heard) {
         ESP_LOGI(TAG, "Keyword heard (distance %.2f < %.2f)", (double) score,
                  (double) s_matcher->threshold);
     }
-    if (c->stream.utterances != c->seen) {
-        c->seen = c->stream.utterances;
-        s_last.test_utterances = c->seen;
-        s_last.last_score = c->stream.last_score;
-        if (c->stream.last_score < s_last.best_score) {
-            s_last.best_score = c->stream.last_score;
+    return heard;
+}
+
+bool kws_service_listener_feed(kws_listener_t *l, const int16_t *stereo, size_t frames, bool mute)
+{
+    return l ? listener_feed(l, stereo, frames, mute) : false;
+}
+
+void kws_service_listener_close(kws_listener_t *l)
+{
+    if (l) {
+        free(l->ring);
+        free(l->scratch);
+        free(l);
+    }
+}
+
+// Listens on the microphone and counts what the stop word detector hears.
+static bool test_block(const int16_t *stereo, size_t frames, void *user)
+{
+    kws_listener_t *l = user;
+    if (listener_feed(l, stereo, frames, false)) {
+        s_last.test_detections++;
+    }
+    if (l->stream.utterances != l->seen) {
+        l->seen = l->stream.utterances;
+        s_last.test_utterances = l->seen;
+        s_last.last_score = l->stream.last_score;
+        if (l->stream.last_score < s_last.best_score) {
+            s_last.best_score = l->stream.last_score;
         }
-        ESP_LOGI(TAG, "Utterance %u: distance %.2f (threshold %.2f)", c->seen,
-                 (double) c->stream.last_score, (double) s_matcher->threshold);
+        ESP_LOGI(TAG, "Utterance %u: distance %.2f (threshold %.2f)", l->seen,
+                 (double) l->stream.last_score, (double) s_matcher->threshold);
     }
     power_manager_reset_sleep_timer();
     return true;
@@ -252,25 +391,19 @@ static bool test_block(const int16_t *stereo, size_t frames, void *user)
 static void test_task(void *arg)
 {
     uint32_t seconds = (uint32_t) (uintptr_t) arg;
-    test_ctx_t *ctx = big_alloc(sizeof(test_ctx_t));
-    int16_t *ring = big_alloc(STREAM_RING_SAMPLES * sizeof(int16_t));
-    kws_pattern_t *scratch = big_alloc(sizeof(kws_pattern_t));
-    if (!ctx || !ring || !scratch) {
+    kws_listener_t *l = listener_open();
+    if (!l) {
         ESP_LOGE(TAG, "Out of memory for the test");
     } else {
-        memset(ctx, 0, sizeof(*ctx));
-        kws_stream_init(&ctx->stream, ring, STREAM_RING_SAMPLES, scratch);
         ESP_LOGI(TAG, "Listening for the stop word for %u s", (unsigned) seconds);
-        esp_err_t err = board_hal_mic_capture(seconds * 1000u, test_block, ctx);
+        esp_err_t err = board_hal_mic_capture(seconds * 1000u, test_block, l);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Capture failed: %s", esp_err_to_name(err));
         }
         ESP_LOGI(TAG, "Test done: %u utterances, %u keyword detections", s_last.test_utterances,
                  s_last.test_detections);
+        kws_service_listener_close(l);
     }
-    free(ctx);
-    free(ring);
-    free(scratch);
     s_mode = KWS_SERVICE_IDLE;
     vTaskDelete(NULL);
 }
@@ -352,6 +485,7 @@ void kws_service_get_status(kws_service_status_t *out)
     out->mode = s_mode;
     out->templates = m ? m->count : 0;
     out->threshold = m ? m->threshold : KWS_DEFAULT_FLOOR_THRESHOLD;
+    out->alarm_stop = alarm_stop_enabled();
 }
 
-#endif  // BOARD_HAL_HAS_MICROPHONE
+#endif  // BOARD_HAL_VOICE_ENABLED

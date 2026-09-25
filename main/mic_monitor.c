@@ -5,9 +5,9 @@
 #include "board_hal.h"
 #include "mic_level.h"
 
-#if !BOARD_HAL_HAS_MICROPHONE
+#if !BOARD_HAL_VOICE_ENABLED
 
-// Compiled out to stubs on boards without a microphone.
+// Compiled out to stubs unless this is an Alarm Clock build on a board with speaker + microphone.
 bool mic_monitor_available(void)
 {
     return false;
@@ -331,4 +331,4 @@ esp_err_t mic_monitor_set_settings(bool auto_threshold, int threshold_dbfs)
     return err;
 }
 
-#endif  // BOARD_HAL_HAS_MICROPHONE
+#endif  // BOARD_HAL_VOICE_ENABLED

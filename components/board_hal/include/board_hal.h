@@ -68,6 +68,24 @@ typedef enum {
 #define BOARD_HAL_HAS_MICROPHONE 0
 #endif
 
+// The voice features - microphone level meter, speaker/microphone self-test and
+// stopping a ringing alarm by a spoken word - belong to the Alarm Clock. They
+// exist only in an Alarm Clock firmware (CONFIG_ALARM_CLOCK_ENABLED, see
+// build.py --alarmclock) for a board that has both a speaker (the alarm) and a
+// microphone; everywhere else the code is not compiled in at all. A board with
+// a speaker but no microphone gets the plain alarm (stopped with KEY) without
+// any of it.
+#if defined(CONFIG_ALARM_CLOCK_ENABLED) && BOARD_HAL_HAS_SPEAKER && BOARD_HAL_HAS_MICROPHONE
+#define BOARD_HAL_VOICE_ENABLED 1
+#else
+#define BOARD_HAL_VOICE_ENABLED 0
+#endif
+
+// board_hal_mic_capture*() discards this many frames after start-up while the
+// microphone front end settles; the first block handed to the callback is that
+// far into a played tone sequence.
+#define BOARD_HAL_MIC_SETTLE_FRAMES 2560
+
 // True if this board's Kconfig entry selects any climate sensor driver
 // component at all (components/board_hal/Kconfig - SENSOR_DRIVER_SHTC3 for
 // waveshare_photopainter_73, SENSOR_DRIVER_SHT40 for the xiao_ee03/
@@ -258,7 +276,8 @@ esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_m
                                bool (*should_stop)(void));
 
 /**
- * @brief True if this board has an onboard microphone
+ * @brief True if the microphone / voice features are available in this build
+ * (BOARD_HAL_VOICE_ENABLED: Alarm Clock firmware on a board with speaker and microphone)
  */
 bool board_hal_has_microphone(void);
 

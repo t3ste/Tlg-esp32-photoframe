@@ -387,6 +387,7 @@ static void play_beep_pattern_tones(i2s_chan_handle_t tx, board_hal_chime_kind_t
     }
 }
 
+#if BOARD_HAL_VOICE_ENABLED
 // ---- ES7210 4-channel ADC (microphones) -----------------------------------
 //
 // The onboard microphones are not on the ES8311's own ADC input but on a
@@ -493,6 +494,8 @@ static void es7210_standby(i2c_master_dev_handle_t dev)
     es8311_write(dev, 0x06, 0x07);
 }
 
+#endif  // BOARD_HAL_VOICE_ENABLED
+
 typedef struct {
     i2s_chan_handle_t tx;
     i2s_chan_handle_t rx;  // only when opened with with_rx (microphone capture)
@@ -503,11 +506,13 @@ typedef struct {
 static void audio_session_close(audio_session_t *s)
 {
     pa_set(false);
+#if BOARD_HAL_VOICE_ENABLED
     if (s->es7210) {
         es7210_standby(s->es7210);
         i2c_master_bus_rm_device(s->es7210);
         s->es7210 = NULL;
     }
+#endif
     if (s->es8311) {
         es8311_standby(s->es8311);
     }
@@ -619,6 +624,7 @@ static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent, 
         return err;
     }
 
+#if BOARD_HAL_VOICE_ENABLED
     if (with_rx) {
         // The microphones sit on the ES7210, which drives I2S DIN. Tri-state the
         // ES8311's own ADC output (SDP_OUT bit 6) so the two don't fight over it.
@@ -658,6 +664,8 @@ static esp_err_t audio_session_open(audio_session_t *s, uint8_t volume_percent, 
         }
         ESP_LOGI(TAG, "ES7210 microphone ADC at I2C 0x%02x initialised", mic_addr);
     }
+
+#endif  // BOARD_HAL_VOICE_ENABLED
 
     i2s_write_silence(s->tx, 128);
     if (!enable_pa) {
@@ -778,6 +786,8 @@ esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t
     return err;
 }
 
+#if BOARD_HAL_VOICE_ENABLED
+
 bool board_hal_has_microphone(void)
 {
     return true;
@@ -846,7 +856,7 @@ static esp_err_t mic_capture_impl(uint32_t duration_ms, board_hal_mic_block_cb_t
     if (err == ESP_OK) {
         // 256 stereo frames = 16 ms per block at 16 kHz. The first blocks after
         // start-up are discarded: the analog front end of the codec still settles.
-        const int SETTLE_BLOCKS = 10;
+        const int SETTLE_BLOCKS = BOARD_HAL_MIC_SETTLE_FRAMES / 256;
         int16_t buf[256 * 2];
         int16_t tx[256 * 2];
         tone_seq_t seq = {.notes = notes, .count = play ? note_count : 0};
@@ -890,5 +900,35 @@ esp_err_t board_hal_mic_capture_with_tones(uint32_t duration_ms, board_hal_mic_b
 {
     return mic_capture_impl(duration_ms, on_block, user, notes, note_count, volume_percent);
 }
+
+#else  // !BOARD_HAL_VOICE_ENABLED
+
+bool board_hal_has_microphone(void)
+{
+    return false;
+}
+
+esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t on_block, void *user)
+{
+    (void) duration_ms;
+    (void) on_block;
+    (void) user;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t board_hal_mic_capture_with_tones(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
+                                           void *user, const board_hal_note_t *notes,
+                                           int note_count, uint8_t volume_percent)
+{
+    (void) duration_ms;
+    (void) on_block;
+    (void) user;
+    (void) notes;
+    (void) note_count;
+    (void) volume_percent;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+#endif  // BOARD_HAL_VOICE_ENABLED
 
 #endif
