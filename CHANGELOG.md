@@ -2,11 +2,15 @@
 
 All notable changes to this fork are documented here. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full running list of everything this fork adds on top of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe); this file covers per-release deltas only.
 
-## [Unreleased]
+## [v218.5.0] - 2026-09-25
 
 ### Changed
 
 - Alarm Clock: a **short KEY press** now stops a ringing alarm (was a 3 s hold), and that press no longer also changes the picture or opens the alarm-setting menu
+
+### Fixed
+
+- Battery/Climate history backups no longer overwrite an earlier backup file that covers the same date range (a `_2`, `_3`, ... suffix is used instead)
 
 ### Added
 
