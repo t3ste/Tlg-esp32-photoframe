@@ -65,8 +65,8 @@ static mic_monitor_status_t s_result;  // written once per finished run
 
 typedef struct {
     mic_level_acc_t acc;
-    mic_detect_t mic;  // left channel (microphone)
-    mic_detect_t ref;  // right channel (speaker reference)
+    mic_detect_t mic;   // left channel (microphone)
+    mic_detect_t mic2;  // right channel (second microphone)
     float loudest_peak_dbfs;
 } monitor_ctx_t;
 
@@ -83,7 +83,7 @@ static bool on_block(const int16_t *samples, size_t frames, void *user)
     mic_level_t right = mic_level_acc_channel(&ctx->acc, 1);
     mic_level_acc_reset(&ctx->acc);
     mic_detect_add_window(&ctx->mic, left.rms_dbfs);
-    mic_detect_add_window(&ctx->ref, right.rms_dbfs);
+    mic_detect_add_window(&ctx->mic2, right.rms_dbfs);
 
     s_rms_dbfs = level.rms_dbfs;
     s_peak_dbfs = level.peak_dbfs;
@@ -93,8 +93,9 @@ static bool on_block(const int16_t *samples, size_t frames, void *user)
 
     char bar[BAR_WIDTH + 3];
     mic_level_bar(level.rms_dbfs, BAR_FLOOR_DBFS, bar, BAR_WIDTH);
-    ESP_LOGI(TAG, "%s %6.1f dBFS  (peak %6.1f)  mic %6.1f  ref %6.1f", bar, (double) level.rms_dbfs,
-             (double) level.peak_dbfs, (double) left.rms_dbfs, (double) right.rms_dbfs);
+    ESP_LOGI(TAG, "%s %6.1f dBFS  (peak %6.1f)  mic %6.1f  mic2 %6.1f", bar,
+             (double) level.rms_dbfs, (double) level.peak_dbfs, (double) left.rms_dbfs,
+             (double) right.rms_dbfs);
 
     power_manager_reset_sleep_timer();  // don't auto-sleep mid-test
     return true;
@@ -111,7 +112,7 @@ static void monitor_task(void *arg)
     monitor_ctx_t ctx;
     mic_level_acc_reset(&ctx.acc);
     mic_detect_init(&ctx.mic);
-    mic_detect_init(&ctx.ref);
+    mic_detect_init(&ctx.mic2);
     ctx.loudest_peak_dbfs = MIC_LEVEL_FLOOR_DBFS;
 
     esp_err_t err = play ? board_hal_mic_capture_with_tones(seconds * 1000u, on_block, &ctx,
@@ -126,17 +127,17 @@ static void monitor_task(void *arg)
         s_result.baseline_dbfs = ctx.mic.baseline_dbfs;
         s_result.mic_peak_dbfs = ctx.mic.peak_dbfs;
         s_result.mic_bursts = ctx.mic.bursts;
-        s_result.ref_peak_dbfs = ctx.ref.peak_dbfs;
-        s_result.ref_bursts = ctx.ref.bursts;
+        s_result.mic2_peak_dbfs = ctx.mic2.peak_dbfs;
+        s_result.mic2_bursts = ctx.mic2.bursts;
         // Allow one burst to be missed (a pause edge, room noise).
         s_result.heard = ctx.mic.bursts + 1 >= MIC_MONITOR_TEST_BURSTS &&
                          ctx.mic.peak_dbfs - ctx.mic.baseline_dbfs >= MIC_DETECT_RISE_DB;
         ESP_LOGI(TAG,
                  "Monitor done: loudest peak %.1f dBFS | microphone: floor %.1f dBFS, peak %.1f, "
-                 "%u/%d bursts%s | reference: peak %.1f, %u bursts | %s",
+                 "%u/%d bursts%s | microphone 2: peak %.1f, %u bursts | %s",
                  (double) ctx.loudest_peak_dbfs, (double) ctx.mic.baseline_dbfs,
                  (double) ctx.mic.peak_dbfs, ctx.mic.bursts, MIC_MONITOR_TEST_BURSTS,
-                 s_result.heard ? " (HEARD)" : "", (double) ctx.ref.peak_dbfs, ctx.ref.bursts,
+                 s_result.heard ? " (HEARD)" : "", (double) ctx.mic2.peak_dbfs, ctx.mic2.bursts,
                  s_result.heard ? "microphone hears the tones" : "no tones detected");
     }
     s_running = false;
@@ -174,7 +175,7 @@ esp_err_t mic_monitor_start(uint32_t seconds, bool play_tones)
     s_rms_dbfs = MIC_LEVEL_FLOOR_DBFS;
     s_peak_dbfs = MIC_LEVEL_FLOOR_DBFS;
     s_result.have_result = false;
-    if (xTaskCreate(monitor_task, "mic_monitor", 4096, (void *) (uintptr_t) seconds, 5, NULL) !=
+    if (xTaskCreate(monitor_task, "mic_monitor", 8192, (void *) (uintptr_t) seconds, 5, NULL) !=
         pdPASS) {
         s_running = false;
         return ESP_ERR_NO_MEM;
@@ -194,7 +195,7 @@ esp_err_t mic_monitor_play_tones(uint8_t volume_percent)
         return ESP_ERR_INVALID_STATE;
     }
     s_tones_running = true;
-    if (xTaskCreate(tones_task, "mic_tones", 4096, (void *) (uintptr_t) volume_percent, 5, NULL) !=
+    if (xTaskCreate(tones_task, "mic_tones", 6144, (void *) (uintptr_t) volume_percent, 5, NULL) !=
         pdPASS) {
         s_tones_running = false;
         return ESP_ERR_NO_MEM;

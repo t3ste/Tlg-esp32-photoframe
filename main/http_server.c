@@ -1335,11 +1335,11 @@ static esp_err_t mic_level_handler(httpd_req_t *req)
     if (st.have_result) {
         snprintf(body + n, sizeof(body) - (size_t) n,
                  "{\"tones\":%s,\"baseline_dbfs\":%.1f,\"mic_peak_dbfs\":%.1f,"
-                 "\"mic_bursts\":%u,\"ref_peak_dbfs\":%.1f,\"ref_bursts\":%u,"
+                 "\"mic_bursts\":%u,\"mic2_peak_dbfs\":%.1f,\"mic2_bursts\":%u,"
                  "\"expected_bursts\":%d,\"heard\":%s}}",
                  st.result_with_tones ? "true" : "false", (double) st.baseline_dbfs,
-                 (double) st.mic_peak_dbfs, st.mic_bursts, (double) st.ref_peak_dbfs, st.ref_bursts,
-                 MIC_MONITOR_TEST_BURSTS, st.heard ? "true" : "false");
+                 (double) st.mic_peak_dbfs, st.mic_bursts, (double) st.mic2_peak_dbfs,
+                 st.mic2_bursts, MIC_MONITOR_TEST_BURSTS, st.heard ? "true" : "false");
     } else {
         snprintf(body + n, sizeof(body) - (size_t) n, "null}");
     }

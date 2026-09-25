@@ -16,7 +16,7 @@ All notable changes to this fork are documented here. See [README.md → Changes
 
 ### Added
 
-- **Speaker + microphone self-test** (`waveshare_photopainter_73`): plays a tone sequence (four beeps with pauses, 100 % volume) on the speaker while the microphone listens and counts the bursts against the measured noise floor. Same frame (`POST /api/mic/level?seconds=8&tones=1`, also a Maintenance-tab button; the ES7210's second input additionally reports what the speaker amp itself outputs) or two frames (`POST /api/mic/tones` on the speaker frame while the other one listens). `GET /api/mic/level` now reports the result; `scripts/mic_selftest.py <mic-host> [--speaker <host>]` runs either variant and exits 0/1.
+- **Speaker + microphone self-test** (`waveshare_photopainter_73`): plays a tone sequence (four beeps with pauses, 100 % volume) on the speaker while the microphone listens and counts the bursts against the measured noise floor (at least 20 dB and -45 dBFS above it). Both onboard microphones are read now (left = MIC1, right = MIC2; Waveshare's stock MIC1 + MIC3 pairing left the right slot silent). Same frame (`POST /api/mic/level?seconds=8&tones=1`, also a Maintenance-tab button) or two frames (`POST /api/mic/tones` on the speaker frame while the other one listens). `GET /api/mic/level` now reports the result; `scripts/mic_selftest.py <mic-host> [--speaker <host>]` runs either variant and exits 0/1.
 
 ---
 

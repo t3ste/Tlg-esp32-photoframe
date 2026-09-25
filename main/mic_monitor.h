@@ -21,16 +21,15 @@ typedef struct {
     float rms_dbfs;      // last ~200 ms window, louder channel
     float peak_dbfs;
 
-    // Result of the last finished run (left channel = microphone, right channel =
-    // the speaker-amp reference, which only hears something when this device plays
-    // the tones itself).
+    // Result of the last finished run (left channel = microphone 1, right channel =
+    // microphone 2).
     bool have_result;
     bool result_with_tones;  // the run played the tones on this device's own speaker
     float baseline_dbfs;     // microphone noise floor before the tones
     float mic_peak_dbfs;
     unsigned mic_bursts;
-    float ref_peak_dbfs;
-    unsigned ref_bursts;
+    float mic2_peak_dbfs;
+    unsigned mic2_bursts;
     bool heard;  // the microphone picked up (nearly) all tone bursts
 } mic_monitor_status_t;
 

@@ -394,7 +394,7 @@ static void play_beep_pattern_tones(i2s_chan_handle_t tx, board_hal_chime_kind_t
 // capsules, MIC3 = speaker-amp reference for echo cancellation, SDOUT1 ->
 // I2S_DSOUT = GPIO18). Register sequence follows Waveshare's own stock
 // esp_codec_dev ES7210 driver as used by 01_Audio_Test ("in: {codec: ES7210}",
-// MIC1 + MIC3 selected -> stereo slot 0 = MIC1, slot 1 = MIC3, slave mode,
+// MIC1 + MIC3 selected there; here MIC1 + MIC2 -> stereo slot 0 = MIC1, slot 1 = MIC2, slave mode,
 // 16 kHz / 16 bit).
 #define ES7210_I2C_ADDR_FIRST 0x40  // AD0/AD1 select 0x40..0x43
 #define ES7210_I2C_ADDR_LAST 0x43
@@ -412,7 +412,11 @@ static esp_err_t es7210_update_bits(i2c_master_dev_handle_t dev, uint8_t reg, ui
     return es8311_write(dev, reg, (uint8_t) ((v & (uint8_t) ~mask) | (value & mask)));
 }
 
-// Enables MIC1 and MIC3 (the two I2S slots) - mirrors es7210_mic_select().
+// Enables MIC1 and MIC2 (the two onboard capsules -> left/right I2S slot) -
+// mirrors es7210_mic_select(). Waveshare's stock code selects MIC1 + MIC3 (MIC3
+// = speaker-amp reference for echo cancellation), but the ES7210 routes ADC1/2
+// to SDOUT1 (the only output wired to the ESP) and ADC3/4 to SDOUT2, so that
+// reference never reached the right slot (measured: exactly silent).
 static void es7210_select_mics(i2c_master_dev_handle_t dev, uint8_t gain)
 {
     for (uint8_t i = 0; i < 4; i++) {
@@ -425,11 +429,11 @@ static void es7210_select_mics(i2c_master_dev_handle_t dev, uint8_t gain)
     es8311_write(dev, 0x4B, 0x00);
     es7210_update_bits(dev, 0x43, 0x10, 0x10);
     es7210_update_bits(dev, 0x43, 0x0F, gain);
-    // MIC3
-    es7210_update_bits(dev, 0x01, 0x15, 0x00);
-    es8311_write(dev, 0x4C, 0x00);
-    es7210_update_bits(dev, 0x45, 0x10, 0x10);
-    es7210_update_bits(dev, 0x45, 0x0F, gain);
+    // MIC2
+    es7210_update_bits(dev, 0x01, 0x0B, 0x00);
+    es8311_write(dev, 0x4B, 0x00);
+    es7210_update_bits(dev, 0x44, 0x10, 0x10);
+    es7210_update_bits(dev, 0x44, 0x0F, gain);
     es8311_write(dev, 0x12, 0x00);  // plain 2-channel I2S, no TDM
 }
 
@@ -472,7 +476,7 @@ static esp_err_t es7210_mic_init(i2c_master_dev_handle_t dev, uint8_t gain)
     err |= es8311_write(dev, 0x00, 0x41);
     // Final PGA gain (the stock code applies it after enabling).
     err |= es7210_update_bits(dev, 0x43, 0x0F, gain);
-    err |= es7210_update_bits(dev, 0x45, 0x0F, gain);
+    err |= es7210_update_bits(dev, 0x44, 0x0F, gain);
     return err;
 }
 

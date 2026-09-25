@@ -89,11 +89,10 @@ def main():
         f"peak {result['mic_peak_dbfs']:.1f} dBFS, "
         f"{result['mic_bursts']}/{result['expected_bursts']} tone bursts"
     )
-    if result["tones"]:
-        print(
-            f"  speaker reference (own amp): peak {result['ref_peak_dbfs']:.1f} dBFS, "
-            f"{result['ref_bursts']} bursts"
-        )
+    print(
+        f"  second microphone: peak {result['mic2_peak_dbfs']:.1f} dBFS, "
+        f"{result['mic2_bursts']} bursts"
+    )
     if result["heard"]:
         print("PASS: the microphone hears the tones")
         return 0

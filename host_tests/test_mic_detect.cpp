@@ -31,6 +31,17 @@ void append(std::vector<float> &v, const std::vector<float> &more)
 
 }  // namespace
 
+TEST(MicDetect, RoomNoiseWobbleIsNotABurst)
+{
+    // Measured on a real frame: windows between -68 and -47 dBFS around a -65 floor.
+    std::vector<float> w = quiet(5, -65.0f);
+    for (float db : {-58.0f, -52.8f, -64.0f, -47.0f, -57.0f, -51.9f, -67.0f, -55.0f}) {
+        w.push_back(db);
+    }
+    mic_detect_t d = run(w);
+    EXPECT_EQ(d.bursts, 0u);
+}
+
 TEST(MicDetect, SteadyNoiseIsNotABurst)
 {
     mic_detect_t d = run(quiet(30));
@@ -43,13 +54,13 @@ TEST(MicDetect, CountsToneBurstsSeparatedByPauses)
 {
     std::vector<float> w = quiet(5);  // baseline
     append(w, quiet(3));
-    append(w, quiet(2, -35.0f));  // burst 1 (400 ms)
+    append(w, quiet(2, -30.0f));  // burst 1 (400 ms)
     append(w, quiet(3));
-    append(w, quiet(2, -35.0f));  // burst 2
+    append(w, quiet(2, -30.0f));  // burst 2
     append(w, quiet(3));
     mic_detect_t d = run(w);
     EXPECT_EQ(d.bursts, 2u);
-    EXPECT_NEAR(d.peak_dbfs, -35.0f, 0.01f);
+    EXPECT_NEAR(d.peak_dbfs, -30.0f, 0.01f);
 }
 
 TEST(MicDetect, ALoudClickInsideTheBaselineRaisesTheFloor)
@@ -67,9 +78,9 @@ TEST(MicDetect, ALoudClickInsideTheBaselineRaisesTheFloor)
 TEST(MicDetect, HysteresisKeepsOneBurstTogether)
 {
     std::vector<float> w = quiet(5);
-    w.push_back(-40.0f);  // above -50 threshold -> burst starts
-    w.push_back(-51.0f);  // dips just below threshold but within the release margin
-    w.push_back(-40.0f);
+    w.push_back(-30.0f);  // above the -40 dBFS threshold (baseline -60 + 20) -> burst starts
+    w.push_back(-41.5f);  // dips just below threshold but within the release margin
+    w.push_back(-30.0f);
     append(w, quiet(3));
     mic_detect_t d = run(w);
     EXPECT_EQ(d.bursts, 1u);
@@ -78,13 +89,13 @@ TEST(MicDetect, HysteresisKeepsOneBurstTogether)
 TEST(MicDetect, SilentRoomNeedsAnAbsoluteMinimum)
 {
     std::vector<float> w = quiet(5, -96.0f);
-    w.push_back(-80.0f);  // dither noise: below the -75 dBFS floor -> ignored
+    w.push_back(-60.0f);  // room noise: below the -45 dBFS floor -> ignored
     w.push_back(-96.0f);
-    w.push_back(-50.0f);  // real sound
+    w.push_back(-30.0f);  // real sound
     w.push_back(-96.0f);
     mic_detect_t d = run(w);
     EXPECT_EQ(d.bursts, 1u);
-    EXPECT_NEAR(mic_detect_threshold_dbfs(&d), -75.0f, 0.01f);
+    EXPECT_NEAR(mic_detect_threshold_dbfs(&d), -45.0f, 0.01f);
 }
 
 TEST(MicDetect, NothingCountedWhileStillInBaseline)

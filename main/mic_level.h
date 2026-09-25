@@ -38,8 +38,7 @@ void mic_level_acc_add(mic_level_acc_t *acc, const int16_t *stereo, size_t frame
 mic_level_t mic_level_acc_result(const mic_level_acc_t *acc);
 
 /**
- * Level of a single channel (0 = left / MIC1, 1 = right / MIC3, which on this
- * board is the speaker-amp reference signal).
+ * Level of a single channel (0 = left / MIC1, 1 = right / MIC2).
  */
 mic_level_t mic_level_acc_channel(const mic_level_acc_t *acc, int channel);
 

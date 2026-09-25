@@ -9,10 +9,14 @@ extern "C" {
 
 /** Windows (~200 ms each) averaged into the noise-floor baseline before detection starts. */
 #define MIC_DETECT_BASELINE_WINDOWS 5
-/** A window counts as "sound" when it rises this far above the baseline... */
-#define MIC_DETECT_RISE_DB 10.0f
-/** ...but never below this absolute level (a silent room must not trigger on dither noise). */
-#define MIC_DETECT_MIN_THRESHOLD_DBFS (-75.0f)
+/**
+ * A window counts as "sound" when it rises this far above the baseline...
+ * (measured on the frames: room noise wobbles by up to ~15 dB window to window,
+ * the self-test tones arrive 30 dB and more above it)
+ */
+#define MIC_DETECT_RISE_DB 20.0f
+/** ...but never below this absolute level (ambient windows stay under about -50 dBFS). */
+#define MIC_DETECT_MIN_THRESHOLD_DBFS (-45.0f)
 /** A burst ends once the level falls this far below the threshold (hysteresis). */
 #define MIC_DETECT_RELEASE_DB 3.0f
 
