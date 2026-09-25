@@ -3192,6 +3192,7 @@ async function performFactoryReset() {
 
             <VoiceStopTools
               :voice-available="settingsStore.deviceSettings.voiceAvailable"
+              :active="tab === 'alarmClock'"
               @message="(m) => showSnackbar(m.text, m.color)"
             />
 
@@ -3200,6 +3201,7 @@ async function performFactoryReset() {
 
               <MicrophoneTools
                 :speaker-available="settingsStore.deviceSettings.chimeSpeakerAvailable"
+                :active="tab === 'alarmClock'"
                 @message="(m) => showSnackbar(m.text, m.color)"
               />
             </template>

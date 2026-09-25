@@ -1468,8 +1468,8 @@ static esp_err_t kws_send_error(httpd_req_t *req, esp_err_t err)
         httpd_resp_sendstr(req, "{\"error\":\"invalid duration\"}");
     } else if (err == ESP_ERR_INVALID_STATE) {
         httpd_resp_set_status(req, "409 Conflict");
-        httpd_resp_sendstr(req,
-                           "{\"error\":\"busy, no templates to test, or five templates already\"}");
+        httpd_resp_sendstr(
+            req, "{\"error\":\"busy, an alarm is ringing, no word taught yet, or five already\"}");
     } else {
         httpd_resp_set_status(req, HTTPD_500);
         httpd_resp_sendstr(req, "{\"error\":\"could not start\"}");

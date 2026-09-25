@@ -23,9 +23,10 @@ import urllib.request
 
 ENROLL_STATUS = {
     0: "added",
-    -1: "no usable word heard (too quiet, too short, or not like the earlier ones)",
+    -1: "no usable word heard (too quiet or too short)",
     -2: "too long - say just the one word",
     -3: "the frame could not record (out of memory or microphone busy)",
+    -4: "not like the earlier examples - is it another word? clear the templates to start over",
 }
 
 

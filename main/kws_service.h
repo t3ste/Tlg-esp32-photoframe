@@ -37,7 +37,8 @@ typedef struct {
 
     // Last enrolment
     bool have_enroll_result;
-    int enroll_status;  // kws_status_t: 0 = added, -1 = no speech heard, -2 = too long
+    int enroll_status;  // kws_status_t: 0 = added, -1 = no speech, -2 = too long, -4 = not like the
+                        // others
     int enroll_frames;
 
     // Last (or running) test
@@ -52,10 +53,16 @@ typedef struct {
  * template (up to 5; calibrates the threshold and stores the templates on the
  * storage). Speak the word once, shortly after the call. Returns immediately.
  *
- * ESP_ERR_NOT_SUPPORTED (no microphone), ESP_ERR_INVALID_STATE (busy or five
- * templates already), ESP_ERR_INVALID_ARG (bad duration).
+ * ESP_ERR_NOT_SUPPORTED (no microphone), ESP_ERR_INVALID_STATE (busy, an alarm
+ * is ringing, or five templates already), ESP_ERR_INVALID_ARG (bad duration).
  */
 esp_err_t kws_service_enroll(uint32_t seconds);
+
+/**
+ * Ends a running enrolment or test at once (the alarm needs the microphone and
+ * the speaker). Does nothing when idle.
+ */
+void kws_service_abort(void);
 
 /** Forgets all templates (also on the storage). */
 esp_err_t kws_service_clear(void);

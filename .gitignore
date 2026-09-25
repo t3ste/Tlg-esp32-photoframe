@@ -55,6 +55,7 @@ _BATT_ANAL/
 # Local-only audit/working notes - not meant for the repo history.
 docs/AGENDA_AUDIT.md
 docs/FIRMWARE_AUDIT.md
+docs/VOICE_ALARM_AUDIT.md
 docs/examples/
 docs/CMD_examples.txt
 docs/HOLIDAYS_API_PLAN.md

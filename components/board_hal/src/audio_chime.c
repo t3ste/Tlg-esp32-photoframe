@@ -138,6 +138,9 @@ static const char *TAG = "board_audio";
 // protecting shared hardware state across calls.
 static SemaphoreHandle_t s_chime_mutex;
 
+// The alarm may have to wait for a microphone test that it has just asked to stop.
+#define ALARM_MUTEX_WAIT_MS 6000
+
 static void chime_mutex_init(void)
 {
     if (!s_chime_mutex) {
@@ -716,7 +719,8 @@ esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_m
                                bool (*should_stop)(void))
 {
     chime_mutex_init();
-    if (!s_chime_mutex || xSemaphoreTake(s_chime_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
+    if (!s_chime_mutex ||
+        xSemaphoreTake(s_chime_mutex, pdMS_TO_TICKS(ALARM_MUTEX_WAIT_MS)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -847,7 +851,8 @@ static esp_err_t mic_capture_impl(uint32_t duration_ms, board_hal_mic_block_cb_t
     }
     const bool play = notes != NULL && note_count > 0;
     chime_mutex_init();
-    if (!s_chime_mutex || xSemaphoreTake(s_chime_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
+    if (!s_chime_mutex ||
+        xSemaphoreTake(s_chime_mutex, pdMS_TO_TICKS(play ? ALARM_MUTEX_WAIT_MS : 2000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 

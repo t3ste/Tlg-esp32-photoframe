@@ -1,9 +1,11 @@
 <script setup>
-import { ref, computed, onUnmounted } from "vue";
+import { ref, computed, watch, onUnmounted } from "vue";
 
 const props = defineProps({
   // Speaker and microphone on this board (an Alarm Clock build): the stop word part is shown.
   voiceAvailable: { type: Boolean, default: false },
+  // The Alarm Clock tab is showing; the device is only polled then.
+  active: { type: Boolean, default: false },
 });
 const emit = defineEmits(["message"]);
 
@@ -17,6 +19,8 @@ const enrollResult = ref(null);
 const alarmRinging = ref(false);
 const lastStop = ref("");
 
+const POLL_IDLE_MS = 5000;
+const POLL_BUSY_MS = 1000;
 let pollTimer = null;
 
 const templates = computed(() => status.value?.templates ?? 0);
@@ -56,9 +60,34 @@ async function tick() {
   await Promise.all([props.voiceAvailable ? loadStatus() : null, loadAlarm()]);
 }
 
-function startPolling() {
-  if (!pollTimer) pollTimer = setInterval(tick, 1000);
+// Quick while something is running, slow otherwise: the device serves one request at a time.
+function schedulePoll() {
+  const busyNow = busy.value || alarmRinging.value || mode.value !== "idle";
+  pollTimer = setTimeout(
+    async () => {
+      await tick();
+      if (pollTimer) schedulePoll();
+    },
+    busyNow ? POLL_BUSY_MS : POLL_IDLE_MS
+  );
 }
+
+function startPolling() {
+  if (pollTimer) return;
+  tick();
+  schedulePoll();
+}
+
+function stopPolling() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+}
+
+watch(
+  () => props.active,
+  (on) => (on ? startPolling() : stopPolling()),
+  { immediate: true }
+);
 
 async function callApi(url, options, failText) {
   try {
@@ -168,6 +197,11 @@ const enrollText = computed(() => {
     return { type: "warning", text: "Nothing was heard - speak clearly, close to the frame." };
   if (r.status === -2)
     return { type: "warning", text: "That was too long - use one short word (under 1.5 s)." };
+  if (r.status === -4)
+    return {
+      type: "warning",
+      text: "That does not sound like the earlier examples. Say the same word the same way - or press Forget to start over with a new word.",
+    };
   return { type: "error", text: "The recording failed." };
 });
 
@@ -181,12 +215,7 @@ const testText = computed(() => {
   }.`;
 });
 
-onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer);
-});
-
-tick();
-startPolling();
+onUnmounted(stopPolling);
 </script>
 
 <template>

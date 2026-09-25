@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "alarm_manager.h"
 #include "board_hal.h"
 #include "kws.h"
 
@@ -24,6 +25,8 @@ esp_err_t kws_service_test(uint32_t seconds)
     (void) seconds;
     return ESP_ERR_NOT_SUPPORTED;
 }
+
+void kws_service_abort(void) {}
 
 void kws_service_get_status(kws_service_status_t *out)
 {
@@ -63,6 +66,7 @@ void kws_service_listener_close(kws_listener_t *l)
 
 #else
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -85,7 +89,8 @@ static const char *TAG = "kws";
 
 static kws_matcher_t *s_matcher = NULL;  // allocated on first use (PSRAM if available)
 static volatile kws_service_mode_t s_mode = KWS_SERVICE_IDLE;
-static kws_service_status_t s_last;  // enrolment/test results of the last runs
+static volatile bool s_abort = false;  // ends a running enrolment/test (see kws_service_abort)
+static kws_service_status_t s_last;    // enrolment/test results of the last runs
 
 static kws_matcher_t *matcher(void)
 {
@@ -161,9 +166,23 @@ static void load_templates(void)
             if (fread(p->data, sizeof(float) * KWS_NUM_CEPS, frames, f) != frames) {
                 break;
             }
+            bool finite = true;
+            for (int fr = 0; fr < frames && finite; fr++) {
+                for (int k = 0; k < KWS_NUM_CEPS; k++) {
+                    finite = finite && isfinite(p->data[fr][k]);
+                }
+            }
+            if (!finite) {
+                ESP_LOGW(TAG, "Template %u in %s is corrupt - ignoring the rest", (unsigned) i,
+                         TEMPLATE_FILE);
+                break;
+            }
             m->count++;
         }
-        m->threshold = threshold;
+        // The stored threshold is not trusted (a damaged value could accept any sound or none):
+        // it is derived from the templates, exactly as when they were enrolled.
+        (void) threshold;
+        kws_matcher_calibrate(m, KWS_DEFAULT_MARGIN, KWS_DEFAULT_FLOOR_THRESHOLD);
     }
     fclose(f);
 }
@@ -192,7 +211,7 @@ static bool enroll_block(const int16_t *stereo, size_t frames, void *user)
         c->buf[c->len++] = (int16_t) (((int) stereo[i * 2] + (int) stereo[i * 2 + 1]) / 2);
     }
     power_manager_reset_sleep_timer();
-    return c->len < c->cap;
+    return c->len < c->cap && !s_abort;
 }
 
 static void enroll_task(void *arg)
@@ -226,7 +245,7 @@ static void enroll_task(void *arg)
                 }
                 if (!consistent) {
                     ESP_LOGW(TAG, "Enrolment rejected: does not resemble the enrolled word");
-                    s_last.enroll_status = KWS_ERR_NO_SPEECH;
+                    s_last.enroll_status = KWS_ERR_INCONSISTENT;
                 } else if (kws_matcher_add(m, pattern) >= 0) {
                     kws_matcher_calibrate(m, KWS_DEFAULT_MARGIN, KWS_DEFAULT_FLOOR_THRESHOLD);
                     save_templates();
@@ -385,7 +404,7 @@ static bool test_block(const int16_t *stereo, size_t frames, void *user)
                  (double) l->stream.last_score, (double) s_matcher->threshold);
     }
     power_manager_reset_sleep_timer();
-    return true;
+    return !s_abort;
 }
 
 static void test_task(void *arg)
@@ -420,9 +439,10 @@ esp_err_t kws_service_enroll(uint32_t seconds)
         return ESP_ERR_NO_MEM;
     }
     ensure_loaded();
-    if (s_mode != KWS_SERVICE_IDLE || m->count >= KWS_MAX_TEMPLATES) {
+    if (s_mode != KWS_SERVICE_IDLE || m->count >= KWS_MAX_TEMPLATES || alarm_manager_is_ringing()) {
         return ESP_ERR_INVALID_STATE;
     }
+    s_abort = false;
     s_mode = KWS_SERVICE_ENROLLING;
     if (xTaskCreate(enroll_task, "kws_enroll", TASK_STACK_BYTES, (void *) (uintptr_t) seconds, 5,
                     NULL) != pdPASS) {
@@ -432,6 +452,13 @@ esp_err_t kws_service_enroll(uint32_t seconds)
     return ESP_OK;
 }
 
+void kws_service_abort(void)
+{
+    if (s_mode != KWS_SERVICE_IDLE) {
+        s_abort = true;
+    }
+}
+
 esp_err_t kws_service_clear(void)
 {
     kws_matcher_t *m = matcher();
@@ -439,7 +466,7 @@ esp_err_t kws_service_clear(void)
         return ESP_ERR_NO_MEM;
     }
     ensure_loaded();
-    if (s_mode != KWS_SERVICE_IDLE) {
+    if (s_mode != KWS_SERVICE_IDLE || alarm_manager_is_ringing()) {
         return ESP_ERR_INVALID_STATE;
     }
     kws_matcher_init(m);
@@ -460,9 +487,10 @@ esp_err_t kws_service_test(uint32_t seconds)
         return ESP_ERR_NO_MEM;
     }
     ensure_loaded();
-    if (s_mode != KWS_SERVICE_IDLE || m->count == 0) {
+    if (s_mode != KWS_SERVICE_IDLE || m->count == 0 || alarm_manager_is_ringing()) {
         return ESP_ERR_INVALID_STATE;
     }
+    s_abort = false;
     s_last.test_utterances = 0;
     s_last.test_detections = 0;
     s_last.best_score = KWS_DTW_INFINITE;

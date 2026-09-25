@@ -12,6 +12,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "power_manager.h"
 
 static const char *TAG = "alarm_manager";
 
@@ -77,6 +78,7 @@ void alarm_manager_run(void)
 
 #include "alarm_pattern.h"
 #include "kws_service.h"
+#include "mic_monitor.h"
 #endif
 
 static volatile bool s_ringing = false;
@@ -176,6 +178,13 @@ bool alarm_manager_key_swallowed(int key_level)
 // Polled by board_hal_play_alarm() between notes/silence chunks.
 static bool key_press_requests_stop(void)
 {
+    // A ring can outlast the auto-sleep timeout (up to 600 s): keep the device awake.
+    static int64_t s_last_keepawake_us = 0;
+    int64_t now_us = esp_timer_get_time();
+    if (now_us - s_last_keepawake_us > 5000000) {
+        s_last_keepawake_us = now_us;
+        power_manager_reset_sleep_timer();
+    }
     if (s_api_stop) {
         return true;
     }
@@ -236,32 +245,37 @@ typedef struct {
     esp_err_t err;
     const char *reason;
     TaskHandle_t caller;
+    volatile bool done;
 } voice_job_t;
 
 static void voice_ring_task(void *arg)
 {
     voice_job_t *job = arg;
+    TaskHandle_t caller = job->caller;  // job is gone once done is set
     job->err = ESP_FAIL;
     job->reason = "";
     kws_listener_t *listener = kws_service_listener_open();
+    // Like the plain alarm, ring whole melodies (a started one is finished).
     int cap = alarm_pattern_count(job->duration_ms);
+    uint32_t total_ms = (uint32_t) (cap / (ALARM_PATTERN_NOTE_COUNT + 1)) * ALARM_PATTERN_CYCLE_MS;
     alarm_note_t *pattern = malloc((size_t) cap * sizeof(alarm_note_t));
     board_hal_note_t *notes = malloc((size_t) cap * sizeof(board_hal_note_t));
     if (listener && pattern && notes) {
-        int n = alarm_pattern_build(pattern, cap, job->duration_ms);
+        int n = alarm_pattern_build(pattern, cap, total_ms);
         for (int i = 0; i < n; i++) {
             notes[i].freq_hz = pattern[i].freq_hz;
             notes[i].duration_ms = pattern[i].duration_ms;
         }
         voice_ctx_t ctx = {.listener = listener};
-        job->err = board_hal_mic_capture_with_tones(job->duration_ms, voice_block, &ctx, notes, n,
-                                                    job->volume);
+        job->err =
+            board_hal_mic_capture_with_tones(total_ms, voice_block, &ctx, notes, n, job->volume);
         job->reason = ctx.reason ? ctx.reason : "";
     }
     free(pattern);
     free(notes);
     kws_service_listener_close(listener);
-    xTaskNotifyGive(job->caller);
+    job->done = true;
+    xTaskNotifyGive(caller);
     vTaskDelete(NULL);
 }
 
@@ -271,11 +285,14 @@ static esp_err_t ring_with_voice(uint16_t duration_sec, const char **reason)
                        .volume = (uint8_t) config_manager_get_chime_volume(),
                        .err = ESP_FAIL,
                        .reason = "",
-                       .caller = xTaskGetCurrentTaskHandle()};
+                       .caller = xTaskGetCurrentTaskHandle(),
+                       .done = false};
     if (xTaskCreate(voice_ring_task, "alarm_voice", 16384, &job, 5, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    while (!job.done) {
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(500));
+    }
     *reason = job.reason;
     return job.err;
 }
@@ -283,6 +300,10 @@ static esp_err_t ring_with_voice(uint16_t duration_sec, const char **reason)
 
 void alarm_manager_run(void)
 {
+    if (s_ringing) {
+        ESP_LOGW(TAG, "Alarm is already ringing");
+        return;
+    }
     if (!board_hal_has_speaker()) {
         ESP_LOGW(TAG, "Alarm due, but this board has no speaker - nothing to ring");
         return;
@@ -316,6 +337,9 @@ void alarm_manager_run(void)
     esp_err_t err = ESP_FAIL;
     bool ring_done = false;
 #if BOARD_HAL_VOICE_ENABLED
+    // The alarm wins over a running microphone test (they share the audio path).
+    mic_monitor_stop();
+    kws_service_abort();
     if (kws_service_alarm_stop_ready()) {
         ESP_LOGI(TAG, "Listening for the stop word in the pauses between the notes");
         const char *reason = "";
@@ -360,7 +384,7 @@ esp_err_t alarm_manager_ring_now(void)
         return ESP_ERR_INVALID_STATE;
     }
     s_ring_task_pending = true;
-    if (xTaskCreate(ring_now_task, "alarm_test", 6144, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(ring_now_task, "alarm_test", 8192, NULL, 5, NULL) != pdPASS) {
         s_ring_task_pending = false;
         return ESP_ERR_NO_MEM;
     }

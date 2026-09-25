@@ -1,9 +1,11 @@
 <script setup>
-import { ref, computed, onUnmounted } from "vue";
+import { ref, computed, watch, onUnmounted } from "vue";
 
 const props = defineProps({
   // Speaker on the same board: enables the speaker + microphone self-test.
   speakerAvailable: { type: Boolean, default: false },
+  // The tab showing this is visible; the live meter is switched off when it is not.
+  active: { type: Boolean, default: true },
 });
 const emit = defineEmits(["message"]);
 
@@ -193,6 +195,13 @@ async function runSelfTest() {
     testingMicTones.value = false;
   }
 }
+
+watch(
+  () => props.active,
+  (on) => {
+    if (!on && live.value) setLive(false);
+  }
+);
 
 onUnmounted(() => {
   stopPolling();

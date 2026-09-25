@@ -45,6 +45,7 @@ typedef enum {
     KWS_ERR_NO_SPEECH = -1,  // nothing loud enough / too short
     KWS_ERR_TOO_LONG = -2,   // the speech region is longer than KWS_MAX_FRAMES
     KWS_ERR_ARG = -3,
+    KWS_ERR_INCONSISTENT = -4,  // does not resemble the words enrolled before
 } kws_status_t;
 
 /** MFCC frames of one utterance. */
