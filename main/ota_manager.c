@@ -464,6 +464,10 @@ esp_err_t ota_check_for_update(bool *update_available_out, int timeout)
     }
 
     update_available = false;
+    // Enter CHECKING here rather than in the task: the wait loop below (and the
+    // caller's HTTP response) would otherwise see the old state before the
+    // task has run and report "no update" straight away.
+    set_ota_state(OTA_STATE_CHECKING, NULL);
     xTaskCreate(&ota_check_task, "ota_check_task", 12288, NULL, 5, NULL);
 
     // Wait for check to complete (with timeout)
