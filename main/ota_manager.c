@@ -112,7 +112,8 @@ static esp_err_t fetch_github_release_info(char *latest_version, size_t version_
     // event-driven callback regardless of encoding (already proven against
     // this exact class of API by weather.c/headlines.c) - reuse it instead of
     // a second, more fragile fetch implementation. This project's own release
-    // (14 assets - 7 boards x merged+OTA binary) measured 34 KB of response
+    // (14 assets - 7 boards x merged+OTA binary; 18 with the Alarm Clock
+    // variant) measured 34 KB of response
     // JSON (GitHub's per-asset metadata, e.g. the uploader object, is
     // verbose) - 64 KB leaves real headroom for more assets later.
     size_t response_len = 0;
@@ -156,8 +157,16 @@ static esp_err_t fetch_github_release_info(char *latest_version, size_t version_
 
     const char *board_name = BOARD_HAL_NAME;
 
-    char target_binary[64];
-    snprintf(target_binary, sizeof(target_binary), "esp32-photoframe-%s.bin", board_name);
+    // A build with the Alarm Clock compiled in must update to the matching
+    // "-alarmclock" release asset, or its first OTA would silently drop the feature.
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+    const char *variant_suffix = "-alarmclock";
+#else
+    const char *variant_suffix = "";
+#endif
+    char target_binary[80];
+    snprintf(target_binary, sizeof(target_binary), "esp32-photoframe-%s%s.bin", board_name,
+             variant_suffix);
     ESP_LOGI(TAG, "Searching for board-specific OTA binary: %s", target_binary);
 
     cJSON_ArrayForEach(asset, assets)

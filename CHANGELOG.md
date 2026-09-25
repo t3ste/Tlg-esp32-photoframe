@@ -2,6 +2,25 @@
 
 All notable changes to this fork are documented here. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full running list of everything this fork adds on top of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe); this file covers per-release deltas only.
 
+## [v218.4.0] - 2026-09-25
+
+### Added
+
+- Upstream integration: all 25 commits from `aitjcize/esp32-photoframe` since the last sync are now in this fork (15 as-is, 7 with documented adaptations, 3 already present) — includes optional HTTP-API password protection with brute-force lockout, IANA time zone picker, bounded WiFi connect time on a bad network, network-failure backoff between unattended wakes, fetch fixes (ETag only after the picture is shown, no retry on 4xx, keep the current picture when the URL fetch fails), and several e-paper/battery fixes. The fork's own cold-boot WiFi credential-protection logic was deliberately kept.
+- **M5Stack M5Paper v1.1** board support (plain ESP32, SHT3x sensor) — 8 supported boards
+- **Alarm Clock** (opt-in), previously only buildable from source, now also released as a ready-made binary: `photoframe-firmware-waveshare_photopainter_73-alarmclock-merged.bin` for the Waveshare PhotoPainter (the only supported board with a speaker). All other boards ship without the feature. See [README](README.md#features).
+- Everything else from the `alarmclock` branch: Chimes/Climate hardware-capability build gating, 7-day Agenda grid with C/D/E header badges, importable Calendar color profiles, optional self-signed HTTPS web UI, offline AP hotspot, "reprovision on WiFi failure" safety toggle
+
+### Changed
+
+- OTA updates on an Alarm Clock build fetch the matching `esp32-photoframe-<board>-alarmclock.bin` release asset so a self-update never silently drops the feature
+
+### Fixed
+
+- Config import: one invalid field (e.g. a bad password or time zone) no longer discards every other field of the same request
+
+---
+
 ## [v218.3.0] - 2026-09-24
 
 ### Fixed
