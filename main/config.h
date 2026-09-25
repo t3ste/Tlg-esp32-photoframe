@@ -916,6 +916,9 @@ typedef enum {
 
 // OTA Configuration
 #define GITHUB_API_URL "https://api.github.com/repos/t3ste/Tlg-esp32-photoframe/releases/latest"
+// Newest release of any kind (pre-releases included); an array with one element.
+#define GITHUB_API_URL_NEWEST \
+    "https://api.github.com/repos/t3ste/Tlg-esp32-photoframe/releases?per_page=1"
 #define OTA_CHECK_INTERVAL_MS (24 * 60 * 60 * 1000)  // 24 hours
 #define NVS_OTA_CHECK_ENABLED_KEY "ota_check_en"
 

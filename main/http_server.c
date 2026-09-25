@@ -2800,6 +2800,8 @@ static esp_err_t ota_status_handler(httpd_req_t *req)
     cJSON_AddStringToObject(response, "current_version", status.current_version);
     cJSON_AddStringToObject(response, "latest_version", status.latest_version);
     cJSON_AddNumberToObject(response, "progress_percent", status.progress_percent);
+    cJSON_AddBoolToObject(response, "latest_prerelease", status.latest_prerelease);
+    cJSON_AddBoolToObject(response, "variant_switch", status.variant_switch);
 
     if (status.error_message[0] != '\0') {
         cJSON_AddStringToObject(response, "error_message", status.error_message);
@@ -2809,6 +2811,86 @@ static esp_err_t ota_status_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, json_str);
 
+    free(json_str);
+    cJSON_Delete(response);
+    return ESP_OK;
+}
+
+// Which release channel / firmware variant the OTA check and update use.
+static esp_err_t ota_options_handler(httpd_req_t *req)
+{
+    if (req->method == HTTP_PUT) {
+        char buf[128];
+        int ret = httpd_req_recv(req, buf, MIN(req->content_len, sizeof(buf) - 1));
+        if (ret <= 0) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read request");
+            return ESP_FAIL;
+        }
+        buf[ret] = '\0';
+        cJSON *body = cJSON_Parse(buf);
+        if (!body) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+            return ESP_FAIL;
+        }
+
+        ota_options_t current;
+        ota_get_options(&current);
+        ota_channel_t channel = current.channel;
+        bool alarmclock = current.alarmclock;
+        bool valid = true;
+
+        cJSON *item = cJSON_GetObjectItem(body, "channel");
+        if (item) {
+            if (cJSON_IsString(item) && strcmp(item->valuestring, "stable") == 0) {
+                channel = OTA_CHANNEL_STABLE;
+            } else if (cJSON_IsString(item) && strcmp(item->valuestring, "prerelease") == 0) {
+                channel = OTA_CHANNEL_PRERELEASE;
+            } else {
+                valid = false;
+            }
+        }
+        item = cJSON_GetObjectItem(body, "alarmclock");
+        if (item) {
+            if (cJSON_IsBool(item)) {
+                alarmclock = cJSON_IsTrue(item);
+            } else {
+                valid = false;
+            }
+        }
+        cJSON_Delete(body);
+
+        if (!valid) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid channel or alarmclock value");
+            return ESP_FAIL;
+        }
+        esp_err_t err = ota_set_options(channel, alarmclock);
+        if (err == ESP_ERR_NOT_SUPPORTED) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Alarm Clock needs a board speaker");
+            return ESP_FAIL;
+        }
+        if (err == ESP_ERR_INVALID_STATE) {
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_sendstr(req, "{\"error\":\"a check or update is running\"}");
+            return ESP_OK;
+        }
+        if (err != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save options");
+            return ESP_FAIL;
+        }
+    }
+
+    ota_options_t options;
+    ota_get_options(&options);
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "channel",
+                            options.channel == OTA_CHANNEL_PRERELEASE ? "prerelease" : "stable");
+    cJSON_AddBoolToObject(response, "alarmclock", options.alarmclock);
+    cJSON_AddBoolToObject(response, "alarmclock_available", options.alarmclock_available);
+    cJSON_AddBoolToObject(response, "running_alarmclock", options.running_alarmclock);
+    char *json_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json_str);
     free(json_str);
     cJSON_Delete(response);
     return ESP_OK;
@@ -3559,6 +3641,8 @@ static void register_all_handlers(httpd_handle_t handle)
     register_uri(handle, "/api/time", HTTP_GET, time_handler);
     register_uri(handle, "/api/time/sync", HTTP_POST, time_sync_handler);
     register_uri(handle, "/api/ota/status", HTTP_GET, ota_status_handler);
+    register_uri(handle, "/api/ota/options", HTTP_GET, ota_options_handler);
+    register_uri(handle, "/api/ota/options", HTTP_PUT, ota_options_handler);
     register_uri(handle, "/api/ota/check", HTTP_POST, ota_check_handler);
     register_uri(handle, "/api/ota/update", HTTP_POST, ota_update_handler);
     register_uri(handle, "/api/keep_alive", HTTP_POST, keep_alive_handler);

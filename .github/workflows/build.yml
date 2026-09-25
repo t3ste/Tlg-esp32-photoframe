@@ -268,14 +268,27 @@ jobs:
           --use-perceived-output --dither-algorithm stucki \
           .img/taipei101.jpg demo/taipei101_dithered.png
 
-        # Determine stable version
+        # A tag run (tag push, or the release-published event for it) builds the
+        # release itself. Once it is published as a pre-release it must not become
+        # "stable" in the flasher: it goes to the pre-release slot instead.
+        THIS_TAG=""
+        THIS_IS_PRERELEASE=false
         if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          THIS_TAG="${GITHUB_REF#refs/tags/}"
+          if [[ "$(gh release view "$THIS_TAG" --json isPrerelease -q .isPrerelease 2>/dev/null)" == "true" ]]; then
+            THIS_IS_PRERELEASE=true
+          fi
+        fi
+
+        # Determine stable version
+        if [[ -n "$THIS_TAG" && "$THIS_IS_PRERELEASE" == "false" ]]; then
           # On a tag push: use this tag as stable version
-          STABLE_TAG="${GITHUB_REF#refs/tags/}"
+          STABLE_TAG="$THIS_TAG"
         else
           # On main branch: check if HEAD has a tag (e.g., tag and main pushed together)
           HEAD_TAG=$(git tag --points-at HEAD | grep '^v' | head -1)
-          if [[ -n "$HEAD_TAG" ]]; then
+          if [[ -n "$HEAD_TAG" && "$THIS_IS_PRERELEASE" != "true" &&
+                "$(gh release view "$HEAD_TAG" --json isPrerelease -q .isPrerelease 2>/dev/null)" != "true" ]]; then
             STABLE_TAG="$HEAD_TAG"
           else
             # Fall back to latest published release
@@ -283,6 +296,41 @@ jobs:
           fi
         fi
         echo "Stable version: ${STABLE_TAG:-none}"
+
+        # Pre-release channel: the newest published pre-release that is newer
+        # than the stable release (an older one is superseded).
+        PRE_TAG=""
+        if [[ "$THIS_IS_PRERELEASE" == "true" ]]; then
+          PRE_TAG="$THIS_TAG"
+        else
+          PRE_TAG=$(gh release list --limit 30 --json tagName,isPrerelease,isDraft,publishedAt \
+            -q '[.[] | select(.isPrerelease and (.isDraft | not))] | sort_by(.publishedAt) | reverse | .[0].tagName // ""' 2>/dev/null || true)
+          if [[ -n "$PRE_TAG" && -n "$STABLE_TAG" ]]; then
+            PRE_PUB=$(gh release view "$PRE_TAG" --json publishedAt -q .publishedAt 2>/dev/null || true)
+            STABLE_PUB=$(gh release view "$STABLE_TAG" --json publishedAt -q .publishedAt 2>/dev/null || true)
+            if [[ -n "$STABLE_PUB" && "$PRE_PUB" < "$STABLE_PUB" ]]; then
+              PRE_TAG=""
+            fi
+          fi
+        fi
+        echo "Pre-release version: ${PRE_TAG:-none}"
+
+        # Fetches one firmware file of the pre-release into the demo dir, under the
+        # name the pre-release manifest expects. $1 = release asset name,
+        # $2 = destination file. Returns non-zero if the asset does not exist.
+        fetch_prerelease_asset() {
+          local asset="$1" dest="$2" tmp
+          tmp=$(mktemp -d)
+          if [[ "$THIS_IS_PRERELEASE" == "true" && -f "firmware-artifacts/$asset" ]]; then
+            cp "firmware-artifacts/$asset" "$dest"
+          elif gh release download "$PRE_TAG" --pattern "$asset" --dir "$tmp" --clobber 2>/dev/null; then
+            mv "$tmp/$asset" "$dest"
+          else
+            rm -rf "$tmp"
+            return 1
+          fi
+          rm -rf "$tmp"
+        }
 
         BOARDS="waveshare_photopainter_73 seeedstudio_xiao_ee02 seeedstudio_reterminal_e1002 seeedstudio_xiao_ee04 seeedstudio_reterminal_e1004 seeedstudio_reterminal_e1003 seeedstudio_xiao_ee03 m5stack_m5paper_v11"
 
@@ -292,7 +340,7 @@ jobs:
           # Dev firmware from this build
           cp "firmware-artifacts/photoframe-firmware-$board-merged.bin" "demo/$board/photoframe-firmware-$board-dev.bin"
 
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [[ -n "$THIS_TAG" && "$THIS_IS_PRERELEASE" == "false" ]]; then
             # For releases: use this build as stable
             cp "demo/$board/photoframe-firmware-$board-dev.bin" "demo/$board/photoframe-firmware-$board-merged.bin"
           elif [[ -n "$STABLE_TAG" ]]; then
@@ -312,9 +360,15 @@ jobs:
             rm -f "demo/$board/photoframe-firmware-$board-merged.bin"
           fi
 
+          # Pre-release firmware of this board (if there is a pre-release)
+          if [[ -n "$PRE_TAG" ]]; then
+            fetch_prerelease_asset "photoframe-firmware-$board-merged.bin" "demo/$board/photoframe-firmware-$board-prerelease-merged.bin" \
+              || echo "::warning::Pre-release ${PRE_TAG} has no firmware for $board"
+          fi
+
           # Generate manifests for this board (pass stable version to match the firmware)
           python3 scripts/generate_manifests.py --no-copy --dev --demo-dir "demo/$board" --board "$board" \
-            ${STABLE_TAG:+--stable-version "$STABLE_TAG"}
+            ${STABLE_TAG:+--stable-version "$STABLE_TAG"} ${PRE_TAG:+--prerelease-version "$PRE_TAG"}
         done
 
         # Alarm Clock variant (only boards with a speaker, see boards.json). Same
@@ -328,7 +382,7 @@ jobs:
           [[ -f "$alarm_dev" ]] || { echo "::warning::No alarmclock build for $board"; continue; }
           cp "$alarm_dev" "demo/$board/photoframe-firmware-$variant-dev.bin"
 
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [[ -n "$THIS_TAG" && "$THIS_IS_PRERELEASE" == "false" ]]; then
             cp "demo/$board/photoframe-firmware-$variant-dev.bin" "demo/$board/photoframe-firmware-$variant-merged.bin"
           elif [[ -n "$STABLE_TAG" ]] && gh release download "$STABLE_TAG" --pattern "photoframe-firmware-$variant-merged.bin" --dir "demo/$board" --clobber; then
             echo "Downloaded stable alarmclock firmware ${STABLE_TAG} for $board"
@@ -337,7 +391,13 @@ jobs:
             rm -f "demo/$board/photoframe-firmware-$variant-merged.bin"
           fi
 
-          python3 scripts/generate_manifests.py --no-copy --dev --demo-dir "demo/$board" --board "$board" --variant alarmclock             ${STABLE_TAG:+--stable-version "$STABLE_TAG"}
+          if [[ -n "$PRE_TAG" ]]; then
+            fetch_prerelease_asset "photoframe-firmware-$variant-merged.bin" "demo/$board/photoframe-firmware-$variant-prerelease-merged.bin" \
+              || echo "::warning::Pre-release ${PRE_TAG} has no alarmclock firmware for $board"
+          fi
+
+          python3 scripts/generate_manifests.py --no-copy --dev --demo-dir "demo/$board" --board "$board" --variant alarmclock \
+            ${STABLE_TAG:+--stable-version "$STABLE_TAG"} ${PRE_TAG:+--prerelease-version "$PRE_TAG"}
         done
 
         # Link a default manifest at the root of demo for backward compatibility or default view

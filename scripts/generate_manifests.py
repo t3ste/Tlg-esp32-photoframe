@@ -96,7 +96,13 @@ def copy_firmware_to_demo(build_dir, demo_dir, board, variant=""):
 
 
 def generate_manifest(
-    output_path, version, firmware_file, board, is_dev=False, variant=""
+    output_path,
+    version,
+    firmware_file,
+    board,
+    is_dev=False,
+    variant="",
+    is_prerelease=False,
 ):
     """Generate a manifest.json file."""
 
@@ -107,6 +113,7 @@ def generate_manifest(
             f"ESP32 PhotoFrame {board_display}"
             f"{' + Alarm Clock' if variant == 'alarmclock' else ''}"
             f"{' (Development)' if is_dev else ''}"
+            f"{' (Pre-release)' if is_prerelease else ''}"
         ),
         "version": version,
         "home_assistant_domain": "esphome",
@@ -129,7 +136,13 @@ def generate_manifest(
 
 
 def generate_manifests(
-    demo_dir, board, build_dir=None, dev_mode=False, stable_version=None, variant=""
+    demo_dir,
+    board,
+    build_dir=None,
+    dev_mode=False,
+    stable_version=None,
+    variant="",
+    prerelease_version=None,
 ):
     """Generate manifest files for web flasher."""
 
@@ -188,6 +201,25 @@ def generate_manifests(
             variant=variant,
         )
 
+    # Pre-release manifest: the newest published pre-release, hosted next to
+    # the other firmware files (release assets can't be fetched cross-origin).
+    if prerelease_version:
+        pre_firmware_file = f"photoframe-firmware-{board}{sfx}-prerelease-merged.bin"
+        if (demo_path / pre_firmware_file).exists():
+            generate_manifest(
+                demo_path / f"manifest-prerelease{sfx}.json",
+                prerelease_version,
+                pre_firmware_file,
+                board,
+                variant=variant,
+                is_prerelease=True,
+            )
+        else:
+            print(
+                f"  Warning: Pre-release firmware {pre_firmware_file} not found, "
+                "skipping pre-release manifest generation"
+            )
+
     return True
 
 
@@ -226,6 +258,10 @@ def main():
         help="Firmware variant (only for boards that have one, see boards.json)",
     )
     parser.add_argument(
+        "--prerelease-version",
+        help="Tag of the published pre-release whose firmware is in the demo dir",
+    )
+    parser.add_argument(
         "--stable-version",
         help="Override stable version (default: auto-detect from git/GitHub)",
     )
@@ -250,6 +286,7 @@ def main():
         args.dev,
         args.stable_version,
         args.variant,
+        args.prerelease_version,
     ):
         sys.exit(1)
 

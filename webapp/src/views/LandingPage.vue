@@ -17,6 +17,10 @@ const selectedVersion = ref("stable");
 // Whether the selected board actually has a stable build deployed (its stable
 // manifest exists). New boards released between tags may only have a dev build.
 const stableAvailable = ref(true);
+// The newest published pre-release, when it is newer than the stable release
+// (its manifest is only deployed then). Selectable as a third release channel.
+const prereleaseAvailable = ref(false);
+const prereleaseVersion = ref("");
 const selectedBoard = ref("waveshare_photopainter_73");
 // Alarm Clock firmware variant (only offered for boards with a speaker).
 const withAlarm = ref(false);
@@ -36,12 +40,13 @@ const selectedBoardMeta = computed(
 const variantSuffix = computed(() =>
   withAlarm.value && selectedBoardMeta.value.alarmclock ? "-alarmclock" : ""
 );
-const manifestFile = computed(
-  () =>
-    (selectedVersion.value === "stable" ? "manifest" : "manifest-dev") +
-    variantSuffix.value +
-    ".json"
-);
+const manifestFile = computed(() => {
+  const base =
+    { stable: "manifest", dev: "manifest-dev", prerelease: "manifest-prerelease" }[
+      selectedVersion.value
+    ] || "manifest";
+  return base + variantSuffix.value + ".json";
+});
 
 const ecosystem = [
   {
@@ -200,6 +205,20 @@ async function loadVersionInfo() {
   }
   if (!stableAvailable.value && selectedVersion.value === "stable") {
     selectedVersion.value = "dev";
+  }
+
+  try {
+    const preManifest = await fetch(
+      baseUrl + selectedBoard.value + "/manifest-prerelease" + variantSuffix.value + ".json"
+    );
+    prereleaseAvailable.value = preManifest.ok;
+    prereleaseVersion.value = preManifest.ok ? (await preManifest.json()).version || "" : "";
+  } catch {
+    prereleaseAvailable.value = false;
+    prereleaseVersion.value = "";
+  }
+  if (!prereleaseAvailable.value && selectedVersion.value === "prerelease") {
+    selectedVersion.value = stableAvailable.value ? "stable" : "dev";
   }
 
   if (manifestVersion) {
@@ -564,6 +583,14 @@ function scrollTo(id) {
                           ? "none for this variant yet"
                           : "none for this board yet"
                     }}</em>
+                  </span>
+                </label>
+                <label v-if="prereleaseAvailable" class="radio">
+                  <input v-model="selectedVersion" type="radio" value="prerelease" />
+                  <span class="radio-dot"></span>
+                  <span class="radio-text">
+                    <strong>Pre-release</strong>
+                    <em class="radio-tag">{{ prereleaseVersion }}</em>
                   </span>
                 </label>
                 <label class="radio">
