@@ -1,9 +1,11 @@
 <script setup>
-import { ref, computed, onUnmounted } from "vue";
+import { ref, computed, watch, onUnmounted } from "vue";
 
 const props = defineProps({
   // Speaker on the same board: enables the speaker + microphone self-test.
   speakerAvailable: { type: Boolean, default: false },
+  // The tab showing this is visible; the live meter is switched off when it is not.
+  active: { type: Boolean, default: true },
 });
 const emit = defineEmits(["message"]);
 
@@ -194,6 +196,13 @@ async function runSelfTest() {
   }
 }
 
+watch(
+  () => props.active,
+  (on) => {
+    if (!on && live.value) setLive(false);
+  }
+);
+
 onUnmounted(() => {
   stopPolling();
   if (live.value) stopDeviceMonitor();
@@ -295,21 +304,28 @@ loadSettings();
       other listeners count every rise above the threshold as one sound.
     </div>
 
-    <div class="mt-4">
-      <v-btn variant="outlined" :loading="testingMic" @click="testMicrophone">
+    <div class="d-flex flex-wrap ga-2 mt-4">
+      <v-btn
+        variant="outlined"
+        :loading="testingMic"
+        title="Prints the input level to the debug log for 15 seconds"
+        @click="testMicrophone"
+      >
         <v-icon start>mdi-microphone</v-icon>
-        Log microphone level (15 s)
+        Log level
       </v-btn>
       <v-btn
         v-if="props.speakerAvailable"
         variant="outlined"
-        class="ml-2"
         :loading="testingMicTones"
+        title="Plays tones on the speaker and checks that the microphone hears them"
         @click="runSelfTest"
       >
         <v-icon start>mdi-volume-high</v-icon>
-        Speaker + microphone self-test
+        Self-test
       </v-btn>
+    </div>
+    <div>
       <v-alert
         v-if="selfTestResult"
         :type="selfTestResult.heard ? 'success' : 'warning'"

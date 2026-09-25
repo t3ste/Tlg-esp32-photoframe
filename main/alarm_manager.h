@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#include "esp_err.h"
+
 /**
  * @brief Whether this firmware build was compiled with the alarm clock
  * feature at all (CONFIG_ALARM_CLOCK_ENABLED - see main/Kconfig,
@@ -79,5 +81,18 @@ bool alarm_manager_key_swallowed(int key_level);
  * no speaker or wasn't compiled with the feature at all.
  */
 void alarm_manager_run(void);
+
+/**
+ * @brief Rings the alarm now (a test from the Web UI): alarm_manager_run() on its
+ * own task, returns immediately. ESP_ERR_NOT_SUPPORTED without the feature,
+ * ESP_ERR_INVALID_STATE if it is already ringing.
+ */
+esp_err_t alarm_manager_ring_now(void);
+
+/** Stops a ringing alarm (from the Web UI); does nothing while it is quiet. */
+void alarm_manager_stop(void);
+
+/** How the last ring ended: "" (none yet / still ringing), "timeout", "key", "voice" or "api". */
+const char *alarm_manager_last_stop_reason(void);
 
 #endif  // ALARM_MANAGER_H

@@ -38,6 +38,7 @@
 #include "http_auth.h"
 #include "https_cert.h"
 #include "image_processor.h"
+#include "kws_service.h"
 #include "lwip/sockets.h"
 #include "mic_detect.h"
 #include "mic_monitor.h"
@@ -1280,6 +1281,40 @@ static esp_err_t battery_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+// /api/alarm/test - POST rings the alarm now (a test; it also listens for the
+// stop word when that is set up), DELETE stops it, GET reports whether it rings
+// and how the last ring ended ("timeout", "key", "voice" or "api").
+static esp_err_t alarm_test_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    if (req->method == HTTP_POST) {
+        esp_err_t err = alarm_manager_ring_now();
+        if (err == ESP_ERR_INVALID_STATE) {
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_sendstr(req, "{\"error\":\"already ringing\"}");
+        } else if (err != ESP_OK) {
+            httpd_resp_set_status(req, HTTPD_500);
+            httpd_resp_sendstr(req, "{\"error\":\"could not start\"}");
+        } else {
+            httpd_resp_sendstr(req, "{\"status\":\"ringing\"}");
+        }
+        return ESP_OK;
+    }
+    if (req->method == HTTP_DELETE) {
+        alarm_manager_stop();
+        httpd_resp_sendstr(req, "{\"status\":\"stopping\"}");
+        return ESP_OK;
+    }
+    char body[96];
+    snprintf(body, sizeof(body), "{\"ringing\":%s,\"last_stop\":\"%s\"}",
+             alarm_manager_is_ringing() ? "true" : "false", alarm_manager_last_stop_reason());
+    httpd_resp_sendstr(req, body);
+    return ESP_OK;
+}
+#endif  // CONFIG_ALARM_CLOCK_ENABLED
+
+#if BOARD_HAL_VOICE_ENABLED
 // Microphone level test (first step towards voice control): POST starts a
 // monitor that prints the input level to the console for ?seconds=N (default
 // 10). With &tones=1 this device also plays the self-test tone sequence on its
@@ -1421,6 +1456,138 @@ static esp_err_t mic_settings_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Stop-word recognition (first step towards switching a ringing alarm off by
+// voice, see kws.h): enrol the word by speaking it a few times, then test.
+static esp_err_t kws_send_error(httpd_req_t *req, esp_err_t err)
+{
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        httpd_resp_set_status(req, HTTPD_404);
+        httpd_resp_sendstr(req, "{\"error\":\"no microphone on this board\"}");
+    } else if (err == ESP_ERR_INVALID_ARG) {
+        httpd_resp_set_status(req, HTTPD_400);
+        httpd_resp_sendstr(req, "{\"error\":\"invalid duration\"}");
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(
+            req, "{\"error\":\"busy, an alarm is ringing, no word taught yet, or five already\"}");
+    } else {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "{\"error\":\"could not start\"}");
+    }
+    return ESP_OK;
+}
+
+static uint32_t kws_seconds_param(httpd_req_t *req, uint32_t fallback)
+{
+    char query[32];
+    char value[8];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "seconds", value, sizeof(value)) == ESP_OK) {
+        return (uint32_t) strtoul(value, NULL, 10);
+    }
+    return fallback;
+}
+
+// GET /api/kws/status
+static esp_err_t kws_status_handler(httpd_req_t *req)
+{
+    kws_service_status_t st;
+    kws_service_get_status(&st);
+    const char *mode = st.mode == KWS_SERVICE_ENROLLING ? "enrolling"
+                       : st.mode == KWS_SERVICE_TESTING ? "testing"
+                                                        : "idle";
+    char best[16] = "null";
+    char last[16] = "null";
+    if (st.best_score < 1.0e8f) {
+        snprintf(best, sizeof(best), "%.2f", (double) st.best_score);
+    }
+    if (st.last_score < 1.0e8f) {
+        snprintf(last, sizeof(last), "%.2f", (double) st.last_score);
+    }
+    char enroll[64] = "null";
+    if (st.have_enroll_result) {
+        snprintf(enroll, sizeof(enroll), "{\"status\":%d,\"frames\":%d}", st.enroll_status,
+                 st.enroll_frames);
+    }
+    char body[500];
+    snprintf(body, sizeof(body),
+             "{\"available\":%s,\"mode\":\"%s\",\"templates\":%d,\"max_templates\":%d,"
+             "\"threshold\":%.2f,\"alarm_stop\":%s,\"enroll\":%s,"
+             "\"test\":{\"utterances\":%u,\"detections\":%u,\"best_score\":%s,"
+             "\"last_score\":%s}}",
+             st.available ? "true" : "false", mode, st.templates, KWS_MAX_TEMPLATES,
+             (double) st.threshold, st.alarm_stop ? "true" : "false", enroll, st.test_utterances,
+             st.test_detections, best, last);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, body);
+    return ESP_OK;
+}
+
+// PUT /api/kws/settings {"alarm_stop":true|false} - should a ringing alarm listen for the stop
+// word?
+static esp_err_t kws_settings_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    char buf[64];
+    int ret = httpd_req_recv(req, buf, MIN(req->content_len, sizeof(buf) - 1));
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read request");
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+    cJSON *json = cJSON_Parse(buf);
+    cJSON *item = json ? cJSON_GetObjectItem(json, "alarm_stop") : NULL;
+    if (!item || !cJSON_IsBool(item)) {
+        cJSON_Delete(json);
+        httpd_resp_set_status(req, HTTPD_400);
+        httpd_resp_sendstr(req, "{\"error\":\"alarm_stop must be a boolean\"}");
+        return ESP_OK;
+    }
+    esp_err_t err = kws_service_set_alarm_stop(cJSON_IsTrue(item));
+    cJSON_Delete(json);
+    if (err != ESP_OK) {
+        return kws_send_error(req, err);
+    }
+    httpd_resp_sendstr(req, "{\"status\":\"saved\"}");
+    return ESP_OK;
+}
+
+// POST /api/kws/enroll?seconds=3 - records and adds one template of the spoken word
+static esp_err_t kws_enroll_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = kws_service_enroll(kws_seconds_param(req, 3));
+    if (err != ESP_OK) {
+        return kws_send_error(req, err);
+    }
+    httpd_resp_sendstr(req, "{\"status\":\"recording\"}");
+    return ESP_OK;
+}
+
+// POST /api/kws/test?seconds=10 - listens and counts how often the word is heard
+static esp_err_t kws_test_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = kws_service_test(kws_seconds_param(req, 10));
+    if (err != ESP_OK) {
+        return kws_send_error(req, err);
+    }
+    httpd_resp_sendstr(req, "{\"status\":\"listening\"}");
+    return ESP_OK;
+}
+
+// DELETE /api/kws/templates - forget the enrolled word
+static esp_err_t kws_templates_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = kws_service_clear();
+    if (err != ESP_OK) {
+        return kws_send_error(req, err);
+    }
+    httpd_resp_sendstr(req, "{\"status\":\"cleared\"}");
+    return ESP_OK;
+}
+
 // POST /api/mic/tones?volume=100 - plays the self-test tone sequence on this
 // device's speaker only (async), for another device's microphone to listen to.
 static esp_err_t mic_tones_handler(httpd_req_t *req)
@@ -1454,6 +1621,8 @@ static esp_err_t mic_tones_handler(httpd_req_t *req)
     }
     return ESP_OK;
 }
+
+#endif  // BOARD_HAL_VOICE_ENABLED
 
 static esp_err_t battery_history_handler(httpd_req_t *req)
 {
@@ -2074,8 +2243,10 @@ static esp_err_t config_handler(httpd_req_t *req)
         // Hardware capability, not a user setting - lets the Web UI hide the
         // whole Chimes tab on boards with no onboard speaker.
         cJSON_AddBoolToObject(root, "chime_speaker_available", board_hal_has_speaker());
-        // Same idea for the microphone (Maintenance tab's level test).
-        cJSON_AddBoolToObject(root, "microphone_available", board_hal_has_microphone());
+        // Voice tools (microphone level meter, stop word): only in an Alarm Clock
+        // build on a board with speaker + microphone - lets the Web UI show them
+        // in the Alarm tab (see BOARD_HAL_VOICE_ENABLED in board_hal.h).
+        cJSON_AddBoolToObject(root, "voice_available", BOARD_HAL_VOICE_ENABLED ? true : false);
         const char *chime_mode_str = "off";
         switch (config_manager_get_chime_speaker_mode()) {
         case CHIME_SPEAKER_BATTERY_AND_MAINS:
@@ -3756,12 +3927,24 @@ static void register_all_handlers(httpd_handle_t handle)
     register_uri(handle, "/api/battery", HTTP_GET, battery_handler);
     register_uri(handle, "/api/battery-history", HTTP_GET, battery_history_handler);
     register_uri(handle, "/api/battery-history", HTTP_DELETE, battery_history_handler);
+#ifdef CONFIG_ALARM_CLOCK_ENABLED
+    register_uri(handle, "/api/alarm/test", HTTP_GET, alarm_test_handler);
+    register_uri(handle, "/api/alarm/test", HTTP_POST, alarm_test_handler);
+    register_uri(handle, "/api/alarm/test", HTTP_DELETE, alarm_test_handler);
+#endif
+#if BOARD_HAL_VOICE_ENABLED
     register_uri(handle, "/api/mic/level", HTTP_GET, mic_level_handler);
     register_uri(handle, "/api/mic/level", HTTP_POST, mic_level_handler);
     register_uri(handle, "/api/mic/level", HTTP_DELETE, mic_level_handler);
     register_uri(handle, "/api/mic/tones", HTTP_POST, mic_tones_handler);
     register_uri(handle, "/api/mic/settings", HTTP_GET, mic_settings_handler);
     register_uri(handle, "/api/mic/settings", HTTP_PUT, mic_settings_handler);
+    register_uri(handle, "/api/kws/status", HTTP_GET, kws_status_handler);
+    register_uri(handle, "/api/kws/settings", HTTP_PUT, kws_settings_handler);
+    register_uri(handle, "/api/kws/enroll", HTTP_POST, kws_enroll_handler);
+    register_uri(handle, "/api/kws/test", HTTP_POST, kws_test_handler);
+    register_uri(handle, "/api/kws/templates", HTTP_DELETE, kws_templates_handler);
+#endif
     register_uri(handle, "/api/history", HTTP_GET, display_history_handler);
     register_uri(handle, "/api/history", HTTP_DELETE, display_history_handler);
     register_uri(handle, "/api/albums/organize-crop", HTTP_POST, organize_crop_variants_handler);
@@ -3810,7 +3993,7 @@ static void register_all_handlers(httpd_handle_t handle)
 esp_err_t http_server_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    // 80: 70 handlers are registered below as of this comment (the microphone
+    // 88: up to 78 handlers are registered below as of this comment (the microphone
     // endpoints pushed the previous 72-handler margin - raised before from 64,
     // 55 and 50 - down to 2 free slots). Keep real margin above the exact count so the next handler
     // added here doesn't silently fail to register
@@ -3820,7 +4003,7 @@ esp_err_t http_server_init(void)
     // silently vanish, which is what made this so easy to miss before -
     // run `grep -c "register_uri(handle," main/http_server.c` and compare
     // against this number whenever you add a new endpoint).
-    config.max_uri_handlers = 80;
+    config.max_uri_handlers = 88;
     // 16384: rotate_handler() (/api/rotate) calls trigger_image_rotation()
     // synchronously on this worker task - the same heavy pipeline that's
     // needed the same bump on button_task/deep_sleep_wake_task (12288 wasn't
@@ -3848,7 +4031,7 @@ esp_err_t http_server_init(void)
         size_t cert_len, key_len;
         if (https_cert_get(&cert_der, &cert_len, &key_der, &key_len) == ESP_OK) {
             httpd_ssl_config_t https_config = HTTPD_SSL_CONFIG_DEFAULT();
-            https_config.httpd.max_uri_handlers = 80;
+            https_config.httpd.max_uri_handlers = 88;
             https_config.httpd.stack_size = 16384;
             https_config.httpd.max_open_sockets =
                 4;  // TLS sockets cost real RAM - see esp_https_server.h
