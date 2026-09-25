@@ -223,7 +223,7 @@ startPolling();
           @click="teach"
         >
           <v-icon start>mdi-microphone-plus</v-icon>
-          Teach word ({{ templates }}/{{ maxTemplates }})
+          Teach {{ templates }}/{{ maxTemplates }}
         </v-btn>
         <v-btn
           variant="outlined"
@@ -232,11 +232,11 @@ startPolling();
           @click="runTest"
         >
           <v-icon start>mdi-ear-hearing</v-icon>
-          Test ({{ TEST_SECONDS }} s)
+          Test
         </v-btn>
         <v-btn variant="text" color="error" :disabled="busy || templates === 0" @click="forget">
           <v-icon start>mdi-delete</v-icon>
-          Forget word
+          Forget
         </v-btn>
       </div>
       <div v-if="mode === 'enrolling'" class="text-body-2 mt-2">
