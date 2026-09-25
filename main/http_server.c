@@ -1281,22 +1281,29 @@ static esp_err_t battery_handler(httpd_req_t *req)
 
 // Microphone level test (first step towards voice control): POST starts a
 // monitor that prints the input level to the console for ?seconds=N (default
-// 10), GET reports whether it runs and the last measured level.
+// 10). With &tones=1 this device also plays the self-test tone sequence on its
+// own speaker at 100 % (speaker + microphone self-test); without it the monitor
+// just listens (e.g. to another device's tones). GET reports whether it runs,
+// the last level and the result of the last finished run.
 static esp_err_t mic_level_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
-    char body[128];
+    char body[480];
 
     if (req->method == HTTP_POST) {
         uint32_t seconds = 10;
-        char query[32];
+        bool tones = false;
+        char query[48];
         if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
             char value[8];
             if (httpd_query_key_value(query, "seconds", value, sizeof(value)) == ESP_OK) {
                 seconds = (uint32_t) strtoul(value, NULL, 10);
             }
+            if (httpd_query_key_value(query, "tones", value, sizeof(value)) == ESP_OK) {
+                tones = strcmp(value, "1") == 0 || strcmp(value, "true") == 0;
+            }
         }
-        esp_err_t err = mic_monitor_start(seconds);
+        esp_err_t err = mic_monitor_start(seconds, tones);
         if (err == ESP_ERR_NOT_SUPPORTED) {
             httpd_resp_set_status(req, HTTPD_404);
             httpd_resp_sendstr(req, "{\"error\":\"no microphone on this board\"}");
@@ -1310,20 +1317,67 @@ static esp_err_t mic_level_handler(httpd_req_t *req)
             httpd_resp_set_status(req, HTTPD_500);
             httpd_resp_sendstr(req, "{\"error\":\"could not start\"}");
         } else {
-            snprintf(body, sizeof(body), "{\"status\":\"started\",\"seconds\":%u}",
-                     (unsigned) seconds);
+            snprintf(body, sizeof(body), "{\"status\":\"started\",\"seconds\":%u,\"tones\":%s}",
+                     (unsigned) seconds, tones ? "true" : "false");
             httpd_resp_sendstr(req, body);
         }
         return ESP_OK;
     }
 
-    mic_monitor_status_t status;
-    mic_monitor_get_status(&status);
-    snprintf(body, sizeof(body),
-             "{\"available\":%s,\"running\":%s,\"rms_dbfs\":%.1f,\"peak_dbfs\":%.1f}",
-             mic_monitor_available() ? "true" : "false", status.running ? "true" : "false",
-             (double) status.rms_dbfs, (double) status.peak_dbfs);
+    mic_monitor_status_t st;
+    mic_monitor_get_status(&st);
+    int n =
+        snprintf(body, sizeof(body),
+                 "{\"available\":%s,\"running\":%s,\"tones_running\":%s,"
+                 "\"rms_dbfs\":%.1f,\"peak_dbfs\":%.1f,\"result\":",
+                 mic_monitor_available() ? "true" : "false", st.running ? "true" : "false",
+                 st.tones_running ? "true" : "false", (double) st.rms_dbfs, (double) st.peak_dbfs);
+    if (st.have_result) {
+        snprintf(body + n, sizeof(body) - (size_t) n,
+                 "{\"tones\":%s,\"baseline_dbfs\":%.1f,\"mic_peak_dbfs\":%.1f,"
+                 "\"mic_bursts\":%u,\"ref_peak_dbfs\":%.1f,\"ref_bursts\":%u,"
+                 "\"expected_bursts\":%d,\"heard\":%s}}",
+                 st.result_with_tones ? "true" : "false", (double) st.baseline_dbfs,
+                 (double) st.mic_peak_dbfs, st.mic_bursts, (double) st.ref_peak_dbfs, st.ref_bursts,
+                 MIC_MONITOR_TEST_BURSTS, st.heard ? "true" : "false");
+    } else {
+        snprintf(body + n, sizeof(body) - (size_t) n, "null}");
+    }
     httpd_resp_sendstr(req, body);
+    return ESP_OK;
+}
+
+// POST /api/mic/tones?volume=100 - plays the self-test tone sequence on this
+// device's speaker only (async), for another device's microphone to listen to.
+static esp_err_t mic_tones_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    uint32_t volume = 100;
+    char query[32];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char value[8];
+        if (httpd_query_key_value(query, "volume", value, sizeof(value)) == ESP_OK) {
+            volume = (uint32_t) strtoul(value, NULL, 10);
+        }
+    }
+    esp_err_t err = mic_monitor_play_tones((uint8_t) (volume > 255 ? 255 : volume));
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        httpd_resp_set_status(req, HTTPD_404);
+        httpd_resp_sendstr(req, "{\"error\":\"no speaker on this board\"}");
+    } else if (err == ESP_ERR_INVALID_ARG) {
+        httpd_resp_set_status(req, HTTPD_400);
+        httpd_resp_sendstr(req, "{\"error\":\"volume must be 0-100\"}");
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req, "{\"error\":\"audio already in use\"}");
+    } else if (err != ESP_OK) {
+        httpd_resp_set_status(req, HTTPD_500);
+        httpd_resp_sendstr(req, "{\"error\":\"could not start\"}");
+    } else {
+        char body[64];
+        snprintf(body, sizeof(body), "{\"status\":\"started\",\"volume\":%u}", (unsigned) volume);
+        httpd_resp_sendstr(req, body);
+    }
     return ESP_OK;
 }
 
@@ -3630,6 +3684,7 @@ static void register_all_handlers(httpd_handle_t handle)
     register_uri(handle, "/api/battery-history", HTTP_DELETE, battery_history_handler);
     register_uri(handle, "/api/mic/level", HTTP_GET, mic_level_handler);
     register_uri(handle, "/api/mic/level", HTTP_POST, mic_level_handler);
+    register_uri(handle, "/api/mic/tones", HTTP_POST, mic_tones_handler);
     register_uri(handle, "/api/history", HTTP_GET, display_history_handler);
     register_uri(handle, "/api/history", HTTP_DELETE, display_history_handler);
     register_uri(handle, "/api/albums/organize-crop", HTTP_POST, organize_crop_variants_handler);

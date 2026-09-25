@@ -1,0 +1,95 @@
+#include <gtest/gtest.h>
+
+#include <vector>
+
+extern "C" {
+#include "mic_detect.h"
+}
+
+namespace
+{
+
+mic_detect_t run(const std::vector<float> &windows)
+{
+    mic_detect_t d;
+    mic_detect_init(&d);
+    for (float w : windows) {
+        mic_detect_add_window(&d, w);
+    }
+    return d;
+}
+
+std::vector<float> quiet(int n, float db = -60.0f)
+{
+    return std::vector<float>((size_t) n, db);
+}
+
+void append(std::vector<float> &v, const std::vector<float> &more)
+{
+    v.insert(v.end(), more.begin(), more.end());
+}
+
+}  // namespace
+
+TEST(MicDetect, SteadyNoiseIsNotABurst)
+{
+    mic_detect_t d = run(quiet(30));
+    EXPECT_TRUE(d.baseline_ready);
+    EXPECT_NEAR(d.baseline_dbfs, -60.0f, 0.01f);
+    EXPECT_EQ(d.bursts, 0u);
+}
+
+TEST(MicDetect, CountsToneBurstsSeparatedByPauses)
+{
+    std::vector<float> w = quiet(5);  // baseline
+    append(w, quiet(3));
+    append(w, quiet(2, -35.0f));  // burst 1 (400 ms)
+    append(w, quiet(3));
+    append(w, quiet(2, -35.0f));  // burst 2
+    append(w, quiet(3));
+    mic_detect_t d = run(w);
+    EXPECT_EQ(d.bursts, 2u);
+    EXPECT_NEAR(d.peak_dbfs, -35.0f, 0.01f);
+}
+
+TEST(MicDetect, ALoudClickInsideTheBaselineRaisesTheFloor)
+{
+    // One -20 dBFS window among the baseline windows dominates the power average
+    // (about -27 dBFS), so a later -20 dBFS is only a 7 dB rise: not a burst.
+    std::vector<float> w = {-60.0f, -60.0f, -20.0f, -60.0f, -60.0f};
+    append(w, quiet(6, -20.0f));
+    mic_detect_t d = run(w);
+    EXPECT_TRUE(d.baseline_ready);
+    EXPECT_GT(d.baseline_dbfs, -30.0f);
+    EXPECT_EQ(d.bursts, 0u);
+}
+
+TEST(MicDetect, HysteresisKeepsOneBurstTogether)
+{
+    std::vector<float> w = quiet(5);
+    w.push_back(-40.0f);  // above -50 threshold -> burst starts
+    w.push_back(-51.0f);  // dips just below threshold but within the release margin
+    w.push_back(-40.0f);
+    append(w, quiet(3));
+    mic_detect_t d = run(w);
+    EXPECT_EQ(d.bursts, 1u);
+}
+
+TEST(MicDetect, SilentRoomNeedsAnAbsoluteMinimum)
+{
+    std::vector<float> w = quiet(5, -96.0f);
+    w.push_back(-80.0f);  // dither noise: below the -75 dBFS floor -> ignored
+    w.push_back(-96.0f);
+    w.push_back(-50.0f);  // real sound
+    w.push_back(-96.0f);
+    mic_detect_t d = run(w);
+    EXPECT_EQ(d.bursts, 1u);
+    EXPECT_NEAR(mic_detect_threshold_dbfs(&d), -75.0f, 0.01f);
+}
+
+TEST(MicDetect, NothingCountedWhileStillInBaseline)
+{
+    mic_detect_t d = run(quiet(4, -30.0f));
+    EXPECT_FALSE(d.baseline_ready);
+    EXPECT_EQ(d.bursts, 0u);
+}

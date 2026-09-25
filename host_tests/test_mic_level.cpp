@@ -85,6 +85,17 @@ TEST(MicLevel, ReportsTheLouderChannel)
     EXPECT_NEAR(both.rms_dbfs, left_only.rms_dbfs, 0.01f);
 }
 
+TEST(MicLevel, ChannelsAreReportedSeparately)
+{
+    std::vector<int16_t> v = stereo_sine(8000, 3200, true);  // right channel silent
+    mic_level_acc_t acc;
+    mic_level_acc_reset(&acc);
+    mic_level_acc_add(&acc, v.data(), v.size() / 2);
+    EXPECT_GT(mic_level_acc_channel(&acc, 0).rms_dbfs, -20.0f);
+    EXPECT_FLOAT_EQ(mic_level_acc_channel(&acc, 1).rms_dbfs, MIC_LEVEL_FLOOR_DBFS);
+    EXPECT_FLOAT_EQ(mic_level_acc_channel(&acc, 5).rms_dbfs, MIC_LEVEL_FLOOR_DBFS);
+}
+
 TEST(MicLevel, AccumulatesAcrossBlocks)
 {
     std::vector<int16_t> quiet = stereo_sine(1000, 1600);

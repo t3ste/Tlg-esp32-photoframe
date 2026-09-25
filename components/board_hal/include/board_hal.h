@@ -307,6 +307,19 @@ typedef struct {
  */
 esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t volume_percent);
 
+/**
+ * @brief Like board_hal_mic_capture(), but the speaker plays @p notes at the same
+ * time (same full-duplex I2S session) - the basis of the speaker/microphone
+ * self-test. After the sequence ends the speaker stays silent while capturing
+ * continues until @p duration_ms. On this board the ES7210's second input
+ * (right channel) hears the speaker amplifier directly.
+ *
+ * @param volume_percent 0-100 speaker volume, same mapping as board_hal_play_notes()
+ */
+esp_err_t board_hal_mic_capture_with_tones(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
+                                           void *user, const board_hal_note_t *notes,
+                                           int note_count, uint8_t volume_percent);
+
 #ifdef __cplusplus
 }
 #endif

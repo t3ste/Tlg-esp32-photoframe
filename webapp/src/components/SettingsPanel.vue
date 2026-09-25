@@ -76,6 +76,38 @@ async function testMicrophone() {
   }
 }
 
+// Speaker + microphone self-test on this frame: plays a tone sequence at 100 %
+// volume on its own speaker while its microphone listens, then reports whether
+// the tones were picked up (the tone bursts are counted on the device).
+const testingMicTones = ref(false);
+const micSelfTestResult = ref(null);
+async function runMicSelfTest() {
+  testingMicTones.value = true;
+  micSelfTestResult.value = null;
+  try {
+    const response = await fetch("/api/mic/level?seconds=8&tones=1", { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showSnackbar(data.error || "Failed to start the self-test", "error");
+      return;
+    }
+    // The device measures for 8 s; poll until it reports the result.
+    for (let i = 0; i < 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const status = await fetch("/api/mic/level").then((r) => r.json());
+      if (!status.running && status.result) {
+        micSelfTestResult.value = status.result;
+        return;
+      }
+    }
+    showSnackbar("The self-test did not finish in time", "error");
+  } catch (_error) {
+    showSnackbar("Failed to run the self-test", "error");
+  } finally {
+    testingMicTones.value = false;
+  }
+}
+
 const testingErrorOverlay = ref(false);
 async function testErrorOverlay() {
   testingErrorOverlay.value = true;
@@ -3547,6 +3579,34 @@ async function performFactoryReset() {
                     <v-icon start>mdi-microphone</v-icon>
                     Log microphone level (15 s)
                   </v-btn>
+                  <v-btn
+                    v-if="settingsStore.deviceSettings.chimeSpeakerAvailable"
+                    variant="outlined"
+                    class="ml-2"
+                    :loading="testingMicTones"
+                    @click="runMicSelfTest"
+                  >
+                    <v-icon start>mdi-volume-high</v-icon>
+                    Speaker + microphone self-test
+                  </v-btn>
+                  <v-alert
+                    v-if="micSelfTestResult"
+                    :type="micSelfTestResult.heard ? 'success' : 'warning'"
+                    variant="tonal"
+                    density="compact"
+                    class="mt-3"
+                  >
+                    {{
+                      micSelfTestResult.heard
+                        ? "The microphone hears the speaker."
+                        : "The microphone did not clearly hear the tones."
+                    }}
+                    Microphone: {{ micSelfTestResult.mic_bursts }}/{{
+                      micSelfTestResult.expected_bursts
+                    }}
+                    tone bursts, peak {{ micSelfTestResult.mic_peak_dbfs }} dBFS over a noise floor
+                    of {{ micSelfTestResult.baseline_dbfs }} dBFS.
+                  </v-alert>
                   <div class="text-caption text-medium-emphasis mt-2">
                     First step towards voice control: the frame prints the input level (bar and
                     dBFS) to its console for 15 seconds - make some noise and watch the serial
