@@ -32,7 +32,7 @@ A modern, feature-rich firmware for ESP32-based e-paper photo frames (currently 
 - 🗓️ **Agenda Mode**: ToDo (todo.txt format) and/or Calendar (up to two auto-refreshing ICS/iCal URLs, plus three extra manually-managed ICS sources for things like holidays/school-holidays that shouldn't auto-update - via URL or direct file upload) rendered full-screen — alone, or together stacked/side-by-side — on its own independent wake schedule that runs alongside normal photo rotation rather than replacing it; a matching wake just takes over the display for that one cycle, with color-coded priorities/tags/due dates, per-calendar-source colors, and a configurable background ([docs](docs/AGENDA_COLORS.html)). Each calendar source is capped at 24 events within its refresh window (30 days for the three manual sources, matching the ~183-byte-per-event fixed-size buffer this project uses everywhere instead of dynamic allocation) - comfortably enough for holidays/school-holidays, but a densely-booked source could hit it
 - 🔔 **Chimes** (`waveshare_photopainter_73` only): short beep feedback on the board's onboard speaker for photo rotated, a new Telegram photo, low battery, WiFi reprovisioning, an overdue Agenda item, a successful firmware update, or WiFi/internet lost - each individually toggleable, with a 3-way power mode (off / battery+mains / mains-only) and an optional quiet-hours window
 - 🌡️ **Climate**: temperature/humidity monitoring via the onboard SHTC3 sensor (any board whose sensor responds, not tied to one specific board) — 5 preset room-type comfort profiles, optional photo-overlay badges and Agenda-header readout, a Climate History chart, and a user-settable calibration offset
-- ⏰ **Alarm Clock** (opt-in, `waveshare_photopainter_73` only — build with `build.py --alarmclock`): bedside-alarm scheduling (Web UI or Telegram `/alarm_cron`), a repeating musical ring tone through the onboard speaker, and a fully offline physical-button time-setting UI (long-press to enter, BOOT/KEY to roll hours/minutes with tone feedback) — no WiFi or display rotation during arming or ringing, so it works even with Deep Sleep enabled; compiled out entirely on builds that don't opt in
+- ⏰ **Alarm Clock** (opt-in, `waveshare_photopainter_73` only — download the `-alarmclock` release binary or build with `build.py --alarmclock`): bedside-alarm scheduling (Web UI or Telegram `/alarm_cron`), a repeating musical ring tone through the onboard speaker, and a fully offline physical-button time-setting UI (long-press to enter, BOOT/KEY to roll hours/minutes with tone feedback) — no WiFi or display rotation during arming or ringing, so it works even with Deep Sleep enabled; compiled out entirely on builds that don't opt in
 
 ## Screenshots
 
@@ -234,6 +234,8 @@ Download from [Releases](https://github.com/t3ste/Tlg-esp32-photoframe/releases)
 ```bash
 esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 photoframe-firmware-<board>-merged.bin
 ```
+
+**Alarm Clock build:** for the Waveshare PhotoPainter (`waveshare_photopainter_73`, the only supported board with a speaker) every release also ships `photoframe-firmware-waveshare_photopainter_73-alarmclock-merged.bin`. It is the same firmware with the [Alarm Clock](#features) compiled in, and OTA updates keep it (they fetch the matching `-alarmclock` asset). All other boards get the regular firmware only.
 
 **Device not detected?** Hold BOOT button + press PWR to enter download mode.
 
