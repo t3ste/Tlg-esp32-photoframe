@@ -7,6 +7,7 @@ All notable changes to this fork are documented here. See [README.md → Changes
 ### Fixed
 
 - **HTTPS web UI (opt-in) worked only sporadically**: opening a TLS session failed with `mbedtls_ssl_setup returned -0x008D` (out of memory) because mbedTLS allocated its 16 KiB + 4 KiB session buffers from internal RAM only. It now allocates through `malloc()` (big buffers go to PSRAM), which also helps the outgoing TLS connections (weather, Telegram, OTA).
+- **Frame unreachable after a browser opened many connections (HTTP + HTTPS)**: all sockets share one lwIP pool of 16, but the HTTP server (10) + optional HTTPS server (4) + their listen/control sockets (4) already exceed it, leaving nothing for the frame's own outgoing connections; the log showed `httpd_accept_conn: error in accept (23)` (ENFILE) and fetches such as "Telegram poll failed". The pool is now 24 sockets / 24 TCP PCBs.
 - **7-day Calendar grid: weather only for the first 3 days with wttr.in**: wttr.in's free format returns 3 days. The remaining days are now filled in from Open-Meteo (the days wttr.in has keep its values).
 
 ### Changed
