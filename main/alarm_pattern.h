@@ -26,16 +26,24 @@ extern "C" {
 /** How long after a note ends the room still rings (echo/DMA delay) and audio is ignored. */
 #define ALARM_PATTERN_TAIL_MS 250
 
+// Selectable alarm melodies (four notes each, repeated). Numbering is stored in NVS
+// (config: alarm_tune) and must stay stable; 0 is the default.
+#define ALARM_TUNE_COUNT 6
+#define ALARM_TUNE_DEFAULT 0
+
 typedef struct {
     float freq_hz;  // 0 = silence
     int duration_ms;
 } alarm_note_t;
 
+/** The four note frequencies (Hz) of a melody; an unknown number gives the default melody. */
+const float *alarm_pattern_tune(int tune);
+
 /**
- * Writes the notes (and pauses as freq 0) needed to ring for @p total_ms into
- * @p out, at most @p max entries. Returns the number written.
+ * Writes the notes of melody @p tune (and pauses as freq 0) needed to ring for @p total_ms
+ * into @p out, at most @p max entries. Returns the number written.
  */
-int alarm_pattern_build(alarm_note_t *out, int max, uint32_t total_ms);
+int alarm_pattern_build(alarm_note_t *out, int max, uint32_t total_ms, int tune);
 
 /** Number of entries alarm_pattern_build() needs for @p total_ms. */
 int alarm_pattern_count(uint32_t total_ms);

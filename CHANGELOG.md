@@ -4,10 +4,14 @@ All notable changes to this fork are documented here. See [README.md → Changes
 
 ## [Unreleased]
 
+### Added
+
+- **Alarm sound settings** (Alarm tab → Sound): the alarm has its **own volume** (10-100 %, default 80, independent of the Chimes volume - the button-setting cues use it too), an optional **volume ramp-up** (0-120 s until the set volume is reached, 0 = off; it starts at about 8 % and rises linearly) and **six selectable tones** (default G4–C5–E5–C5; C5–E5–G5–E5, A4–C5–E5–C5, G4–D5–B4–D5, F4–A4–C5–A4, C5–G4–E5–C5). New config fields `alarm_volume`, `alarm_ramp_sec`, `alarm_tune`. Chimes **quiet hours never apply to the alarm** (a Chimes feature; the alarm does not go through the chime code) - now also stated in the UI.
+- **Stop-word threshold adjustable in the Web UI** (Alarm tab → Stop by voice): an *Automatic* switch and a *Strict … Forgiving* slider (`PUT /api/kws/settings {"threshold": n | null}`, shown in `GET /api/kws/status` as `threshold` / `threshold_manual`). The automatic value stays at least 4, which is too strict for a real voice with one or two examples - the Test now leads to a workable value (its best distance). Teaching accepts an example that is within 12 of its nearest taught example (was: within 8 of *all* of them), so several repetitions of a real voice can be taught; a different word is still rejected.
+
 ### Fixed
 
 - **HTTPS web UI (opt-in) worked only sporadically**: opening a TLS session failed with `mbedtls_ssl_setup returned -0x008D` (out of memory) because mbedTLS allocated its 16 KiB + 4 KiB session buffers from internal RAM only. It now allocates through `malloc()` (big buffers go to PSRAM), which also helps the outgoing TLS connections (weather, Telegram, OTA).
-- **Stop-word threshold adjustable in the Web UI** (Alarm tab → Stop by voice): an *Automatic* switch and a *Strict … Forgiving* slider (`PUT /api/kws/settings {"threshold": n | null}`, shown in `GET /api/kws/status` as `threshold` / `threshold_manual`). The automatic value stays at least 4, which is too strict for a real voice with one or two examples - the Test now leads to a workable value (its best distance). Teaching accepts an example that is within 12 of its nearest taught example (was: within 8 of *all* of them), so several repetitions of a real voice can be taught; a different word is still rejected.
 - **Frame unreachable after a browser opened many connections (HTTP + HTTPS)**: all sockets share one lwIP pool of 16, but the HTTP server (10) + optional HTTPS server (4) + their listen/control sockets (4) already exceed it, leaving nothing for the frame's own outgoing connections; the log showed `httpd_accept_conn: error in accept (23)` (ENFILE) and fetches such as "Telegram poll failed". The pool is now 24 sockets / 24 TCP PCBs.
 - **7-day Calendar grid: weather only for the first 3 days with wttr.in**: wttr.in's free format returns 3 days. The remaining days are now filled in from Open-Meteo (the days wttr.in has keep its values).
 

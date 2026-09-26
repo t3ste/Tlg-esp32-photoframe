@@ -430,7 +430,7 @@ TEST(KwsAlarm, StopWordInAPauseBetweenAlarmNotesIsHeard)
 
     // alarm tones (loud) at the start of every cycle
     alarm_note_t notes[64];
-    int n = alarm_pattern_build(notes, 64, 14000);
+    int n = alarm_pattern_build(notes, 64, 14000, ALARM_TUNE_DEFAULT);
     size_t pos = 0;
     double phase = 0;
     for (int i = 0; i < n; i++) {
@@ -484,7 +484,7 @@ TEST(KwsAlarm, AlarmNotesAloneNeverTrigger)
     kws_stream_t s;
     kws_stream_init(&s, ring.data(), ring.size(), scratch.get());
     alarm_note_t notes[64];
-    int n = alarm_pattern_build(notes, 64, 20000);
+    int n = alarm_pattern_build(notes, 64, 20000, ALARM_TUNE_DEFAULT);
     int detections = 0;
     double phase = 0;
     size_t t = 0;

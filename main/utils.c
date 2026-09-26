@@ -1275,6 +1275,42 @@ esp_err_t apply_config_from_json(cJSON *root, bool from_remote)
         }
     }
 
+    item = cJSON_GetObjectItem(root, "alarm_volume");
+    if (item && cJSON_IsNumber(item)) {
+        if (item->valueint >= ALARM_VOLUME_MIN && item->valueint <= ALARM_VOLUME_MAX) {
+            config_manager_set_alarm_volume(item->valueint);
+        } else {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Alarm volume must be %d-%d %%", ALARM_VOLUME_MIN,
+                     ALARM_VOLUME_MAX);
+            utils_set_config_error(msg);
+            had_error = true;
+        }
+    }
+    item = cJSON_GetObjectItem(root, "alarm_ramp_sec");
+    if (item && cJSON_IsNumber(item)) {
+        if (item->valueint >= 0 && item->valueint <= ALARM_RAMP_MAX_SEC) {
+            config_manager_set_alarm_ramp_sec(item->valueint);
+        } else {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Alarm volume ramp-up must be 0-%d seconds",
+                     ALARM_RAMP_MAX_SEC);
+            utils_set_config_error(msg);
+            had_error = true;
+        }
+    }
+    item = cJSON_GetObjectItem(root, "alarm_tune");
+    if (item && cJSON_IsNumber(item)) {
+        if (item->valueint >= 0 && item->valueint <= ALARM_TUNE_MAX_INDEX) {
+            config_manager_set_alarm_tune(item->valueint);
+        } else {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Alarm tone must be 0-%d", ALARM_TUNE_MAX_INDEX);
+            utils_set_config_error(msg);
+            had_error = true;
+        }
+    }
+
     config_manager_end_agenda_batch();
 
     return had_error ? ESP_FAIL : ESP_OK;

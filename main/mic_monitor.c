@@ -182,7 +182,7 @@ static void monitor_task(void *arg)
     ctx.loudest_peak_dbfs = MIC_LEVEL_FLOOR_DBFS;
 
     esp_err_t err = play ? board_hal_mic_capture_with_tones(seconds * 1000u, on_block, &ctx,
-                                                            TEST_TONES, TEST_TONE_COUNT, 100)
+                                                            TEST_TONES, TEST_TONE_COUNT, 100, 0)
                          : board_hal_mic_capture(seconds * 1000u, on_block, &ctx);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Microphone capture failed: %s", esp_err_to_name(err));

@@ -176,6 +176,11 @@ export const useSettingsStore = defineStore("settings", () => {
     alarmClockAvailable: false,
     alarmCron: [],
     alarmRingDurationSec: 60,
+    // The alarm's own sound settings: volume in % (not the Chimes volume), seconds the volume
+    // takes to rise to that level (0 = no ramp) and the melody number.
+    alarmVolume: 80,
+    alarmRampSec: 0,
+    alarmTune: 0,
     // Agenda (ToDo + Calendar) - a full-screen display mode, not a photo
     // overlay. agendaTodoUrl/agendaCalUrl are write-only (never returned by
     // GET /api/config, same treatment as wifiPassword above) - both start
@@ -500,6 +505,9 @@ export const useSettingsStore = defineStore("settings", () => {
       deviceSettings.value.alarmClockAvailable = data.alarm_clock_available === true;
       deviceSettings.value.alarmCron = Array.isArray(data.alarm_cron) ? data.alarm_cron : [];
       deviceSettings.value.alarmRingDurationSec = data.alarm_ring_duration_sec ?? 60;
+      deviceSettings.value.alarmVolume = data.alarm_volume ?? 80;
+      deviceSettings.value.alarmRampSec = data.alarm_ramp_sec ?? 0;
+      deviceSettings.value.alarmTune = data.alarm_tune ?? 0;
       deviceSettings.value.agendaTodoEnabled = data.agenda_todo_enabled === true;
       deviceSettings.value.agendaCalEnabled = data.agenda_cal_enabled === true;
       // agenda_todo_url/agenda_cal_url are intentionally never present in
@@ -686,6 +694,9 @@ export const useSettingsStore = defineStore("settings", () => {
       climate_hum_offset: deviceSettings.value.climateHumOffset,
       alarm_cron: deviceSettings.value.alarmCron,
       alarm_ring_duration_sec: deviceSettings.value.alarmRingDurationSec,
+      alarm_volume: deviceSettings.value.alarmVolume,
+      alarm_ramp_sec: deviceSettings.value.alarmRampSec,
+      alarm_tune: deviceSettings.value.alarmTune,
       agenda_todo_enabled: deviceSettings.value.agendaTodoEnabled,
       agenda_cal_enabled: deviceSettings.value.agendaCalEnabled,
       agenda_cal_c_enabled: deviceSettings.value.agendaCalCEnabled,

@@ -77,7 +77,7 @@ static bool s_hold_cue_played = false;  // guards the "still held" cue against r
 
 static uint8_t volume(void)
 {
-    return (uint8_t) config_manager_get_chime_volume();
+    return (uint8_t) config_manager_get_alarm_volume();
 }
 
 static void play_beeps(float freq_hz, int count)

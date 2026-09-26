@@ -1,3 +1,4 @@
+#include "alarm_ramp.h"
 #include "board_hal.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -18,11 +19,13 @@ esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volum
 }
 
 esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_ms,
-                               bool (*should_stop)(void))
+                               bool (*should_stop)(void), const float notes_hz[4], uint32_t ramp_ms)
 {
     (void) volume_percent;
     (void) total_duration_ms;
     (void) should_stop;
+    (void) notes_hz;
+    (void) ramp_ms;
     return ESP_ERR_NOT_SUPPORTED;
 }
 
@@ -49,13 +52,14 @@ esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t o
 
 esp_err_t board_hal_mic_capture_with_tones(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
                                            void *user, const board_hal_note_t *notes,
-                                           int note_count, uint8_t volume_percent)
+                                           int note_count, uint8_t volume_percent, uint32_t ramp_ms)
 {
     (void) duration_ms;
     (void) on_block;
     (void) user;
     (void) notes;
     (void) note_count;
+    (void) ramp_ms;
     (void) volume_percent;
     return ESP_ERR_NOT_SUPPORTED;
 }
@@ -716,7 +720,7 @@ esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volum
 // 5s i2s_write_silence() call) purely so should_stop() gets checked several
 // times per pause instead of only once every 5 seconds.
 esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_ms,
-                               bool (*should_stop)(void))
+                               bool (*should_stop)(void), const float notes_hz[4], uint32_t ramp_ms)
 {
     chime_mutex_init();
     if (!s_chime_mutex ||
@@ -724,7 +728,8 @@ esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_m
         return ESP_ERR_TIMEOUT;
     }
 
-    static const float ALARM_NOTES_HZ[4] = {392.0f, 523.0f, 659.0f, 523.0f};  // G4 C5 E5 C5
+    static const float DEFAULT_NOTES_HZ[4] = {392.0f, 523.0f, 659.0f, 523.0f};  // G4 C5 E5 C5
+    const float *alarm_notes = notes_hz ? notes_hz : DEFAULT_NOTES_HZ;
     const int NOTE_MS = 300;
     const int PAUSE_MS = 5000;
     const int PAUSE_CHUNK_MS = 200;
@@ -736,7 +741,10 @@ esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_m
         bool stop = false;
         while (elapsed_ms < total_duration_ms && !stop) {
             for (int i = 0; i < 4 && !stop; i++) {
-                play_tone(session.tx, ALARM_NOTES_HZ[i], NOTE_MS, CHIME_AMPLITUDE);
+                // Volume ramp-up: the gain follows the time since the ring started.
+                float gain = alarm_ramp_gain(elapsed_ms + NOTE_MS / 2, ramp_ms);
+                play_tone(session.tx, alarm_notes[i], NOTE_MS,
+                          (int) ((float) CHIME_AMPLITUDE * gain));
                 elapsed_ms += NOTE_MS;
                 if (should_stop && should_stop()) {
                     stop = true;
@@ -805,11 +813,16 @@ typedef struct {
     int idx;
     int frame;
     float phase;
+    uint32_t ramp_ms;        // volume ramp-up (0 = none), see alarm_ramp.h
+    uint32_t frames_played;  // frames produced so far
 } tone_seq_t;
 
 static void tone_seq_fill(tone_seq_t *t, int16_t *out, int frames)
 {
     const int edge = CHIME_SAMPLE_RATE * 8 / 1000;
+    const float gain = alarm_ramp_gain(
+        (uint32_t) ((uint64_t) t->frames_played * 1000u / CHIME_SAMPLE_RATE), t->ramp_ms);
+    t->frames_played += (uint32_t) frames;
     for (int i = 0; i < frames; i++) {
         int16_t sample = 0;
         if (t->idx < t->count) {
@@ -822,7 +835,7 @@ static void tone_seq_fill(tone_seq_t *t, int16_t *out, int frames)
                 } else if (t->frame > n - edge) {
                     env = (float) (n - t->frame) / (float) edge;
                 }
-                sample = (int16_t) (sinf(t->phase) * (float) CHIME_AMPLITUDE * env);
+                sample = (int16_t) (sinf(t->phase) * (float) CHIME_AMPLITUDE * env * gain);
                 t->phase += 2.0f * (float) M_PI * note->freq_hz / (float) CHIME_SAMPLE_RATE;
                 if (t->phase > 2.0f * (float) M_PI) {
                     t->phase -= 2.0f * (float) M_PI;
@@ -844,7 +857,7 @@ static void tone_seq_fill(tone_seq_t *t, int16_t *out, int frames)
 // the same full-duplex I2S session.
 static esp_err_t mic_capture_impl(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
                                   void *user, const board_hal_note_t *notes, int note_count,
-                                  uint8_t volume_percent)
+                                  uint8_t volume_percent, uint32_t ramp_ms)
 {
     if (!on_block) {
         return ESP_ERR_INVALID_ARG;
@@ -864,7 +877,7 @@ static esp_err_t mic_capture_impl(uint32_t duration_ms, board_hal_mic_block_cb_t
         const int SETTLE_BLOCKS = BOARD_HAL_MIC_SETTLE_FRAMES / 256;
         int16_t buf[256 * 2];
         int16_t tx[256 * 2];
-        tone_seq_t seq = {.notes = notes, .count = play ? note_count : 0};
+        tone_seq_t seq = {.notes = notes, .count = play ? note_count : 0, .ramp_ms = ramp_ms};
         int64_t end_us = esp_timer_get_time() + (int64_t) duration_ms * 1000;
         int block = 0;
         bool keep_going = true;
@@ -896,14 +909,15 @@ static esp_err_t mic_capture_impl(uint32_t duration_ms, board_hal_mic_block_cb_t
 
 esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t on_block, void *user)
 {
-    return mic_capture_impl(duration_ms, on_block, user, NULL, 0, 0);
+    return mic_capture_impl(duration_ms, on_block, user, NULL, 0, 0, 0);
 }
 
 esp_err_t board_hal_mic_capture_with_tones(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
                                            void *user, const board_hal_note_t *notes,
-                                           int note_count, uint8_t volume_percent)
+                                           int note_count, uint8_t volume_percent, uint32_t ramp_ms)
 {
-    return mic_capture_impl(duration_ms, on_block, user, notes, note_count, volume_percent);
+    return mic_capture_impl(duration_ms, on_block, user, notes, note_count, volume_percent,
+                            ramp_ms);
 }
 
 #else  // !BOARD_HAL_VOICE_ENABLED
@@ -923,13 +937,14 @@ esp_err_t board_hal_mic_capture(uint32_t duration_ms, board_hal_mic_block_cb_t o
 
 esp_err_t board_hal_mic_capture_with_tones(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
                                            void *user, const board_hal_note_t *notes,
-                                           int note_count, uint8_t volume_percent)
+                                           int note_count, uint8_t volume_percent, uint32_t ramp_ms)
 {
     (void) duration_ms;
     (void) on_block;
     (void) user;
     (void) notes;
     (void) note_count;
+    (void) ramp_ms;
     (void) volume_percent;
     return ESP_ERR_NOT_SUPPORTED;
 }

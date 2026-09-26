@@ -697,4 +697,14 @@ int config_manager_get_compiled_alarm_cron_rules(cron_rule_t *out, int max);
 void config_manager_set_alarm_ring_duration_sec(uint16_t seconds);
 uint16_t config_manager_get_alarm_ring_duration_sec(void);
 
+// The alarm's own volume in percent (ALARM_VOLUME_MIN..MAX; not the Chimes volume), the time in
+// seconds the volume takes to rise from a quiet start to that volume (0 = no ramp) and the
+// melody number (alarm_pattern.h). Setters ignore out-of-range values.
+void config_manager_set_alarm_volume(int percent);
+int config_manager_get_alarm_volume(void);
+void config_manager_set_alarm_ramp_sec(int seconds);
+int config_manager_get_alarm_ramp_sec(void);
+void config_manager_set_alarm_tune(int tune);
+int config_manager_get_alarm_tune(void);
+
 #endif

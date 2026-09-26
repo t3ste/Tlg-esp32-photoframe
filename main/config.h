@@ -1036,5 +1036,17 @@ typedef enum {
 #define NVS_ALARM_RING_SEC_KEY "alarm_ring_sec"
 #define ALARM_RING_DURATION_DEFAULT_SEC 60
 #define ALARM_RING_DURATION_MAX_SEC 600  // 10 minutes - generous upper bound, not a hard spec limit
+// The alarm has its own volume (independent of the Chimes volume, and quiet hours - a Chimes
+// feature - never apply to it), a gentle volume ramp-up and a choice of melodies.
+// NVS keys must stay <= 15 characters.
+#define NVS_ALARM_VOLUME_KEY "alarm_volume"
+#define NVS_ALARM_RAMP_SEC_KEY "alarm_ramp_sec"
+#define NVS_ALARM_TUNE_KEY "alarm_tune"
+#define ALARM_VOLUME_DEFAULT 80
+#define ALARM_VOLUME_MIN 10  // below this an alarm could be missed - never silent
+#define ALARM_VOLUME_MAX 100
+#define ALARM_RAMP_DEFAULT_SEC 0  // 0 = no ramp, full volume at once
+#define ALARM_RAMP_MAX_SEC 120    // 2 minutes: longer than a gentle wake-up needs
+#define ALARM_TUNE_MAX_INDEX 5    // alarm_pattern.h: ALARM_TUNE_COUNT - 1
 
 #endif

@@ -73,10 +73,15 @@ void alarm_manager_run(void)
 
 #else
 
+#include "alarm_pattern.h"
+
+// The ring uses the alarm's own settings (alarm_volume, alarm_ramp_sec, alarm_tune). Chimes
+// settings - volume, quiet hours, speaker mode - deliberately do NOT apply to the alarm:
+// nothing in this file (or alarm_setting_ui.c) goes through chime.c.
+
 #if BOARD_HAL_VOICE_ENABLED
 #include <stdlib.h>
 
-#include "alarm_pattern.h"
 #include "kws_service.h"
 #include "mic_monitor.h"
 #endif
@@ -242,6 +247,8 @@ static bool voice_block(const int16_t *stereo, size_t frames, void *user)
 typedef struct {
     uint32_t duration_ms;
     uint8_t volume;
+    uint32_t ramp_ms;
+    int tune;
     esp_err_t err;
     const char *reason;
     TaskHandle_t caller;
@@ -261,14 +268,14 @@ static void voice_ring_task(void *arg)
     alarm_note_t *pattern = malloc((size_t) cap * sizeof(alarm_note_t));
     board_hal_note_t *notes = malloc((size_t) cap * sizeof(board_hal_note_t));
     if (listener && pattern && notes) {
-        int n = alarm_pattern_build(pattern, cap, total_ms);
+        int n = alarm_pattern_build(pattern, cap, total_ms, job->tune);
         for (int i = 0; i < n; i++) {
             notes[i].freq_hz = pattern[i].freq_hz;
             notes[i].duration_ms = pattern[i].duration_ms;
         }
         voice_ctx_t ctx = {.listener = listener};
-        job->err =
-            board_hal_mic_capture_with_tones(total_ms, voice_block, &ctx, notes, n, job->volume);
+        job->err = board_hal_mic_capture_with_tones(total_ms, voice_block, &ctx, notes, n,
+                                                    job->volume, job->ramp_ms);
         job->reason = ctx.reason ? ctx.reason : "";
     }
     free(pattern);
@@ -282,7 +289,9 @@ static void voice_ring_task(void *arg)
 static esp_err_t ring_with_voice(uint16_t duration_sec, const char **reason)
 {
     voice_job_t job = {.duration_ms = (uint32_t) duration_sec * 1000u,
-                       .volume = (uint8_t) config_manager_get_chime_volume(),
+                       .volume = (uint8_t) config_manager_get_alarm_volume(),
+                       .ramp_ms = (uint32_t) config_manager_get_alarm_ramp_sec() * 1000u,
+                       .tune = config_manager_get_alarm_tune(),
                        .err = ESP_FAIL,
                        .reason = "",
                        .caller = xTaskGetCurrentTaskHandle(),
@@ -354,8 +363,10 @@ void alarm_manager_run(void)
     }
 #endif
     if (!ring_done) {
-        err = board_hal_play_alarm((uint8_t) config_manager_get_chime_volume(),
-                                   (uint32_t) duration_sec * 1000u, key_press_requests_stop);
+        err = board_hal_play_alarm((uint8_t) config_manager_get_alarm_volume(),
+                                   (uint32_t) duration_sec * 1000u, key_press_requests_stop,
+                                   alarm_pattern_tune(config_manager_get_alarm_tune()),
+                                   (uint32_t) config_manager_get_alarm_ramp_sec() * 1000u);
         s_stop_reason = s_api_stop ? "api" : s_stop_requested ? "key" : "timeout";
     }
     s_ringing = false;

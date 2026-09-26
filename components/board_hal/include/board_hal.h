@@ -269,11 +269,15 @@ esp_err_t board_hal_play_beep_pattern(board_hal_chime_kind_t kind, uint8_t volum
  * @param total_duration_ms Give up and stop after this long even if should_stop() never fires
  * @param should_stop Polled periodically during playback; returning true stops the alarm early.
  *        May be NULL to only ever stop via total_duration_ms.
+ * @param notes_hz The four melody notes (Hz), repeated; NULL = G4 C5 E5 C5
+ * @param ramp_ms Volume ramp-up: 0 = full volume at once, otherwise the volume rises from about
+ *        -22 dB to the set volume over this time (see alarm_ramp.h)
  * @return ESP_OK on success (whether it ended via timeout or should_stop()), ESP_ERR_NOT_SUPPORTED
  *         if no speaker, or another error if the codec / I2S path failed
  */
 esp_err_t board_hal_play_alarm(uint8_t volume_percent, uint32_t total_duration_ms,
-                               bool (*should_stop)(void));
+                               bool (*should_stop)(void), const float notes_hz[4],
+                               uint32_t ramp_ms);
 
 /**
  * @brief True if the microphone / voice features are available in this build
@@ -337,7 +341,8 @@ esp_err_t board_hal_play_notes(const board_hal_note_t *notes, int count, uint8_t
  */
 esp_err_t board_hal_mic_capture_with_tones(uint32_t duration_ms, board_hal_mic_block_cb_t on_block,
                                            void *user, const board_hal_note_t *notes,
-                                           int note_count, uint8_t volume_percent);
+                                           int note_count, uint8_t volume_percent,
+                                           uint32_t ramp_ms);
 
 #ifdef __cplusplus
 }

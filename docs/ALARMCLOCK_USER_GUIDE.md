@@ -26,7 +26,9 @@ the frame runs it.
 - Ringing = a repeating four-note melody (G-C-E-C, 1.2 s) followed by a 5 s
   pause. It rings until the **ring duration** is over (default 60 s, up to
   600 s; a started melody is always finished) or until you stop it.
-- The volume is the one of the **Chimes** tab.
+- Sound: the alarm has its **own volume**, an optional **volume ramp-up** and a choice of
+  **six melodies** (Alarm Clock tab, "Sound"). The Chimes volume and the Chimes **quiet hours**
+  never apply to the alarm - it always rings.
 
 ## Stopping a ringing alarm
 
@@ -110,13 +112,16 @@ Open the **Alarm Clock** tab, card **Stop by voice**:
 | Alarm armed / disarmed | Off clears the schedule; on needs a schedule rule. |
 | Schedule | Times and weekdays of the alarm (several rules possible). |
 | Ring duration | How long it rings if not stopped (1-600 s). |
+| Alarm tone | The melody: G4-C5-E5-C5 (default), C5-E5-G5-E5 bright and friendly, A4-C5-E5-C5 soft and pleasant, G4-D5-B4-D5 clear and attention-grabbing, F4-A4-C5-A4 warm and calm, C5-G4-E5-C5 distinctive and a little more dynamic. |
+| Volume | The alarm's own volume, 10-100 % (not the Chimes volume). The speaker is quiet below about 40 % and distorts above about 90 %. |
+| Volume ramp-up | Seconds until the full volume is reached: 0 = off (full volume at once), up to 120 s. It starts at about 8 % of the volume and rises evenly; 20-60 s is usually enough. Keep the ring duration longer than the ramp. |
 | Stop by voice | Switch, **Teach**, **Test**, **Forget** (above). Voice boards only. |
 | Try the alarm | **Ring now** rings with the current settings (incl. the stop word), **Stop** ends it, and the last ring's ending is shown (time / KEY / voice / Web UI). |
 | Microphone (voice boards) | **Live level**: bars for both microphones with the noise floor (blue) and the threshold (red) - the frame stays awake while it is on. Threshold: automatic (noise floor + 20 dB) or a fixed slider. **Log level**: writes the level to the debug log for 15 s. **Self-test**: plays tones and checks that the microphone hears them. |
 
-Schedule, armed switch and ring duration are saved with the tab's normal
-**Save** button; the voice controls act immediately. The volume is set in the
-**Chimes** tab.
+Schedule, armed switch, ring duration, tone, volume and ramp-up are saved with the tab's
+normal **Save** button (then **Ring now** plays the new sound); the voice controls act
+immediately.
 
 ## Troubleshooting
 

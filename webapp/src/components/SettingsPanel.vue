@@ -415,6 +415,15 @@ const climateRoomTypeOptions = [
   { title: "Basement", value: "basement" },
 ];
 
+// Numbering is stored on the device (alarm_tune) - see alarm_pattern.c.
+const alarmTuneOptions = [
+  { title: "G4–C5–E5–C5 – classic (default)", value: 0 },
+  { title: "C5–E5–G5–E5 – bright and friendly", value: 1 },
+  { title: "A4–C5–E5–C5 – soft and pleasant", value: 2 },
+  { title: "G4–D5–B4–D5 – clear and attention-grabbing", value: 3 },
+  { title: "F4–A4–C5–A4 – warm and calm", value: 4 },
+  { title: "C5–G4–E5–C5 – distinctive, a little more dynamic", value: 5 },
+];
 const climateTempUnitOptions = [
   { title: "Celsius (default)", value: "celsius" },
   { title: "Fahrenheit", value: "fahrenheit" },
@@ -3019,6 +3028,9 @@ async function performFactoryReset() {
             <v-divider class="mb-4 mt-2" />
 
             <div class="text-subtitle-2 mb-2">Quiet hours</div>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Applies to the chimes only - the Alarm Clock always rings.
+            </div>
             <v-switch
               v-model="settingsStore.deviceSettings.chimeQuietEnabled"
               label="Enable quiet hours"
@@ -3187,6 +3199,68 @@ async function performFactoryReset() {
             </v-row>
             <div class="text-caption text-medium-emphasis mb-2">
               How long the alarm keeps ringing if never stopped early (default 60s, up to 600s).
+            </div>
+
+            <v-divider class="my-4" />
+
+            <div class="text-subtitle-2 mb-2">Sound</div>
+            <v-select
+              v-model="settingsStore.deviceSettings.alarmTune"
+              :items="alarmTuneOptions"
+              item-title="title"
+              item-value="value"
+              label="Alarm tone"
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="mb-2"
+            />
+            <div class="text-caption text-medium-emphasis mb-3">
+              Four notes that repeat, followed by a pause. Save, then "Ring now" (below) plays the
+              selected tone.
+            </div>
+
+            <v-slider
+              v-model="settingsStore.deviceSettings.alarmVolume"
+              label="Volume"
+              min="10"
+              max="100"
+              step="5"
+              thumb-label
+              hide-details
+              class="mt-2 mb-1"
+            >
+              <template #append>
+                <span class="text-body-2" style="min-width: 3em">
+                  {{ settingsStore.deviceSettings.alarmVolume }}%
+                </span>
+              </template>
+            </v-slider>
+            <div class="text-caption text-medium-emphasis mb-3">
+              The alarm's own volume, independent of the Chimes volume. Chimes quiet hours never
+              apply to the alarm. (Speaker: quiet below about 40 %, distorts above about 90 %.)
+            </div>
+
+            <v-row dense align="center">
+              <v-col cols="6" sm="3">
+                <v-text-field
+                  v-model.number="settingsStore.deviceSettings.alarmRampSec"
+                  type="number"
+                  min="0"
+                  max="120"
+                  step="5"
+                  suffix="s"
+                  label="Volume ramp-up"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
+            <div class="text-caption text-medium-emphasis mb-2">
+              Gentle wake-up: the volume rises from quiet to the volume above within this time. 0 =
+              off (full volume at once), up to 120 s (20-60 s is usually enough). Keep the ring
+              duration longer than this, otherwise the full volume is never reached.
             </div>
 
             <v-divider class="my-4" />

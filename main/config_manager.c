@@ -170,6 +170,9 @@ static int alarm_cron_rule_count = 0;
 static cron_rule_t alarm_cron_compiled[MAX_CRON_RULES];
 static int alarm_cron_compiled_count = -1;
 static uint16_t alarm_ring_duration_sec = ALARM_RING_DURATION_DEFAULT_SEC;
+static int alarm_volume = ALARM_VOLUME_DEFAULT;
+static int alarm_ramp_sec = ALARM_RAMP_DEFAULT_SEC;
+static int alarm_tune = 0;
 #endif
 
 static bool agenda_stack_layout = AGENDA_STACK_DEFAULT;
@@ -1353,6 +1356,21 @@ esp_err_t config_manager_init(void)
         if (nvs_get_u16(nvs_handle, NVS_ALARM_RING_SEC_KEY, &stored_alarm_ring_sec) == ESP_OK &&
             stored_alarm_ring_sec > 0 && stored_alarm_ring_sec <= ALARM_RING_DURATION_MAX_SEC) {
             alarm_ring_duration_sec = stored_alarm_ring_sec;
+        }
+        uint8_t stored_alarm_volume = 0;
+        if (nvs_get_u8(nvs_handle, NVS_ALARM_VOLUME_KEY, &stored_alarm_volume) == ESP_OK &&
+            stored_alarm_volume >= ALARM_VOLUME_MIN && stored_alarm_volume <= ALARM_VOLUME_MAX) {
+            alarm_volume = stored_alarm_volume;
+        }
+        uint16_t stored_alarm_ramp = 0;
+        if (nvs_get_u16(nvs_handle, NVS_ALARM_RAMP_SEC_KEY, &stored_alarm_ramp) == ESP_OK &&
+            stored_alarm_ramp <= ALARM_RAMP_MAX_SEC) {
+            alarm_ramp_sec = stored_alarm_ramp;
+        }
+        uint8_t stored_alarm_tune = 0;
+        if (nvs_get_u8(nvs_handle, NVS_ALARM_TUNE_KEY, &stored_alarm_tune) == ESP_OK &&
+            stored_alarm_tune <= ALARM_TUNE_MAX_INDEX) {
+            alarm_tune = stored_alarm_tune;
         }
 #endif
         uint8_t stored_agenda_stack = AGENDA_STACK_DEFAULT ? 1 : 0;
@@ -3836,6 +3854,48 @@ uint16_t config_manager_get_alarm_ring_duration_sec(void)
 {
     return alarm_ring_duration_sec;
 }
+
+void config_manager_set_alarm_volume(int percent)
+{
+    if (percent < ALARM_VOLUME_MIN || percent > ALARM_VOLUME_MAX) {
+        return;
+    }
+    alarm_volume = percent;
+    agenda_nvs_set_u8(NVS_ALARM_VOLUME_KEY, (uint8_t) alarm_volume);
+}
+
+int config_manager_get_alarm_volume(void)
+{
+    return alarm_volume;
+}
+
+void config_manager_set_alarm_ramp_sec(int seconds)
+{
+    if (seconds < 0 || seconds > ALARM_RAMP_MAX_SEC) {
+        return;
+    }
+    alarm_ramp_sec = seconds;
+    agenda_nvs_set_u16(NVS_ALARM_RAMP_SEC_KEY, (uint16_t) alarm_ramp_sec);
+}
+
+int config_manager_get_alarm_ramp_sec(void)
+{
+    return alarm_ramp_sec;
+}
+
+void config_manager_set_alarm_tune(int tune)
+{
+    if (tune < 0 || tune > ALARM_TUNE_MAX_INDEX) {
+        return;
+    }
+    alarm_tune = tune;
+    agenda_nvs_set_u8(NVS_ALARM_TUNE_KEY, (uint8_t) alarm_tune);
+}
+
+int config_manager_get_alarm_tune(void)
+{
+    return alarm_tune;
+}
 #else
 int config_manager_get_alarm_cron_rule_count(void)
 {
@@ -3869,6 +3929,36 @@ void config_manager_set_alarm_ring_duration_sec(uint16_t seconds)
 uint16_t config_manager_get_alarm_ring_duration_sec(void)
 {
     return ALARM_RING_DURATION_DEFAULT_SEC;
+}
+
+void config_manager_set_alarm_volume(int percent)
+{
+    (void) percent;
+}
+
+int config_manager_get_alarm_volume(void)
+{
+    return ALARM_VOLUME_DEFAULT;
+}
+
+void config_manager_set_alarm_ramp_sec(int seconds)
+{
+    (void) seconds;
+}
+
+int config_manager_get_alarm_ramp_sec(void)
+{
+    return ALARM_RAMP_DEFAULT_SEC;
+}
+
+void config_manager_set_alarm_tune(int tune)
+{
+    (void) tune;
+}
+
+int config_manager_get_alarm_tune(void)
+{
+    return 0;
 }
 #endif  // CONFIG_ALARM_CLOCK_ENABLED
 

@@ -2481,6 +2481,9 @@ static esp_err_t config_handler(httpd_req_t *req)
         cJSON_AddItemToObject(root, "alarm_cron", alarm_cron_arr);
         cJSON_AddNumberToObject(root, "alarm_ring_duration_sec",
                                 config_manager_get_alarm_ring_duration_sec());
+        cJSON_AddNumberToObject(root, "alarm_volume", config_manager_get_alarm_volume());
+        cJSON_AddNumberToObject(root, "alarm_ramp_sec", config_manager_get_alarm_ramp_sec());
+        cJSON_AddNumberToObject(root, "alarm_tune", config_manager_get_alarm_tune());
 
         cJSON_AddBoolToObject(root, "agenda_stack_layout",
                               config_manager_get_agenda_stack_layout());

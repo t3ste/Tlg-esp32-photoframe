@@ -134,6 +134,7 @@ target_include_directories(
   PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/../main
+  ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_hal/include
 )
 
 # Stop-word (keyword) recognition: MFCC + DTW template matching, tested on
