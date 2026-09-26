@@ -68,6 +68,13 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 CONFIG_ESP_TLS_INSECURE=y
 CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y
 
+# mbedTLS - allocate through malloc() instead of internal RAM only. A TLS session needs a
+# 16 KiB input + 4 KiB output buffer; from internal DRAM alone the HTTPS web UI (opt-in)
+# failed sporadically with "mbedtls_ssl_setup returned -0x008D" (out of memory) once the
+# heap was fragmented. malloc() sends the big buffer to PSRAM (SPIRAM_USE_MALLOC) and
+# falls back between the two; boards without PSRAM behave as before.
+CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
+
 # mbedTLS - Keep peer certificate for trust-cert endpoint
 CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE=y
 

@@ -46,9 +46,8 @@ typedef struct {
  * Open-Meteo's response uses "timezone=auto" (resolves the correct local
  * timezone from the coordinates server-side); yr.no has no such parameter
  * and buckets by UTC calendar date instead (see fetch_yrno() in weather.c
- * for the specific trade-offs that implies). wttr.in's free `j1` format may
- * not actually be able to return more than 3 days regardless of `max_days`
- * - see fetch_wttrin() in weather.c.
+ * for the specific trade-offs that implies). wttr.in's free `j1` format returns
+ * 3 days only: for more, the missing days are taken from Open-Meteo.
  *
  * Resolution order: if both config_manager_get_weather_lat()/_lon() are set,
  * uses them directly. Otherwise, geocodes config_manager_get_weather_location_name()

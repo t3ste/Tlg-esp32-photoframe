@@ -2,6 +2,19 @@
 
 All notable changes to this fork are documented here. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full running list of everything this fork adds on top of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe); this file covers per-release deltas only.
 
+## [Unreleased]
+
+### Fixed
+
+- **HTTPS web UI (opt-in) worked only sporadically**: opening a TLS session failed with `mbedtls_ssl_setup returned -0x008D` (out of memory) because mbedTLS allocated its 16 KiB + 4 KiB session buffers from internal RAM only. It now allocates through `malloc()` (big buffers go to PSRAM), which also helps the outgoing TLS connections (weather, Telegram, OTA).
+- **7-day Calendar grid: weather only for the first 3 days with wttr.in**: wttr.in's free format returns 3 days. The remaining days are now filled in from Open-Meteo (the days wttr.in has keep its values).
+
+### Changed
+
+- The profile editor page (`/profile-editor.html`) is now in English with neutral sample data; saved editor state and exported profiles remain compatible.
+
+---
+
 ## [v218.6.0] - 2026-09-26 (pre-release)
 
 ### Added

@@ -571,6 +571,23 @@ esp_err_t weather_fetch_forecast(weather_forecast_t *out, int max_days)
     const char *provider = config_manager_get_weather_provider();
     if (strcmp(provider, WEATHER_PROVIDER_WTTR_IN) == 0) {
         err = fetch_wttrin(lat, lon, out, max_days);
+        // wttr.in's free j1 format covers 3 days only. When more are wanted (the 7-day
+        // Calendar grid), complete them from Open-Meteo; the days wttr.in has keep its values.
+        if (err == ESP_OK && out->count > 0 && out->count < max_days) {
+            weather_forecast_t extra;
+            memset(&extra, 0, sizeof(extra));
+            if (fetch_open_meteo(lat, lon, &extra, max_days) == ESP_OK) {
+                const char *last = out->days[out->count - 1].date;
+                for (int i = 0; i < extra.count && out->count < max_days; i++) {
+                    if (strcmp(extra.days[i].date, last) > 0) {
+                        out->days[out->count++] = extra.days[i];
+                    }
+                }
+            } else {
+                ESP_LOGW(TAG, "wttr.in has %d of %d days and Open-Meteo could not fill the rest",
+                         out->count, max_days);
+            }
+        }
     } else if (strcmp(provider, WEATHER_PROVIDER_YR_NO) == 0) {
         err = fetch_yrno(lat, lon, out, max_days);
     } else {
