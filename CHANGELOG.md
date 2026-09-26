@@ -2,7 +2,7 @@
 
 All notable changes to this fork are documented here. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full running list of everything this fork adds on top of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe); this file covers per-release deltas only.
 
-## [v218.6.0] - 2026-09-26 (pre-release)
+## [v218.7.0] - 2026-09-26 (pre-release)
 
 ### Added
 
