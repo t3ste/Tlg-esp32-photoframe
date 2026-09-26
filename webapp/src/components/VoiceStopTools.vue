@@ -27,6 +27,21 @@ const templates = computed(() => status.value?.templates ?? 0);
 const maxTemplates = computed(() => status.value?.max_templates ?? 5);
 const mode = computed(() => status.value?.mode ?? "idle");
 const alarmStop = computed(() => status.value?.alarm_stop === true);
+const thresholdMin = computed(() => status.value?.threshold_min ?? 2);
+const thresholdMax = computed(() => status.value?.threshold_max ?? 30);
+const thresholdAuto = computed(() => !(status.value?.threshold_manual > 0));
+const effectiveThreshold = computed(() => status.value?.threshold ?? 4);
+const thresholdSlider = ref(4);
+const savingThreshold = ref(false);
+let draggingThreshold = false;
+
+function roundHalf(v) {
+  return Math.round(v * 2) / 2;
+}
+
+watch(effectiveThreshold, (t) => {
+  if (!draggingThreshold) thresholdSlider.value = roundHalf(t);
+});
 
 const stopReasonText = {
   timeout: "it rang until the ring duration ran out",
@@ -119,6 +134,37 @@ async function setAlarmStop(on) {
   } finally {
     await loadStatus();
     savingSwitch.value = false;
+  }
+}
+
+async function saveThreshold(value) {
+  savingThreshold.value = true;
+  try {
+    await callApi(
+      "/api/kws/settings",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threshold: value }),
+      },
+      "Failed to save the threshold"
+    );
+  } finally {
+    draggingThreshold = false;
+    await loadStatus();
+    savingThreshold.value = false;
+  }
+}
+
+function onThresholdAuto(auto) {
+  if (auto) {
+    saveThreshold(null);
+  } else {
+    const v = Math.min(
+      thresholdMax.value,
+      Math.max(thresholdMin.value, roundHalf(effectiveThreshold.value))
+    );
+    saveThreshold(v);
   }
 }
 
@@ -281,6 +327,45 @@ onUnmounted(stopPolling);
         {{ enrollText.text }}
       </v-alert>
       <div v-if="testText && mode !== 'testing'" class="text-caption mt-2">{{ testText }}</div>
+
+      <div class="text-subtitle-2 mt-4">Detection threshold</div>
+      <v-switch
+        :model-value="thresholdAuto"
+        color="primary"
+        density="compact"
+        hide-details
+        :disabled="templates === 0"
+        :loading="savingThreshold"
+        label="Automatic (from how much the taught examples differ)"
+        @update:model-value="onThresholdAuto"
+      />
+      <v-slider
+        v-model="thresholdSlider"
+        :min="thresholdMin"
+        :max="thresholdMax"
+        :step="0.5"
+        :disabled="thresholdAuto || templates === 0"
+        thumb-label
+        hide-details
+        density="compact"
+        color="error"
+        class="mt-2"
+        @start="draggingThreshold = true"
+        @end="saveThreshold(thresholdSlider)"
+      >
+        <template #prepend><span class="text-caption">Strict</span></template>
+        <template #append
+          ><span class="text-caption">Forgiving - {{ thresholdSlider }}</span></template
+        >
+      </v-slider>
+      <div class="text-caption text-medium-emphasis mt-1">
+        Current threshold: {{ effectiveThreshold }} ({{ thresholdAuto ? "automatic" : "fixed" }}). A
+        spoken word counts as the stop word when its distance to a taught example is below this
+        value. Run <b>Test</b> and say your word: if its best distance is above the threshold, move
+        the slider a little above that value; if other words get accepted, lower it or teach more
+        examples. The automatic value is at least 4 and usually too strict for one or two examples
+        of a real voice.
+      </div>
       <div v-if="mode === 'testing'" class="text-body-2 mt-2">
         Listening - say the word and other words, then wait ...
       </div>

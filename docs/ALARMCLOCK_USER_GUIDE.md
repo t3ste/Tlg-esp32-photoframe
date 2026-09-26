@@ -93,7 +93,14 @@ Open the **Alarm Clock** tab, card **Stop by voice**:
    word should count.
 3. **Stop the ringing alarm with the stop word** - the switch (enabled after the
    first example).
-4. **Forget** - deletes all taught examples (start again after changing your
+4. **Detection threshold** - how close a spoken word must be to a taught example to count
+   (a distance: smaller = stricter). **Automatic** derives it from how much your examples
+   differ (at least 4 - often too strict with only one or two examples of a real voice).
+   Switch Automatic off to set it with the slider. Workflow: run **Test**, say your word and
+   read its *best distance*; put the threshold a little above that value. If other words
+   start to be accepted, lower it again or teach more examples (more examples lower the
+   distance of your own word).
+5. **Forget** - deletes all taught examples (start again after changing your
    word, or if it works badly).
 
 ## Web UI - Alarm Clock tab at a glance

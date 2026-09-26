@@ -31,9 +31,10 @@ typedef enum {
 typedef struct {
     bool available;  // the board has a microphone
     kws_service_mode_t mode;
-    int templates;  // enrolled patterns
-    float threshold;
-    bool alarm_stop;  // the ringing alarm listens for the word
+    int templates;           // enrolled patterns
+    float threshold;         // effective: an utterance closer than this counts as the word
+    float threshold_manual;  // the fixed value set by the user, 0 = automatic
+    bool alarm_stop;         // the ringing alarm listens for the word
 
     // Last enrolment
     bool have_enroll_result;
@@ -75,6 +76,16 @@ esp_err_t kws_service_clear(void);
 esp_err_t kws_service_test(uint32_t seconds);
 
 void kws_service_get_status(kws_service_status_t *out);
+
+#define KWS_THRESHOLD_MIN 2.0f
+#define KWS_THRESHOLD_MAX 30.0f
+
+/**
+ * Detection threshold (a distance: smaller = stricter). 0 = automatic (derived from how much
+ * the taught examples vary, at least KWS_DEFAULT_FLOOR_THRESHOLD), otherwise a fixed value in
+ * KWS_THRESHOLD_MIN..KWS_THRESHOLD_MAX. Persisted; applies to the test and to the alarm.
+ */
+esp_err_t kws_service_set_threshold(float threshold);
 
 /** Switch: should a ringing alarm listen for the stop word? (persisted) */
 esp_err_t kws_service_set_alarm_stop(bool enabled);

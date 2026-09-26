@@ -40,6 +40,12 @@ esp_err_t kws_service_set_alarm_stop(bool enabled)
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+esp_err_t kws_service_set_threshold(float threshold)
+{
+    (void) threshold;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 bool kws_service_alarm_stop_ready(void)
 {
     return false;
@@ -85,12 +91,16 @@ static const char *TAG = "kws";
 #define TEMPLATE_MAGIC 0x3153574Bu  // "KWS1"
 #define STREAM_RING_SAMPLES 32000   // 2 s
 #define TASK_STACK_BYTES 16384
-#define MAX_ENROLL_SPREAD 8.0f  // enrolments further apart than this are not the same word
+// A new example must be at least this close to its nearest taught example: one person's own
+// repetitions of a word differ by 6-10, another word usually by more.
+#define MAX_ENROLL_SPREAD 12.0f
 
 static kws_matcher_t *s_matcher = NULL;  // allocated on first use (PSRAM if available)
 static volatile kws_service_mode_t s_mode = KWS_SERVICE_IDLE;
 static volatile bool s_abort = false;  // ends a running enrolment/test (see kws_service_abort)
 static kws_service_status_t s_last;    // enrolment/test results of the last runs
+
+static void apply_threshold(kws_matcher_t *m);
 
 static kws_matcher_t *matcher(void)
 {
@@ -183,6 +193,7 @@ static void load_templates(void)
         // it is derived from the templates, exactly as when they were enrolled.
         (void) threshold;
         kws_matcher_calibrate(m, KWS_DEFAULT_MARGIN, KWS_DEFAULT_FLOOR_THRESHOLD);
+        apply_threshold(m);
     }
     fclose(f);
 }
@@ -237,17 +248,24 @@ static void enroll_task(void *arg)
             s_last.enroll_status = st;
             if (st == KWS_OK) {
                 // The new word must resemble the ones already enrolled.
-                bool consistent = true;
+                float nearest = KWS_DTW_INFINITE;
                 for (int i = 0; i < m->count; i++) {
-                    if (kws_dtw_distance(pattern, &m->templates[i]) > MAX_ENROLL_SPREAD) {
-                        consistent = false;
+                    float d = kws_dtw_distance(pattern, &m->templates[i]);
+                    if (d < nearest) {
+                        nearest = d;
                     }
+                }
+                bool consistent = m->count == 0 || nearest <= MAX_ENROLL_SPREAD;
+                if (!consistent) {
+                    ESP_LOGW(TAG, "Enrolment: nearest distance %.2f > %.1f", (double) nearest,
+                             (double) MAX_ENROLL_SPREAD);
                 }
                 if (!consistent) {
                     ESP_LOGW(TAG, "Enrolment rejected: does not resemble the enrolled word");
                     s_last.enroll_status = KWS_ERR_INCONSISTENT;
                 } else if (kws_matcher_add(m, pattern) >= 0) {
                     kws_matcher_calibrate(m, KWS_DEFAULT_MARGIN, KWS_DEFAULT_FLOOR_THRESHOLD);
+                    apply_threshold(m);
                     save_templates();
                     s_last.enroll_frames = pattern->frames;
                     ESP_LOGI(TAG, "Enrolled template %d (%d frames), threshold %.2f", m->count,
@@ -268,23 +286,76 @@ static void enroll_task(void *arg)
 
 #define KWS_NVS_NAMESPACE "kws"
 #define KWS_NVS_ALARM_KEY "alarm"
+#define KWS_NVS_THRESHOLD_KEY "thr100"  // threshold * 100, absent/0 = automatic
 static bool s_alarm_stop = false;
-static bool s_alarm_stop_loaded = false;
+static float s_threshold_manual = 0.0f;
+static bool s_settings_loaded = false;
+
+static void settings_load(void)
+{
+    if (s_settings_loaded) {
+        return;
+    }
+    s_settings_loaded = true;
+    nvs_handle_t h;
+    if (nvs_open(KWS_NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+        uint8_t v = 0;
+        if (nvs_get_u8(h, KWS_NVS_ALARM_KEY, &v) == ESP_OK) {
+            s_alarm_stop = v != 0;
+        }
+        int32_t t100 = 0;
+        if (nvs_get_i32(h, KWS_NVS_THRESHOLD_KEY, &t100) == ESP_OK) {
+            float t = (float) t100 / 100.0f;
+            if (t >= KWS_THRESHOLD_MIN && t <= KWS_THRESHOLD_MAX) {
+                s_threshold_manual = t;
+            }
+        }
+        nvs_close(h);
+    }
+}
 
 static bool alarm_stop_enabled(void)
 {
-    if (!s_alarm_stop_loaded) {
-        s_alarm_stop_loaded = true;
-        nvs_handle_t h;
-        if (nvs_open(KWS_NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
-            uint8_t v = 0;
-            if (nvs_get_u8(h, KWS_NVS_ALARM_KEY, &v) == ESP_OK) {
-                s_alarm_stop = v != 0;
-            }
-            nvs_close(h);
-        }
-    }
+    settings_load();
     return s_alarm_stop;
+}
+
+// A fixed threshold set by the user replaces the calibrated one.
+static void apply_threshold(kws_matcher_t *m)
+{
+    settings_load();
+    if (m && s_threshold_manual > 0.0f) {
+        m->threshold = s_threshold_manual;
+    }
+}
+
+esp_err_t kws_service_set_threshold(float threshold)
+{
+    if (threshold != 0.0f && (!(threshold >= KWS_THRESHOLD_MIN) || threshold > KWS_THRESHOLD_MAX)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    settings_load();
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(KWS_NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_i32(h, KWS_NVS_THRESHOLD_KEY, (int32_t) (threshold * 100.0f + 0.5f));
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+    if (err != ESP_OK) {
+        return err;
+    }
+    s_threshold_manual = threshold;
+    kws_matcher_t *m = matcher();
+    ensure_loaded();
+    if (m) {
+        kws_matcher_calibrate(m, KWS_DEFAULT_MARGIN, KWS_DEFAULT_FLOOR_THRESHOLD);
+        apply_threshold(m);
+    }
+    return ESP_OK;
 }
 
 esp_err_t kws_service_set_alarm_stop(bool enabled)
@@ -300,7 +371,7 @@ esp_err_t kws_service_set_alarm_stop(bool enabled)
     }
     nvs_close(h);
     if (err == ESP_OK) {
-        s_alarm_stop_loaded = true;
+        settings_load();
         s_alarm_stop = enabled;
     }
     return err;
@@ -514,6 +585,7 @@ void kws_service_get_status(kws_service_status_t *out)
     out->templates = m ? m->count : 0;
     out->threshold = m ? m->threshold : KWS_DEFAULT_FLOOR_THRESHOLD;
     out->alarm_stop = alarm_stop_enabled();
+    out->threshold_manual = s_threshold_manual;
 }
 
 #endif  // BOARD_HAL_VOICE_ENABLED

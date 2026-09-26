@@ -1509,26 +1509,29 @@ static esp_err_t kws_status_handler(httpd_req_t *req)
         snprintf(enroll, sizeof(enroll), "{\"status\":%d,\"frames\":%d}", st.enroll_status,
                  st.enroll_frames);
     }
-    char body[500];
+    char body[600];
     snprintf(body, sizeof(body),
              "{\"available\":%s,\"mode\":\"%s\",\"templates\":%d,\"max_templates\":%d,"
-             "\"threshold\":%.2f,\"alarm_stop\":%s,\"enroll\":%s,"
+             "\"threshold\":%.2f,\"threshold_manual\":%.2f,\"threshold_min\":%.0f,"
+             "\"threshold_max\":%.0f,\"alarm_stop\":%s,\"enroll\":%s,"
              "\"test\":{\"utterances\":%u,\"detections\":%u,\"best_score\":%s,"
              "\"last_score\":%s}}",
              st.available ? "true" : "false", mode, st.templates, KWS_MAX_TEMPLATES,
-             (double) st.threshold, st.alarm_stop ? "true" : "false", enroll, st.test_utterances,
-             st.test_detections, best, last);
+             (double) st.threshold, (double) st.threshold_manual, (double) KWS_THRESHOLD_MIN,
+             (double) KWS_THRESHOLD_MAX, st.alarm_stop ? "true" : "false", enroll,
+             st.test_utterances, st.test_detections, best, last);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, body);
     return ESP_OK;
 }
 
-// PUT /api/kws/settings {"alarm_stop":true|false} - should a ringing alarm listen for the stop
-// word?
+// PUT /api/kws/settings {"alarm_stop":true|false, "threshold":<number>|null} - both optional:
+// should a ringing alarm listen for the stop word, and the detection threshold (a distance,
+// smaller = stricter; null = automatic).
 static esp_err_t kws_settings_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
-    char buf[64];
+    char buf[96];
     int ret = httpd_req_recv(req, buf, MIN(req->content_len, sizeof(buf) - 1));
     if (ret <= 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read request");
@@ -1536,14 +1539,30 @@ static esp_err_t kws_settings_handler(httpd_req_t *req)
     }
     buf[ret] = '\0';
     cJSON *json = cJSON_Parse(buf);
-    cJSON *item = json ? cJSON_GetObjectItem(json, "alarm_stop") : NULL;
-    if (!item || !cJSON_IsBool(item)) {
+    cJSON *alarm = json ? cJSON_GetObjectItem(json, "alarm_stop") : NULL;
+    cJSON *thr = json ? cJSON_GetObjectItem(json, "threshold") : NULL;
+    bool valid = json && (alarm || thr) && (!alarm || cJSON_IsBool(alarm)) &&
+                 (!thr || cJSON_IsNull(thr) || cJSON_IsNumber(thr));
+    if (!valid) {
         cJSON_Delete(json);
         httpd_resp_set_status(req, HTTPD_400);
-        httpd_resp_sendstr(req, "{\"error\":\"alarm_stop must be a boolean\"}");
+        httpd_resp_sendstr(
+            req, "{\"error\":\"alarm_stop must be a boolean, threshold a number or null\"}");
         return ESP_OK;
     }
-    esp_err_t err = kws_service_set_alarm_stop(cJSON_IsTrue(item));
+    esp_err_t err = ESP_OK;
+    if (thr) {
+        err = kws_service_set_threshold(cJSON_IsNull(thr) ? 0.0f : (float) thr->valuedouble);
+        if (err == ESP_ERR_INVALID_ARG) {
+            cJSON_Delete(json);
+            httpd_resp_set_status(req, HTTPD_400);
+            httpd_resp_sendstr(req, "{\"error\":\"threshold must be from 2 to 30\"}");
+            return ESP_OK;
+        }
+    }
+    if (err == ESP_OK && alarm) {
+        err = kws_service_set_alarm_stop(cJSON_IsTrue(alarm));
+    }
     cJSON_Delete(json);
     if (err != ESP_OK) {
         return kws_send_error(req, err);

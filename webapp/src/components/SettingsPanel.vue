@@ -2072,9 +2072,10 @@ async function performFactoryReset() {
             <div class="text-caption text-medium-emphasis mb-2">
               Appends each day's forecast to its divider, e.g. "Fr 11. [18/25 cloudy]" - reuses the
               same location/provider settings as the photo Weather Overlay (Settings → Power →
-              Weather + Headline Overlays), just for this independent display path. The forecast
-              only covers 3 days, so if the lookahead window reaches into a 4th day (possible late
-              in the evening), that day simply shows no forecast.
+              Weather + Headline Overlays), just for this independent display path. The list layout
+              shows up to 3 days of forecast and the 7-day grid up to 7 (wttr.in only returns 3
+              days, the rest then comes from Open-Meteo); a day beyond the forecast simply shows
+              none.
             </div>
             <v-switch
               v-model="settingsStore.deviceSettings.agendaCalWeatherRightAligned"
