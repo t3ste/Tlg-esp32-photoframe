@@ -2,7 +2,7 @@
 
 The frame can act as a bedside alarm clock: at the set time it rings a melody
 on its speaker. You stop it with the KEY button, with a spoken **stop word**, or
-from the Web UI. (Design background: [ALARMCLOCK_FEASIBILITY.md](ALARMCLOCK_FEASIBILITY.md).)
+from the Web UI.
 
 ## What you need
 
