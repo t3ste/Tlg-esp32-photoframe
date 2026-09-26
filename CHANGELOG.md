@@ -2,29 +2,12 @@
 
 All notable changes to this fork are documented here. See [README.md → Changes from Upstream](README.md#changes-from-upstream) for the full running list of everything this fork adds on top of [aitjcize/esp32-photoframe](https://github.com/aitjcize/esp32-photoframe); this file covers per-release deltas only.
 
-## [Unreleased]
+## [v218.6.0] - 2026-09-26 (pre-release)
 
 ### Added
 
 - **Alarm sound settings** (Alarm tab → Sound): the alarm has its **own volume** (10-100 %, default 80, independent of the Chimes volume - the button-setting cues use it too), an optional **volume ramp-up** (0-120 s until the set volume is reached, 0 = off; it starts at about 8 % and rises linearly) and **six selectable tones** (default G4–C5–E5–C5; C5–E5–G5–E5, A4–C5–E5–C5, G4–D5–B4–D5, F4–A4–C5–A4, C5–G4–E5–C5). New config fields `alarm_volume`, `alarm_ramp_sec`, `alarm_tune`. Chimes **quiet hours never apply to the alarm** (a Chimes feature; the alarm does not go through the chime code) - now also stated in the UI.
 - **Stop-word threshold adjustable in the Web UI** (Alarm tab → Stop by voice): an *Automatic* switch and a *Strict … Forgiving* slider (`PUT /api/kws/settings {"threshold": n | null}`, shown in `GET /api/kws/status` as `threshold` / `threshold_manual`). The automatic value stays at least 4, which is too strict for a real voice with one or two examples - the Test now leads to a workable value (its best distance). Teaching accepts an example that is within 12 of its nearest taught example (was: within 8 of *all* of them), so several repetitions of a real voice can be taught; a different word is still rejected.
-
-### Fixed
-
-- **HTTPS web UI (opt-in) worked only sporadically**: opening a TLS session failed with `mbedtls_ssl_setup returned -0x008D` (out of memory) because mbedTLS allocated its 16 KiB + 4 KiB session buffers from internal RAM only. It now allocates through `malloc()` (big buffers go to PSRAM), which also helps the outgoing TLS connections (weather, Telegram, OTA).
-- **Frame unreachable after a browser opened many connections (HTTP + HTTPS)**: all sockets share one lwIP pool of 16, but the HTTP server (10) + optional HTTPS server (4) + their listen/control sockets (4) already exceed it, leaving nothing for the frame's own outgoing connections; the log showed `httpd_accept_conn: error in accept (23)` (ENFILE) and fetches such as "Telegram poll failed". The pool is now 24 sockets / 24 TCP PCBs.
-- **7-day Calendar grid: weather only for the first 3 days with wttr.in**: wttr.in's free format returns 3 days. The remaining days are now filled in from Open-Meteo (the days wttr.in has keep its values).
-
-### Changed
-
-- The profile editor page (`/profile-editor.html`) is now in English with neutral sample data; saved editor state and exported profiles remain compatible.
-
----
-
-## [v218.6.0] - 2026-09-26 (pre-release)
-
-### Added
-
 - **Stop the ringing alarm by voice** (Alarm Clock firmware on boards with speaker **and** microphone - currently only `waveshare_photopainter_73`): teach the frame a short word (Alarm tab, up to 5 examples), switch "Stop the ringing alarm with the stop word" on, and the ringing alarm listens in the 5 s pauses between its notes and stops when it hears the word; the KEY button keeps working, and without a taught word or when the microphone can't be opened the alarm rings as before. While a note sounds (plus 250 ms echo) the audio is muted for the recogniser, so the alarm can't trigger itself. New endpoints `PUT /api/kws/settings` (`alarm_stop`) and `POST/GET/DELETE /api/alarm/test` (ring now / state and how the last ring ended / stop) with a "Ring now" button in the Alarm tab for trying it. Host-tested (`alarm_pattern`, alarm-shaped audio streams in `test_kws`).
 - **Voice features belong to the Alarm Clock firmware**: the microphone monitor, level meter, self-test and stop-word recognition are compiled in only with `CONFIG_ALARM_CLOCK_ENABLED` on a board with speaker and microphone (`BOARD_HAL_VOICE_ENABLED`); every other firmware contains none of it (checked: no such symbol in a regular `waveshare_photopainter_73` build). A board with a speaker but no microphone would get the plain alarm (none exists today). `microphone_available` in the config is replaced by `voice_available`; the Web UI shows the microphone tools and the voice-stop settings in the Alarm tab (formerly Maintenance) only when it is true.
 - **Stop-word recognition** (first steps, now used by the alarm): the frame learns a word from a few spoken examples and recognises it again. Small self-contained C module (`main/kws.c`, host-tested): voice-activity segmentation, MFCC features, DTW template matching (absorbs different speaking speeds), threshold derived from how much the enrolments vary; nothing but the feature templates is stored (on the storage), no audio. Device side `main/kws_service.c` with `POST /api/kws/enroll`, `POST /api/kws/test`, `GET /api/kws/status`, `DELETE /api/kws/templates` and `scripts/kws_tool.py`. Speaker-dependent by design (enrol with your own voice on the frame). Tested against text-to-speech samples of the word at several speeds plus ten other words, incl. the hard look-alikes "Stock", "Spott" and "Stoppuhr" (`scripts/generate_kws_test_audio.ps1` regenerates the samples). Also verified end to end on a frame with the PC playing the samples through its speakers (`scripts/kws_playback_test.py`: enrol 4 examples, then 10 words): every "Stopp" variant accepted in most runs (the fastest one is occasionally missed by a hair) and no other word ever accepted; 30 s of silence produce no events. Known limits: enrolment and use should happen in a similarly quiet room; a minimal pair such as "Stock" is rejected with a modest margin (distance about 7.7+ against a threshold around 6.5).
@@ -33,6 +16,16 @@ All notable changes to this fork are documented here. See [README.md → Changes
 - **OTA release channel + firmware variant** in the Web UI's Updates tab: "Stable" (default) or "Include pre-releases", and — on boards with a speaker — an "Alarm Clock firmware" option to switch a device between the regular and the Alarm Clock build (same version is offered when only the variant differs; an older release is never offered as a "switch"). Stored on the device (`GET/PUT /api/ota/options`); the update status reports `latest_prerelease` and `variant_switch`.
 - **Web Flasher**: a **Pre-release** option (the newest published pre-release that is newer than the stable release; its firmware is hosted on the Pages site, since release assets can't be fetched cross-origin), also with the Alarm Clock option. A published pre-release no longer shows up as "Stable" in the flasher.
 - **Speaker + microphone self-test** (`waveshare_photopainter_73`): plays a tone sequence (four beeps with pauses, 100 % volume) on the speaker while the microphone listens and counts the bursts against the measured noise floor (at least 20 dB and -45 dBFS above it). Both onboard microphones are read now (left = MIC1, right = MIC2; Waveshare's stock MIC1 + MIC3 pairing left the right slot silent). Same frame (`POST /api/mic/level?seconds=8&tones=1`, also an Alarm-tab button) or two frames (`POST /api/mic/tones` on the speaker frame while the other one listens). `GET /api/mic/level` now reports the result; `scripts/mic_selftest.py <mic-host> [--speaker <host>]` runs either variant and exits 0/1.
+
+### Changed
+
+- The profile editor page (`/profile-editor.html`) is now in English with neutral sample data; saved editor state and exported profiles remain compatible.
+
+### Fixed
+
+- **HTTPS web UI (opt-in) worked only sporadically**: opening a TLS session failed with `mbedtls_ssl_setup returned -0x008D` (out of memory) because mbedTLS allocated its 16 KiB + 4 KiB session buffers from internal RAM only. It now allocates through `malloc()` (big buffers go to PSRAM), which also helps the outgoing TLS connections (weather, Telegram, OTA).
+- **Frame unreachable after a browser opened many connections (HTTP + HTTPS)**: all sockets share one lwIP pool of 16, but the HTTP server (10) + optional HTTPS server (4) + their listen/control sockets (4) already exceed it, leaving nothing for the frame's own outgoing connections; the log showed `httpd_accept_conn: error in accept (23)` (ENFILE) and fetches such as "Telegram poll failed". The pool is now 24 sockets / 24 TCP PCBs.
+- **7-day Calendar grid: weather only for the first 3 days with wttr.in**: wttr.in's free format returns 3 days. The remaining days are now filled in from Open-Meteo (the days wttr.in has keep its values).
 
 ---
 
